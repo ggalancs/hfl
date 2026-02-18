@@ -8,8 +8,13 @@
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
+
+# Collect all rich submodules including unicode data
+rich_imports = collect_submodules('rich')
+rich_data = collect_data_files('rich')
 
 # Detectar plataforma
 is_windows = sys.platform == 'win32'
@@ -52,11 +57,7 @@ hidden_imports = [
     'typer',
     'typer.main',
     'click',
-    'rich',
-    'rich.console',
-    'rich.table',
-    'rich.panel',
-    'rich.progress',
+    # Rich - collected dynamically via collect_submodules
     'pydantic',
     'pydantic.main',
     'fastapi',
@@ -79,7 +80,7 @@ hidden_imports = [
 ]
 
 # Datos adicionales a incluir
-datas = []
+datas = rich_data
 
 # Excluir módulos pesados opcionales que no son necesarios para la CLI básica
 excludes = [
@@ -109,7 +110,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=hidden_imports,
+    hiddenimports=hidden_imports + rich_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
