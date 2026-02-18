@@ -4,16 +4,7 @@
 name: License Check
 
 on:
-  pull_request:
-    paths:
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-  push:
-    branches: [main]
-    paths:
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-  workflow_dispatch:
+  workflow_dispatch:  # Solo ejecución manual
 
 jobs:
   check-licenses:
