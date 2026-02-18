@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: HRUL-1.0
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests para el módulo hub (auth, resolver, downloader)."""
 
 import pytest
@@ -174,6 +176,69 @@ class TestResolver:
         assert _detect_quant("model-F16.gguf") == "F16"
         assert _detect_quant("model-Q8_0.gguf") == "Q8_0"
         assert _detect_quant("model.gguf") is None
+
+    def test_is_quantization(self):
+        """Verifica detección de cadenas de cuantización."""
+        from hfl.hub.resolver import _is_quantization
+
+        # Cuantizaciones válidas
+        assert _is_quantization("Q4_K_M") is True
+        assert _is_quantization("q4_k_m") is True  # case insensitive
+        assert _is_quantization("Q5_K_S") is True
+        assert _is_quantization("Q8_0") is True
+        assert _is_quantization("F16") is True
+        assert _is_quantization("F32") is True
+        assert _is_quantization("IQ4_NL") is True
+        assert _is_quantization("IQ2_XS") is True
+
+        # No son cuantizaciones
+        assert _is_quantization("main") is False
+        assert _is_quantization("v1.0") is False
+        assert _is_quantization("latest") is False
+        assert _is_quantization("") is False
+        assert _is_quantization("model-name") is False
+
+    def test_resolve_with_colon_quantization(self, mock_hf_api, sample_gguf_model_info):
+        """Verifica resolución con formato repo:quantization (estilo Ollama)."""
+        mock_hf_api.model_info.return_value = sample_gguf_model_info
+
+        from hfl.hub.resolver import resolve
+
+        with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
+            result = resolve("test-org/test-model-gguf:Q5_K_M")
+
+        assert result.repo_id == "test-org/test-model-gguf"
+        assert result.quantization == "Q5_K_M"
+        assert "Q5_K_M" in result.filename
+
+    def test_resolve_colon_not_quantization(self, mock_hf_api, sample_gguf_model_info):
+        """Verifica que : sin cuantización válida no se parsea incorrectamente."""
+        # Simular un repo que tiene : en el nombre (raro pero posible en búsquedas)
+        mock_model = MagicMock()
+        mock_model.id = "org/model"
+        mock_hf_api.list_models.return_value = [mock_model]
+        mock_hf_api.model_info.return_value = sample_gguf_model_info
+
+        from hfl.hub.resolver import resolve
+
+        with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
+            # "model:latest" - latest no es cuantización, debería buscar "model:latest"
+            result = resolve("model:latest")
+
+        # Debería haber buscado el modelo
+        mock_hf_api.list_models.assert_called()
+
+    def test_resolve_quantization_priority(self, mock_hf_api, sample_gguf_model_info):
+        """Verifica que cuantización en spec tiene prioridad sobre parámetro."""
+        mock_hf_api.model_info.return_value = sample_gguf_model_info
+
+        from hfl.hub.resolver import resolve
+
+        with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
+            # Q5_K_M en spec debería tener prioridad sobre Q4_K_M en parámetro
+            result = resolve("test-org/test-model-gguf:Q5_K_M", quantization="Q4_K_M")
+
+        assert result.quantization == "Q5_K_M"
 
 
 class TestDownloader:

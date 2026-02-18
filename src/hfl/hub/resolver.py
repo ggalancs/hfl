@@ -26,12 +26,27 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
     """
     Resuelve una especificación de modelo a un ResolvedModel concreto.
 
+    Formatos soportados:
+    - "org/model"                    → repo directo
+    - "org/model:Q4_K_M"             → repo con cuantización (estilo Ollama)
+    - "nombre-modelo"                → búsqueda por nombre
+
     Estrategia de resolución:
-    1. Si contiene '/', tratar como repo_id directo
-    2. Si el repo tiene archivos GGUF, usarlos directamente
-    3. Si no, usar safetensors y marcar para conversión
+    1. Extraer cuantización si usa formato repo:quant
+    2. Si contiene '/', tratar como repo_id directo
+    3. Si el repo tiene archivos GGUF, usarlos directamente
+    4. Si no, usar safetensors y marcar para conversión
     """
     api = HfApi()
+
+    # Extraer cuantización del formato "repo:Q4_K_M" (estilo Ollama)
+    if ":" in model_spec:
+        parts = model_spec.rsplit(":", 1)
+        # Verificar que la parte después de : parece una cuantización
+        if _is_quantization(parts[1]):
+            model_spec = parts[0]
+            # La cuantización explícita en el spec tiene prioridad
+            quantization = parts[1]
 
     # Caso 1: repo_id directo (org/model)
     if "/" in model_spec:
@@ -99,14 +114,37 @@ def _select_gguf(files: list[str], quant: str | None) -> str:
 
 def _detect_quant(filename: str) -> str | None:
     """Detecta el nivel de cuantización del nombre del archivo."""
-    quant_levels = [
-        "Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L",
-        "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M",
-        "Q5_0", "Q5_1", "Q5_K_S", "Q5_K_M",
-        "Q6_K", "Q8_0", "F16", "F32",
-    ]
+    quant_levels = _get_quant_levels()
     upper = filename.upper()
     for q in quant_levels:
         if q in upper:
             return q
     return None
+
+
+def _get_quant_levels() -> list[str]:
+    """Lista de niveles de cuantización conocidos."""
+    return [
+        "Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L",
+        "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M",
+        "Q5_0", "Q5_1", "Q5_K_S", "Q5_K_M",
+        "Q6_K", "Q8_0", "F16", "F32",
+        "IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M",
+        "IQ3_XXS", "IQ3_XS", "IQ3_S", "IQ3_M",
+        "IQ4_NL", "IQ4_XS",
+    ]
+
+
+def _is_quantization(s: str) -> bool:
+    """Verifica si una cadena parece un nivel de cuantización."""
+    if not s:
+        return False
+    upper = s.upper()
+    # Verificar coincidencia exacta o parcial con niveles conocidos
+    for q in _get_quant_levels():
+        if upper == q or upper == q.replace("_", ""):
+            return True
+    # Patrón genérico: Q seguido de número, o F16/F32, o IQ
+    if upper.startswith(("Q", "F", "IQ")) and any(c.isdigit() for c in upper):
+        return True
+    return False

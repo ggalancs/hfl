@@ -47,7 +47,25 @@ def pull(
 
     # 1. Resolver modelo
     console.print(f"[bold]Resolviendo[/] {model}...")
-    resolved = resolve(model, quantization=quantize)
+    try:
+        resolved = resolve(model, quantization=quantize)
+    except (ValueError, Exception) as e:
+        error_msg = str(e)
+        if "Repo id must" in error_msg or "repo_name" in error_msg:
+            console.print(f"[red]Error de formato:[/] El nombre del modelo es inválido.")
+            console.print(f"\n[yellow]Formatos soportados:[/]")
+            console.print("  • org/modelo                  → repo directo de HuggingFace")
+            console.print("  • org/modelo:Q4_K_M           → repo con cuantización")
+            console.print("  • nombre-modelo               → búsqueda por nombre")
+            console.print(f"\n[dim]Entrada recibida:[/] {model}")
+            console.print(f"[dim]Detalle:[/] {e}")
+        elif "No se encontró modelo" in error_msg:
+            console.print(f"[red]Error:[/] {e}")
+            console.print("[dim]Verifica el nombre o usa 'hfl search' para buscar.[/]")
+        else:
+            console.print(f"[red]Error al resolver modelo:[/] {e}")
+        raise typer.Exit(1)
+
     console.print(f"  Repo: {resolved.repo_id}")
     console.print(f"  Formato: {resolved.format}")
     if resolved.filename:
@@ -639,7 +657,7 @@ def version():
     """Muestra la versión de hfl."""
     from hfl import __version__
     console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")
-    console.print("[dim]Based on hfl (https://github.com/hfl/hfl)[/]")
+    console.print("[dim]https://github.com/ggalancs/hfl[/]")
 
 
 if __name__ == "__main__":

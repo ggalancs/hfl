@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: HRUL-1.0
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests para el módulo converter (formats, gguf_converter)."""
 
 import pytest

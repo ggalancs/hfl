@@ -201,7 +201,7 @@ Environment variables:
 
 ```bash
 # Clone and install in development mode
-git clone https://github.com/yourusername/hfl
+git clone https://github.com/ggalancs/hfl
 cd hfl
 pip install -e ".[dev]"
 

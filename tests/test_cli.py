@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: HRUL-1.0
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests para el módulo CLI (main commands)."""
 
 import pytest
@@ -306,6 +308,53 @@ class TestPullCommand:
                 result = runner.invoke(cli_app, ["pull", "test/model", "-q", "Q5_K_M", "--skip-license"])
 
                 mock_resolve.assert_called_once()
+
+    def test_pull_invalid_format_shows_helpful_error(self, runner, cli_app, temp_config):
+        """Pull con formato inválido muestra error amigable."""
+        from huggingface_hub.utils import HFValidationError
+
+        with patch("hfl.hub.resolver.resolve") as mock_resolve:
+            mock_resolve.side_effect = HFValidationError(
+                "Repo id must use alphanumeric chars, '-', '_' or '.'"
+            )
+
+            result = runner.invoke(cli_app, ["pull", "invalid:model:format", "--skip-license"])
+
+            assert result.exit_code == 1
+            # Verifica que muestra información sobre el error
+            assert "alphanumeric" in result.stdout or "Error" in result.stdout
+
+    def test_pull_model_not_found_error(self, runner, cli_app, temp_config):
+        """Pull con modelo no encontrado muestra error claro."""
+        with patch("hfl.hub.resolver.resolve") as mock_resolve:
+            mock_resolve.side_effect = ValueError("No se encontró modelo: nonexistent")
+
+            result = runner.invoke(cli_app, ["pull", "nonexistent", "--skip-license"])
+
+            assert result.exit_code == 1
+            assert "No se encontró modelo" in result.stdout
+
+    def test_pull_with_colon_quantization(self, runner, cli_app, temp_config):
+        """Pull con formato repo:quantization (estilo Ollama)."""
+        from hfl.hub.resolver import ResolvedModel
+
+        with patch("hfl.hub.resolver.resolve") as mock_resolve:
+            with patch("hfl.hub.downloader.pull_model") as mock_pull:
+                mock_resolve.return_value = ResolvedModel(
+                    repo_id="org/model",
+                    filename="model-Q4_K_M.gguf",
+                    format="gguf",
+                    quantization="Q4_K_M",
+                )
+
+                model_path = temp_config.models_dir / "model.gguf"
+                model_path.parent.mkdir(parents=True, exist_ok=True)
+                model_path.write_bytes(b"GGUF")
+                mock_pull.return_value = model_path
+
+                result = runner.invoke(cli_app, ["pull", "org/model:Q4_K_M", "--skip-license"])
+
+                assert result.exit_code == 0
 
 
 class TestRunCommand:
