@@ -342,6 +342,57 @@ def _get_key() -> str:
     return ch
 
 
+def _extract_params_from_name(model_id: str) -> str | None:
+    """Extrae el número de parámetros del nombre del modelo (ej: '70B', '7B')."""
+    import re
+
+    name = model_id.lower()
+    # Patterns: 70b, 7b, 1.5b, 0.5b, 405b, etc.
+    patterns = [
+        r"(\d+\.?\d*)b(?:[-_]|$)",  # 70b, 7b, 1.5b
+        r"(\d+)b-",  # 70b-instruct
+        r"-(\d+\.?\d*)b",  # model-7b
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            return match.group(1) + "B"
+    return None
+
+
+def _estimate_model_size(params_str: str | None, quantization: str = "Q4") -> str:
+    """Estima el tamaño del modelo basado en parámetros y cuantización."""
+    if not params_str:
+        return "?"
+
+    try:
+        # Parse params (e.g., "70B" -> 70, "1.5B" -> 1.5)
+        params = float(params_str.replace("B", "").replace("b", ""))
+
+        # Bytes per parameter depends on quantization
+        # Q4_K_M ~ 4.5 bits/param, Q8_0 ~ 8 bits/param, F16 ~ 16 bits
+        bits_per_param = {
+            "Q2": 2.5,
+            "Q3": 3.5,
+            "Q4": 4.5,
+            "Q5": 5.5,
+            "Q6": 6.5,
+            "Q8": 8.0,
+            "F1": 16.0,  # F16
+        }
+        bits = bits_per_param.get(quantization[:2].upper(), 4.5)
+        size_gb = (params * 1e9 * bits / 8) / (1024**3)
+
+        if size_gb >= 100:
+            return f"{size_gb:.0f}GB"
+        elif size_gb >= 10:
+            return f"{size_gb:.0f}GB"
+        else:
+            return f"{size_gb:.1f}GB"
+    except Exception:
+        return "?"
+
+
 def _display_model_row(model, index: int, show_index: bool = True) -> None:
     """Muestra una fila de modelo formateada."""
     # Obtener información del modelo
@@ -370,6 +421,11 @@ def _display_model_row(model, index: int, show_index: bool = True) -> None:
     else:
         dl_str = str(downloads)
 
+    # Extraer parámetros y estimar tamaño
+    params = _extract_params_from_name(model_id)
+    size_q4 = _estimate_model_size(params, "Q4")
+    size_str = f"[magenta]~{size_q4}[/]" if params else ""
+
     # Número de índice
     idx_str = f"[dim]{index:3}.[/] " if show_index else ""
 
@@ -378,6 +434,7 @@ def _display_model_row(model, index: int, show_index: bool = True) -> None:
         f"{format_icon}  "
         f"[yellow]↓{dl_str}[/]  "
         f"[red]♥{likes}[/]  "
+        f"{size_str}  "
         f"[dim]{pipeline_tag or ''}[/]"
     )
 
