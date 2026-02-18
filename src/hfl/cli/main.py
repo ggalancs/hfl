@@ -439,12 +439,29 @@ def _display_model_row(model, index: int, show_index: bool = True) -> None:
     )
 
 
+def _get_params_value(model_id: str) -> float | None:
+    """Extrae el valor numérico de parámetros del nombre (ej: 70 para '70B')."""
+    params = _extract_params_from_name(model_id)
+    if not params:
+        return None
+    try:
+        return float(params.replace("B", "").replace("b", ""))
+    except ValueError:
+        return None
+
+
 @app.command()
 def search(
     query: str = typer.Argument(help="Texto a buscar (mínimo 3 caracteres)"),
     limit: int = typer.Option(100, "--limit", "-l", help="Número máximo de resultados"),
     page_size: int = typer.Option(10, "--page-size", "-n", help="Resultados por página"),
     gguf_only: bool = typer.Option(False, "--gguf", "-g", help="Mostrar solo modelos con GGUF"),
+    max_params: float = typer.Option(
+        None, "--max-params", "-p", help="Máximo de parámetros en B (ej: 70 para <70B)"
+    ),
+    min_params: float = typer.Option(
+        None, "--min-params", help="Mínimo de parámetros en B (ej: 7 para >7B)"
+    ),
     sort: str = typer.Option(
         "downloads", "--sort", "-s", help="Ordenar por: downloads, likes, created"
     ),
@@ -461,6 +478,8 @@ def search(
       hfl search llama
       hfl search mistral --gguf
       hfl search phi --limit 50 --page-size 5
+      hfl search qwen --max-params 14        # Modelos de menos de 14B
+      hfl search llama --min-params 70       # Modelos de 70B o más
     """
     from huggingface_hub import HfApi
 
@@ -504,6 +523,31 @@ def search(
         ]
         if not models:
             console.print(f"[yellow]No se encontraron modelos GGUF para:[/] '{query}'")
+            return
+
+    # Filtrar por número de parámetros
+    if max_params is not None or min_params is not None:
+        filtered = []
+        for m in models:
+            params = _get_params_value(m.id)
+            if params is None:
+                continue  # Excluir modelos sin parámetros detectables
+            if max_params is not None and params > max_params:
+                continue
+            if min_params is not None and params < min_params:
+                continue
+            filtered.append(m)
+        models = filtered
+
+        if not models:
+            filter_desc = []
+            if max_params is not None:
+                filter_desc.append(f"<{max_params}B")
+            if min_params is not None:
+                filter_desc.append(f">{min_params}B")
+            console.print(
+                f"[yellow]No se encontraron modelos {' y '.join(filter_desc)} para:[/] '{query}'"
+            )
             return
 
     total = len(models)
