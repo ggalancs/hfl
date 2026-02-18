@@ -3,9 +3,10 @@
 """Tests para el módulo converter (formats, gguf_converter)."""
 
 import pytest
+import sys
 from pathlib import Path
 import tempfile
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 
 class TestModelFormat:
@@ -297,3 +298,166 @@ class TestGGUFConverter:
         for level in quant_levels:
             assert isinstance(level, str)
             assert len(level) > 0
+
+    def test_convert_uses_sys_executable_not_python(self, temp_config):
+        """
+        CRÍTICO: Verifica que se usa sys.executable en lugar de 'python'.
+
+        En macOS, 'python' no existe (solo python3), lo que causa
+        FileNotFoundError. Este test previene regresiones de este bug.
+        """
+        from hfl.converter.gguf_converter import GGUFConverter
+
+        converter = GGUFConverter()
+
+        model_path = temp_config.models_dir / "test-model"
+        model_path.mkdir(parents=True)
+        (model_path / "config.json").write_text("{}")
+
+        output_path = temp_config.cache_dir / "output"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        captured_commands = []
+
+        def capture_run(cmd, **kwargs):
+            captured_commands.append(cmd)
+            # Simular creación del archivo FP16
+            fp16_path = output_path.with_suffix(".fp16.gguf")
+            fp16_path.write_bytes(b"GGUF")
+            return MagicMock(returncode=0)
+
+        with patch.object(converter, "ensure_tools"):
+            with patch("subprocess.run", side_effect=capture_run):
+                with patch.object(Path, "rename"):
+                    with patch.object(Path, "unlink"):
+                        try:
+                            converter.convert(model_path, output_path, "F16")
+                        except Exception:
+                            pass
+
+        # Verificar que la primera llamada usa sys.executable, no "python"
+        assert len(captured_commands) >= 1
+        first_cmd = captured_commands[0]
+        assert first_cmd[0] == sys.executable, (
+            f"Debe usar sys.executable ({sys.executable}), no '{first_cmd[0]}'. "
+            "En macOS 'python' no existe, solo 'python3'."
+        )
+        assert "convert_hf_to_gguf.py" in first_cmd[1]
+
+    def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config):
+        """
+        Verifica que pip se invoca con sys.executable -m pip.
+
+        Esto garantiza que se usa el pip del entorno correcto.
+        """
+        from hfl.converter.gguf_converter import GGUFConverter
+
+        converter = GGUFConverter()
+
+        # Crear directorio y requirements.txt
+        converter.llama_cpp_dir.mkdir(parents=True, exist_ok=True)
+        (converter.llama_cpp_dir / "requirements.txt").write_text("numpy\n")
+
+        captured_commands = []
+
+        def capture_run(cmd, **kwargs):
+            captured_commands.append(cmd)
+            return MagicMock(returncode=0, stdout="abc123")
+
+        with patch("subprocess.run", side_effect=capture_run):
+            with patch("shutil.which", return_value=None):  # Sin CUDA
+                try:
+                    converter.ensure_tools()
+                except Exception:
+                    pass  # Puede fallar, solo nos interesa capturar los comandos
+
+        # Buscar la llamada a pip
+        pip_calls = [c for c in captured_commands if "-m" in c and "pip" in c]
+        assert len(pip_calls) >= 1, "No se encontró llamada a pip con -m"
+
+        pip_cmd = pip_calls[0]
+        assert pip_cmd[0] == sys.executable, (
+            f"pip debe invocarse con sys.executable ({sys.executable}), "
+            f"no con '{pip_cmd[0]}'"
+        )
+        assert pip_cmd[1] == "-m"
+        assert pip_cmd[2] == "pip"
+
+    def test_convert_with_quantization(self, temp_config):
+        """Verifica conversión completa con cuantización."""
+        from hfl.converter.gguf_converter import GGUFConverter
+
+        converter = GGUFConverter()
+
+        model_path = temp_config.models_dir / "test-model"
+        model_path.mkdir(parents=True)
+        (model_path / "config.json").write_text("{}")
+
+        output_path = temp_config.cache_dir / "output"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        call_count = [0]
+
+        def mock_run(cmd, **kwargs):
+            call_count[0] += 1
+            # Primera llamada: crear FP16
+            if call_count[0] == 1:
+                fp16_path = output_path.with_suffix(".fp16.gguf")
+                fp16_path.write_bytes(b"GGUF FP16")
+            # Segunda llamada: crear archivo cuantizado
+            elif call_count[0] == 2:
+                final_path = output_path.with_suffix(".Q4_K_M.gguf")
+                final_path.write_bytes(b"GGUF Q4_K_M")
+            return MagicMock(returncode=0)
+
+        with patch.object(converter, "ensure_tools"):
+            with patch("subprocess.run", side_effect=mock_run):
+                result = converter.convert(
+                    model_path, output_path, "Q4_K_M",
+                    source_repo="test/model",
+                    original_license="apache-2.0",
+                    license_accepted=True,
+                )
+
+        assert call_count[0] >= 2  # Conversión FP16 + cuantización (+ provenance)
+        assert result.suffix == ".gguf"
+        assert "Q4_K_M" in result.name
+
+
+class TestGetLlamaCppVersion:
+    """Tests para _get_llama_cpp_version."""
+
+    def test_get_version_success(self, temp_config):
+        """Obtiene versión correctamente."""
+        from hfl.converter.gguf_converter import _get_llama_cpp_version
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="abc1234\n"
+            )
+
+            result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
+
+            assert result == "abc1234"
+            mock_run.assert_called_once()
+
+    def test_get_version_failure(self, temp_config):
+        """Devuelve 'unknown' si falla."""
+        from hfl.converter.gguf_converter import _get_llama_cpp_version
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+
+            result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
+
+            assert result == "unknown"
+
+    def test_get_version_exception(self, temp_config):
+        """Devuelve 'unknown' si hay excepción."""
+        from hfl.converter.gguf_converter import _get_llama_cpp_version
+
+        with patch("subprocess.run", side_effect=Exception("Git not found")):
+            result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
+
+            assert result == "unknown"
