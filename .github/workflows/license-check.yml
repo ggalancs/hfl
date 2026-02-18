@@ -1,0 +1,51 @@
+# R7 - License Check (Legal Audit)
+# Prevents introduction of copyleft dependencies
+
+name: License Check
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+  push:
+    branches: [main]
+    paths:
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+  workflow_dispatch:
+
+jobs:
+  check-licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install pip-licenses
+          pip install -e .
+
+      - name: Check for copyleft licenses
+        run: |
+          echo "Checking for GPL/AGPL/LGPL licenses..."
+          pip-licenses --fail-on="GPL;GPLv2;GPLv3;AGPL;AGPLv3;LGPL;LGPLv2;LGPLv3" \
+            --format=table --with-urls
+
+      - name: Generate license report
+        if: always()
+        run: |
+          pip-licenses --format=markdown --with-urls > license-report.md
+          cat license-report.md
+
+      - name: Upload license report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: license-report.md

@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hfl"
+version = "0.1.0"
+description = "Run HuggingFace models locally like Ollama"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "huggingface-hub>=0.27.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "httpx>=0.28.0",
+    "sse-starlette>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# llama-cpp-python requiere compilación - instalar por separado si se necesita
+llama = ["llama-cpp-python>=0.3.0"]
+transformers = [
+    "transformers>=4.47.0",
+    "torch>=2.5.0",
+    "accelerate>=1.2.0",
+    "sentencepiece>=0.2.0",
+]
+vllm = ["vllm>=0.6.0"]
+convert = ["gguf>=0.10.0"]
+all = ["hfl[llama,transformers,vllm,convert]"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0"]
+
+[project.scripts]
+hfl = "hfl.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hfl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

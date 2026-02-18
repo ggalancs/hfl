@@ -1,0 +1,733 @@
+hfl Responsible Use License (HRUL) v1.0
+==========================================
+
+Copyright (c) 2026 hfl Contributors. All rights reserved.
+
+Effective Date: February 18, 2026
+
+---------------------------------------------------------------------------
+
+PREÁMBULO / PREAMBLE
+
+hfl es una herramienta que facilita la descarga, conversión y ejecución
+local de modelos de inteligencia artificial desde HuggingFace Hub. Dado que
+los modelos de IA están sujetos a licencias diversas con restricciones
+específicas, hfl incorpora módulos de cumplimiento legal diseñados para
+proteger tanto a los usuarios como a los autores originales de los modelos.
+
+Esta licencia garantiza que cualquier producto derivado de hfl mantenga
+dichos mecanismos de protección legal, independientemente de las
+modificaciones realizadas al software.
+
+hfl is a tool that facilitates the download, conversion, and local
+execution of AI models from HuggingFace Hub. Given that AI models are
+subject to diverse licenses with specific restrictions, hfl incorporates
+legal compliance modules designed to protect both users and original model
+authors.
+
+This license ensures that any derivative product of hfl maintains said
+legal protection mechanisms, regardless of modifications made to the
+software.
+
+---------------------------------------------------------------------------
+
+SECTION 1 — DEFINITIONS
+
+1.1. "Software" means the hfl source code, documentation, and associated
+     files distributed under this License.
+
+1.2. "Licensor" means the copyright holder(s) of the Software.
+
+1.3. "You" (or "Your") means any individual or Legal Entity exercising
+     permissions granted by this License.
+
+1.4. "Derivative Work" means any work that is based on or derived from the
+     Software, including but not limited to modifications, forks, ports,
+     translations, adaptations, or any software that incorporates
+     substantial portions of the Software's source code.
+
+1.5. "Compliance Modules" means the following functional components of the
+     Software, collectively referred to as the "Mandatory Compliance Stack":
+
+     (a) LICENSE VERIFICATION MODULE — Functionality that queries, classifies,
+         and presents to the end user the license of any AI model before
+         download, conversion, or execution. This includes but is not limited
+         to: license risk classification (permissive, conditional,
+         non-commercial, restricted, unknown), display of specific license
+         restrictions, and requiring explicit user acknowledgment before
+         proceeding with gated or restricted models.
+         Reference implementation: hub/license_checker.py
+
+     (b) PROVENANCE TRACKING MODULE — Functionality that records and preserves
+         the origin, license, conversion parameters, and toolchain version of
+         each model processed by the Software. This provenance chain must be
+         queryable by end users.
+         Reference implementation: models/provenance.py, converter/gguf_converter.py
+         (provenance logging section)
+
+     (c) AI OUTPUT DISCLAIMER MODULE — Functionality that attaches an
+         unambiguous disclaimer to all AI-generated content served through
+         the Software's API endpoints (via HTTP headers, response metadata,
+         or response body) and/or CLI output. The disclaimer MUST convey,
+         at minimum, that: (i) the content is AI-generated, and (ii) the
+         end user assumes responsibility for evaluating and using the
+         outputs. The exact wording may be customized provided these two
+         elements are present and clearly readable.
+         Reference implementation: api/server.py (DisclaimerMiddleware)
+
+     (d) PRIVACY PROTECTION MODULE — Functionality that ensures user
+         authentication tokens (HuggingFace tokens or equivalent) are NEVER
+         persisted to disk, stored in configuration files, or logged. Tokens
+         must be read exclusively from environment variables or secure
+         in-memory prompts and held only for the duration of the process.
+         Reference implementation: config.py (hf_token handling)
+
+     (e) GATING RESPECT MODULE — Functionality that respects the model
+         gating system of upstream repositories (HuggingFace Hub or
+         equivalent), ensuring that the Software does NOT bypass, automate,
+         or circumvent license acceptance mechanisms required by model
+         authors. Specifically: if a model repository requires the user to
+         accept license terms through the repository's web interface before
+         download, the Software MUST NOT programmatically accept those terms
+         on behalf of the user or provide alternative download paths that
+         circumvent the gating check. The use of pre-existing authentication
+         tokens (obtained after the user has manually accepted terms) is
+         permitted and expected.
+         Reference implementation: hub/auth.py
+
+1.6. "Functional Equivalent" means a component that satisfies ALL of the
+     following criteria with respect to the corresponding Compliance Module:
+
+     (i)   It implements the same mandatory behaviors described in
+           Section 3.1 for that Module.
+     (ii)  It is active by default in every Distribution without requiring
+           user opt-in or additional configuration.
+     (iii) Its protective outcome is objectively verifiable against the
+           Compliance Verification Checklist in Appendix A.
+
+     For the avoidance of doubt:
+
+     - Module (d) (Privacy Protection) has a binary requirement (tokens
+       MUST NOT be persisted to non-volatile storage) and does not admit
+       alternative implementations that persist tokens in any form.
+     - A component that formally presents compliance information but makes
+       it invisible, inaccessible, or practically unusable (e.g., hidden
+       in debug logs, shown for zero seconds, requiring special flags to
+       view) does NOT constitute a Functional Equivalent.
+     - An implementation that queries model licenses but does NOT classify
+       them into risk categories or does NOT display restrictions to the
+       user does NOT constitute a Functional Equivalent of Module (a).
+
+1.7. "Distribution" means making the Software or a Derivative Work available
+     to third parties, whether by sale, license, sublicense, lease, transfer,
+     publication, or any other mechanism of conveyance, including making
+     available for download via the internet or any network.
+
+---------------------------------------------------------------------------
+
+SECTION 2 — GRANT OF RIGHTS
+
+Subject to the terms and conditions of this License, the Licensor hereby
+grants You a worldwide, royalty-free, non-exclusive, perpetual (subject to
+Section 5) license to:
+
+  (a) Use the Software for any lawful purpose, including commercial use.
+
+  (b) Reproduce and prepare Derivative Works of the Software.
+
+  (c) Distribute copies of the Software and Derivative Works thereof.
+
+  (d) Sublicense the Software under terms no less restrictive than this
+      License with respect to the Compliance Modules (see Section 3).
+
+---------------------------------------------------------------------------
+
+SECTION 3 — MANDATORY COMPLIANCE CONDITIONS
+
+The rights granted in Section 2 are expressly conditioned on the following:
+
+3.1. PRESERVATION OF COMPLIANCE MODULES
+
+     Any Derivative Work that is Distributed MUST include and maintain active
+     all Compliance Modules defined in Section 1.5, or their Functional
+     Equivalents (as defined in Section 1.6).
+
+     Specifically:
+
+     (a) The License Verification Module MUST verify and display model license
+         information to the end user BEFORE any model download, conversion, or
+         loading operation.
+
+     (b) The Provenance Tracking Module MUST record the source repository,
+         original license, conversion parameters, and timestamp for every
+         model processed.
+
+     (c) The AI Output Disclaimer Module MUST attach an AI-generated content
+         disclaimer to every response served through API endpoints or CLI
+         output that contains model-generated text.
+
+     (d) The Privacy Protection Module MUST NOT persist, log, or store
+         authentication tokens to any non-volatile medium.
+
+     (e) The Gating Respect Module MUST NOT bypass or automate license
+         acceptance for gated models; users must accept gated licenses through
+         the upstream repository's own mechanism.
+
+3.2. NON-CIRCUMVENTION
+
+     You SHALL NOT:
+
+     (a) Disable, bypass, hide, or render inoperative any Compliance Module
+         or its Functional Equivalent in a Distributed Derivative Work,
+         except as expressly permitted by Section 3.2(d).
+
+     (b) Provide configuration options, flags, environment variables, or any
+         other mechanism that allows end users to globally disable the
+         Compliance Modules in a Distributed binary or package.
+
+     (c) Move Compliance Module functionality behind a paywall, premium tier,
+         or opt-in mechanism; compliance features must be active by default
+         for all users.
+
+     (d) PER-OPERATION OVERRIDE EXCEPTION: Notwithstanding Section 3.2(a),
+         You MAY provide a per-operation override flag (e.g., --skip-license)
+         for individual invocations, provided that ALL of the following
+         conditions are met:
+           (i)   The flag must be explicitly set by the user on each
+                 individual invocation; it cannot be set globally or persist
+                 between invocations.
+           (ii)  The default behavior WITHOUT the flag is full compliance
+                 with all applicable Compliance Modules.
+           (iii) When the flag is used, the Software MUST emit a clearly
+                 visible warning to the user indicating that compliance
+                 checks have been skipped for that operation.
+         This exception exists to support automated workflows (CI/CD,
+         batch processing) where interactive compliance prompts are
+         impractical.
+
+3.3. DOWNSTREAM LICENSING
+
+     If You Distribute a Derivative Work, You MUST:
+
+     (a) Include a copy of this License (HRUL v1.0) or a license with terms
+         at least as protective of the Compliance Modules.
+
+     (b) Clearly indicate which portions are derived from the original
+         Software.
+
+     (c) Include a prominent notice that the Compliance Modules are mandatory
+         and may not be removed.
+
+     (d) Ensure that all sublicenses include the obligations of this
+         Section 3.
+
+3.4. ATTRIBUTION
+
+     All Derivative Works must include the following attribution in a
+     reasonably prominent location (e.g., README, about screen, or --version
+     output):
+
+         "Based on hfl (https://github.com/[REPO]) — Licensed under HRUL v1.0"
+
+     This attribution refers solely to the hfl project and does NOT
+     constitute or imply endorsement, sponsorship, or affiliation by the
+     authors or contributors of any third-party dependency included in
+     hfl. This clause is compatible with and does not conflict with the
+     non-endorsement provisions of BSD-3-Clause licensed dependencies.
+
+---------------------------------------------------------------------------
+
+SECTION 4 — FREEDOM TO MODIFY
+
+4.1. Subject to Section 3, You are free to:
+
+     (a) Modify, extend, refactor, or rewrite any part of the Software,
+         including the Compliance Modules themselves, provided that the
+         modified versions remain Functional Equivalents.
+
+     (b) Add new features, backends, engines, API endpoints, or integrations.
+
+     (c) Change the user interface, branding, or visual design.
+
+     (d) Use the Software as a library or component within a larger system.
+
+     (e) Sell, offer as a service, or otherwise commercially exploit
+         Derivative Works.
+
+4.2. For the avoidance of doubt, the following modifications are explicitly
+     PERMITTED:
+
+     (a) Replacing the license classification database with a more
+         comprehensive one.
+
+     (b) Changing the disclaimer text to be more specific or comprehensive.
+
+     (c) Enhancing the provenance system with additional metadata fields.
+
+     (d) Implementing stronger privacy protections.
+
+     (e) Supporting additional gating mechanisms beyond HuggingFace.
+
+     (f) Using the Software for internal tools that are not Distributed.
+
+4.3. INTERNAL USE EXCEPTION
+
+     If You use the Software or a Derivative Work solely for internal
+     purposes within Your organization and do NOT Distribute it to third
+     parties outside Your organization, the conditions of Section 3 do
+     not apply. For the avoidance of doubt:
+
+     (a) "Internal purposes" means use by employees, contractors, and
+         agents of Your organization who are bound by confidentiality
+         obligations, where the Software is not made available to the
+         general public or to external parties.
+
+     (b) Making the Software available as a hosted service (SaaS, API,
+         or equivalent) to parties outside Your organization constitutes
+         Distribution for purposes of this License, even if no copy of
+         the Software's source code or binaries is transferred.
+
+     (c) Providing access to external beta testers, partners, or
+         customers constitutes Distribution.
+
+     Even when Section 3 does not apply, You are strongly encouraged to
+     maintain the Compliance Modules for Your own legal protection
+     regarding model license compliance.
+
+---------------------------------------------------------------------------
+
+SECTION 5 — TERMINATION
+
+5.1. SCOPE OF TERMINATION
+
+     Termination under this Section applies ONLY to the rights granted by
+     THIS License (HRUL v1.0) over the hfl source code. Termination
+     does NOT affect, revoke, or diminish any rights You hold under the
+     independent licenses of third-party dependencies included in or used
+     by the Software (including but not limited to MIT, Apache 2.0, and
+     BSD-3-Clause licensed components). Those rights are governed solely
+     by their respective licenses and survive any termination of this
+     License.
+
+     For the avoidance of doubt: if Your HRUL rights terminate, You may
+     still use, modify, and distribute any MIT, Apache 2.0, BSD, or other
+     permissively-licensed dependency that You obtained through hfl,
+     subject to the terms of those dependencies' own licenses. You may
+     NOT, however, continue to use, reproduce, or distribute the hfl
+     source code or Derivative Works thereof that are covered by this
+     License.
+
+5.2. AUTOMATIC TERMINATION OF DISTRIBUTION RIGHTS
+
+     Your right to Distribute the Software or Derivative Works under this
+     License terminates automatically if You Distribute a Derivative Work
+     that violates any condition in Section 3, without need for notice
+     from the Licensor. Termination of distribution rights takes effect
+     upon expiration of the cure period described in Section 5.3, unless
+     the violation is cured within that period.
+
+     Upon termination, You MUST cease all Distribution of the non-compliant
+     Derivative Work. Your right to use the Software for internal,
+     non-distributed purposes is not affected by termination of
+     distribution rights.
+
+5.3. CURE PERIOD
+
+     Upon becoming aware of a violation (whether through self-discovery or
+     notification by the Licensor or any third party), You have thirty (30)
+     calendar days from the date of first awareness to cure the violation
+     by BOTH:
+
+     (a) Ceasing Distribution of the non-compliant Derivative Work, AND
+     (b) Releasing a corrected version that restores all Compliance Modules
+         or their Functional Equivalents.
+
+     If the violation is fully cured within this thirty (30) day period,
+     termination under Section 5.2 does not take effect and Your
+     distribution rights under this License continue uninterrupted.
+
+     If the violation is NOT cured within this period, termination of
+     distribution rights becomes effective from the date of expiration of
+     the cure period.
+
+5.4. REPEAT VIOLATIONS
+
+     If Your distribution rights are terminated and subsequently reinstated
+     under Section 5.3, any further violation of Section 3 within twelve
+     (12) months of reinstatement results in permanent and irrevocable
+     termination of ALL rights granted under this License (not only
+     distribution rights), with no further cure period.
+
+5.5. SURVIVAL
+
+     Sections 1, 5.1, 6, 7, 8, and 9 survive any termination of this License.
+
+---------------------------------------------------------------------------
+
+SECTION 6 — LIABILITY OF DERIVATIVE WORK AUTHORS
+
+6.1. SOLE RESPONSIBILITY FOR DERIVATIVE WORKS
+
+     By exercising any right granted under Section 2, You acknowledge and
+     agree that You are SOLELY responsible for ensuring that any Derivative
+     Work You create, maintain, or Distribute complies with:
+
+     (a) All conditions of this License, including Section 3.
+
+     (b) All applicable laws and regulations in the jurisdictions where
+         You Distribute or make available the Derivative Work, including
+         but not limited to the EU AI Act, GDPR, CCPA, and applicable
+         export control regulations.
+
+     (c) All applicable license terms of any AI model that is downloaded,
+         converted, served, or otherwise processed by the Derivative Work.
+
+     The Licensor bears NO responsibility, obligation, or liability for
+     the actions, omissions, modifications, or distributions of any
+     Derivative Work author. Each Derivative Work author operates
+     independently and at their own legal risk.
+
+6.2. INDEMNIFICATION AND HOLD HARMLESS
+
+     You shall defend, indemnify, and hold harmless the Licensor and its
+     Contributors from and against any and all claims, demands, actions,
+     suits, proceedings, losses, damages, liabilities, costs, and expenses
+     (including reasonable attorney fees and court costs) arising out of
+     or relating to:
+
+     (a) Your Derivative Work, including any defect, malfunction, security
+         vulnerability, or non-compliance therein.
+
+     (b) Your removal, disabling, modification, or circumvention of any
+         Compliance Module or its Functional Equivalent in a Distributed
+         Derivative Work.
+
+     (c) Any third-party claim alleging that Your Derivative Work
+         infringes intellectual property rights, violates privacy laws,
+         breaches AI model license terms, or causes harm through
+         AI-generated outputs.
+
+     (d) Any regulatory action, fine, penalty, or investigation directed
+         at Your Derivative Work under the EU AI Act, GDPR, CCPA, or
+         any other applicable regulation.
+
+     This indemnification obligation survives termination of this License
+     and applies regardless of the theory of liability (contract, tort,
+     strict liability, or otherwise).
+
+6.3. ASSUMPTION OF LIABILITY FOR NON-COMPLIANCE
+
+     If You Distribute a Derivative Work that does NOT include all
+     Compliance Modules or their Functional Equivalents as required by
+     Section 3, You ASSUME SOLE AND EXCLUSIVE LIABILITY for all
+     consequences arising from that non-compliance, including but not
+     limited to:
+
+     (a) Claims by AI model authors or licensors for violation of model
+         license terms that would have been prevented or mitigated by
+         the License Verification Module.
+
+     (b) Claims by end users who relied on AI-generated outputs without
+         being informed of their AI-generated nature, which would have
+         been prevented by the AI Output Disclaimer Module.
+
+     (c) Claims for privacy violations arising from improper handling of
+         authentication tokens, which would have been prevented by the
+         Privacy Protection Module.
+
+     (d) Claims by model authors whose gating mechanisms were bypassed,
+         which would have been prevented by the Gating Respect Module.
+
+     (e) Regulatory penalties for failure to maintain provenance
+         documentation, which would have been prevented by the Provenance
+         Tracking Module.
+
+     The Licensor SHALL NOT be named as, joined as, or held to be a
+     co-defendant, co-respondent, or co-liable party in any claim,
+     action, or proceeding arising from a Derivative Work's non-compliance
+     with Section 3. If the Licensor is nevertheless named in such a
+     proceeding, You shall indemnify the Licensor pursuant to Section 6.2
+     and shall take all reasonable steps to have the Licensor dismissed
+     from the proceeding.
+
+6.4. COPYRIGHT CONSEQUENCES OF NON-COMPLIANCE
+
+     The Compliance Modules are a non-severable condition of the copyright
+     license granted in Section 2, as contemplated by the doctrine
+     established in Jacobsen v. Katzer, 535 F.3d 1373 (Fed. Cir. 2008).
+     For the avoidance of doubt:
+
+     (a) CONDITION, NOT COVENANT: The obligations in Section 3 define the
+         SCOPE of the license grant in Section 2. They are not mere
+         contractual promises (covenants) but are conditions precedent to
+         the exercise of the rights granted. Violation of any condition
+         in Section 3 means You are exercising rights OUTSIDE the scope
+         of this License.
+
+     (b) COPYRIGHT INFRINGEMENT: Any Derivative Work that is Distributed
+         in violation of Section 3 contains reproductions of the
+         Licensor's copyrighted code WITHOUT a valid license. Such
+         Distribution constitutes copyright infringement under the
+         Berne Convention, 17 U.S.C. § 106 (United States), Directive
+         2009/24/EC (European Union), and equivalent laws in other
+         jurisdictions.
+
+     (c) INFRINGING DERIVATIVE WORK: Under 17 U.S.C. § 103(a) and
+         equivalent provisions, copyright protection does NOT extend to
+         any part of a work in which copyrighted material has been used
+         unlawfully. A Derivative Work created or Distributed in
+         violation of Section 3 may be denied copyright protection to
+         the extent it incorporates the Licensor's code without
+         authorization.
+
+     (d) INJUNCTIVE RELIEF: The Licensor may seek injunctive relief
+         (including temporary restraining orders and preliminary
+         injunctions) to prevent the continued Distribution of any
+         Derivative Work that violates Section 3, without the need to
+         demonstrate irreparable harm (which is presumed in copyright
+         infringement cases in many jurisdictions).
+
+     (e) PRESERVATION OF DERIVATIVE AUTHOR'S ORIGINAL CONTRIBUTIONS:
+         For the avoidance of doubt, this Section does NOT affect the
+         Derivative Work author's copyright in their own original
+         contributions to the Derivative Work (i.e., code that does not
+         incorporate or derive from the Licensor's code). However, to
+         the extent the Derivative Work is an integrated whole that
+         cannot be separated from the Licensor's code, the practical
+         effect is that the Derivative Work may not be lawfully
+         Distributed without a valid HRUL license.
+
+---------------------------------------------------------------------------
+
+SECTION 7 — DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+THE LICENSOR MAKES NO WARRANTY THAT THE COMPLIANCE MODULES ARE SUFFICIENT
+TO ENSURE LEGAL COMPLIANCE IN ALL JURISDICTIONS OR FOR ALL USE CASES.
+USERS AND DERIVATIVE WORK AUTHORS ARE SOLELY RESPONSIBLE FOR ENSURING
+THEIR OWN LEGAL COMPLIANCE.
+
+---------------------------------------------------------------------------
+
+SECTION 8 — LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE TO YOU OR ANY THIRD PARTY FOR ANY
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE
+DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, GOODWILL, OR
+OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATING TO THIS LICENSE OR THE
+SOFTWARE, REGARDLESS OF WHETHER THE LICENSOR HAS BEEN ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES.
+
+THE LICENSOR'S TOTAL AGGREGATE LIABILITY UNDER THIS LICENSE SHALL NOT
+EXCEED ONE HUNDRED US DOLLARS (USD $100.00).
+
+---------------------------------------------------------------------------
+
+SECTION 9 — GENERAL PROVISIONS
+
+9.1. SEVERABILITY — If any provision of this License is held to be
+     unenforceable, such provision shall be reformed only to the extent
+     necessary to make it enforceable, and the remaining provisions shall
+     remain in full force and effect.
+
+9.2. ENTIRE AGREEMENT — This License constitutes the entire agreement
+     between the parties with respect to the Software and supersedes all
+     prior agreements relating thereto.
+
+9.3. GOVERNING LAW — This License shall be governed by and construed in
+     accordance with the laws of the jurisdiction in which the Licensor
+     primarily resides, without regard to its conflict of law provisions.
+
+9.4. NO WAIVER — Failure to enforce any provision of this License shall
+     not constitute a waiver of that provision.
+
+9.5. DEPENDENCY LICENSES AND GRANT SEPARATION —
+
+     (a) SCOPE LIMITATION: This License applies solely to the hfl
+         source code authored by the Licensor and its Contributors. It
+         does NOT modify, restrict, extend, or supersede the licenses of
+         third-party dependencies (which retain their own MIT, Apache 2.0,
+         BSD-3-Clause, or other applicable licenses).
+
+     (b) INDEPENDENT GRANTS: The rights granted by the licenses of
+         third-party dependencies (including perpetual and irrevocable
+         grants under Apache License 2.0, and unrestricted grants under
+         the MIT License) are independent of this License. Nothing in
+         this License shall be construed to limit, condition, or revoke
+         those independent grants.
+
+     (c) COMPLIANCE MODULE SCOPE: The obligations in Section 3 to
+         maintain Compliance Modules apply to Derivative Works of hfl
+         as an integrated whole. They do NOT require that third-party
+         dependencies be modified, restricted, or conditioned in any way.
+         If You extract a dependency from hfl and use it independently,
+         that dependency's own license governs without any obligation
+         under this License.
+
+     (d) APACHE 2.0 COMPATIBILITY: For Apache 2.0-licensed components
+         included in or used by hfl (including but not limited to
+         huggingface-hub, transformers, accelerate, sentencepiece, and
+         vllm), the perpetual, worldwide, royalty-free, irrevocable
+         copyright and patent licenses granted by Apache License 2.0 are
+         fully preserved and unaffected by this License, including in the
+         event of termination under Section 5. The additional terms
+         imposed by this License on hfl code are permitted under
+         Apache 2.0 Section 4 and do not constitute restrictions on the
+         Apache-licensed components themselves.
+
+     (e) MIT/BSD COMPATIBILITY: For MIT-licensed and BSD-3-Clause-licensed
+         components (including but not limited to typer, rich, fastapi,
+         pydantic, pyyaml, uvicorn, httpx, torch, llama-cpp-python, and
+         gguf), the unrestricted rights granted by those licenses remain
+         in full force. The Compliance Module obligations of Section 3
+         apply only to hfl's own code, not to these dependencies.
+
+9.6. DISPUTE RESOLUTION —
+
+     (a) Any dispute, controversy, or claim arising out of or relating to
+         this License, including its formation, interpretation, breach, or
+         termination, shall be resolved by binding arbitration administered
+         under the rules of the arbitration institution agreed upon by the
+         parties or, failing agreement, under the UNCITRAL Arbitration
+         Rules.
+
+     (b) The place of arbitration shall be the city of primary residence
+         of the Licensor. The language of arbitration shall be the
+         official language of the Licensor's jurisdiction or English, at
+         the Licensor's election.
+
+     (c) Each party shall bear its own costs of arbitration. The
+         arbitrator may, at their discretion, award reasonable attorney
+         fees and costs to the prevailing party.
+
+     (d) The arbitrator's award shall be final and binding and may be
+         entered as a judgment in any court of competent jurisdiction.
+
+     (e) EXCEPTION: The Licensor may seek injunctive or other equitable
+         relief in any court of competent jurisdiction to prevent
+         ongoing copyright infringement under Section 6.4, without first
+         submitting to arbitration.
+
+9.7. VERSIONING AND LICENSE UPDATES —
+
+     (a) RIGHT TO PUBLISH NEW VERSIONS: The Licensor reserves the right
+         to publish revised versions of this License at any time. Revised
+         versions will be identified by a new version number (e.g.,
+         HRUL v2.0) and published at the same location as the original
+         or at a URL designated by the Licensor.
+
+     (b) USER CHOICE FOR EXISTING CODE: If You received the Software
+         under a specific version of this License, You may choose to
+         follow the terms of that version OR any later version published
+         by the Licensor. This choice is Yours; the Licensor cannot
+         unilaterally impose a new version on code You already possess.
+
+     (c) NEW RELEASES UNDER NEW VERSIONS: Each new release of the
+         Software (identified by a new version number, tag, or commit)
+         is licensed under the version of this License specified in that
+         release's LICENSE file. If the Licensor publishes hfl v0.2.0
+         under HRUL v2.0, all use of hfl v0.2.0 is governed by
+         HRUL v2.0. Prior releases remain under their original license
+         version.
+
+     (d) DERIVATIVE WORKS AND VERSION INHERITANCE: A Derivative Work
+         inherits the license version of the Software release from which
+         it was derived. If You fork hfl v0.2.0 (licensed under
+         HRUL v2.0), Your Derivative Work is governed by HRUL v2.0 or
+         any later version at Your election. You may NOT apply an
+         earlier version of this License to a Derivative Work than the
+         version that governed the release You derived from.
+
+     (e) FORWARD COMPATIBILITY: If You Distribute a Derivative Work
+         under a specific version of this License, recipients of Your
+         Derivative Work may choose to follow that version or any later
+         version published by the Licensor, consistent with Section
+         9.7(b).
+
+     (f) VERSION CONTINUITY GUARANTEE: The Licensor guarantees that any
+         future version of this License will maintain, at minimum, the
+         Compliance Module requirements of Section 3 or their equivalent.
+         Future versions may add new Compliance Modules, clarify existing
+         ones, or adapt to regulatory changes, but will not remove the
+         core protective requirements. No future version will convert
+         this License into a permissive license that eliminates the
+         Mandatory Compliance Stack.
+
+---------------------------------------------------------------------------
+
+APPENDIX A — COMPLIANCE VERIFICATION CHECKLIST
+
+For maintainers of Derivative Works, the following checklist can be used to
+verify compliance with Section 3:
+
+  [ ] License Verification: Before any model download/conversion/load, does
+      the software query and display the model's license to the user?
+
+  [ ] License Classification: Does the software classify licenses into risk
+      categories (permissive, conditional, non-commercial, restricted)?
+
+  [ ] User Acknowledgment: For gated or restricted models, does the software
+      require explicit user acknowledgment before proceeding?
+
+  [ ] Provenance Recording: For each model processed, does the software
+      record source, license, conversion parameters, and timestamp?
+
+  [ ] AI Disclaimer: Do all API endpoints and CLI outputs that serve
+      model-generated text include an AI-generated content disclaimer?
+
+  [ ] Token Privacy: Are authentication tokens read ONLY from environment
+      variables or secure prompts, and NEVER written to disk?
+
+  [ ] Gating Respect: Does the software refuse to bypass upstream license
+      acceptance mechanisms (e.g., HuggingFace gating)?
+
+  [ ] Default Active: Are all compliance features enabled by default, with
+      no global disable mechanism?
+
+  [ ] Attribution: Is the original hfl project credited per Section 3.4?
+
+  [ ] License Inclusion: Is a copy of HRUL v1.0 (or compatible terms)
+      included with the distribution?
+
+---------------------------------------------------------------------------
+
+APPENDIX B — RATIONALE AND LEGAL CONTEXT
+
+This license was designed to address the following legal landscape:
+
+1. AI models are distributed under diverse and often restrictive licenses
+   (Llama Community License, Mistral MRL/MNPL, CC-BY-NC, RAIL, etc.).
+   Tools that process these models have an obligation to inform users of
+   applicable restrictions.
+
+2. The EU AI Act (effective August 2025) imposes obligations on distributors
+   of General Purpose AI (GPAI) systems, including transparency and
+   documentation requirements.
+
+3. Privacy regulations (GDPR, CCPA) require careful handling of
+   authentication tokens and user data.
+
+4. Standard permissive licenses (MIT, Apache 2.0) cannot require
+   preservation of specific functional modules in derivative works.
+
+5. Standard copyleft licenses (GPL, AGPL) require source disclosure but
+   cannot mandate preservation of specific safety features.
+
+6. RAIL (Responsible AI License) pioneered the concept of behavioral
+   restrictions that flow downstream, but is primarily designed for AI
+   models rather than developer tools.
+
+This License (HRUL) adapts the RAIL concept of mandatory downstream
+behavioral requirements to the context of AI infrastructure software,
+specifically requiring that legal compliance safeguards survive forking
+and modification.
+
+---------------------------------------------------------------------------
+
+END OF LICENSE
