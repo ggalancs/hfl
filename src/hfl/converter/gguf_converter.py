@@ -20,6 +20,7 @@ cada conversión para cumplimiento legal.
 
 import subprocess
 import shutil
+import sys
 from pathlib import Path
 from rich.console import Console
 
@@ -90,7 +91,7 @@ class GGUFConverter:
         requirements_file = self.llama_cpp_dir / "requirements.txt"
         if requirements_file.exists():
             subprocess.run(
-                ["pip", "install", "-r", str(requirements_file)],
+                [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
                 check=True,
             )
 
@@ -135,7 +136,7 @@ class GGUFConverter:
 
         subprocess.run(
             [
-                "python", str(self.convert_script),
+                sys.executable, str(self.convert_script),
                 str(model_path),
                 "--outtype", "f16",
                 "--outfile", str(fp16_path),
