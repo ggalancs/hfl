@@ -166,9 +166,22 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
 
     # Intentar obtener licencia de card_data
     license_id = None
+    license_name = None
+    license_url = None
     card_data = getattr(info, "card_data", None)
-    if card_data and hasattr(card_data, "license"):
-        license_id = card_data.license
+
+    if card_data:
+        # Obtener license básica
+        if hasattr(card_data, "license"):
+            license_id = card_data.license
+
+        # Obtener license_name (más específica, ej: "qwen2" cuando license es "other")
+        if hasattr(card_data, "license_name"):
+            license_name = card_data.license_name
+
+        # Obtener license_link si existe
+        if hasattr(card_data, "license_link"):
+            license_url = card_data.license_link
 
     # Fallback: buscar en tags
     if not license_id:
@@ -176,28 +189,49 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
         license_tags = [t.replace("license:", "") for t in tags if t.startswith("license:")]
         license_id = license_tags[0] if license_tags else "other"
 
-    # Normalizar license_id
+    # Normalizar license_id y license_name
     license_id = license_id.lower().strip() if license_id else "other"
+    license_name_normalized = license_name.lower().strip() if license_name else None
+
+    # Si license_id es "other" pero tenemos license_name, usar license_name para clasificación
+    classification_key = license_id
+    if license_id == "other" and license_name_normalized:
+        classification_key = license_name_normalized
 
     # Buscar clasificación
-    risk = LICENSE_CLASSIFICATION.get(license_id, LicenseRisk.UNKNOWN)
+    risk = LICENSE_CLASSIFICATION.get(classification_key, LicenseRisk.UNKNOWN)
+
+    # Si aún es UNKNOWN pero tenemos license_name, buscar coincidencia parcial
+    if risk == LicenseRisk.UNKNOWN and license_name_normalized:
+        for known_license, known_risk in LICENSE_CLASSIFICATION.items():
+            if known_license in license_name_normalized or license_name_normalized in known_license:
+                risk = known_risk
+                classification_key = known_license
+                break
 
     # Buscar restricciones (intentar coincidencia parcial para variantes)
     restrictions = []
     for key, restr in LICENSE_RESTRICTIONS.items():
-        if key in license_id or license_id in key:
+        if key in classification_key or classification_key in key:
             restrictions = restr
             break
 
     # Detectar si es gated
     gated = getattr(info, "gated", False) or False
 
+    # Determinar el nombre de licencia para mostrar
+    display_name = license_name if license_name else license_id.replace("-", " ").title()
+
+    # Determinar URL de licencia
+    if not license_url:
+        license_url = f"https://huggingface.co/{repo_id}#license"
+
     return LicenseInfo(
-        license_id=license_id,
-        license_name=license_id.replace("-", " ").title(),
+        license_id=license_name if license_name else license_id,
+        license_name=display_name,
         risk=risk,
         restrictions=restrictions,
-        url=f"https://huggingface.co/{repo_id}#license",
+        url=license_url,
         gated=bool(gated),
     )
 

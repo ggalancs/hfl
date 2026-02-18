@@ -241,6 +241,85 @@ class TestResolver:
         assert result.quantization == "Q5_K_M"
 
 
+class TestLicenseChecker:
+    """Tests para hub/license_checker.py."""
+
+    def test_check_license_with_license_name(self, mock_hf_api):
+        """Verifica que usa license_name cuando license es 'other'."""
+        from hfl.hub.license_checker import check_model_license, LicenseRisk
+
+        # Simular modelo con license: other pero license_name: qwen2
+        mock_info = MagicMock()
+        mock_card_data = MagicMock()
+        mock_card_data.license = "other"
+        mock_card_data.license_name = "qwen2"
+        mock_card_data.license_link = "https://example.com/LICENSE"
+        mock_info.card_data = mock_card_data
+        mock_info.tags = []
+        mock_info.gated = False
+        mock_hf_api.model_info.return_value = mock_info
+
+        with patch("hfl.hub.license_checker.HfApi", return_value=mock_hf_api):
+            result = check_model_license("test/model")
+
+        assert result.license_id == "qwen2"
+        assert result.risk == LicenseRisk.CONDITIONAL
+        assert result.url == "https://example.com/LICENSE"
+
+    def test_check_license_permissive(self, mock_hf_api):
+        """Verifica detección de licencia permisiva."""
+        from hfl.hub.license_checker import check_model_license, LicenseRisk
+
+        mock_info = MagicMock()
+        mock_card_data = MagicMock(spec=["license"])
+        mock_card_data.license = "apache-2.0"
+        mock_info.card_data = mock_card_data
+        mock_info.tags = []
+        mock_info.gated = False
+        mock_hf_api.model_info.return_value = mock_info
+
+        with patch("hfl.hub.license_checker.HfApi", return_value=mock_hf_api):
+            result = check_model_license("test/model")
+
+        assert result.license_id == "apache-2.0"
+        assert result.risk == LicenseRisk.PERMISSIVE
+
+    def test_check_license_non_commercial(self, mock_hf_api):
+        """Verifica detección de licencia no comercial."""
+        from hfl.hub.license_checker import check_model_license, LicenseRisk
+
+        mock_info = MagicMock()
+        mock_card_data = MagicMock(spec=["license"])
+        mock_card_data.license = "cc-by-nc-4.0"
+        mock_info.card_data = mock_card_data
+        mock_info.tags = []
+        mock_info.gated = False
+        mock_hf_api.model_info.return_value = mock_info
+
+        with patch("hfl.hub.license_checker.HfApi", return_value=mock_hf_api):
+            result = check_model_license("test/model")
+
+        assert result.risk == LicenseRisk.NON_COMMERCIAL
+        assert "non-commercial-only" in result.restrictions
+
+    def test_check_license_unknown_fallback(self, mock_hf_api):
+        """Verifica fallback a unknown para licencias no reconocidas."""
+        from hfl.hub.license_checker import check_model_license, LicenseRisk
+
+        mock_info = MagicMock()
+        mock_card_data = MagicMock(spec=["license"])
+        mock_card_data.license = "custom-proprietary"
+        mock_info.card_data = mock_card_data
+        mock_info.tags = []
+        mock_info.gated = False
+        mock_hf_api.model_info.return_value = mock_info
+
+        with patch("hfl.hub.license_checker.HfApi", return_value=mock_hf_api):
+            result = check_model_license("test/model")
+
+        assert result.risk == LicenseRisk.UNKNOWN
+
+
 class TestDownloader:
     """Tests para hub/downloader.py."""
 
