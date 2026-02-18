@@ -12,6 +12,7 @@ import sys
 import time
 from contextlib import contextmanager
 from typing import Iterator
+
 from llama_cpp import Llama
 
 
@@ -38,8 +39,12 @@ def _nullcontext():
     """Context manager que no hace nada (para cuando verbose=True)."""
     yield
 
+
 from hfl.engine.base import (
-    InferenceEngine, ChatMessage, GenerationConfig, GenerationResult,
+    ChatMessage,
+    GenerationConfig,
+    GenerationResult,
+    InferenceEngine,
 )
 
 

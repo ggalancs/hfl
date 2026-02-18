@@ -14,10 +14,11 @@ Uso:
 """
 
 import sys
+
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 app = typer.Typer(
     name="hfl",
@@ -32,18 +33,23 @@ def pull(
     model: str = typer.Argument(help="Modelo HF (ej: meta-llama/Llama-3.3-70B-Instruct)"),
     quantize: str = typer.Option("Q4_K_M", "--quantize", "-q", help="Nivel de cuantización"),
     format: str = typer.Option("auto", "--format", "-f", help="Formato: auto, gguf, safetensors"),
-    alias: str = typer.Option(None, "--alias", "-a", help="Alias corto para referirse al modelo (ej: 'coder')"),
-    skip_license: bool = typer.Option(False, "--skip-license", help="Saltar verificación de licencia"),
+    alias: str = typer.Option(
+        None, "--alias", "-a", help="Alias corto para referirse al modelo (ej: 'coder')"
+    ),
+    skip_license: bool = typer.Option(
+        False, "--skip-license", help="Saltar verificación de licencia"
+    ),
 ):
     """Descarga un modelo desde HuggingFace Hub."""
     from datetime import datetime
-    from hfl.hub.resolver import resolve
+
+    from hfl.converter.formats import ModelFormat, detect_format
+    from hfl.converter.gguf_converter import GGUFConverter
     from hfl.hub.downloader import pull_model
     from hfl.hub.license_checker import check_model_license, require_user_acceptance
-    from hfl.converter.formats import detect_format, ModelFormat
-    from hfl.converter.gguf_converter import GGUFConverter
-    from hfl.models.registry import ModelRegistry
+    from hfl.hub.resolver import resolve
     from hfl.models.manifest import ModelManifest
+    from hfl.models.registry import ModelRegistry
 
     # 1. Resolver modelo
     console.print(f"[bold]Resolviendo[/] {model}...")
@@ -149,13 +155,16 @@ def run(
     backend: str = typer.Option("auto", "--backend", "-b"),
     ctx: int = typer.Option(4096, "--ctx", "-c", help="Tamaño de contexto"),
     system: str = typer.Option(None, "--system", "-s", help="Prompt de sistema"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Mostrar logs del backend (Metal, CUDA)"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Mostrar logs del backend (Metal, CUDA)"
+    ),
 ):
     """Inicia un chat interactivo con un modelo."""
-    from hfl.models.registry import ModelRegistry
-    from hfl.engine.selector import select_engine, MissingDependencyError
-    from hfl.engine.base import ChatMessage
     from pathlib import Path
+
+    from hfl.engine.base import ChatMessage
+    from hfl.engine.selector import MissingDependencyError, select_engine
+    from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     manifest = registry.get(model)
@@ -200,6 +209,7 @@ def run(
         # Streaming de respuesta con estilo
         # markup=False evita que Rich interprete [] como tags de formato
         from rich.style import Style
+
         green_style = Style(color="green")
 
         full_response = []
@@ -234,9 +244,10 @@ def serve(
             raise typer.Exit(0)
 
     if model:
-        from hfl.models.registry import ModelRegistry
-        from hfl.engine.selector import select_engine, MissingDependencyError
         from pathlib import Path
+
+        from hfl.engine.selector import MissingDependencyError, select_engine
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
         manifest = registry.get(model)
@@ -259,8 +270,9 @@ def serve(
 @app.command(name="list")
 def list_models():
     """Lista todos los modelos descargados."""
-    from hfl.models.registry import ModelRegistry
     from rich.table import Table
+
+    from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     models = registry.list_all()
@@ -334,27 +346,27 @@ def _display_model_row(model, index: int, show_index: bool = True) -> None:
     """Muestra una fila de modelo formateada."""
     # Obtener información del modelo
     model_id = model.id
-    downloads = getattr(model, 'downloads', 0) or 0
-    likes = getattr(model, 'likes', 0) or 0
+    downloads = getattr(model, "downloads", 0) or 0
+    likes = getattr(model, "likes", 0) or 0
 
     # Detectar si tiene GGUF
     has_gguf = False
-    siblings = getattr(model, 'siblings', None)
+    siblings = getattr(model, "siblings", None)
     if siblings:
-        has_gguf = any(s.rfilename.endswith('.gguf') for s in siblings)
+        has_gguf = any(s.rfilename.endswith(".gguf") for s in siblings)
 
     # Formatear tags
-    tags = getattr(model, 'tags', []) or []
-    pipeline_tag = getattr(model, 'pipeline_tag', None)
+    tags = getattr(model, "tags", []) or []
+    pipeline_tag = getattr(model, "pipeline_tag", None)
 
     # Icono de formato
     format_icon = "[green]●[/] GGUF" if has_gguf else "[dim]○[/] HF"
 
     # Formatear descargas
     if downloads >= 1_000_000:
-        dl_str = f"{downloads/1_000_000:.1f}M"
+        dl_str = f"{downloads / 1_000_000:.1f}M"
     elif downloads >= 1_000:
-        dl_str = f"{downloads/1_000:.1f}K"
+        dl_str = f"{downloads / 1_000:.1f}K"
     else:
         dl_str = str(downloads)
 
@@ -376,7 +388,9 @@ def search(
     limit: int = typer.Option(100, "--limit", "-l", help="Número máximo de resultados"),
     page_size: int = typer.Option(10, "--page-size", "-n", help="Resultados por página"),
     gguf_only: bool = typer.Option(False, "--gguf", "-g", help="Mostrar solo modelos con GGUF"),
-    sort: str = typer.Option("downloads", "--sort", "-s", help="Ordenar por: downloads, likes, created"),
+    sort: str = typer.Option(
+        "downloads", "--sort", "-s", help="Ordenar por: downloads, likes, created"
+    ),
 ):
     """
     Busca modelos en HuggingFace Hub con paginación interactiva.
@@ -404,14 +418,16 @@ def search(
 
     try:
         # Buscar modelos
-        models = list(api.list_models(
-            search=query,
-            sort=sort,
-            direction=-1,
-            limit=limit,
-            fetch_config=False,
-            full=True,  # Para obtener siblings y detectar GGUF
-        ))
+        models = list(
+            api.list_models(
+                search=query,
+                sort=sort,
+                direction=-1,
+                limit=limit,
+                fetch_config=False,
+                full=True,  # Para obtener siblings y detectar GGUF
+            )
+        )
     except Exception as e:
         console.print(f"[red]Error al buscar:[/] {e}")
         raise typer.Exit(1)
@@ -423,9 +439,11 @@ def search(
     # Filtrar por GGUF si se solicita
     if gguf_only:
         models = [
-            m for m in models
-            if hasattr(m, 'siblings') and m.siblings and
-            any(s.rfilename.endswith('.gguf') for s in m.siblings)
+            m
+            for m in models
+            if hasattr(m, "siblings")
+            and m.siblings
+            and any(s.rfilename.endswith(".gguf") for s in m.siblings)
         ]
         if not models:
             console.print(f"[yellow]No se encontraron modelos GGUF para:[/] '{query}'")
@@ -436,14 +454,16 @@ def search(
     current_page = 0
 
     # Mostrar encabezado
-    console.print(Panel(
-        f"[bold]{total}[/] modelos encontrados  |  "
-        f"[dim]ESPACIO/ENTER[/] continuar  |  "
-        f"[dim]q[/] salir  |  "
-        f"[dim]p[/] anterior",
-        title=f"[bold cyan]Búsqueda: {query}[/]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            f"[bold]{total}[/] modelos encontrados  |  "
+            f"[dim]ESPACIO/ENTER[/] continuar  |  "
+            f"[dim]q[/] salir  |  "
+            f"[dim]p[/] anterior",
+            title=f"[bold cyan]Búsqueda: {query}[/]",
+            border_style="cyan",
+        )
+    )
     console.print()
 
     while current_page < total_pages:
@@ -469,17 +489,19 @@ def search(
                 # Fallback si no hay terminal interactivo
                 try:
                     user_input = input("\n[Presiona ENTER para continuar, 'q' para salir]: ")
-                    key = 'q' if user_input.lower() == 'q' else ' '
+                    key = "q" if user_input.lower() == "q" else " "
                 except (EOFError, KeyboardInterrupt):
-                    key = 'q'
+                    key = "q"
 
             # Limpiar línea de estado
             console.print("\r" + " " * 80 + "\r", end="")
 
-            if key in ('q', 'Q', '\x1b', '\x03'):  # q, Q, ESC, Ctrl+C
-                console.print(f"\n[dim]Búsqueda terminada. Mostrando {end_idx} de {total} resultados.[/]")
+            if key in ("q", "Q", "\x1b", "\x03"):  # q, Q, ESC, Ctrl+C
+                console.print(
+                    f"\n[dim]Búsqueda terminada. Mostrando {end_idx} de {total} resultados.[/]"
+                )
                 break
-            elif key == 'p' and current_page > 0:
+            elif key == "p" and current_page > 0:
                 current_page -= 1
                 console.print()  # Nueva línea antes de la página anterior
             else:
@@ -498,9 +520,10 @@ def search(
 @app.command()
 def rm(model: str = typer.Argument(help="Nombre del modelo a eliminar")):
     """Elimina un modelo local."""
-    from hfl.models.registry import ModelRegistry
-    from pathlib import Path
     import shutil
+    from pathlib import Path
+
+    from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     manifest = registry.get(model)
@@ -530,9 +553,10 @@ def rm(model: str = typer.Argument(help="Nombre del modelo a eliminar")):
 @app.command()
 def inspect(model: str = typer.Argument(help="Nombre del modelo")):
     """Muestra información detallada de un modelo."""
-    from hfl.models.registry import ModelRegistry
     from rich.panel import Panel
     from rich.text import Text
+
+    from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     manifest = registry.get(model)
@@ -609,7 +633,12 @@ def set_alias(
 
 @app.command()
 def login(
-    token: str = typer.Option(None, "--token", "-t", help="Token de HuggingFace (si no se proporciona, se pedirá interactivamente)"),
+    token: str = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Token de HuggingFace (si no se proporciona, se pedirá interactivamente)",
+    ),
 ):
     """
     Configura tu token de HuggingFace para descargas más rápidas.
@@ -621,7 +650,8 @@ def login(
       - Descargas más rápidas (rate limits más altos)
       - Acceso a modelos gated (tras aceptar su licencia en HF)
     """
-    from huggingface_hub import login as hf_login, whoami
+    from huggingface_hub import login as hf_login
+    from huggingface_hub import whoami
 
     try:
         if token:
@@ -656,6 +686,7 @@ def logout():
 def version():
     """Muestra la versión de hfl."""
     from hfl import __version__
+
     console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")
     console.print("[dim]https://github.com/ggalancs/hfl[/]")
 

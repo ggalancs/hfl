@@ -23,6 +23,7 @@ Este diseño garantiza que:
 """
 
 from huggingface_hub import HfApi, get_token
+
 from hfl.config import config
 
 
@@ -72,6 +73,7 @@ def ensure_auth(repo_id: str) -> str | None:
     if not token:
         from rich.console import Console
         from rich.prompt import Prompt
+
         console = Console()
 
         console.print("\n[yellow]Este modelo requiere autenticación HuggingFace.[/]")

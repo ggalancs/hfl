@@ -9,7 +9,7 @@ y para preservar atribución en obras derivadas.
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 

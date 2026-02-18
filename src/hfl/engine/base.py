@@ -9,7 +9,7 @@ from typing import Iterator
 
 @dataclass
 class ChatMessage:
-    role: str       # "system", "user", "assistant"
+    role: str  # "system", "user", "assistant"
     content: str
 
 

@@ -11,7 +11,10 @@ import time
 from typing import Iterator
 
 from hfl.engine.base import (
-    InferenceEngine, ChatMessage, GenerationConfig, GenerationResult,
+    ChatMessage,
+    GenerationConfig,
+    GenerationResult,
+    InferenceEngine,
 )
 
 
@@ -48,6 +51,7 @@ class TransformersEngine(InferenceEngine):
 
         if quant == "4bit":
             from transformers import BitsAndBytesConfig
+
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.bfloat16,
@@ -56,14 +60,13 @@ class TransformersEngine(InferenceEngine):
             )
         elif quant == "8bit":
             from transformers import BitsAndBytesConfig
+
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_8bit=True,
             )
 
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_path, **load_kwargs
-        )
+        self._model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
         self._model_id = model_path
 
     def unload(self) -> None:
@@ -73,6 +76,7 @@ class TransformersEngine(InferenceEngine):
             self._model = None
             self._tokenizer = None
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -82,7 +86,9 @@ class TransformersEngine(InferenceEngine):
 
         if hasattr(self._tokenizer, "apply_chat_template"):
             return self._tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=True,
+                msgs,
+                tokenize=False,
+                add_generation_prompt=True,
             )
 
         # Fallback genérico
@@ -102,11 +108,10 @@ class TransformersEngine(InferenceEngine):
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
         import torch
+
         cfg = config or GenerationConfig()
 
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(
-            self._model.device
-        )
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
         prompt_tokens = inputs["input_ids"].shape[1]
 
         t0 = time.perf_counter()
@@ -139,16 +144,17 @@ class TransformersEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> Iterator[str]:
-        from transformers import TextIteratorStreamer
         from threading import Thread
 
+        from transformers import TextIteratorStreamer
+
         cfg = config or GenerationConfig()
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(
-            self._model.device
-        )
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
 
         streamer = TextIteratorStreamer(
-            self._tokenizer, skip_prompt=True, skip_special_tokens=True,
+            self._tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
         )
 
         gen_kwargs = {

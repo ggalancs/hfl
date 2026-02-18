@@ -249,9 +249,9 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
     Returns:
         True si el usuario acepta, False si rechaza.
     """
+    import typer
     from rich.console import Console
     from rich.panel import Panel
-    import typer
 
     console = Console()
 

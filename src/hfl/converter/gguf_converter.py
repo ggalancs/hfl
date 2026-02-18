@@ -18,10 +18,11 @@ sobre el archivo convertido. hfl registra la procedencia de
 cada conversión para cumplimiento legal.
 """
 
-import subprocess
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
 from rich.console import Console
 
 from hfl.config import config
@@ -64,9 +65,13 @@ class GGUFConverter:
         if not self.llama_cpp_dir.exists():
             self.llama_cpp_dir.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "clone", "--depth=1",
-                 "https://github.com/ggml-org/llama.cpp.git",
-                 str(self.llama_cpp_dir)],
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    "https://github.com/ggml-org/llama.cpp.git",
+                    str(self.llama_cpp_dir),
+                ],
                 check=True,
             )
 
@@ -84,7 +89,8 @@ class GGUFConverter:
         subprocess.run(cmake_cmd, cwd=build_dir, check=True)
         subprocess.run(
             ["cmake", "--build", ".", "--config", "Release", "-j"],
-            cwd=build_dir, check=True,
+            cwd=build_dir,
+            check=True,
         )
 
         # Instalar dependencias Python del script de conversión
@@ -136,10 +142,13 @@ class GGUFConverter:
 
         subprocess.run(
             [
-                sys.executable, str(self.convert_script),
+                sys.executable,
+                str(self.convert_script),
                 str(model_path),
-                "--outtype", "f16",
-                "--outfile", str(fp16_path),
+                "--outtype",
+                "f16",
+                "--outfile",
+                str(fp16_path),
             ],
             check=True,
         )
@@ -172,8 +181,8 @@ class GGUFConverter:
         # R3 - Registrar provenance de la conversión
         if source_repo:
             try:
-                from hfl.models.provenance import log_conversion
                 from hfl.converter.formats import detect_format
+                from hfl.models.provenance import log_conversion
 
                 source_format = detect_format(model_path).value
                 tool_version = _get_llama_cpp_version(self.llama_cpp_dir)

@@ -5,10 +5,11 @@ Endpoints compatibles con la API de OpenAI.
 Drop-in replacement para aplicaciones que usan OpenAI SDK.
 """
 
-import time
 import json
+import time
 import uuid
 from typing import AsyncIterator
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ router = APIRouter()
 
 
 # --- Schemas Pydantic ---
+
 
 class ChatCompletionMessage(BaseModel):
     role: str
@@ -52,9 +54,11 @@ class CompletionRequest(BaseModel):
 
 # --- Helpers ---
 
+
 def _get_state():
     """Import state lazily to avoid circular imports."""
     from hfl.api.server import state
+
     return state
 
 
@@ -73,8 +77,9 @@ def _ensure_model_loaded(model_name: str):
     if not manifest:
         raise HTTPException(404, f"Modelo no encontrado: {model_name}")
 
-    from hfl.engine.selector import select_engine
     from pathlib import Path
+
+    from hfl.engine.selector import select_engine
 
     state.engine = select_engine(Path(manifest.local_path))
     state.engine.load(manifest.local_path, n_ctx=manifest.context_length)
@@ -93,6 +98,7 @@ def _to_gen_config(req) -> GenerationConfig:
 
 
 # --- Endpoints ---
+
 
 @router.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
@@ -115,11 +121,13 @@ async def chat_completions(req: ChatCompletionRequest):
         "object": "chat.completion",
         "created": int(time.time()),
         "model": req.model,
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": result.text},
-            "finish_reason": result.stop_reason,
-        }],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": result.text},
+                "finish_reason": result.stop_reason,
+            }
+        ],
         "usage": {
             "prompt_tokens": result.tokens_prompt,
             "completion_tokens": result.tokens_generated,
@@ -143,11 +151,13 @@ async def _stream_chat(
             "object": "chat.completion.chunk",
             "created": int(time.time()),
             "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": token},
-                "finish_reason": None,
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": token},
+                    "finish_reason": None,
+                }
+            ],
         }
         yield f"data: {json.dumps(chunk)}\n\n"
 
@@ -184,11 +194,13 @@ async def completions(req: CompletionRequest):
         "object": "text_completion",
         "created": int(time.time()),
         "model": req.model,
-        "choices": [{
-            "text": result.text,
-            "index": 0,
-            "finish_reason": result.stop_reason,
-        }],
+        "choices": [
+            {
+                "text": result.text,
+                "index": 0,
+                "finish_reason": result.stop_reason,
+            }
+        ],
         "usage": {
             "prompt_tokens": result.tokens_prompt,
             "completion_tokens": result.tokens_generated,
@@ -198,7 +210,9 @@ async def completions(req: CompletionRequest):
 
 
 async def _stream_completion(
-    model: str, prompt: str, config: GenerationConfig,
+    model: str,
+    prompt: str,
+    config: GenerationConfig,
 ) -> AsyncIterator[str]:
     state = _get_state()
     for token in state.engine.generate_stream(prompt, config):

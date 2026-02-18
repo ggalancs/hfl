@@ -21,20 +21,21 @@ Cumplimiento Legal (R9 - Auditoría):
 """
 
 from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from hfl.config import config
-from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_native import router as native_router
+from hfl.api.routes_openai import router as openai_router
+from hfl.config import config
 
 
 # Estado global del servidor
 class ServerState:
-    engine = None          # InferenceEngine activo
-    current_model = None   # ModelManifest del modelo cargado
+    engine = None  # InferenceEngine activo
+    current_model = None  # ModelManifest del modelo cargado
 
 
 state = ServerState()

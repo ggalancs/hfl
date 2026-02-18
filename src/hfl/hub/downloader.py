@@ -22,8 +22,8 @@ from huggingface_hub import hf_hub_download, snapshot_download
 from rich.console import Console
 
 from hfl.config import config
-from hfl.hub.resolver import ResolvedModel
 from hfl.hub.auth import ensure_auth
+from hfl.hub.resolver import ResolvedModel
 
 console = Console()
 
@@ -92,7 +92,7 @@ def pull_model(resolved: ResolvedModel) -> Path:
                 "tokenizer.json",
                 "tokenizer_config.json",
                 "special_tokens_map.json",
-                "tokenizer.model",       # SentencePiece
+                "tokenizer.model",  # SentencePiece
                 "generation_config.json",
             ]
 

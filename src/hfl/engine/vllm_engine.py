@@ -12,7 +12,10 @@ Este módulo es un placeholder para implementación futura.
 from vllm import LLM, SamplingParams
 
 from hfl.engine.base import (
-    InferenceEngine, ChatMessage, GenerationConfig, GenerationResult,
+    ChatMessage,
+    GenerationConfig,
+    GenerationResult,
+    InferenceEngine,
 )
 
 
@@ -68,7 +71,9 @@ class VLLMEngine(InferenceEngine):
         result = self.generate(prompt, config)
         yield result.text
 
-    def chat(self, messages: list[ChatMessage], config: GenerationConfig | None = None) -> GenerationResult:
+    def chat(
+        self, messages: list[ChatMessage], config: GenerationConfig | None = None
+    ) -> GenerationResult:
         """Chat completion."""
         prompt = self._build_prompt(messages)
         return self.generate(prompt, config)

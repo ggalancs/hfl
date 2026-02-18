@@ -5,8 +5,9 @@ Endpoints compatibles con la API nativa de Ollama.
 Permite usar hfl como drop-in replacement de Ollama.
 """
 
-import time
 import json
+import time
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -34,6 +35,7 @@ class ChatRequest(BaseModel):
 def _get_state():
     """Import state lazily to avoid circular imports."""
     from hfl.api.server import state
+
     return state
 
 
@@ -53,27 +55,39 @@ def _options_to_config(options: dict | None) -> GenerationConfig:
 @router.post("/api/generate")
 async def api_generate(req: GenerateRequest):
     from hfl.api.routes_openai import _ensure_model_loaded
+
     _ensure_model_loaded(req.model)
     state = _get_state()
 
     gen_config = _options_to_config(req.options)
 
     if req.stream:
+
         async def stream():
             for token in state.engine.generate_stream(req.prompt, gen_config):
-                yield json.dumps({
-                    "model": req.model,
-                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "response": token,
-                    "done": False,
-                }) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "model": req.model,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "response": token,
+                            "done": False,
+                        }
+                    )
+                    + "\n"
+                )
 
-            yield json.dumps({
-                "model": req.model,
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "response": "",
-                "done": True,
-            }) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "model": req.model,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "response": "",
+                        "done": True,
+                    }
+                )
+                + "\n"
+            )
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 
@@ -92,6 +106,7 @@ async def api_generate(req: GenerateRequest):
 @router.post("/api/chat")
 async def api_chat(req: ChatRequest):
     from hfl.api.routes_openai import _ensure_model_loaded
+
     _ensure_model_loaded(req.model)
     state = _get_state()
 
@@ -99,21 +114,32 @@ async def api_chat(req: ChatRequest):
     gen_config = _options_to_config(req.options)
 
     if req.stream:
+
         async def stream():
             for token in state.engine.chat_stream(messages, gen_config):
-                yield json.dumps({
-                    "model": req.model,
-                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "message": {"role": "assistant", "content": token},
-                    "done": False,
-                }) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "model": req.model,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "message": {"role": "assistant", "content": token},
+                            "done": False,
+                        }
+                    )
+                    + "\n"
+                )
 
-            yield json.dumps({
-                "model": req.model,
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "message": {"role": "assistant", "content": ""},
-                "done": True,
-            }) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "model": req.model,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "message": {"role": "assistant", "content": ""},
+                        "done": True,
+                    }
+                )
+                + "\n"
+            )
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 

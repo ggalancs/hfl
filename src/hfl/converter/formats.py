@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Detección y validación de formatos de modelo."""
 
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
 
 
 class ModelFormat(Enum):

@@ -2,9 +2,9 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Configuración central de hfl."""
 
-from pathlib import Path
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -13,9 +13,7 @@ class HFLConfig:
 
     # Directorio raíz (~/.hfl por defecto)
     home_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get("HFL_HOME", Path.home() / ".hfl")
-        )
+        default_factory=lambda: Path(os.environ.get("HFL_HOME", Path.home() / ".hfl"))
     )
 
     # Subdirectorios
@@ -49,9 +47,7 @@ class HFLConfig:
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.
     # It is NEVER persisted to disk, NEVER stored in models.json or any config file.
     # Token is held in memory only for the duration of the process.
-    hf_token: str | None = field(
-        default_factory=lambda: os.environ.get("HF_TOKEN")
-    )
+    hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
     def ensure_dirs(self):
         """Crea los directorios necesarios."""

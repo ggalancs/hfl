@@ -11,8 +11,9 @@ Este middleware implementa logging "privacy-safe" que:
 - Solo registra metadata: método, path, status, duración
 """
 
-import time
 import logging
+import time
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
