@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: HRUL-1.0
-# Copyright (c) 2026 hfl Contributors
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """Interfaz abstracta para motores de inferencia."""
 
 from abc import ABC, abstractmethod

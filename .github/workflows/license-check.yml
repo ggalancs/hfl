@@ -35,7 +35,7 @@ jobs:
         run: |
           echo "Checking for GPL/AGPL/LGPL licenses..."
           pip-licenses --fail-on="GPL;GPLv2;GPLv3;AGPL;AGPLv3;LGPL;LGPLv2;LGPLv3" \
-            --format=table --with-urls
+            --format=plain --with-urls
 
       - name: Generate license report
         if: always()

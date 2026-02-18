@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: HRUL-1.0
-# Copyright (c) 2026 hfl Contributors
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """Modelo de datos para metadata de modelos locales."""
 
 from dataclasses import dataclass, field, asdict

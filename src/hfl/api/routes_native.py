@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: HRUL-1.0
-# Copyright (c) 2026 hfl Contributors
+# Copyright (c) 2026 Gabriel Galán Pelayo
 """
 Endpoints compatibles con la API nativa de Ollama.
 Permite usar hfl como drop-in replacement de Ollama.
