@@ -44,7 +44,6 @@ def pull(
     from datetime import datetime
 
     from hfl.converter.formats import ModelFormat, detect_format
-    from hfl.converter.gguf_converter import GGUFConverter
     from hfl.hub.downloader import pull_model
     from hfl.hub.license_checker import check_model_license, require_user_acceptance
     from hfl.hub.resolver import resolve
@@ -101,6 +100,20 @@ def pull(
     final_path = local_path
 
     if fmt != ModelFormat.GGUF and format != "safetensors":
+        # Verificar si el modelo puede convertirse a GGUF
+        from hfl.converter.gguf_converter import GGUFConverter, check_model_convertibility
+
+        is_convertible, reason = check_model_convertibility(local_path)
+
+        if not is_convertible:
+            console.print(f"\n[yellow]No se puede convertir a GGUF:[/] {reason}")
+            console.print(
+                "\n[dim]El modelo se ha descargado pero no puede ejecutarse con llama.cpp.[/]"
+            )
+            console.print("[dim]Considera buscar una versión GGUF del modelo:[/]")
+            console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
+            raise typer.Exit(1)
+
         console.print(f"[yellow]Convirtiendo a GGUF ({quantize})...[/]")
         converter = GGUFConverter()
         output_name = resolved.repo_id.replace("/", "--")

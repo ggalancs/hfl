@@ -16,8 +16,18 @@ La conversión de formato preserva los pesos del modelo original.
 La licencia y restricciones del modelo original siguen vigentes
 sobre el archivo convertido. hfl registra la procedencia de
 cada conversión para cumplimiento legal.
+
+Modelos soportados para conversión GGUF:
+- Modelos de texto (LLMs) con arquitecturas soportadas por llama.cpp
+- Requieren config.json con model_type válido
+
+Modelos NO soportados:
+- LoRA adapters (archivos adapter_*.safetensors sin modelo base)
+- Modelos de imagen (Stable Diffusion, FLUX, etc.)
+- Modelos sin config.json
 """
 
+import json
 import shutil
 import subprocess
 import sys
@@ -28,6 +38,116 @@ from rich.console import Console
 from hfl.config import config
 
 console = Console()
+
+
+class UnsupportedModelError(Exception):
+    """Raised when a model cannot be converted to GGUF format."""
+
+    pass
+
+
+# Tipos de modelo que NO pueden convertirse a GGUF
+UNSUPPORTED_MODEL_TYPES = {
+    # Modelos de imagen
+    "stable-diffusion",
+    "sdxl",
+    "flux",
+    "vae",
+    "unet",
+    "controlnet",
+    # LoRA adapters
+    "lora",
+    "adapter",
+    # Otros
+    "clip",
+    "vit",
+    "audio",
+    "whisper",
+}
+
+# Patrones de archivos que indican modelos no convertibles
+UNSUPPORTED_FILE_PATTERNS = {
+    "adapter_model.safetensors",  # LoRA adapter
+    "adapter_config.json",  # LoRA config
+    "diffusion_pytorch_model.safetensors",  # Difusión
+    "unet/",  # Stable Diffusion UNet
+    "vae/",  # VAE
+}
+
+
+def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
+    """
+    Verifica si un modelo puede convertirse a formato GGUF.
+
+    Args:
+        model_path: Ruta al directorio del modelo descargado
+
+    Returns:
+        Tuple (es_convertible, razón)
+        - (True, "") si es convertible
+        - (False, razón) si no es convertible
+    """
+    # 1. Verificar que existe config.json
+    config_path = model_path / "config.json"
+    if not config_path.exists():
+        # Verificar si es un LoRA adapter
+        adapter_config = model_path / "adapter_config.json"
+        if adapter_config.exists():
+            return (
+                False,
+                "Este es un LoRA adapter, no un modelo completo. "
+                "Los LoRA adapters requieren un modelo base para funcionar.",
+            )
+
+        # Verificar si hay archivos de difusión
+        for pattern in UNSUPPORTED_FILE_PATTERNS:
+            if (model_path / pattern).exists() or list(model_path.glob(f"*{pattern}*")):
+                return (
+                    False,
+                    "Este parece ser un modelo de difusión de imágenes. "
+                    "GGUF solo soporta modelos de texto (LLMs).",
+                )
+
+        return (
+            False,
+            "No se encontró config.json. Este modelo no tiene el formato "
+            "estándar de HuggingFace para modelos de texto.",
+        )
+
+    # 2. Leer config.json y verificar model_type
+    try:
+        with open(config_path) as f:
+            config_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return (False, f"No se pudo leer config.json: {e}")
+
+    model_type = config_data.get("model_type", "").lower()
+
+    if not model_type:
+        # Sin model_type, verificar otros indicadores
+        if "adapter_config" in config_data or "_name_or_path" in str(config_data.get("base_model")):
+            return (
+                False,
+                "Este es un LoRA adapter. Los LoRA adapters requieren "
+                "un modelo base para funcionar.",
+            )
+        return (
+            False,
+            "config.json no contiene 'model_type'. "
+            "El modelo no puede ser identificado.",
+        )
+
+    # 3. Verificar si el model_type está en la lista de no soportados
+    for unsupported in UNSUPPORTED_MODEL_TYPES:
+        if unsupported in model_type:
+            return (
+                False,
+                f"El tipo de modelo '{model_type}' no es soportado para conversión GGUF. "
+                "GGUF solo soporta modelos de texto (LLMs).",
+            )
+
+    # 4. El modelo parece ser convertible
+    return (True, "")
 
 
 def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:

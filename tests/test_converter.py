@@ -2,11 +2,12 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests para el módulo converter (formats, gguf_converter)."""
 
+import json
 import pytest
 import sys
-from pathlib import Path
 import tempfile
-from unittest.mock import patch, MagicMock, call
+from pathlib import Path
+from unittest.mock import MagicMock, call, patch
 
 
 class TestModelFormat:
@@ -461,3 +462,164 @@ class TestGetLlamaCppVersion:
             result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
 
             assert result == "unknown"
+
+
+class TestCheckModelConvertibility:
+    """Tests para check_model_convertibility."""
+
+    def test_convertible_llm_model(self, temp_dir):
+        """Modelo LLM con config.json válido es convertible."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "llama", "hidden_size": 4096}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+        (temp_dir / "model.safetensors").write_bytes(b"weights")
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is True
+        assert reason == ""
+
+    def test_missing_config_json(self, temp_dir):
+        """Modelo sin config.json no es convertible."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        (temp_dir / "model.safetensors").write_bytes(b"weights")
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "config.json" in reason
+
+    def test_lora_adapter_detected(self, temp_dir):
+        """LoRA adapter es detectado y rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        # LoRA adapter tiene adapter_config.json
+        (temp_dir / "adapter_config.json").write_text('{"base_model": "llama"}')
+        (temp_dir / "adapter_model.safetensors").write_bytes(b"lora weights")
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "LoRA" in reason
+
+    def test_diffusion_model_detected(self, temp_dir):
+        """Modelo de difusión es detectado y rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        # Stable Diffusion tiene diffusion_pytorch_model.safetensors
+        (temp_dir / "diffusion_pytorch_model.safetensors").write_bytes(b"unet")
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "difusión" in reason.lower() or "imagen" in reason.lower()
+
+    def test_stable_diffusion_model_type(self, temp_dir):
+        """Modelo con model_type de stable-diffusion es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "stable-diffusion-xl"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "no es soportado" in reason
+
+    def test_vae_model_type(self, temp_dir):
+        """Modelo VAE es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "vae"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "no es soportado" in reason
+
+    def test_missing_model_type(self, temp_dir):
+        """config.json sin model_type es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"hidden_size": 4096}  # Sin model_type
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "model_type" in reason
+
+    def test_invalid_json(self, temp_dir):
+        """config.json malformado es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        (temp_dir / "config.json").write_text("{ invalid json }")
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+        assert "No se pudo leer" in reason
+
+    def test_clip_model_rejected(self, temp_dir):
+        """Modelo CLIP es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "clip"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+
+    def test_whisper_model_rejected(self, temp_dir):
+        """Modelo Whisper (audio) es rechazado."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "whisper"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is False
+
+    def test_qwen_model_convertible(self, temp_dir):
+        """Modelo Qwen es convertible."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "qwen2"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is True
+
+    def test_mistral_model_convertible(self, temp_dir):
+        """Modelo Mistral es convertible."""
+        from hfl.converter.gguf_converter import check_model_convertibility
+
+        config = {"model_type": "mistral"}
+        (temp_dir / "config.json").write_text(json.dumps(config))
+
+        is_convertible, reason = check_model_convertibility(temp_dir)
+
+        assert is_convertible is True
+
+
+class TestUnsupportedModelError:
+    """Tests para UnsupportedModelError."""
+
+    def test_exception_inheritance(self):
+        """UnsupportedModelError hereda de Exception."""
+        from hfl.converter.gguf_converter import UnsupportedModelError
+
+        assert issubclass(UnsupportedModelError, Exception)
+
+    def test_exception_message(self):
+        """UnsupportedModelError puede tener mensaje."""
+        from hfl.converter.gguf_converter import UnsupportedModelError
+
+        err = UnsupportedModelError("LoRA models are not supported")
+        assert str(err) == "LoRA models are not supported"
