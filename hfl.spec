@@ -16,15 +16,15 @@ block_cipher = None
 rich_imports = collect_submodules('rich')
 rich_data = collect_data_files('rich')
 
-# Detectar plataforma
+# Detect platform
 is_windows = sys.platform == 'win32'
 is_macos = sys.platform == 'darwin'
 is_linux = sys.platform.startswith('linux')
 
-# Nombre del ejecutable
+# Executable name
 exe_name = 'hfl.exe' if is_windows else 'hfl'
 
-# Hidden imports que PyInstaller no detecta automáticamente
+# Hidden imports that PyInstaller doesn't detect automatically
 hidden_imports = [
     # Core
     'hfl',
@@ -79,10 +79,10 @@ hidden_imports = [
     'encodings.latin_1',
 ]
 
-# Datos adicionales a incluir
+# Additional data to include
 datas = rich_data
 
-# Excluir módulos pesados opcionales que no son necesarios para la CLI básica
+# Exclude heavy optional modules not needed for basic CLI
 excludes = [
     'torch',
     'transformers',
@@ -134,7 +134,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,  # Comprimir con UPX si está disponible
+    upx=True,  # Compress with UPX if available
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,  # CLI application
@@ -143,5 +143,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Añadir icono si se desea: icon='assets/hfl.ico'
+    icon=None,  # Add icon if desired: icon='assets/hfl.ico'
 )

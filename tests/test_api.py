@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo API (server, routes_openai, routes_native)."""
+"""Tests for the API module (server, routes_openai, routes_native)."""
 
 import pytest
 import json
@@ -10,22 +10,22 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(temp_config):
-    """Cliente de test para la API."""
+    """Test client for the API."""
     from hfl.api.server import app
     return TestClient(app)
 
 
 @pytest.fixture
 def client_with_model(temp_config, sample_manifest):
-    """Cliente con modelo pre-cargado."""
+    """Client with pre-loaded model."""
     from hfl.api.server import app, state
     from hfl.models.registry import ModelRegistry
 
-    # Registrar modelo
+    # Register model
     registry = ModelRegistry()
     registry.add(sample_manifest)
 
-    # Mock del engine
+    # Mock the engine
     mock_engine = MagicMock()
     mock_engine.is_loaded = True
     mock_engine.chat.return_value = MagicMock(
@@ -54,17 +54,17 @@ def client_with_model(temp_config, sample_manifest):
 
 
 class TestRootEndpoints:
-    """Tests para endpoints raíz."""
+    """Tests for root endpoints."""
 
     def test_root(self, client):
-        """Verifica endpoint raíz."""
+        """Verifies root endpoint."""
         response = client.get("/")
 
         assert response.status_code == 200
         assert response.json()["status"] == "hfl is running"
 
     def test_health_no_model(self, client):
-        """Verifica health sin modelo cargado."""
+        """Verifies health without loaded model."""
         response = client.get("/health")
 
         assert response.status_code == 200
@@ -74,7 +74,7 @@ class TestRootEndpoints:
         assert data["current_model"] is None
 
     def test_health_with_model(self, client_with_model):
-        """Verifica health con modelo cargado."""
+        """Verifies health with loaded model."""
         response = client_with_model.get("/health")
 
         assert response.status_code == 200
@@ -84,10 +84,10 @@ class TestRootEndpoints:
 
 
 class TestOpenAIEndpoints:
-    """Tests para endpoints compatibles con OpenAI."""
+    """Tests for OpenAI-compatible endpoints."""
 
     def test_list_models_empty(self, client):
-        """Lista modelos vacía."""
+        """Empty model list."""
         response = client.get("/v1/models")
 
         assert response.status_code == 200
@@ -96,7 +96,7 @@ class TestOpenAIEndpoints:
         assert isinstance(data["data"], list)
 
     def test_list_models_with_data(self, client, temp_config, sample_manifest):
-        """Lista modelos con datos."""
+        """Model list with data."""
         from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
@@ -111,7 +111,7 @@ class TestOpenAIEndpoints:
         assert data["data"][0]["object"] == "model"
 
     def test_chat_completions_no_model(self, client):
-        """Chat completions sin modelo."""
+        """Chat completions without model."""
         response = client.post("/v1/chat/completions", json={
             "model": "nonexistent",
             "messages": [{"role": "user", "content": "hi"}],
@@ -120,7 +120,7 @@ class TestOpenAIEndpoints:
         assert response.status_code == 404
 
     def test_chat_completions_success(self, client_with_model):
-        """Chat completions exitoso."""
+        """Successful chat completions."""
         response = client_with_model.post("/v1/chat/completions", json={
             "model": "test-model-q4_k_m",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -136,7 +136,7 @@ class TestOpenAIEndpoints:
         assert "usage" in data
 
     def test_chat_completions_with_system(self, client_with_model):
-        """Chat completions con mensaje de sistema."""
+        """Chat completions with system message."""
         response = client_with_model.post("/v1/chat/completions", json={
             "model": "test-model-q4_k_m",
             "messages": [
@@ -148,7 +148,7 @@ class TestOpenAIEndpoints:
         assert response.status_code == 200
 
     def test_chat_completions_stream(self, client_with_model):
-        """Chat completions con streaming."""
+        """Chat completions with streaming."""
         response = client_with_model.post("/v1/chat/completions", json={
             "model": "test-model-q4_k_m",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -158,13 +158,13 @@ class TestOpenAIEndpoints:
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
 
-        # Verificar formato SSE
+        # Verify SSE format
         content = response.text
         assert "data:" in content
         assert "[DONE]" in content
 
     def test_completions_no_model(self, client):
-        """Completions sin modelo."""
+        """Completions without model."""
         response = client.post("/v1/completions", json={
             "model": "nonexistent",
             "prompt": "Hello",
@@ -173,7 +173,7 @@ class TestOpenAIEndpoints:
         assert response.status_code == 404
 
     def test_completions_success(self, client_with_model):
-        """Completions exitoso."""
+        """Successful completions."""
         response = client_with_model.post("/v1/completions", json={
             "model": "test-model-q4_k_m",
             "prompt": "Once upon a time",
@@ -188,7 +188,7 @@ class TestOpenAIEndpoints:
         assert data["choices"][0]["text"] == "Generated"
 
     def test_completions_with_list_prompt(self, client_with_model):
-        """Completions con prompt como lista."""
+        """Completions with prompt as list."""
         response = client_with_model.post("/v1/completions", json={
             "model": "test-model-q4_k_m",
             "prompt": ["First prompt", "Second prompt"],
@@ -198,7 +198,7 @@ class TestOpenAIEndpoints:
         assert response.status_code == 200
 
     def test_completions_stream(self, client_with_model):
-        """Completions con streaming."""
+        """Completions with streaming."""
         response = client_with_model.post("/v1/completions", json={
             "model": "test-model-q4_k_m",
             "prompt": "Hello",
@@ -209,7 +209,7 @@ class TestOpenAIEndpoints:
         assert "text/event-stream" in response.headers["content-type"]
 
     def test_chat_completions_params(self, client_with_model):
-        """Verifica que se pasan los parámetros correctamente."""
+        """Verifies that parameters are passed correctly."""
         response = client_with_model.post("/v1/chat/completions", json={
             "model": "test-model-q4_k_m",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -224,10 +224,10 @@ class TestOpenAIEndpoints:
 
 
 class TestNativeEndpoints:
-    """Tests para endpoints nativos (Ollama-compatible)."""
+    """Tests for native endpoints (Ollama-compatible)."""
 
     def test_api_tags_empty(self, client):
-        """Lista tags vacía."""
+        """Empty tags list."""
         response = client.get("/api/tags")
 
         assert response.status_code == 200
@@ -236,7 +236,7 @@ class TestNativeEndpoints:
         assert isinstance(data["models"], list)
 
     def test_api_tags_with_models(self, client, temp_config, sample_manifest):
-        """Lista tags con modelos."""
+        """Tags list with models."""
         from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
@@ -253,20 +253,20 @@ class TestNativeEndpoints:
         assert model["details"]["format"] == "gguf"
 
     def test_api_version(self, client):
-        """Verifica endpoint de versión."""
+        """Verifies version endpoint."""
         response = client.get("/api/version")
 
         assert response.status_code == 200
         assert "version" in response.json()
 
     def test_head_root(self, client):
-        """Verifica HEAD request."""
+        """Verifies HEAD request."""
         response = client.head("/")
 
         assert response.status_code == 200
 
     def test_api_generate_no_model(self, client):
-        """Generate sin modelo."""
+        """Generate without model."""
         response = client.post("/api/generate", json={
             "model": "nonexistent",
             "prompt": "Hello",
@@ -275,7 +275,7 @@ class TestNativeEndpoints:
         assert response.status_code == 404
 
     def test_api_generate_success(self, client_with_model):
-        """Generate exitoso."""
+        """Successful generate."""
         response = client_with_model.post("/api/generate", json={
             "model": "test-model-q4_k_m",
             "prompt": "Hello",
@@ -289,7 +289,7 @@ class TestNativeEndpoints:
         assert "response" in data
 
     def test_api_generate_stream(self, client_with_model):
-        """Generate con streaming."""
+        """Generate with streaming."""
         response = client_with_model.post("/api/generate", json={
             "model": "test-model-q4_k_m",
             "prompt": "Hello",
@@ -299,7 +299,7 @@ class TestNativeEndpoints:
         assert response.status_code == 200
         assert "application/x-ndjson" in response.headers["content-type"]
 
-        # Verificar formato NDJSON
+        # Verify NDJSON format
         lines = [l for l in response.text.strip().split("\n") if l]
         for line in lines:
             data = json.loads(line)
@@ -307,7 +307,7 @@ class TestNativeEndpoints:
             assert "done" in data
 
     def test_api_chat_no_model(self, client):
-        """Chat sin modelo."""
+        """Chat without model."""
         response = client.post("/api/chat", json={
             "model": "nonexistent",
             "messages": [{"role": "user", "content": "hi"}],
@@ -316,7 +316,7 @@ class TestNativeEndpoints:
         assert response.status_code == 404
 
     def test_api_chat_success(self, client_with_model):
-        """Chat exitoso."""
+        """Successful chat."""
         response = client_with_model.post("/api/chat", json={
             "model": "test-model-q4_k_m",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -331,7 +331,7 @@ class TestNativeEndpoints:
         assert data["message"]["role"] == "assistant"
 
     def test_api_chat_stream(self, client_with_model):
-        """Chat con streaming."""
+        """Chat with streaming."""
         response = client_with_model.post("/api/chat", json={
             "model": "test-model-q4_k_m",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -342,7 +342,7 @@ class TestNativeEndpoints:
         assert "application/x-ndjson" in response.headers["content-type"]
 
     def test_api_generate_with_options(self, client_with_model):
-        """Generate con opciones."""
+        """Generate with options."""
         response = client_with_model.post("/api/generate", json={
             "model": "test-model-q4_k_m",
             "prompt": "Hello",
@@ -361,33 +361,33 @@ class TestNativeEndpoints:
 
 
 class TestMiddleware:
-    """Tests para middleware."""
+    """Tests for middleware."""
 
     def test_cors_headers(self, client):
-        """Verifica headers CORS."""
+        """Verifies CORS headers."""
         response = client.options("/", headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
         })
 
-        # CORS middleware debería responder
+        # CORS middleware should respond
         assert response.status_code in [200, 400]
 
     def test_error_handling(self, client):
-        """Verifica manejo de errores."""
+        """Verifies error handling."""
         response = client.post("/v1/chat/completions", json={
             "model": "invalid",
-            "messages": "invalid",  # Debería ser lista
+            "messages": "invalid",  # Should be a list
         })
 
-        assert response.status_code in [404, 422]  # Not found o validation error
+        assert response.status_code in [404, 422]  # Not found or validation error
 
 
 class TestServerState:
-    """Tests para el estado del servidor."""
+    """Tests for server state."""
 
     def test_initial_state(self):
-        """Verifica estado inicial."""
+        """Verifies initial state."""
         from hfl.api.server import ServerState
 
         state = ServerState()
@@ -396,7 +396,7 @@ class TestServerState:
         assert state.current_model is None
 
     def test_start_server_function_exists(self):
-        """Verifica que start_server existe."""
+        """Verifies that start_server exists."""
         from hfl.api.server import start_server
 
         assert callable(start_server)

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Endpoints compatibles con la API de OpenAI.
-Drop-in replacement para aplicaciones que usan OpenAI SDK.
+Endpoints compatible with the OpenAI API.
+Drop-in replacement for applications using the OpenAI SDK.
 """
 
 import json
@@ -63,19 +63,19 @@ def _get_state():
 
 
 def _ensure_model_loaded(model_name: str):
-    """Carga el modelo si no está ya en memoria."""
+    """Load the model if it is not already in memory."""
     state = _get_state()
 
     if state.engine and state.engine.is_loaded:
         if state.current_model and state.current_model.name == model_name:
             return
-        # Modelo diferente, descargar el actual
+        # Different model, unload the current one
         state.engine.unload()
 
     registry = ModelRegistry()
     manifest = registry.get(model_name)
     if not manifest:
-        raise HTTPException(404, f"Modelo no encontrado: {model_name}")
+        raise HTTPException(404, f"Model not found: {model_name}")
 
     from pathlib import Path
 
@@ -141,7 +141,7 @@ async def _stream_chat(
     messages: list[ChatMessage],
     config: GenerationConfig,
 ) -> AsyncIterator[str]:
-    """Genera respuestas SSE compatibles con OpenAI."""
+    """Generate OpenAI-compatible SSE responses."""
     state = _get_state()
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
@@ -161,7 +161,7 @@ async def _stream_chat(
         }
         yield f"data: {json.dumps(chunk)}\n\n"
 
-    # Chunk final
+    # Final chunk
     final = {
         "id": chat_id,
         "object": "chat.completion.chunk",

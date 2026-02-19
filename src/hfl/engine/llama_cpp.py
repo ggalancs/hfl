@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Backend de inferencia basado en llama-cpp-python.
+Inference backend based on llama-cpp-python.
 
-Este es el backend principal para modelos GGUF.
-Soporta CPU, CUDA, Metal y Vulkan.
+This is the main backend for GGUF models.
+Supports CPU, CUDA, Metal, and Vulkan.
 """
 
 import os
@@ -18,25 +18,25 @@ from llama_cpp import Llama
 
 @contextmanager
 def _suppress_stderr():
-    """Suprime stderr temporalmente (para silenciar logs de Metal/CUDA)."""
-    # Guardar el descriptor original
+    """Temporarily suppresses stderr (to silence Metal/CUDA logs)."""
+    # Save the original descriptor
     stderr_fd = sys.stderr.fileno()
     saved_fd = os.dup(stderr_fd)
     try:
-        # Redirigir stderr a /dev/null
+        # Redirect stderr to /dev/null
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, stderr_fd)
         os.close(devnull)
         yield
     finally:
-        # Restaurar stderr
+        # Restore stderr
         os.dup2(saved_fd, stderr_fd)
         os.close(saved_fd)
 
 
 @contextmanager
 def _nullcontext():
-    """Context manager que no hace nada (para cuando verbose=True)."""
+    """Context manager that does nothing (for when verbose=True)."""
     yield
 
 
@@ -49,7 +49,7 @@ from hfl.engine.base import (
 
 
 class LlamaCppEngine(InferenceEngine):
-    """Motor de inferencia llama.cpp."""
+    """llama.cpp inference engine."""
 
     def __init__(self):
         self._model: Llama | None = None
@@ -57,21 +57,21 @@ class LlamaCppEngine(InferenceEngine):
 
     def load(self, model_path: str, **kwargs) -> None:
         """
-        Carga un modelo GGUF.
+        Loads a GGUF model.
 
         Args:
-            model_path: Ruta al archivo .gguf
-            **kwargs: Parámetros adicionales:
-                n_ctx: Tamaño de contexto (default 4096)
-                n_gpu_layers: Capas en GPU (-1 = todas)
-                n_threads: Threads CPU (0 = auto)
-                verbose: Mostrar logs de llama.cpp
-                flash_attn: Usar Flash Attention (default True)
-                chat_format: Formato de chat (auto-detectado)
+            model_path: Path to the .gguf file
+            **kwargs: Additional parameters:
+                n_ctx: Context size (default 4096)
+                n_gpu_layers: GPU layers (-1 = all)
+                n_threads: CPU threads (0 = auto)
+                verbose: Show llama.cpp logs
+                flash_attn: Use Flash Attention (default True)
+                chat_format: Chat format (auto-detected)
         """
         verbose = kwargs.get("verbose", False)
 
-        # Suprimir mensajes de inicialización de Metal/CUDA si verbose=False
+        # Suppress Metal/CUDA initialization messages if verbose=False
         context = _suppress_stderr if not verbose else _nullcontext
         with context():
             self._model = Llama(

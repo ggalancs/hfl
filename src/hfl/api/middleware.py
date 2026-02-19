@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Middleware para logging, CORS y manejo de errores.
+Middleware for logging, CORS and error handling.
 
-PRIVACIDAD (R6 - Auditoría Legal):
-Este middleware implementa logging "privacy-safe" que:
-- NUNCA registra el contenido de los requests (prompts)
-- NUNCA registra el contenido de las respuestas (outputs AI)
-- NUNCA registra headers de autenticación
-- Solo registra metadata: método, path, status, duración
+PRIVACY (R6 - Legal Audit):
+This middleware implements privacy-safe logging that:
+- NEVER logs request content (prompts)
+- NEVER logs response content (AI outputs)
+- NEVER logs authentication headers
+- Only logs metadata: method, path, status, duration
 """
 
 import logging
@@ -22,15 +22,15 @@ logger = logging.getLogger("hfl")
 
 class RequestLogger(BaseHTTPMiddleware):
     """
-    Middleware de logging privacy-safe.
+    Privacy-safe logging middleware.
 
-    IMPORTANTE: Este logger está diseñado para NUNCA registrar:
-    - Request bodies (contienen prompts del usuario)
-    - Response bodies (contienen outputs del modelo)
-    - Authorization headers (contienen tokens)
-    - User-Agent u otros headers identificadores
+    IMPORTANT: This logger is designed to NEVER log:
+    - Request bodies (contain user prompts)
+    - Response bodies (contain model outputs)
+    - Authorization headers (contain tokens)
+    - User-Agent or other identifying headers
 
-    Solo se registra metadata básica para debugging y métricas.
+    Only basic metadata is logged for debugging and metrics.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -38,7 +38,7 @@ class RequestLogger(BaseHTTPMiddleware):
         response = await call_next(request)
         elapsed = time.perf_counter() - start
 
-        # Solo loguear metadata, NUNCA el body ni headers sensibles
+        # Only log metadata, NEVER the body or sensitive headers
         # R6 - Privacy compliance: no personal data in logs
         logger.info(
             "method=%s path=%s status=%d duration=%.3fs",
@@ -46,6 +46,6 @@ class RequestLogger(BaseHTTPMiddleware):
             request.url.path,
             response.status_code,
             elapsed,
-            # NO incluir: request body, headers auth, user-agent, IP real
+            # DO NOT include: request body, auth headers, user-agent, real IP
         )
         return response

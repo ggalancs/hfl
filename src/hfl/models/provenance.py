@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Registro de procedencia para modelos convertidos.
+Provenance registry for converted models.
 
-Documenta la cadena completa: origen -> conversión -> resultado.
-Esto es importante para cumplimiento legal (R3 - Auditoría Legal)
-y para preservar atribución en obras derivadas.
+Documents the complete chain: origin -> conversion -> result.
+This is important for legal compliance (R3 - Legal Audit)
+and for preserving attribution in derivative works.
 """
 
 import json
@@ -18,62 +18,62 @@ from hfl.config import config
 
 @dataclass
 class ConversionRecord:
-    """Registro inmutable de una operación de conversión."""
+    """Immutable record of a conversion operation."""
 
-    # Timestamp de la operación
+    # Operation timestamp
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    # Origen
-    source_repo: str = ""  # Repositorio HuggingFace original
+    # Source
+    source_repo: str = ""  # Original HuggingFace repository
     source_format: str = ""  # "safetensors", "pytorch", "gguf"
-    source_revision: str = ""  # Commit hash del repo
+    source_revision: str = ""  # Repo commit hash
 
-    # Destino
+    # Destination
     target_format: str = "gguf"
-    target_path: str = ""  # Ruta del archivo resultante
+    target_path: str = ""  # Path of the resulting file
     quantization: str = ""  # Q4_K_M, Q5_K_M, etc.
 
-    # Herramienta usada
+    # Tool used
     tool_used: str = "llama.cpp/convert_hf_to_gguf.py"
     tool_version: str = ""
     hfl_version: str = "0.1.0"
 
-    # Licencia
+    # License
     original_license: str = ""
     license_accepted: bool = False
     license_accepted_at: str = ""
 
-    # Tipo de conversión
+    # Conversion type
     conversion_type: str = "format"  # "format", "quantize", "both"
 
-    # Notas adicionales
+    # Additional notes
     notes: str = ""
 
 
 class ProvenanceLog:
     """
-    Log persistente de todas las conversiones realizadas.
+    Persistent log of all conversions performed.
 
-    Almacena un registro de cada operación de conversión para:
-    1. Trazabilidad legal (demostrar procedencia)
-    2. Atribución correcta a autores originales
-    3. Auditoría de cumplimiento de licencias
+    Stores a record of each conversion operation for:
+    1. Legal traceability (prove provenance)
+    2. Correct attribution to original authors
+    3. License compliance audit
     """
 
     def __init__(self, log_path: Path | None = None):
         """
-        Inicializa el log de procedencia.
+        Initializes the provenance log.
 
         Args:
-            log_path: Ruta al archivo de log. Si no se especifica,
-                      usa ~/.hfl/provenance.json
+            log_path: Path to the log file. If not specified,
+                      uses ~/.hfl/provenance.json
         """
         self.path = log_path or (config.home_dir / "provenance.json")
         self._records: list[dict] = []
         self._load()
 
     def _load(self) -> None:
-        """Carga registros existentes del archivo."""
+        """Loads existing records from the file."""
         if self.path.exists():
             try:
                 self._records = json.loads(self.path.read_text())
@@ -81,29 +81,29 @@ class ProvenanceLog:
                 self._records = []
 
     def _save(self) -> None:
-        """Guarda registros al archivo."""
+        """Saves records to the file."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._records, indent=2))
 
     def record(self, conversion: ConversionRecord) -> None:
         """
-        Registra una nueva conversión.
+        Records a new conversion.
 
         Args:
-            conversion: Registro de la conversión realizada.
+            conversion: Record of the performed conversion.
         """
         self._records.append(asdict(conversion))
         self._save()
 
     def get_history(self, repo_id: str) -> list[dict]:
         """
-        Obtiene el historial de conversiones para un repositorio.
+        Gets the conversion history for a repository.
 
         Args:
-            repo_id: ID del repositorio (ej: "meta-llama/Llama-3.1-8B")
+            repo_id: Repository ID (e.g., "meta-llama/Llama-3.1-8B")
 
         Returns:
-            Lista de registros de conversión ordenados por fecha.
+            List of conversion records sorted by date.
         """
         return sorted(
             [r for r in self._records if r.get("source_repo") == repo_id],
@@ -112,22 +112,22 @@ class ProvenanceLog:
 
     def get_all(self) -> list[dict]:
         """
-        Obtiene todos los registros de conversión.
+        Gets all conversion records.
 
         Returns:
-            Lista completa de registros ordenados por fecha.
+            Complete list of records sorted by date.
         """
         return sorted(self._records, key=lambda r: r.get("timestamp", ""))
 
     def find_by_target(self, target_path: str) -> dict | None:
         """
-        Busca el registro de conversión para un archivo destino.
+        Finds the conversion record for a target file.
 
         Args:
-            target_path: Ruta del archivo convertido.
+            target_path: Path of the converted file.
 
         Returns:
-            Registro de conversión o None si no existe.
+            Conversion record or None if it doesn't exist.
         """
         for record in self._records:
             if record.get("target_path") == target_path:
@@ -135,12 +135,12 @@ class ProvenanceLog:
         return None
 
 
-# Instancia global del log
+# Global log instance
 _provenance_log: ProvenanceLog | None = None
 
 
 def get_provenance_log() -> ProvenanceLog:
-    """Obtiene la instancia global del log de procedencia."""
+    """Gets the global provenance log instance."""
     global _provenance_log
     if _provenance_log is None:
         _provenance_log = ProvenanceLog()
@@ -158,20 +158,20 @@ def log_conversion(
     notes: str = "",
 ) -> ConversionRecord:
     """
-    Función de conveniencia para registrar una conversión.
+    Convenience function to record a conversion.
 
     Args:
-        source_repo: Repositorio HuggingFace original
-        source_format: Formato original (safetensors, pytorch)
-        target_path: Ruta del archivo GGUF resultante
-        quantization: Nivel de cuantización aplicado
-        original_license: Licencia del modelo original
-        license_accepted: Si el usuario aceptó la licencia
-        tool_version: Versión de la herramienta de conversión
-        notes: Notas adicionales
+        source_repo: Original HuggingFace repository
+        source_format: Original format (safetensors, pytorch)
+        target_path: Path of the resulting GGUF file
+        quantization: Applied quantization level
+        original_license: Original model license
+        license_accepted: Whether the user accepted the license
+        tool_version: Conversion tool version
+        notes: Additional notes
 
     Returns:
-        El registro de conversión creado.
+        The created conversion record.
     """
     record = ConversionRecord(
         source_repo=source_repo,

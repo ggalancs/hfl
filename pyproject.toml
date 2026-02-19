@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# llama-cpp-python requiere compilación - instalar por separado si se necesita
+# llama-cpp-python requires compilation - install separately if needed
 llama = ["llama-cpp-python>=0.3.0"]
 transformers = [
     "transformers>=4.47.0",

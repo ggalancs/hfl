@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo engine/vllm_engine."""
+"""Tests for the engine/vllm_engine module."""
 
 import pytest
 import sys
 from unittest.mock import MagicMock, patch
 
 
-# Mock vLLM antes de importar el módulo
+# Mock vLLM before importing the module
 @pytest.fixture(autouse=True)
 def mock_vllm():
-    """Mock del módulo vLLM para tests sin GPU."""
+    """Mock of the vLLM module for tests without GPU."""
     mock_llm = MagicMock()
     mock_sampling = MagicMock()
 
@@ -19,10 +19,10 @@ def mock_vllm():
 
 
 class TestVLLMEngine:
-    """Tests para VLLMEngine."""
+    """Tests for VLLMEngine."""
 
     def test_initialization(self, mock_vllm):
-        """Verifica inicialización correcta."""
+        """Verifies correct initialization."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -31,7 +31,7 @@ class TestVLLMEngine:
         assert engine._model_path == ""
 
     def test_is_loaded_false_initially(self, mock_vllm):
-        """No cargado inicialmente."""
+        """Not loaded initially."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -39,7 +39,7 @@ class TestVLLMEngine:
         assert engine.is_loaded is False
 
     def test_is_loaded_true_after_load(self, mock_vllm):
-        """Cargado después de load()."""
+        """Loaded after load()."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -48,7 +48,7 @@ class TestVLLMEngine:
         assert engine.is_loaded is True
 
     def test_model_name(self, mock_vllm):
-        """Devuelve el nombre del modelo."""
+        """Returns the model name."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -57,7 +57,7 @@ class TestVLLMEngine:
         assert engine.model_name == "test-model-path"
 
     def test_load_model(self, mock_vllm):
-        """Carga un modelo."""
+        """Loads a model."""
         mock_llm_class, _ = mock_vllm
 
         from hfl.engine.vllm_engine import VLLMEngine
@@ -69,7 +69,7 @@ class TestVLLMEngine:
         mock_llm_class.assert_called_once_with(model="/path/to/model", tensor_parallel_size=2)
 
     def test_unload_model(self, mock_vllm):
-        """Descarga el modelo."""
+        """Unloads the model."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -80,22 +80,22 @@ class TestVLLMEngine:
         assert engine._model is None
 
     def test_generate_without_model_raises(self, mock_vllm):
-        """Generate sin modelo lanza error."""
+        """Generate without model raises error."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 
-        with pytest.raises(RuntimeError, match="Modelo no cargado"):
+        with pytest.raises(RuntimeError, match="Model not loaded"):
             engine.generate("test prompt")
 
     def test_generate_with_model(self, mock_vllm):
-        """Generate con modelo cargado."""
+        """Generate with loaded model."""
         from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import GenerationConfig
 
         engine = VLLMEngine()
 
-        # Configurar mock del modelo
+        # Configure model mock
         mock_output = MagicMock()
         mock_output.outputs = [MagicMock(text="Generated text", token_ids=[1, 2, 3])]
         engine._model = MagicMock()
@@ -107,7 +107,7 @@ class TestVLLMEngine:
         assert result.tokens_generated == 3
 
     def test_generate_stream(self, mock_vllm):
-        """Generate stream devuelve texto en un chunk."""
+        """Generate stream returns text in one chunk."""
         from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
@@ -161,7 +161,7 @@ class TestVLLMEngine:
         assert chunks[0] == "Stream chat"
 
     def test_build_prompt_system(self, mock_vllm):
-        """Construye prompt con mensaje system."""
+        """Builds prompt with system message."""
         from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
 
@@ -178,7 +178,7 @@ class TestVLLMEngine:
         assert prompt.endswith("Assistant:")
 
     def test_build_prompt_with_assistant(self, mock_vllm):
-        """Construye prompt con historial de assistant."""
+        """Builds prompt with assistant history."""
         from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
 

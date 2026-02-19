@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo converter (formats, gguf_converter)."""
+"""Tests for the converter module (formats, gguf_converter)."""
 
 import json
 import pytest
@@ -11,10 +11,10 @@ from unittest.mock import MagicMock, call, patch
 
 
 class TestModelFormat:
-    """Tests para ModelFormat enum."""
+    """Tests for ModelFormat enum."""
 
     def test_enum_values(self):
-        """Verifica valores del enum."""
+        """Verifies enum values."""
         from hfl.converter.formats import ModelFormat
 
         assert ModelFormat.GGUF.value == "gguf"
@@ -23,7 +23,7 @@ class TestModelFormat:
         assert ModelFormat.UNKNOWN.value == "unknown"
 
     def test_enum_members(self):
-        """Verifica miembros del enum."""
+        """Verifies enum members."""
         from hfl.converter.formats import ModelFormat
 
         assert hasattr(ModelFormat, "GGUF")
@@ -33,10 +33,10 @@ class TestModelFormat:
 
 
 class TestDetectFormat:
-    """Tests para detect_format."""
+    """Tests for detect_format."""
 
     def test_detect_gguf_file(self, temp_dir):
-        """Detecta archivo GGUF."""
+        """Detects GGUF file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         gguf_file = temp_dir / "model.gguf"
@@ -46,7 +46,7 @@ class TestDetectFormat:
         assert result == ModelFormat.GGUF
 
     def test_detect_safetensors_file(self, temp_dir):
-        """Detecta archivo safetensors."""
+        """Detects safetensors file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         st_file = temp_dir / "model.safetensors"
@@ -56,7 +56,7 @@ class TestDetectFormat:
         assert result == ModelFormat.SAFETENSORS
 
     def test_detect_pytorch_bin_file(self, temp_dir):
-        """Detecta archivo pytorch .bin."""
+        """Detects pytorch .bin file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         pt_file = temp_dir / "model.bin"
@@ -66,7 +66,7 @@ class TestDetectFormat:
         assert result == ModelFormat.PYTORCH
 
     def test_detect_pytorch_pt_file(self, temp_dir):
-        """Detecta archivo pytorch .pt."""
+        """Detects pytorch .pt file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         pt_file = temp_dir / "model.pt"
@@ -76,7 +76,7 @@ class TestDetectFormat:
         assert result == ModelFormat.PYTORCH
 
     def test_detect_pytorch_pth_file(self, temp_dir):
-        """Detecta archivo pytorch .pth."""
+        """Detects pytorch .pth file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         pt_file = temp_dir / "model.pth"
@@ -86,7 +86,7 @@ class TestDetectFormat:
         assert result == ModelFormat.PYTORCH
 
     def test_detect_gguf_in_directory(self, temp_dir):
-        """Detecta GGUF en directorio."""
+        """Detects GGUF in directory."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         (temp_dir / "model.gguf").write_bytes(b"GGUF")
@@ -96,7 +96,7 @@ class TestDetectFormat:
         assert result == ModelFormat.GGUF
 
     def test_detect_safetensors_in_directory(self, temp_dir):
-        """Detecta safetensors en directorio."""
+        """Detects safetensors in directory."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
@@ -106,7 +106,7 @@ class TestDetectFormat:
         assert result == ModelFormat.SAFETENSORS
 
     def test_detect_pytorch_in_directory(self, temp_dir):
-        """Detecta pytorch en directorio."""
+        """Detects pytorch in directory."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         (temp_dir / "pytorch_model.bin").write_bytes(b"PT")
@@ -116,7 +116,7 @@ class TestDetectFormat:
         assert result == ModelFormat.PYTORCH
 
     def test_detect_unknown_file(self, temp_dir):
-        """Devuelve UNKNOWN para archivo desconocido."""
+        """Returns UNKNOWN for unknown file."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         txt_file = temp_dir / "readme.txt"
@@ -126,7 +126,7 @@ class TestDetectFormat:
         assert result == ModelFormat.UNKNOWN
 
     def test_detect_unknown_directory(self, temp_dir):
-        """Devuelve UNKNOWN para directorio sin modelos."""
+        """Returns UNKNOWN for directory without models."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         (temp_dir / "readme.txt").write_text("readme")
@@ -136,14 +136,14 @@ class TestDetectFormat:
         assert result == ModelFormat.UNKNOWN
 
     def test_detect_nonexistent_path(self):
-        """Devuelve UNKNOWN para path inexistente."""
+        """Returns UNKNOWN for non-existent path."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         result = detect_format(Path("/nonexistent/path"))
         assert result == ModelFormat.UNKNOWN
 
     def test_detect_gguf_priority_over_safetensors(self, temp_dir):
-        """GGUF tiene prioridad sobre safetensors."""
+        """GGUF has priority over safetensors."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         (temp_dir / "model.gguf").write_bytes(b"GGUF")
@@ -153,7 +153,7 @@ class TestDetectFormat:
         assert result == ModelFormat.GGUF
 
     def test_detect_nested_files(self, temp_dir):
-        """Detecta archivos en subdirectorios."""
+        """Detects files in subdirectories."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         subdir = temp_dir / "subdir"
@@ -165,10 +165,10 @@ class TestDetectFormat:
 
 
 class TestFindModelFile:
-    """Tests para find_model_file."""
+    """Tests for find_model_file."""
 
     def test_find_gguf_file_direct(self, temp_dir):
-        """Encuentra archivo GGUF directo."""
+        """Finds direct GGUF file."""
         from hfl.converter.formats import find_model_file, ModelFormat
 
         gguf_file = temp_dir / "model.gguf"
@@ -178,7 +178,7 @@ class TestFindModelFile:
         assert result == gguf_file
 
     def test_find_gguf_in_directory(self, temp_dir):
-        """Encuentra GGUF en directorio."""
+        """Finds GGUF in directory."""
         from hfl.converter.formats import find_model_file, ModelFormat
 
         gguf_file = temp_dir / "model.gguf"
@@ -188,7 +188,7 @@ class TestFindModelFile:
         assert result == gguf_file
 
     def test_find_safetensors_returns_directory(self, temp_dir):
-        """Para safetensors devuelve el directorio."""
+        """For safetensors returns the directory."""
         from hfl.converter.formats import find_model_file, ModelFormat
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
@@ -197,7 +197,7 @@ class TestFindModelFile:
         assert result == temp_dir
 
     def test_find_no_gguf_returns_none(self, temp_dir):
-        """Devuelve None si no hay GGUF."""
+        """Returns None if no GGUF found."""
         from hfl.converter.formats import find_model_file, ModelFormat
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
@@ -207,10 +207,10 @@ class TestFindModelFile:
 
 
 class TestGGUFConverter:
-    """Tests para GGUFConverter."""
+    """Tests for GGUFConverter."""
 
     def test_converter_initialization(self, temp_config):
-        """Verifica inicialización del converter."""
+        """Verifies converter initialization."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
@@ -220,22 +220,22 @@ class TestGGUFConverter:
         assert "llama-quantize" in str(converter.quantize_bin)
 
     def test_ensure_tools_when_available(self, temp_config):
-        """Verifica que ensure_tools no hace nada si las herramientas existen."""
+        """Verifies that ensure_tools does nothing if tools exist."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
 
-        # Crear los archivos necesarios
+        # Create necessary files
         converter.convert_script.parent.mkdir(parents=True, exist_ok=True)
         converter.convert_script.write_text("# script")
         converter.quantize_bin.parent.mkdir(parents=True, exist_ok=True)
         converter.quantize_bin.write_text("# binary")
 
-        # No debería lanzar error
+        # Should not raise error
         converter.ensure_tools()
 
     def test_ensure_tools_clones_repo(self, temp_config):
-        """Verifica que ensure_tools clona llama.cpp si no existe."""
+        """Verifies that ensure_tools clones llama.cpp if it doesn't exist."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
@@ -244,15 +244,15 @@ class TestGGUFConverter:
             mock_run.return_value = MagicMock(returncode=0)
 
             with pytest.raises(Exception):
-                # Fallará porque el script no existirá después del mock
+                # Will fail because the script won't exist after the mock
                 converter.ensure_tools()
 
-            # Verificar que se intentó clonar
+            # Verify that clone was attempted
             calls = [str(c) for c in mock_run.call_args_list]
             assert any("git" in str(c) and "clone" in str(c) for c in calls)
 
     def test_convert_f16_skips_quantization(self, temp_config):
-        """Verifica que F16 salta la cuantización."""
+        """Verifies that F16 skips quantization."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
@@ -267,7 +267,7 @@ class TestGGUFConverter:
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0)
 
-                # Crear el archivo intermedio que sería generado
+                # Create the intermediate file that would be generated
                 fp16_path = output_path.with_suffix(".fp16.gguf")
                 fp16_path.parent.mkdir(parents=True, exist_ok=True)
                 fp16_path.write_bytes(b"GGUF")
@@ -276,18 +276,18 @@ class TestGGUFConverter:
                     try:
                         converter.convert(model_path, output_path, "F16")
                     except Exception:
-                        pass  # Puede fallar por el mock
+                        pass  # May fail due to mock
 
-                # Verificar que solo se llama una vez (conversión, no cuantización)
+                # Verify that it's called at least once (conversion, not quantization)
                 assert mock_run.call_count >= 1
 
     def test_convert_quantization_levels(self, temp_config):
-        """Verifica niveles de cuantización soportados."""
+        """Verifies supported quantization levels."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
 
-        # Lista de niveles de cuantización
+        # List of quantization levels
         quant_levels = [
             "Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L",
             "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M",
@@ -295,17 +295,17 @@ class TestGGUFConverter:
             "Q6_K", "Q8_0", "F16",
         ]
 
-        # Todos son strings válidos
+        # All are valid strings
         for level in quant_levels:
             assert isinstance(level, str)
             assert len(level) > 0
 
     def test_convert_uses_sys_executable_not_python(self, temp_config):
         """
-        CRÍTICO: Verifica que se usa sys.executable en lugar de 'python'.
+        CRITICAL: Verifies that sys.executable is used instead of 'python'.
 
-        En macOS, 'python' no existe (solo python3), lo que causa
-        FileNotFoundError. Este test previene regresiones de este bug.
+        On macOS, 'python' doesn't exist (only python3), which causes
+        FileNotFoundError. This test prevents regressions of this bug.
         """
         from hfl.converter.gguf_converter import GGUFConverter
 
@@ -322,7 +322,7 @@ class TestGGUFConverter:
 
         def capture_run(cmd, **kwargs):
             captured_commands.append(cmd)
-            # Simular creación del archivo FP16
+            # Simulate FP16 file creation
             fp16_path = output_path.with_suffix(".fp16.gguf")
             fp16_path.write_bytes(b"GGUF")
             return MagicMock(returncode=0)
@@ -336,26 +336,26 @@ class TestGGUFConverter:
                         except Exception:
                             pass
 
-        # Verificar que la primera llamada usa sys.executable, no "python"
+        # Verify that the first call uses sys.executable, not "python"
         assert len(captured_commands) >= 1
         first_cmd = captured_commands[0]
         assert first_cmd[0] == sys.executable, (
-            f"Debe usar sys.executable ({sys.executable}), no '{first_cmd[0]}'. "
-            "En macOS 'python' no existe, solo 'python3'."
+            f"Must use sys.executable ({sys.executable}), not '{first_cmd[0]}'. "
+            "On macOS 'python' doesn't exist, only 'python3'."
         )
         assert "convert_hf_to_gguf.py" in first_cmd[1]
 
     def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config):
         """
-        Verifica que pip se invoca con sys.executable -m pip.
+        Verifies that pip is invoked with sys.executable -m pip.
 
-        Esto garantiza que se usa el pip del entorno correcto.
+        This ensures that the pip from the correct environment is used.
         """
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
 
-        # Crear directorio y requirements.txt
+        # Create directory and requirements.txt
         converter.llama_cpp_dir.mkdir(parents=True, exist_ok=True)
         (converter.llama_cpp_dir / "requirements.txt").write_text("numpy\n")
 
@@ -366,26 +366,26 @@ class TestGGUFConverter:
             return MagicMock(returncode=0, stdout="abc123")
 
         with patch("subprocess.run", side_effect=capture_run):
-            with patch("shutil.which", return_value=None):  # Sin CUDA
+            with patch("shutil.which", return_value=None):  # No CUDA
                 try:
                     converter.ensure_tools()
                 except Exception:
-                    pass  # Puede fallar, solo nos interesa capturar los comandos
+                    pass  # May fail, we only care about capturing commands
 
-        # Buscar la llamada a pip
+        # Find the pip call
         pip_calls = [c for c in captured_commands if "-m" in c and "pip" in c]
-        assert len(pip_calls) >= 1, "No se encontró llamada a pip con -m"
+        assert len(pip_calls) >= 1, "No pip call with -m found"
 
         pip_cmd = pip_calls[0]
         assert pip_cmd[0] == sys.executable, (
-            f"pip debe invocarse con sys.executable ({sys.executable}), "
-            f"no con '{pip_cmd[0]}'"
+            f"pip must be invoked with sys.executable ({sys.executable}), "
+            f"not with '{pip_cmd[0]}'"
         )
         assert pip_cmd[1] == "-m"
         assert pip_cmd[2] == "pip"
 
     def test_convert_with_quantization(self, temp_config):
-        """Verifica conversión completa con cuantización."""
+        """Verifies complete conversion with quantization."""
         from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
@@ -401,11 +401,11 @@ class TestGGUFConverter:
 
         def mock_run(cmd, **kwargs):
             call_count[0] += 1
-            # Primera llamada: crear FP16
+            # First call: create FP16
             if call_count[0] == 1:
                 fp16_path = output_path.with_suffix(".fp16.gguf")
                 fp16_path.write_bytes(b"GGUF FP16")
-            # Segunda llamada: crear archivo cuantizado
+            # Second call: create quantized file
             elif call_count[0] == 2:
                 final_path = output_path.with_suffix(".Q4_K_M.gguf")
                 final_path.write_bytes(b"GGUF Q4_K_M")
@@ -420,16 +420,16 @@ class TestGGUFConverter:
                     license_accepted=True,
                 )
 
-        assert call_count[0] >= 2  # Conversión FP16 + cuantización (+ provenance)
+        assert call_count[0] >= 2  # FP16 conversion + quantization (+ provenance)
         assert result.suffix == ".gguf"
         assert "Q4_K_M" in result.name
 
 
 class TestGetLlamaCppVersion:
-    """Tests para _get_llama_cpp_version."""
+    """Tests for _get_llama_cpp_version."""
 
     def test_get_version_success(self, temp_config):
-        """Obtiene versión correctamente."""
+        """Gets version correctly."""
         from hfl.converter.gguf_converter import _get_llama_cpp_version
 
         with patch("subprocess.run") as mock_run:
@@ -444,7 +444,7 @@ class TestGetLlamaCppVersion:
             mock_run.assert_called_once()
 
     def test_get_version_failure(self, temp_config):
-        """Devuelve 'unknown' si falla."""
+        """Returns 'unknown' on failure."""
         from hfl.converter.gguf_converter import _get_llama_cpp_version
 
         with patch("subprocess.run") as mock_run:
@@ -455,7 +455,7 @@ class TestGetLlamaCppVersion:
             assert result == "unknown"
 
     def test_get_version_exception(self, temp_config):
-        """Devuelve 'unknown' si hay excepción."""
+        """Returns 'unknown' on exception."""
         from hfl.converter.gguf_converter import _get_llama_cpp_version
 
         with patch("subprocess.run", side_effect=Exception("Git not found")):
@@ -465,10 +465,10 @@ class TestGetLlamaCppVersion:
 
 
 class TestCheckModelConvertibility:
-    """Tests para check_model_convertibility."""
+    """Tests for check_model_convertibility."""
 
     def test_convertible_llm_model(self, temp_dir):
-        """Modelo LLM con config.json válido es convertible."""
+        """LLM model with valid config.json is convertible."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "llama", "hidden_size": 4096}
@@ -481,7 +481,7 @@ class TestCheckModelConvertibility:
         assert reason == ""
 
     def test_missing_config_json(self, temp_dir):
-        """Modelo sin config.json no es convertible."""
+        """Model without config.json is not convertible."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         (temp_dir / "model.safetensors").write_bytes(b"weights")
@@ -492,10 +492,10 @@ class TestCheckModelConvertibility:
         assert "config.json" in reason
 
     def test_lora_adapter_detected(self, temp_dir):
-        """LoRA adapter es detectado y rechazado."""
+        """LoRA adapter is detected and rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
-        # LoRA adapter tiene adapter_config.json
+        # LoRA adapter has adapter_config.json
         (temp_dir / "adapter_config.json").write_text('{"base_model": "llama"}')
         (temp_dir / "adapter_model.safetensors").write_bytes(b"lora weights")
 
@@ -505,19 +505,19 @@ class TestCheckModelConvertibility:
         assert "LoRA" in reason
 
     def test_diffusion_model_detected(self, temp_dir):
-        """Modelo de difusión es detectado y rechazado."""
+        """Diffusion model is detected and rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
-        # Stable Diffusion tiene diffusion_pytorch_model.safetensors
+        # Stable Diffusion has diffusion_pytorch_model.safetensors
         (temp_dir / "diffusion_pytorch_model.safetensors").write_bytes(b"unet")
 
         is_convertible, reason = check_model_convertibility(temp_dir)
 
         assert is_convertible is False
-        assert "difusión" in reason.lower() or "imagen" in reason.lower()
+        assert "diffusion" in reason.lower() or "image" in reason.lower()
 
     def test_stable_diffusion_model_type(self, temp_dir):
-        """Modelo con model_type de stable-diffusion es rechazado."""
+        """Model with stable-diffusion model_type is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "stable-diffusion-xl"}
@@ -526,10 +526,10 @@ class TestCheckModelConvertibility:
         is_convertible, reason = check_model_convertibility(temp_dir)
 
         assert is_convertible is False
-        assert "no es soportado" in reason
+        assert "not supported" in reason
 
     def test_vae_model_type(self, temp_dir):
-        """Modelo VAE es rechazado."""
+        """VAE model is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "vae"}
@@ -538,13 +538,13 @@ class TestCheckModelConvertibility:
         is_convertible, reason = check_model_convertibility(temp_dir)
 
         assert is_convertible is False
-        assert "no es soportado" in reason
+        assert "not supported" in reason
 
     def test_missing_model_type(self, temp_dir):
-        """config.json sin model_type es rechazado."""
+        """config.json without model_type is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
-        config = {"hidden_size": 4096}  # Sin model_type
+        config = {"hidden_size": 4096}  # No model_type
         (temp_dir / "config.json").write_text(json.dumps(config))
 
         is_convertible, reason = check_model_convertibility(temp_dir)
@@ -553,7 +553,7 @@ class TestCheckModelConvertibility:
         assert "model_type" in reason
 
     def test_invalid_json(self, temp_dir):
-        """config.json malformado es rechazado."""
+        """Malformed config.json is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         (temp_dir / "config.json").write_text("{ invalid json }")
@@ -561,10 +561,10 @@ class TestCheckModelConvertibility:
         is_convertible, reason = check_model_convertibility(temp_dir)
 
         assert is_convertible is False
-        assert "No se pudo leer" in reason
+        assert "Could not read" in reason
 
     def test_clip_model_rejected(self, temp_dir):
-        """Modelo CLIP es rechazado."""
+        """CLIP model is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "clip"}
@@ -575,7 +575,7 @@ class TestCheckModelConvertibility:
         assert is_convertible is False
 
     def test_whisper_model_rejected(self, temp_dir):
-        """Modelo Whisper (audio) es rechazado."""
+        """Whisper model (audio) is rejected."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "whisper"}
@@ -586,7 +586,7 @@ class TestCheckModelConvertibility:
         assert is_convertible is False
 
     def test_qwen_model_convertible(self, temp_dir):
-        """Modelo Qwen es convertible."""
+        """Qwen model is convertible."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "qwen2"}
@@ -597,7 +597,7 @@ class TestCheckModelConvertibility:
         assert is_convertible is True
 
     def test_mistral_model_convertible(self, temp_dir):
-        """Modelo Mistral es convertible."""
+        """Mistral model is convertible."""
         from hfl.converter.gguf_converter import check_model_convertibility
 
         config = {"model_type": "mistral"}
@@ -609,16 +609,16 @@ class TestCheckModelConvertibility:
 
 
 class TestUnsupportedModelError:
-    """Tests para UnsupportedModelError."""
+    """Tests for UnsupportedModelError."""
 
     def test_exception_inheritance(self):
-        """UnsupportedModelError hereda de Exception."""
+        """UnsupportedModelError inherits from Exception."""
         from hfl.converter.gguf_converter import UnsupportedModelError
 
         assert issubclass(UnsupportedModelError, Exception)
 
     def test_exception_message(self):
-        """UnsupportedModelError puede tener mensaje."""
+        """UnsupportedModelError can have a message."""
         from hfl.converter.gguf_converter import UnsupportedModelError
 
         err = UnsupportedModelError("LoRA models are not supported")

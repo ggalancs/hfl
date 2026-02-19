@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo api/middleware."""
+"""Tests for the api/middleware module."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 
 
 class TestRequestLogger:
-    """Tests para RequestLogger middleware."""
+    """Tests for RequestLogger middleware."""
 
     def test_middleware_logs_request_metadata(self):
-        """Verifica que el middleware registra metadata del request."""
+        """Verifies that the middleware logs request metadata."""
         from hfl.api.middleware import RequestLogger
 
         app = FastAPI()
@@ -29,25 +29,25 @@ class TestRequestLogger:
 
             assert response.status_code == 200
 
-            # Verificar que se llamó a logger.info con los argumentos correctos
+            # Verify that logger.info was called with correct arguments
             mock_logger.info.assert_called_once()
             call_args = mock_logger.info.call_args
 
-            # Verificar formato del log
+            # Verify log format
             format_string = call_args[0][0]
             assert "method=%s" in format_string
             assert "path=%s" in format_string
             assert "status=%d" in format_string
             assert "duration=" in format_string
 
-            # Verificar argumentos posicionales
+            # Verify positional arguments
             args = call_args[0][1:]
             assert args[0] == "GET"  # method
             assert args[1] == "/test"  # path
             assert args[2] == 200  # status
 
     def test_middleware_logs_post_request(self):
-        """Verifica logging de request POST."""
+        """Verifies POST request logging."""
         from hfl.api.middleware import RequestLogger
 
         app = FastAPI()
@@ -68,7 +68,7 @@ class TestRequestLogger:
             assert call_args[2] == "/api/endpoint"
 
     def test_middleware_logs_error_status(self):
-        """Verifica logging de errores."""
+        """Verifies error logging."""
         from hfl.api.middleware import RequestLogger
 
         app = FastAPI()
@@ -90,9 +90,9 @@ class TestRequestLogger:
 
     def test_middleware_privacy_no_body_logged(self):
         """
-        CRÍTICO: Verifica que el middleware NO registra el body del request.
+        CRITICAL: Verifies that the middleware does NOT log the request body.
 
-        R6 - Privacy compliance: Los prompts de usuario son datos sensibles.
+        R6 - Privacy compliance: User prompts are sensitive data.
         """
         from hfl.api.middleware import RequestLogger
 
@@ -106,19 +106,19 @@ class TestRequestLogger:
         client = TestClient(app)
 
         with patch("hfl.api.middleware.logger") as mock_logger:
-            # Enviar datos sensibles
-            sensitive_data = {"prompt": "Mi secreto es...", "api_key": "sk-123"}
+            # Send sensitive data
+            sensitive_data = {"prompt": "My secret is...", "api_key": "sk-123"}
             response = client.post("/chat", json=sensitive_data)
 
-            # Verificar que la llamada al logger NO contiene datos sensibles
+            # Verify that the logger call does NOT contain sensitive data
             log_call = str(mock_logger.info.call_args)
-            assert "Mi secreto" not in log_call
+            assert "My secret" not in log_call
             assert "sk-123" not in log_call
             assert "api_key" not in log_call
-            assert "prompt" not in log_call  # No debería loguearse el campo
+            assert "prompt" not in log_call  # Field should not be logged
 
     def test_middleware_measures_duration(self):
-        """Verifica que mide la duración del request."""
+        """Verifies that request duration is measured."""
         from hfl.api.middleware import RequestLogger
         import time
 
@@ -136,5 +136,5 @@ class TestRequestLogger:
             client.get("/slow")
 
             call_args = mock_logger.info.call_args[0]
-            duration = call_args[4]  # El 5to argumento es la duración
-            assert duration >= 0.1  # Al menos 100ms
+            duration = call_args[4]  # The 5th argument is the duration
+            assert duration >= 0.1  # At least 100ms

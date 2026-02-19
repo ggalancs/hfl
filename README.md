@@ -84,10 +84,10 @@ hfl search phi --limit 50 --page-size 5
 hfl search qwen --sort likes
 ```
 
-**Controles de navegación:**
-- `ESPACIO` / `ENTER` - Siguiente página
-- `p` - Página anterior
-- `q` / `ESC` - Salir
+**Navigation controls:**
+- `SPACE` / `ENTER` - Next page
+- `p` - Previous page
+- `q` / `ESC` - Exit
 
 ### Model Management
 

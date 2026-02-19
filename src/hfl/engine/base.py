@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Interfaz abstracta para motores de inferencia."""
+"""Abstract interface for inference engines."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -34,16 +34,16 @@ class GenerationResult:
 
 
 class InferenceEngine(ABC):
-    """Interfaz que deben implementar todos los backends."""
+    """Interface that all backends must implement."""
 
     @abstractmethod
     def load(self, model_path: str, **kwargs) -> None:
-        """Carga el modelo en memoria."""
+        """Loads the model into memory."""
         ...
 
     @abstractmethod
     def unload(self) -> None:
-        """Libera el modelo de memoria."""
+        """Releases the model from memory."""
         ...
 
     @abstractmethod
@@ -52,7 +52,7 @@ class InferenceEngine(ABC):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
-        """Genera texto de forma síncrona."""
+        """Generates text synchronously."""
         ...
 
     @abstractmethod
@@ -61,7 +61,7 @@ class InferenceEngine(ABC):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> Iterator[str]:
-        """Genera texto token a token (streaming)."""
+        """Generates text token by token (streaming)."""
         ...
 
     @abstractmethod
@@ -70,7 +70,7 @@ class InferenceEngine(ABC):
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
-        """Chat síncrono con formato de mensajes."""
+        """Synchronous chat with message format."""
         ...
 
     @abstractmethod
@@ -79,17 +79,17 @@ class InferenceEngine(ABC):
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
     ) -> Iterator[str]:
-        """Chat streaming token a token."""
+        """Streaming chat token by token."""
         ...
 
     @property
     @abstractmethod
     def model_name(self) -> str:
-        """Nombre del modelo cargado."""
+        """Name of the loaded model."""
         ...
 
     @property
     @abstractmethod
     def is_loaded(self) -> bool:
-        """Si hay un modelo en memoria."""
+        """Whether a model is in memory."""
         ...

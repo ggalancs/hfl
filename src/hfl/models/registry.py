@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Registro local de modelos descargados.
-Persiste en ~/.hfl/models.json.
+Local registry for downloaded models.
+Persists to ~/.hfl/models.json.
 """
 
 import json
@@ -12,7 +12,7 @@ from hfl.models.manifest import ModelManifest
 
 
 class ModelRegistry:
-    """Gestiona el inventario local de modelos."""
+    """Manages the local model inventory."""
 
     def __init__(self):
         self.path = config.registry_path
@@ -30,14 +30,14 @@ class ModelRegistry:
         self.path.write_text(json.dumps(data, indent=2))
 
     def add(self, manifest: ModelManifest):
-        """Registra un nuevo modelo."""
-        # Evitar duplicados
+        """Registers a new model."""
+        # Avoid duplicates
         self._models = [m for m in self._models if m.name != manifest.name]
         self._models.append(manifest)
         self._save()
 
     def get(self, name: str) -> ModelManifest | None:
-        """Busca un modelo por nombre, alias o repo_id."""
+        """Finds a model by name, alias, or repo_id."""
         for m in self._models:
             if m.name == name or m.repo_id == name:
                 return m
@@ -46,8 +46,8 @@ class ModelRegistry:
         return None
 
     def set_alias(self, name: str, alias: str) -> bool:
-        """Establece un alias para un modelo existente."""
-        # Verificar que el alias no esté en uso
+        """Sets an alias for an existing model."""
+        # Verify the alias is not already in use
         for m in self._models:
             if m.alias == alias or m.name == alias:
                 return False
@@ -60,11 +60,11 @@ class ModelRegistry:
         return False
 
     def list_all(self) -> list[ModelManifest]:
-        """Lista todos los modelos registrados."""
+        """Lists all registered models."""
         return sorted(self._models, key=lambda m: m.created_at, reverse=True)
 
     def remove(self, name: str) -> bool:
-        """Elimina un modelo del registro (no borra archivos)."""
+        """Removes a model from the registry (does not delete files)."""
         before = len(self._models)
         self._models = [m for m in self._models if m.name != name]
         if len(self._models) < before:

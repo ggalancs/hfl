@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Servidor API REST compatible con OpenAI y Ollama.
+REST API server compatible with OpenAI and Ollama.
 
-Endpoints implementados:
+Implemented endpoints:
   OpenAI:
     POST /v1/chat/completions
     POST /v1/completions
@@ -16,8 +16,8 @@ Endpoints implementados:
     POST /api/pull
     DELETE /api/delete
 
-Cumplimiento Legal (R9 - Auditoría):
-- Disclaimer header en todas las respuestas AI
+Legal Compliance (R9 - Audit):
+- Disclaimer header in all AI responses
 """
 
 from contextlib import asynccontextmanager
@@ -32,25 +32,25 @@ from hfl.api.routes_openai import router as openai_router
 from hfl.config import config
 
 
-# Estado global del servidor
+# Global server state
 class ServerState:
-    engine = None  # InferenceEngine activo
-    current_model = None  # ModelManifest del modelo cargado
+    engine = None  # Active InferenceEngine
+    current_model = None  # ModelManifest of loaded model
 
 
 state = ServerState()
 
 
-# R9 - Disclaimer Middleware (Auditoría Legal)
-# Añade header de exención de responsabilidad a todas las respuestas AI
+# R9 - Disclaimer Middleware (Legal Audit)
+# Adds disclaimer header to all AI responses
 class DisclaimerMiddleware(BaseHTTPMiddleware):
-    """Middleware que añade disclaimer a respuestas de endpoints AI."""
+    """Middleware that adds disclaimer to AI endpoint responses."""
 
     AI_ENDPOINTS = {"/v1/chat/completions", "/v1/completions", "/api/generate", "/api/chat"}
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        # Solo añadir disclaimer a endpoints de generación
+        # Only add disclaimer to generation endpoints
         if request.url.path in self.AI_ENDPOINTS:
             response.headers["X-AI-Disclaimer"] = (
                 "AI-generated content. May be inaccurate or inappropriate. "
@@ -61,16 +61,16 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle del servidor."""
+    """Server lifecycle."""
     yield
-    # Cleanup al cerrar
+    # Cleanup on shutdown
     if state.engine and state.engine.is_loaded:
         state.engine.unload()
 
 
 app = FastAPI(
     title="hfl API",
-    description="API compatible con OpenAI y Ollama para modelos HuggingFace",
+    description="OpenAI and Ollama compatible API for HuggingFace models",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -82,7 +82,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# R9 - Añadir disclaimer middleware
+# R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)
 
 app.include_router(openai_router)

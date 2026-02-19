@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HFL — Arquitectura Completa y Documentación Exhaustiva</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+    --text: #c9d1d9; --text-muted: #8b949e; --accent: #58a6ff; --green: #3fb950;
+    --yellow: #d29922; --red: #f85149; --purple: #bc8cff; --orange: #f0883e;
+    --cyan: #39d353;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+
+  /* Header */
+  .hero { text-align: center; padding: 3rem 0; border-bottom: 1px solid var(--border); margin-bottom: 3rem; }
+  .hero h1 { font-size: 3rem; background: linear-gradient(135deg, var(--accent), var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+  .hero .subtitle { font-size: 1.2rem; color: var(--text-muted); }
+  .hero .meta { margin-top: 1rem; display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; }
+  .hero .meta span { background: var(--surface); padding: 0.3rem 0.8rem; border-radius: 6px; font-size: 0.85rem; border: 1px solid var(--border); }
+
+  /* Navigation */
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 3rem; }
+  .toc h2 { color: var(--accent); font-size: 1.1rem; margin-bottom: 1rem; }
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.5rem; }
+  .toc a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; padding: 0.3rem 0; display: block; transition: color 0.2s; }
+  .toc a:hover { color: var(--accent); }
+  .toc a::before { content: '›'; margin-right: 0.5rem; color: var(--accent); }
+
+  /* Sections */
+  section { margin-bottom: 3rem; }
+  h2 { font-size: 1.8rem; color: var(--accent); margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--border); }
+  h3 { font-size: 1.3rem; color: var(--green); margin: 1.5rem 0 0.8rem; }
+  h4 { font-size: 1.1rem; color: var(--yellow); margin: 1rem 0 0.5rem; }
+  p { margin-bottom: 0.8rem; color: var(--text); }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-bottom: 1rem; }
+  .card-header { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.8rem; }
+  .card-header .icon { font-size: 1.5rem; }
+  .card-header h3 { margin: 0; color: var(--text); }
+
+  /* Grid layouts */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+
+  /* Code */
+  code { background: var(--surface2); padding: 0.15rem 0.4rem; border-radius: 4px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em; color: var(--orange); }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; overflow-x: auto; margin: 1rem 0; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .comment { color: var(--text-muted); }
+  .keyword { color: var(--purple); }
+  .string { color: var(--green); }
+  .func { color: var(--accent); }
+  .cls { color: var(--yellow); }
+
+  /* Diagrams (SVG-based) */
+  .diagram-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; margin: 1.5rem 0; overflow-x: auto; }
+  .diagram-title { text-align: center; color: var(--accent); font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th { background: var(--surface2); color: var(--accent); text-align: left; padding: 0.7rem 1rem; border: 1px solid var(--border); }
+  td { padding: 0.6rem 1rem; border: 1px solid var(--border); }
+  tr:hover td { background: var(--surface); }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge-blue { background: #1f3a5f; color: var(--accent); }
+  .badge-green { background: #1a3a2a; color: var(--green); }
+  .badge-yellow { background: #3a2f1a; color: var(--yellow); }
+  .badge-red { background: #3a1a1a; color: var(--red); }
+  .badge-purple { background: #2d1f4e; color: var(--purple); }
+
+  /* Flow arrows */
+  .flow { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+  .flow-step { background: var(--surface2); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 8px; font-size: 0.85rem; white-space: nowrap; }
+  .flow-arrow { color: var(--accent); font-weight: bold; }
+
+  /* File tree */
+  .file-tree { font-family: monospace; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem; }
+  .file-tree .dir { color: var(--accent); font-weight: 600; }
+  .file-tree .file { color: var(--text-muted); }
+  .file-tree .desc { color: var(--text-muted); font-style: italic; font-family: sans-serif; font-size: 0.8rem; }
+
+  /* Collapsible */
+  details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin: 0.5rem 0; }
+  details summary { cursor: pointer; padding: 0.8rem 1.2rem; font-weight: 600; color: var(--text); user-select: none; }
+  details summary:hover { color: var(--accent); }
+  details .content { padding: 0 1.2rem 1.2rem; }
+
+  /* Highlight boxes */
+  .highlight { border-left: 4px solid; padding: 1rem 1.2rem; margin: 1rem 0; border-radius: 0 8px 8px 0; }
+  .highlight-info { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+  .highlight-warn { border-color: var(--yellow); background: rgba(210,153,34,0.08); }
+  .highlight-legal { border-color: var(--red); background: rgba(248,81,73,0.06); }
+  .highlight-success { border-color: var(--green); background: rgba(63,185,80,0.08); }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .container { padding: 1rem; }
+    .hero h1 { font-size: 2rem; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .toc-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ========== HEADER ========== -->
+<div class="hero">
+  <h1>HFL — Arquitectura Completa</h1>
+  <div class="subtitle">Run HuggingFace Models Locally Like Ollama</div>
+  <div class="meta">
+    <span>v0.1.0</span>
+    <span>Python ≥3.10</span>
+    <span>Licencia HRUL-1.0</span>
+    <span>Autor: Gabriel Galán Pelayo</span>
+    <span>Build: Hatchling</span>
+  </div>
+</div>
+
+<!-- ========== TOC ========== -->
+<nav class="toc">
+  <h2>Índice de Contenidos</h2>
+  <div class="toc-grid">
+    <a href="#vision">Visión General y Propósito</a>
+    <a href="#stack">Stack Tecnológico</a>
+    <a href="#estructura">Estructura de Archivos</a>
+    <a href="#diagrama-arquitectura">Diagrama de Arquitectura</a>
+    <a href="#config">Módulo config — Configuración Central</a>
+    <a href="#cli">Módulo cli — Interfaz de Línea de Comandos</a>
+    <a href="#hub">Módulo hub — Integración con HuggingFace</a>
+    <a href="#models">Módulo models — Datos y Registro</a>
+    <a href="#engine">Módulo engine — Motores de Inferencia</a>
+    <a href="#converter">Módulo converter — Conversión de Formatos</a>
+    <a href="#api">Módulo api — Servidor REST</a>
+    <a href="#exceptions">Jerarquía de Excepciones</a>
+    <a href="#flujo-pull">Flujo Completo: hfl pull</a>
+    <a href="#flujo-run">Flujo Completo: hfl run</a>
+    <a href="#flujo-serve">Flujo Completo: hfl serve</a>
+    <a href="#legal">Cumplimiento Legal y Auditoría</a>
+    <a href="#patrones">Patrones de Diseño</a>
+    <a href="#dependencias">Dependencias y Extras</a>
+    <a href="#tests">Testing</a>
+    <a href="#build">Build y Distribución</a>
+  </div>
+</nav>
+
+<!-- ========== 1. VISIÓN GENERAL ========== -->
+<section id="vision">
+  <h2>1. Visión General y Propósito</h2>
+  <p><strong>HFL</strong> (HuggingFace Local) es una herramienta CLI y servidor API que permite descargar, gestionar y ejecutar modelos de inteligencia artificial de HuggingFace Hub directamente en la máquina local del usuario. Su diseño aspira a ser un <strong>drop-in replacement de Ollama</strong>, pero conectado al ecosistema de HuggingFace con más de 500.000 modelos.</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="icon">🎯</span><h3>Problema que Resuelve</h3></div>
+      <p>Los usuarios necesitan ejecutar LLMs localmente sin depender de APIs en la nube. Ollama resuelve esto pero con un catálogo limitado. HFL conecta directamente con HuggingFace Hub, ofreciendo acceso al catálogo más grande de modelos open-source del mundo, con descarga, conversión automática a GGUF y ejecución local.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🏗️</span><h3>Filosofía de Diseño</h3></div>
+      <p>Modularidad extrema con lazy imports, compatibilidad API dual (OpenAI + Ollama), cumplimiento legal riguroso (licencias, privacidad, EU AI Act), y soporte multi-backend (llama.cpp, Transformers, vLLM) con selección automática según el formato del modelo y el hardware disponible.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 2. STACK TECNOLÓGICO ========== -->
+<section id="stack">
+  <h2>2. Stack Tecnológico</h2>
+  <div class="grid-3">
+    <div class="card">
+      <h4>Core</h4>
+      <table>
+        <tr><td><code>Python ≥3.10</code></td><td>Lenguaje base</td></tr>
+        <tr><td><code>typer ≥0.12</code></td><td>Framework CLI</td></tr>
+        <tr><td><code>rich ≥13.0</code></td><td>Output con estilo</td></tr>
+        <tr><td><code>pydantic ≥2.10</code></td><td>Validación de datos API</td></tr>
+        <tr><td><code>pyyaml ≥6.0</code></td><td>Parsing de configuración</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>API Server</h4>
+      <table>
+        <tr><td><code>fastapi ≥0.115</code></td><td>Framework web async</td></tr>
+        <tr><td><code>uvicorn ≥0.32</code></td><td>Servidor ASGI</td></tr>
+        <tr><td><code>sse-starlette ≥2.0</code></td><td>Server-Sent Events</td></tr>
+        <tr><td><code>httpx ≥0.28</code></td><td>HTTP client async</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>HuggingFace</h4>
+      <table>
+        <tr><td><code>huggingface-hub ≥0.27</code></td><td>API de HF Hub</td></tr>
+      </table>
+      <h4 style="margin-top:1rem">Extras Opcionales</h4>
+      <table>
+        <tr><td><code>llama-cpp-python</code></td><td>Backend GGUF</td></tr>
+        <tr><td><code>transformers+torch</code></td><td>Backend GPU nativo</td></tr>
+        <tr><td><code>vllm</code></td><td>Backend producción</td></tr>
+        <tr><td><code>gguf</code></td><td>Conversión de formato</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 3. ESTRUCTURA DE ARCHIVOS ========== -->
+<section id="estructura">
+  <h2>3. Estructura de Archivos del Proyecto</h2>
+  <div class="file-tree">
+<pre><span class="dir">hfl/</span>
+├── <span class="file">pyproject.toml</span>           <span class="desc">— Definición del paquete, deps, scripts, herramientas</span>
+├── <span class="file">hfl.spec</span>                 <span class="desc">— PyInstaller spec para ejecutable standalone</span>
+├── <span class="file">LICENSE</span>                  <span class="desc">— HRUL v1.0 (licencia propia)</span>
+├── <span class="file">LICENSE-DEPENDENCIES.md</span>  <span class="desc">— Licencias de todas las dependencias</span>
+├── <span class="file">PRIVACY.md</span>               <span class="desc">— Política de privacidad</span>
+├── <span class="file">NOTICE-EU-AI-ACT.md</span>     <span class="desc">— Cumplimiento EU AI Act</span>
+├── <span class="file">DISCLAIMER.md</span>            <span class="desc">— Exención de responsabilidad</span>
+├── <span class="file">README.md</span>                <span class="desc">— Documentación principal</span>
+│
+├── <span class="dir">src/hfl/</span>                 <span class="desc">— CÓDIGO FUENTE PRINCIPAL</span>
+│   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.1.0)</span>
+│   ├── <span class="file">config.py</span>            <span class="desc">— HFLConfig dataclass — configuración global</span>
+│   ├── <span class="file">exceptions.py</span>        <span class="desc">— Jerarquía completa de excepciones</span>
+│   │
+│   ├── <span class="dir">cli/</span>                 <span class="desc">— INTERFAZ DE LÍNEA DE COMANDOS</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   └── <span class="file">main.py</span>          <span class="desc">— 11 comandos: pull, run, serve, list, search, rm, inspect, alias, login, logout, version</span>
+│   │
+│   ├── <span class="dir">api/</span>                 <span class="desc">— SERVIDOR REST API</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">server.py</span>        <span class="desc">— FastAPI app, CORS, disclaimer, lifespan</span>
+│   │   ├── <span class="file">middleware.py</span>     <span class="desc">— Logging privacy-safe</span>
+│   │   ├── <span class="file">routes_openai.py</span> <span class="desc">— /v1/chat/completions, /v1/completions, /v1/models</span>
+│   │   └── <span class="file">routes_native.py</span> <span class="desc">— /api/generate, /api/chat, /api/tags, /api/version</span>
+│   │
+│   ├── <span class="dir">engine/</span>              <span class="desc">— MOTORES DE INFERENCIA</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">base.py</span>          <span class="desc">— InferenceEngine ABC + dataclasses</span>
+│   │   ├── <span class="file">selector.py</span>      <span class="desc">— Selección automática de backend</span>
+│   │   ├── <span class="file">llama_cpp.py</span>     <span class="desc">— LlamaCppEngine (GGUF, CPU/GPU)</span>
+│   │   ├── <span class="file">transformers_engine.py</span> <span class="desc">— TransformersEngine (safetensors, GPU)</span>
+│   │   └── <span class="file">vllm_engine.py</span>   <span class="desc">— VLLMEngine (producción GPU)</span>
+│   │
+│   ├── <span class="dir">hub/</span>                 <span class="desc">— INTEGRACIÓN HUGGINGFACE</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">auth.py</span>          <span class="desc">— Autenticación y tokens</span>
+│   │   ├── <span class="file">downloader.py</span>    <span class="desc">— Descarga con resume y rate limiting</span>
+│   │   ├── <span class="file">license_checker.py</span> <span class="desc">— Clasificación de licencias</span>
+│   │   └── <span class="file">resolver.py</span>      <span class="desc">— Resolución inteligente de modelos</span>
+│   │
+│   ├── <span class="dir">models/</span>              <span class="desc">— MODELOS DE DATOS</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">manifest.py</span>      <span class="desc">— ModelManifest — metadata completa</span>
+│   │   ├── <span class="file">provenance.py</span>    <span class="desc">— ConversionRecord + ProvenanceLog</span>
+│   │   └── <span class="file">registry.py</span>      <span class="desc">— ModelRegistry — inventario local JSON</span>
+│   │
+│   └── <span class="dir">converter/</span>           <span class="desc">— CONVERSIÓN DE FORMATOS</span>
+│       ├── <span class="file">__init__.py</span>
+│       ├── <span class="file">formats.py</span>       <span class="desc">— ModelFormat enum + detect_format()</span>
+│       └── <span class="file">gguf_converter.py</span> <span class="desc">— GGUFConverter — conversión + cuantización</span>
+│
+└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS</span>
+    ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures: tmp dirs, mock APIs, sample models</span>
+    ├── <span class="file">test_api.py</span>          <span class="file">test_cli.py</span>          <span class="file">test_config.py</span>
+    ├── <span class="file">test_converter.py</span>    <span class="file">test_engine.py</span>       <span class="file">test_exceptions.py</span>
+    ├── <span class="file">test_hub.py</span>          <span class="file">test_integration.py</span>  <span class="file">test_middleware.py</span>
+    ├── <span class="file">test_provenance.py</span>   <span class="file">test_registry.py</span>     <span class="file">test_vllm_engine.py</span>
+</pre>
+  </div>
+</section>
+
+<!-- ========== 4. DIAGRAMA DE ARQUITECTURA ========== -->
+<section id="diagrama-arquitectura">
+  <h2>4. Diagrama de Arquitectura General</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Arquitectura de Alto Nivel — HFL v0.1.0</div>
+    <svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1200px;margin:0 auto;display:block;">
+      <!-- Background groups -->
+      <!-- CLI Layer -->
+      <rect x="30" y="20" width="350" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="205" y="48" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">CLI (typer + rich)</text>
+      <text x="60" y="75" fill="#8b949e" font-size="11">pull  run  serve  list  search</text>
+      <text x="60" y="95" fill="#8b949e" font-size="11">rm  inspect  alias  login  logout  version</text>
+      <text x="60" y="115" fill="#3a2f1a" font-size="10">cli/main.py — Punto de entrada: hfl.cli.main:app</text>
+
+      <!-- API Layer -->
+      <rect x="420" y="20" width="350" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="595" y="48" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">API Server (FastAPI + Uvicorn)</text>
+      <rect x="440" y="60" width="145" height="30" rx="6" fill="#1f3a5f" stroke="#58a6ff" stroke-width="0.5"/>
+      <text x="512" y="80" text-anchor="middle" fill="#58a6ff" font-size="10">OpenAI Compatible</text>
+      <rect x="600" y="60" width="145" height="30" rx="6" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="672" y="80" text-anchor="middle" fill="#3fb950" font-size="10">Ollama Compatible</text>
+      <text x="440" y="115" fill="#8b949e" font-size="10">Middleware: CORS + Disclaimer + Privacy Logger</text>
+
+      <!-- Users -->
+      <rect x="830" y="20" width="340" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="1000" y="48" text-anchor="middle" fill="#d29922" font-size="14" font-weight="bold">Consumidores</text>
+      <text x="850" y="75" fill="#8b949e" font-size="11">Terminal (CLI interactivo)</text>
+      <text x="850" y="95" fill="#8b949e" font-size="11">OpenAI SDK / httpx / curl</text>
+      <text x="850" y="115" fill="#8b949e" font-size="11">Apps Ollama (Open WebUI, etc.)</text>
+
+      <!-- Arrow CLI -> API -->
+      <line x1="380" y1="80" x2="418" y2="80" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <!-- Arrow API -> Users -->
+      <line x1="770" y1="80" x2="828" y2="80" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- HUB Layer -->
+      <rect x="30" y="190" width="350" height="160" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="205" y="218" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="bold">Hub (HuggingFace Integration)</text>
+      <rect x="50" y="232" width="130" height="28" rx="5" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="115" y="250" text-anchor="middle" fill="#c9d1d9" font-size="10">resolver.py</text>
+      <rect x="200" y="232" width="130" height="28" rx="5" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="265" y="250" text-anchor="middle" fill="#c9d1d9" font-size="10">downloader.py</text>
+      <rect x="50" y="272" width="130" height="28" rx="5" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="115" y="290" text-anchor="middle" fill="#c9d1d9" font-size="10">license_checker.py</text>
+      <rect x="200" y="272" width="130" height="28" rx="5" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="265" y="290" text-anchor="middle" fill="#c9d1d9" font-size="10">auth.py</text>
+      <text x="50" y="330" fill="#8b949e" font-size="10">Conexión: huggingface_hub API</text>
+
+      <!-- ENGINE Layer -->
+      <rect x="420" y="190" width="350" height="160" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="595" y="218" text-anchor="middle" fill="#bc8cff" font-size="14" font-weight="bold">Engine (Motores de Inferencia)</text>
+      <rect x="435" y="235" width="100" height="45" rx="6" fill="#2d1f4e" stroke="#bc8cff" stroke-width="0.5"/>
+      <text x="485" y="254" text-anchor="middle" fill="#c9d1d9" font-size="10">LlamaCpp</text>
+      <text x="485" y="268" text-anchor="middle" fill="#8b949e" font-size="9">GGUF CPU/GPU</text>
+      <rect x="545" y="235" width="100" height="45" rx="6" fill="#2d1f4e" stroke="#bc8cff" stroke-width="0.5"/>
+      <text x="595" y="254" text-anchor="middle" fill="#c9d1d9" font-size="10">Transformers</text>
+      <text x="595" y="268" text-anchor="middle" fill="#8b949e" font-size="9">safetensors GPU</text>
+      <rect x="655" y="235" width="100" height="45" rx="6" fill="#2d1f4e" stroke="#bc8cff" stroke-width="0.5"/>
+      <text x="705" y="254" text-anchor="middle" fill="#c9d1d9" font-size="10">vLLM</text>
+      <text x="705" y="268" text-anchor="middle" fill="#8b949e" font-size="9">Producción GPU</text>
+      <rect x="435" y="295" width="320" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="595" y="312" text-anchor="middle" fill="#bc8cff" font-size="10">selector.py → Auto-selección por formato + hardware</text>
+      <text x="435" y="340" fill="#8b949e" font-size="10">ABC: InferenceEngine (base.py)</text>
+
+      <!-- MODELS Layer -->
+      <rect x="830" y="190" width="340" height="160" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="1000" y="218" text-anchor="middle" fill="#f0883e" font-size="14" font-weight="bold">Models (Datos y Registro)</text>
+      <rect x="850" y="235" width="130" height="28" rx="5" fill="#3a2a1a" stroke="#f0883e" stroke-width="0.5"/>
+      <text x="915" y="253" text-anchor="middle" fill="#c9d1d9" font-size="10">manifest.py</text>
+      <rect x="1000" y="235" width="130" height="28" rx="5" fill="#3a2a1a" stroke="#f0883e" stroke-width="0.5"/>
+      <text x="1065" y="253" text-anchor="middle" fill="#c9d1d9" font-size="10">registry.py</text>
+      <rect x="850" y="275" width="130" height="28" rx="5" fill="#3a2a1a" stroke="#f0883e" stroke-width="0.5"/>
+      <text x="915" y="293" text-anchor="middle" fill="#c9d1d9" font-size="10">provenance.py</text>
+      <text x="850" y="330" fill="#8b949e" font-size="10">Persistencia: ~/.hfl/models.json</text>
+      <text x="850" y="345" fill="#8b949e" font-size="10">              ~/.hfl/provenance.json</text>
+
+      <!-- CONVERTER Layer -->
+      <rect x="30" y="400" width="350" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="205" y="428" text-anchor="middle" fill="#f85149" font-size="14" font-weight="bold">Converter (Conversión de Formatos)</text>
+      <rect x="50" y="445" width="130" height="28" rx="5" fill="#3a1a1a" stroke="#f85149" stroke-width="0.5"/>
+      <text x="115" y="463" text-anchor="middle" fill="#c9d1d9" font-size="10">formats.py</text>
+      <rect x="200" y="445" width="150" height="28" rx="5" fill="#3a1a1a" stroke="#f85149" stroke-width="0.5"/>
+      <text x="275" y="463" text-anchor="middle" fill="#c9d1d9" font-size="10">gguf_converter.py</text>
+      <text x="50" y="500" fill="#8b949e" font-size="10">safetensors → FP16 GGUF → Quantized GGUF</text>
+
+      <!-- CONFIG Layer -->
+      <rect x="420" y="400" width="350" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
+      <text x="595" y="428" text-anchor="middle" fill="#d29922" font-size="14" font-weight="bold">Config + Exceptions (Núcleo)</text>
+      <rect x="440" y="445" width="140" height="28" rx="5" fill="#3a2f1a" stroke="#d29922" stroke-width="0.5"/>
+      <text x="510" y="463" text-anchor="middle" fill="#c9d1d9" font-size="10">config.py (HFLConfig)</text>
+      <rect x="600" y="445" width="150" height="28" rx="5" fill="#3a2f1a" stroke="#d29922" stroke-width="0.5"/>
+      <text x="675" y="463" text-anchor="middle" fill="#c9d1d9" font-size="10">exceptions.py (15 tipos)</text>
+      <text x="440" y="500" fill="#8b949e" font-size="10">Home: ~/.hfl  |  Puerto: 11434 (Ollama compat)</text>
+
+      <!-- External: HF Hub -->
+      <rect x="830" y="400" width="340" height="120" rx="12" fill="#0d1117" stroke="#58a6ff" stroke-dasharray="4"/>
+      <text x="1000" y="428" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">HuggingFace Hub (Externo)</text>
+      <text x="850" y="455" fill="#8b949e" font-size="11">huggingface.co API</text>
+      <text x="850" y="475" fill="#8b949e" font-size="11">500.000+ modelos</text>
+      <text x="850" y="495" fill="#8b949e" font-size="11">Gated models + Licencias</text>
+
+      <!-- Filesystem -->
+      <rect x="30" y="570" width="1140" height="100" rx="12" fill="#0d1117" stroke="#39d353" stroke-dasharray="4"/>
+      <text x="600" y="598" text-anchor="middle" fill="#39d353" font-size="14" font-weight="bold">Sistema de Archivos Local — ~/.hfl/</text>
+      <text x="100" y="625" fill="#8b949e" font-size="11">models/</text>
+      <text x="100" y="645" fill="#8b949e" font-size="10">Archivos de modelos (GGUF, safetensors)</text>
+      <text x="380" y="625" fill="#8b949e" font-size="11">models.json</text>
+      <text x="380" y="645" fill="#8b949e" font-size="10">Registro de modelos locales</text>
+      <text x="620" y="625" fill="#8b949e" font-size="11">provenance.json</text>
+      <text x="620" y="645" fill="#8b949e" font-size="10">Log de conversiones</text>
+      <text x="880" y="625" fill="#8b949e" font-size="11">cache/ + tools/llama.cpp</text>
+      <text x="880" y="645" fill="#8b949e" font-size="10">Cache HF + herramientas compiladas</text>
+
+      <!-- Connecting arrows -->
+      <!-- CLI -> Hub -->
+      <line x1="205" y1="140" x2="205" y2="188" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrow-g)"/>
+      <!-- CLI -> Engine (via serve/run) -->
+      <path d="M 320 140 Q 400 170 480 190" fill="none" stroke="#bc8cff" stroke-width="1.2" marker-end="url(#arrow-p)"/>
+      <!-- API -> Engine -->
+      <line x1="595" y1="140" x2="595" y2="188" stroke="#bc8cff" stroke-width="1.2" marker-end="url(#arrow-p)"/>
+      <!-- Hub -> Converter -->
+      <line x1="205" y1="350" x2="205" y2="398" stroke="#f85149" stroke-width="1.2" marker-end="url(#arrow-r)"/>
+      <!-- Hub -> Models -->
+      <path d="M 380 300 L 828 270" fill="none" stroke="#f0883e" stroke-width="1.0" marker-end="url(#arrow-o)"/>
+      <!-- Engine -> Models -->
+      <line x1="770" y1="270" x2="828" y2="270" stroke="#f0883e" stroke-width="1.0" marker-end="url(#arrow-o)"/>
+      <!-- Hub -> External HF -->
+      <path d="M 380 270 Q 600 380 830 450" fill="none" stroke="#58a6ff" stroke-width="1.0" stroke-dasharray="4" marker-end="url(#arrow)"/>
+      <!-- Models -> Filesystem -->
+      <line x1="1000" y1="350" x2="1000" y2="568" stroke="#39d353" stroke-width="1.0" stroke-dasharray="4" marker-end="url(#arrow-cg)"/>
+      <!-- Converter -> Filesystem -->
+      <line x1="205" y1="520" x2="205" y2="568" stroke="#39d353" stroke-width="1.0" stroke-dasharray="4" marker-end="url(#arrow-cg)"/>
+
+      <!-- Arrow markers -->
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#58a6ff"/></marker>
+        <marker id="arrow-g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#3fb950"/></marker>
+        <marker id="arrow-p" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#bc8cff"/></marker>
+        <marker id="arrow-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f85149"/></marker>
+        <marker id="arrow-o" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f0883e"/></marker>
+        <marker id="arrow-cg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#39d353"/></marker>
+      </defs>
+    </svg>
+  </div>
+</section>
+
+<!-- ========== 5. CONFIG ========== -->
+<section id="config">
+  <h2>5. Módulo config — Configuración Central</h2>
+  <div class="card">
+    <p><strong>Archivo:</strong> <code>src/hfl/config.py</code></p>
+    <p>Contiene la clase <code>HFLConfig</code> (dataclass) que define toda la configuración global de la aplicación. Se instancia una vez como singleton (<code>config = HFLConfig()</code>) al importar el módulo, y se llama a <code>ensure_dirs()</code> para crear la estructura de directorios.</p>
+  </div>
+
+  <table>
+    <tr><th>Propiedad</th><th>Tipo</th><th>Default</th><th>Descripción</th></tr>
+    <tr><td><code>home_dir</code></td><td>Path</td><td><code>~/.hfl</code></td><td>Directorio raíz. Override con <code>HFL_HOME</code> env var</td></tr>
+    <tr><td><code>models_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/models</code></td><td>Almacenamiento de modelos descargados</td></tr>
+    <tr><td><code>cache_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/cache</code></td><td>Caché temporal de HuggingFace</td></tr>
+    <tr><td><code>registry_path</code></td><td>Path (prop)</td><td><code>~/.hfl/models.json</code></td><td>Registro de modelos (inventario local)</td></tr>
+    <tr><td><code>llama_cpp_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/tools/llama.cpp</code></td><td>Herramientas de conversión compiladas</td></tr>
+    <tr><td><code>host</code></td><td>str</td><td><code>127.0.0.1</code></td><td>Dirección del servidor API</td></tr>
+    <tr><td><code>port</code></td><td>int</td><td><code>11434</code></td><td>Puerto (igual que Ollama para compatibilidad)</td></tr>
+    <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>4096</code></td><td>Tokens de contexto por defecto</td></tr>
+    <tr><td><code>default_n_gpu_layers</code></td><td>int</td><td><code>-1</code></td><td>Capas GPU (-1 = todas)</td></tr>
+    <tr><td><code>hf_token</code></td><td>str|None</td><td>env <code>HF_TOKEN</code></td><td>Token de autenticación (solo memoria, nunca persiste)</td></tr>
+  </table>
+
+  <div class="highlight highlight-legal">
+    <strong>Privacidad (R6):</strong> El <code>hf_token</code> se lee SOLO de la variable de entorno. Nunca se persiste a disco, nunca se guarda en models.json ni en ningún archivo de configuración. Existe solo en memoria durante la ejecución del proceso.
+  </div>
+</section>
+
+<!-- ========== 6. CLI ========== -->
+<section id="cli">
+  <h2>6. Módulo cli — Interfaz de Línea de Comandos</h2>
+  <div class="card">
+    <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~810 líneas)</p>
+    <p><strong>Framework:</strong> Typer + Rich. Entry point registrado en pyproject.toml como <code>hfl = "hfl.cli.main:app"</code></p>
+  </div>
+
+  <table>
+    <tr><th>Comando</th><th>Descripción</th><th>Opciones Clave</th></tr>
+    <tr><td><code>hfl pull &lt;modelo&gt;</code></td><td>Descarga modelo desde HF Hub</td><td><code>--quantize Q4_K_M</code>, <code>--format auto|gguf|safetensors</code>, <code>--alias</code>, <code>--skip-license</code></td></tr>
+    <tr><td><code>hfl run &lt;modelo&gt;</code></td><td>Chat interactivo en terminal</td><td><code>--backend auto|llama-cpp|transformers|vllm</code>, <code>--ctx</code>, <code>--system</code>, <code>--verbose</code></td></tr>
+    <tr><td><code>hfl serve</code></td><td>Servidor API REST</td><td><code>--host</code>, <code>--port</code>, <code>--model</code> (pre-carga)</td></tr>
+    <tr><td><code>hfl list</code></td><td>Lista modelos locales con tabla Rich</td><td>Muestra nombre, alias, formato, cuantización, licencia (coloreada por riesgo), tamaño</td></tr>
+    <tr><td><code>hfl search &lt;query&gt;</code></td><td>Búsqueda paginada interactiva en HF Hub</td><td><code>--gguf</code>, <code>--max-params</code>, <code>--min-params</code>, <code>--sort</code>, <code>--page-size</code></td></tr>
+    <tr><td><code>hfl rm &lt;modelo&gt;</code></td><td>Elimina modelo con confirmación</td><td>Borra archivos + entrada del registro</td></tr>
+    <tr><td><code>hfl inspect &lt;modelo&gt;</code></td><td>Detalle completo (panel Rich)</td><td>Muestra metadata, licencia, restricciones, timestamps</td></tr>
+    <tr><td><code>hfl alias &lt;modelo&gt; &lt;alias&gt;</code></td><td>Asigna alias corto</td><td>Permite referir modelos por nombres simples</td></tr>
+    <tr><td><code>hfl login</code></td><td>Configura token HF</td><td><code>--token</code> o interactivo. Verifica con <code>whoami()</code></td></tr>
+    <tr><td><code>hfl logout</code></td><td>Elimina token guardado</td><td>Usa <code>huggingface_hub.logout()</code></td></tr>
+    <tr><td><code>hfl version</code></td><td>Muestra versión + licencia</td><td>—</td></tr>
+  </table>
+
+  <h3>Funciones Auxiliares del CLI</h3>
+  <p><code>_format_size()</code> convierte bytes a formato legible. <code>_get_key()</code> lee una tecla sin Enter (raw terminal). <code>_extract_params_from_name()</code> extrae parámetros del nombre (regex: "70b", "7b", "1.5b"). <code>_estimate_model_size()</code> estima tamaño en disco según parámetros y cuantización. <code>_display_model_row()</code> renderiza una fila de resultado de búsqueda. <code>_get_params_value()</code> extrae el valor numérico para filtrado.</p>
+</section>
+
+<!-- ========== 7. HUB ========== -->
+<section id="hub">
+  <h2>7. Módulo hub — Integración con HuggingFace</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>resolver.py — Resolución Inteligente</h4>
+      <p>Clase <code>ResolvedModel</code> (dataclass) con: <code>repo_id</code>, <code>revision</code>, <code>filename</code>, <code>format</code>, <code>quantization</code>.</p>
+      <p>La función <code>resolve()</code> soporta tres formatos de entrada:</p>
+      <p>1. <code>org/modelo</code> → repo directo en HF</p>
+      <p>2. <code>org/modelo:Q4_K_M</code> → repo con cuantización estilo Ollama</p>
+      <p>3. <code>nombre-modelo</code> → búsqueda por nombre (top 5 por descargas)</p>
+      <p>Tras resolver, detecta si el repo tiene archivos GGUF (prefiere <code>_select_gguf()</code> con prioridad Q4_K_M > Q5_K_M > Q4_K_S), safetensors, o pytorch.</p>
+    </div>
+
+    <div class="card">
+      <h4>downloader.py — Descarga con Progreso</h4>
+      <p>Función principal <code>pull_model(resolved)</code>. Para GGUF descarga archivo individual con <code>hf_hub_download()</code>. Para safetensors descarga snapshot completo con <code>snapshot_download()</code> filtrando: <code>*.safetensors</code>, <code>config.json</code>, <code>tokenizer*.json</code>, <code>tokenizer.model</code>.</p>
+      <p>Implementa rate limiting (0.5s entre llamadas API) y User-Agent identificativo (<code>hfl/0.1.0</code>) para cumplir con ToS de HuggingFace.</p>
+    </div>
+
+    <div class="card">
+      <h4>auth.py — Autenticación</h4>
+      <p><code>get_hf_token()</code> obtiene token con prioridad: 1) env var <code>HF_TOKEN</code>, 2) token guardado por huggingface_hub.</p>
+      <p><code>ensure_auth(repo_id)</code> verifica acceso al repo. Si falla y no hay token, solicita interactivamente. Respeta el sistema de gating de HF: NO bypasea la aceptación de licencias de modelos gated.</p>
+    </div>
+
+    <div class="card">
+      <h4>license_checker.py — Clasificación de Licencias</h4>
+      <p>Enum <code>LicenseRisk</code>: PERMISSIVE, CONDITIONAL, NON_COMMERCIAL, RESTRICTED, UNKNOWN.</p>
+      <p>Diccionario <code>LICENSE_CLASSIFICATION</code> con ~20 licencias conocidas. Diccionario <code>LICENSE_RESTRICTIONS</code> con restricciones específicas por familia (Llama: 700M MAU, attribution, etc.).</p>
+      <p><code>check_model_license()</code> consulta la API de HF, clasifica el riesgo, y devuelve <code>LicenseInfo</code>. <code>require_user_acceptance()</code> presenta un panel Rich con la licencia y requiere confirmación explícita para licencias no permisivas.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 8. MODELS ========== -->
+<section id="models">
+  <h2>8. Módulo models — Datos y Registro</h2>
+
+  <h3>ModelManifest (manifest.py)</h3>
+  <p>Dataclass que almacena la metadata completa de cada modelo descargado. Es la unidad fundamental de información en el sistema.</p>
+  <table>
+    <tr><th>Campo</th><th>Tipo</th><th>Propósito</th></tr>
+    <tr><td><code>name</code>, <code>repo_id</code></td><td>str</td><td>Identificación (nombre corto + repo HF)</td></tr>
+    <tr><td><code>alias</code></td><td>str|None</td><td>Nombre personalizado por el usuario</td></tr>
+    <tr><td><code>local_path</code>, <code>format</code></td><td>str</td><td>Ubicación y tipo (gguf/safetensors/pytorch)</td></tr>
+    <tr><td><code>size_bytes</code>, <code>quantization</code></td><td>int, str</td><td>Tamaño en disco + nivel Q</td></tr>
+    <tr><td><code>architecture</code>, <code>parameters</code>, <code>context_length</code></td><td>str, str, int</td><td>Características del modelo</td></tr>
+    <tr><td><code>license</code>, <code>license_name</code>, <code>license_url</code></td><td>str</td><td>Información legal (R1)</td></tr>
+    <tr><td><code>license_restrictions</code>, <code>gated</code>, <code>license_accepted_at</code></td><td>list, bool, str</td><td>Restricciones y aceptación</td></tr>
+    <tr><td><code>gpai_classification</code>, <code>training_flops</code></td><td>str</td><td>EU AI Act (R4)</td></tr>
+    <tr><td><code>created_at</code>, <code>last_used</code></td><td>str</td><td>Timestamps</td></tr>
+  </table>
+
+  <h3>ModelRegistry (registry.py)</h3>
+  <p>Gestiona el inventario local. Persiste a <code>~/.hfl/models.json</code> como array JSON. Operaciones: <code>add()</code> (evita duplicados), <code>get()</code> (busca por name, alias, o repo_id), <code>set_alias()</code>, <code>list_all()</code> (ordenado por fecha), <code>remove()</code>.</p>
+
+  <h3>ProvenanceLog (provenance.py)</h3>
+  <p>Log inmutable de conversiones en <code>~/.hfl/provenance.json</code>. Cada <code>ConversionRecord</code> documenta: origen (repo, formato, revisión), destino (formato, path, cuantización), herramienta usada (llama.cpp + versión), licencia original, y timestamps. Sirve para trazabilidad legal y auditoría de cumplimiento (R3).</p>
+</section>
+
+<!-- ========== 9. ENGINE ========== -->
+<section id="engine">
+  <h2>9. Módulo engine — Motores de Inferencia</h2>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Jerarquía de Clases — Engine</div>
+    <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <!-- ABC -->
+      <rect x="300" y="20" width="300" height="90" rx="10" fill="#2d1f4e" stroke="#bc8cff"/>
+      <text x="450" y="45" text-anchor="middle" fill="#bc8cff" font-size="13" font-weight="bold">«ABC» InferenceEngine</text>
+      <text x="320" y="65" fill="#c9d1d9" font-size="10">+ load(path, **kwargs)</text>
+      <text x="320" y="78" fill="#c9d1d9" font-size="10">+ unload() / generate() / generate_stream()</text>
+      <text x="320" y="91" fill="#c9d1d9" font-size="10">+ chat() / chat_stream() / model_name / is_loaded</text>
+
+      <!-- LlamaCpp -->
+      <rect x="30" y="170" width="240" height="70" rx="8" fill="#1a3a2a" stroke="#3fb950"/>
+      <text x="150" y="195" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">LlamaCppEngine</text>
+      <text x="50" y="215" fill="#8b949e" font-size="10">GGUF | CPU+Metal+CUDA+Vulkan</text>
+      <text x="50" y="228" fill="#8b949e" font-size="10">Flash Attention, auto chat format</text>
+
+      <!-- Transformers -->
+      <rect x="330" y="170" width="240" height="70" rx="8" fill="#1f3a5f" stroke="#58a6ff"/>
+      <text x="450" y="195" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="bold">TransformersEngine</text>
+      <text x="350" y="215" fill="#8b949e" font-size="10">safetensors | GPU CUDA</text>
+      <text x="350" y="228" fill="#8b949e" font-size="10">BitsAndBytes 4bit/8bit, TextIteratorStreamer</text>
+
+      <!-- vLLM -->
+      <rect x="630" y="170" width="240" height="70" rx="8" fill="#3a2f1a" stroke="#d29922"/>
+      <text x="750" y="195" text-anchor="middle" fill="#d29922" font-size="12" font-weight="bold">VLLMEngine</text>
+      <text x="650" y="215" fill="#8b949e" font-size="10">Producción GPU | NVIDIA CUDA</text>
+      <text x="650" y="228" fill="#8b949e" font-size="10">PagedAttention, batching continuo</text>
+
+      <!-- Selector -->
+      <rect x="250" y="270" width="400" height="40" rx="8" fill="#21262d" stroke="#bc8cff" stroke-dasharray="4"/>
+      <text x="450" y="295" text-anchor="middle" fill="#bc8cff" font-size="11">selector.py → GGUF→LlamaCpp | CUDA+safetensors→Transformers | fallback→LlamaCpp</text>
+
+      <!-- Inheritance arrows -->
+      <line x1="150" y1="170" x2="400" y2="110" stroke="#3fb950" stroke-width="1.2"/>
+      <line x1="450" y1="170" x2="450" y2="110" stroke="#58a6ff" stroke-width="1.2"/>
+      <line x1="750" y1="170" x2="500" y2="110" stroke="#d29922" stroke-width="1.2"/>
+
+      <!-- Dataclasses -->
+      <rect x="680" y="20" width="200" height="90" rx="8" fill="#21262d" stroke="#30363d"/>
+      <text x="780" y="42" text-anchor="middle" fill="#8b949e" font-size="11" font-weight="bold">Dataclasses</text>
+      <text x="700" y="60" fill="#c9d1d9" font-size="10">ChatMessage(role, content)</text>
+      <text x="700" y="75" fill="#c9d1d9" font-size="10">GenerationConfig(temp, top_p...)</text>
+      <text x="700" y="90" fill="#c9d1d9" font-size="10">GenerationResult(text, tokens...)</text>
+    </svg>
+  </div>
+
+  <div class="grid-3">
+    <div class="card">
+      <h4>LlamaCppEngine</h4>
+      <p>Backend principal. Usa <code>llama-cpp-python</code>. Parámetros: n_ctx, n_gpu_layers (-1=todas), n_threads (0=auto), flash_attn, chat_format (auto-detect). Incluye supresión de stderr para silenciar logs de Metal/CUDA cuando verbose=False. Genera resultados con métricas: tokens/s, prompt tokens, stop reason.</p>
+    </div>
+    <div class="card">
+      <h4>TransformersEngine</h4>
+      <p>Usa modelos en formato nativo con GPU. Soporte cuantización dinámica: 4bit (NF4 double quant via BitsAndBytes) y 8bit. Streaming via <code>TextIteratorStreamer</code> en thread separado. Usa <code>apply_chat_template()</code> del tokenizer o fallback Llama-style.</p>
+    </div>
+    <div class="card">
+      <h4>VLLMEngine</h4>
+      <p>Placeholder para producción GPU. Wrappea <code>vllm.LLM</code> con <code>SamplingParams</code>. Streaming básico (yield resultado completo). Build de prompt simple <code>Role: content</code>. Requiere GPU NVIDIA con CUDA.</p>
+    </div>
+  </div>
+
+  <h3>Selector Automático (selector.py)</h3>
+  <p>Lógica de decisión en <code>select_engine(model_path, backend)</code>:</p>
+  <div class="flow">
+    <span class="flow-step">Modelo GGUF?</span>
+    <span class="flow-arrow">→ Sí →</span>
+    <span class="flow-step" style="border-color:#3fb950">LlamaCppEngine</span>
+  </div>
+  <div class="flow">
+    <span class="flow-step">GPU CUDA disponible?</span>
+    <span class="flow-arrow">→ Sí →</span>
+    <span class="flow-step" style="border-color:#58a6ff">TransformersEngine</span>
+    <span class="flow-arrow">→ ImportError →</span>
+    <span class="flow-step" style="border-color:#3fb950">Fallback: LlamaCppEngine</span>
+  </div>
+  <div class="flow">
+    <span class="flow-step">Sin GPU?</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step" style="border-color:#3fb950">LlamaCppEngine (necesitará conversión previa)</span>
+  </div>
+  <p>Todos los imports son lazy (<code>_get_llama_cpp_engine()</code>, etc.) para no requerir todas las dependencias instaladas.</p>
+</section>
+
+<!-- ========== 10. CONVERTER ========== -->
+<section id="converter">
+  <h2>10. Módulo converter — Conversión de Formatos</h2>
+
+  <h3>formats.py — Detección de Formatos</h3>
+  <p>Enum <code>ModelFormat</code>: GGUF, SAFETENSORS, PYTORCH, UNKNOWN. La función <code>detect_format(path)</code> inspecciona extensiones (.gguf, .safetensors, .pt/.pth/.bin) tanto en archivos individuales como en directorios (rglob). <code>find_model_file()</code> localiza el archivo principal del modelo.</p>
+
+  <h3>gguf_converter.py — Conversión a GGUF</h3>
+  <p>Clase <code>GGUFConverter</code> con pipeline de dos pasos:</p>
+  <div class="flow">
+    <span class="flow-step">safetensors/pytorch</span>
+    <span class="flow-arrow">→ Paso 1 →</span>
+    <span class="flow-step">convert_hf_to_gguf.py (FP16)</span>
+    <span class="flow-arrow">→ Paso 2 →</span>
+    <span class="flow-step">llama-quantize (Q4_K_M)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step" style="border-color:#3fb950">GGUF final</span>
+  </div>
+
+  <p><code>ensure_tools()</code> auto-instala llama.cpp si no existe: git clone → cmake build → pip install requirements. <code>check_model_convertibility()</code> valida que el modelo sea convertible (rechaza LoRA adapters, modelos de imagen, modelos sin config.json).</p>
+
+  <table>
+    <tr><th>Cuantización</th><th>Bits/peso</th><th>Calidad</th><th>Caso de Uso</th></tr>
+    <tr><td>Q2_K</td><td>~2.5</td><td>~80%</td><td>Extrema compresión</td></tr>
+    <tr><td>Q3_K_M</td><td>~3.5</td><td>~87%</td><td>Poca RAM</td></tr>
+    <tr><td><strong>Q4_K_M</strong></td><td>~4.5</td><td>~92%</td><td>DEFAULT — mejor balance</td></tr>
+    <tr><td>Q5_K_M</td><td>~5.0</td><td>~96%</td><td>Alta calidad</td></tr>
+    <tr><td>Q6_K</td><td>~6.5</td><td>~97%</td><td>Premium</td></tr>
+    <tr><td>Q8_0</td><td>~8.0</td><td>~98%+</td><td>Máxima calidad cuantizada</td></tr>
+    <tr><td>F16</td><td>16.0</td><td>100%</td><td>Sin cuantización</td></tr>
+  </table>
+</section>
+
+<!-- ========== 11. API ========== -->
+<section id="api">
+  <h2>11. Módulo api — Servidor REST</h2>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Endpoints y Compatibilidad API</div>
+    <svg viewBox="0 0 900 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <!-- Server box -->
+      <rect x="300" y="10" width="300" height="50" rx="10" fill="#1a2332" stroke="#58a6ff"/>
+      <text x="450" y="40" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">FastAPI Server (server.py)</text>
+
+      <!-- Middleware stack -->
+      <rect x="250" y="75" width="400" height="30" rx="6" fill="#21262d" stroke="#30363d"/>
+      <text x="450" y="95" text-anchor="middle" fill="#d29922" font-size="10">CORSMiddleware → DisclaimerMiddleware → RequestLogger</text>
+
+      <!-- OpenAI routes -->
+      <rect x="50" y="130" width="380" height="250" rx="10" fill="#0d1117" stroke="#58a6ff"/>
+      <text x="240" y="155" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="bold">OpenAI Compatible (routes_openai.py)</text>
+
+      <rect x="70" y="170" width="340" height="38" rx="6" fill="#1f3a5f" stroke="#58a6ff" stroke-width="0.5"/>
+      <text x="90" y="185" fill="#3fb950" font-size="10" font-weight="bold">POST</text>
+      <text x="140" y="185" fill="#c9d1d9" font-size="10">/v1/chat/completions</text>
+      <text x="90" y="200" fill="#8b949e" font-size="9">Chat con streaming SSE (text/event-stream)</text>
+
+      <rect x="70" y="215" width="340" height="38" rx="6" fill="#1f3a5f" stroke="#58a6ff" stroke-width="0.5"/>
+      <text x="90" y="230" fill="#3fb950" font-size="10" font-weight="bold">POST</text>
+      <text x="140" y="230" fill="#c9d1d9" font-size="10">/v1/completions</text>
+      <text x="90" y="245" fill="#8b949e" font-size="9">Text completion con streaming</text>
+
+      <rect x="70" y="260" width="340" height="30" rx="6" fill="#1f3a5f" stroke="#58a6ff" stroke-width="0.5"/>
+      <text x="90" y="280" fill="#58a6ff" font-size="10" font-weight="bold">GET</text>
+      <text x="130" y="280" fill="#c9d1d9" font-size="10">/v1/models — Lista modelos disponibles</text>
+
+      <text x="70" y="315" fill="#8b949e" font-size="10">Schemas: ChatCompletionRequest, CompletionRequest</text>
+      <text x="70" y="330" fill="#8b949e" font-size="10">Helpers: _ensure_model_loaded() → auto-carga</text>
+      <text x="70" y="345" fill="#8b949e" font-size="10">Streaming: _stream_chat(), _stream_completion()</text>
+      <text x="70" y="360" fill="#8b949e" font-size="10">Formato: SSE data: {...}\n\n + data: [DONE]</text>
+
+      <!-- Ollama routes -->
+      <rect x="470" y="130" width="380" height="250" rx="10" fill="#0d1117" stroke="#3fb950"/>
+      <text x="660" y="155" text-anchor="middle" fill="#3fb950" font-size="13" font-weight="bold">Ollama Compatible (routes_native.py)</text>
+
+      <rect x="490" y="170" width="340" height="38" rx="6" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="510" y="185" fill="#3fb950" font-size="10" font-weight="bold">POST</text>
+      <text x="560" y="185" fill="#c9d1d9" font-size="10">/api/generate</text>
+      <text x="510" y="200" fill="#8b949e" font-size="9">Generación texto con streaming NDJSON</text>
+
+      <rect x="490" y="215" width="340" height="38" rx="6" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="510" y="230" fill="#3fb950" font-size="10" font-weight="bold">POST</text>
+      <text x="560" y="230" fill="#c9d1d9" font-size="10">/api/chat</text>
+      <text x="510" y="245" fill="#8b949e" font-size="9">Chat multi-turno con streaming NDJSON</text>
+
+      <rect x="490" y="260" width="340" height="30" rx="6" fill="#1a3a2a" stroke="#3fb950" stroke-width="0.5"/>
+      <text x="510" y="280" fill="#58a6ff" font-size="10" font-weight="bold">GET</text>
+      <text x="550" y="280" fill="#c9d1d9" font-size="10">/api/tags + /api/version + HEAD /</text>
+
+      <text x="490" y="315" fill="#8b949e" font-size="10">Schemas: GenerateRequest, ChatRequest</text>
+      <text x="490" y="330" fill="#8b949e" font-size="10">Streaming: application/x-ndjson</text>
+      <text x="490" y="345" fill="#8b949e" font-size="10">Compatible con: Open WebUI, Chatbox, etc.</text>
+      <text x="490" y="360" fill="#8b949e" font-size="10">Helper: _options_to_config() para parámetros</text>
+    </svg>
+  </div>
+
+  <h3>ServerState</h3>
+  <p>Clase simple con <code>engine</code> (InferenceEngine activo) y <code>current_model</code> (ModelManifest cargado). Instanciada como singleton global. El lifespan del servidor hace cleanup al cerrar.</p>
+
+  <h3>Middleware Stack</h3>
+  <p><strong>CORSMiddleware</strong> — Permite todas las orígenes, métodos y headers (desarrollo local).</p>
+  <p><strong>DisclaimerMiddleware</strong> — Añade header <code>X-AI-Disclaimer</code> a respuestas de endpoints de generación AI (R9).</p>
+  <p><strong>RequestLogger</strong> — Logging privacy-safe. NUNCA registra: bodies (prompts/outputs), headers auth, User-Agent. Solo: método, path, status, duración.</p>
+</section>
+
+<!-- ========== 12. EXCEPTIONS ========== -->
+<section id="exceptions">
+  <h2>12. Jerarquía de Excepciones</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Árbol de Excepciones Personalizadas</div>
+    <svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <!-- Root -->
+      <rect x="350" y="10" width="200" height="35" rx="8" fill="#3a1a1a" stroke="#f85149"/>
+      <text x="450" y="33" text-anchor="middle" fill="#f85149" font-size="12" font-weight="bold">HFLError</text>
+
+      <!-- Level 1 -->
+      <rect x="20" y="80" width="140" height="30" rx="6" fill="#21262d" stroke="#f0883e"/>
+      <text x="90" y="100" text-anchor="middle" fill="#f0883e" font-size="10">ModelNotFoundError</text>
+      <rect x="170" y="80" width="155" height="30" rx="6" fill="#21262d" stroke="#f0883e"/>
+      <text x="247" y="100" text-anchor="middle" fill="#f0883e" font-size="10">ModelAlreadyExistsError</text>
+
+      <rect x="20" y="130" width="140" height="30" rx="6" fill="#21262d" stroke="#d29922"/>
+      <text x="90" y="150" text-anchor="middle" fill="#d29922" font-size="10">DownloadError</text>
+      <rect x="40" y="175" width="120" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="100" y="192" text-anchor="middle" fill="#8b949e" font-size="9">NetworkError</text>
+
+      <rect x="335" y="80" width="140" height="30" rx="6" fill="#21262d" stroke="#f85149"/>
+      <text x="405" y="100" text-anchor="middle" fill="#f85149" font-size="10">ConversionError</text>
+      <rect x="355" y="125" width="120" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="415" y="142" text-anchor="middle" fill="#8b949e" font-size="9">ToolNotFoundError</text>
+
+      <rect x="490" y="80" width="120" height="30" rx="6" fill="#21262d" stroke="#f85149"/>
+      <text x="550" y="100" text-anchor="middle" fill="#f85149" font-size="10">LicenseError</text>
+      <rect x="490" y="125" width="145" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="562" y="142" text-anchor="middle" fill="#8b949e" font-size="9">LicenseNotAcceptedError</text>
+      <rect x="490" y="158" width="145" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="562" y="175" text-anchor="middle" fill="#8b949e" font-size="9">GatedModelError</text>
+
+      <rect x="650" y="80" width="120" height="30" rx="6" fill="#21262d" stroke="#bc8cff"/>
+      <text x="710" y="100" text-anchor="middle" fill="#bc8cff" font-size="10">EngineError</text>
+      <rect x="640" y="125" width="140" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="710" y="142" text-anchor="middle" fill="#8b949e" font-size="9">ModelNotLoadedError</text>
+      <rect x="640" y="158" width="155" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="717" y="175" text-anchor="middle" fill="#8b949e" font-size="9">MissingDependencyError</text>
+      <rect x="640" y="191" width="140" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="710" y="208" text-anchor="middle" fill="#8b949e" font-size="9">OutOfMemoryError</text>
+
+      <rect x="20" y="230" width="150" height="30" rx="6" fill="#21262d" stroke="#58a6ff"/>
+      <text x="95" y="250" text-anchor="middle" fill="#58a6ff" font-size="10">AuthenticationError</text>
+      <rect x="30" y="272" width="130" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="95" y="289" text-anchor="middle" fill="#8b949e" font-size="9">InvalidTokenError</text>
+      <rect x="30" y="305" width="140" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="100" y="322" text-anchor="middle" fill="#8b949e" font-size="9">TokenRequiredError</text>
+
+      <rect x="335" y="230" width="155" height="30" rx="6" fill="#21262d" stroke="#d29922"/>
+      <text x="412" y="250" text-anchor="middle" fill="#d29922" font-size="10">ConfigurationError</text>
+      <rect x="345" y="272" width="135" height="25" rx="5" fill="#21262d" stroke="#30363d"/>
+      <text x="412" y="289" text-anchor="middle" fill="#8b949e" font-size="9">InvalidConfigError</text>
+
+      <!-- Lines from root -->
+      <line x1="90" y1="45" x2="90" y2="78" stroke="#30363d" stroke-width="1"/>
+      <line x1="247" y1="45" x2="247" y2="78" stroke="#30363d" stroke-width="1"/>
+      <line x1="90" y1="45" x2="90" y2="128" stroke="#30363d" stroke-width="1"/>
+      <line x1="405" y1="45" x2="405" y2="78" stroke="#30363d" stroke-width="1"/>
+      <line x1="550" y1="45" x2="550" y2="78" stroke="#30363d" stroke-width="1"/>
+      <line x1="710" y1="45" x2="710" y2="78" stroke="#30363d" stroke-width="1"/>
+      <line x1="95" y1="45" x2="95" y2="228" stroke="#30363d" stroke-width="1"/>
+      <line x1="412" y1="45" x2="412" y2="228" stroke="#30363d" stroke-width="1"/>
+      <line x1="450" y1="45" x2="90" y2="45" stroke="#30363d" stroke-width="1"/>
+      <line x1="450" y1="45" x2="710" y2="45" stroke="#30363d" stroke-width="1"/>
+    </svg>
+  </div>
+  <p>Todas heredan de <code>HFLError(message, details)</code> con <code>__str__</code> que combina ambos. Cada excepción incluye datos contextuales específicos (model_name, repo_id, required_gb, etc.) para diagnóstico detallado.</p>
+</section>
+
+<!-- ========== 13. FLUJO PULL ========== -->
+<section id="flujo-pull">
+  <h2>13. Flujo Completo: hfl pull</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Pipeline de Descarga y Registro de Modelo</div>
+    <svg viewBox="0 0 1100 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1100px;margin:0 auto;display:block;">
+      <rect x="10" y="70" width="130" height="50" rx="8" fill="#1f3a5f" stroke="#58a6ff"/><text x="75" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">1. Resolver</text><text x="75" y="107" text-anchor="middle" fill="#8b949e" font-size="9">resolver.py</text>
+      <line x1="140" y1="95" x2="160" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="160" y="70" width="130" height="50" rx="8" fill="#3a1a1a" stroke="#f85149"/><text x="225" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">2. Licencia</text><text x="225" y="107" text-anchor="middle" fill="#8b949e" font-size="9">license_checker.py</text>
+      <line x1="290" y1="95" x2="310" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="310" y="70" width="130" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/><text x="375" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">3. Descargar</text><text x="375" y="107" text-anchor="middle" fill="#8b949e" font-size="9">downloader.py</text>
+      <line x1="440" y1="95" x2="460" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="460" y="70" width="140" height="50" rx="8" fill="#3a2f1a" stroke="#d29922"/><text x="530" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">4. Detectar fmt</text><text x="530" y="107" text-anchor="middle" fill="#8b949e" font-size="9">formats.py</text>
+      <line x1="600" y1="95" x2="620" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="620" y="55" width="150" height="75" rx="8" fill="#3a1a1a" stroke="#f85149"/><text x="695" y="80" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">5. Convertir?</text><text x="695" y="95" text-anchor="middle" fill="#8b949e" font-size="9">gguf_converter.py</text><text x="695" y="110" text-anchor="middle" fill="#8b949e" font-size="8">(solo si no es GGUF)</text><text x="695" y="122" text-anchor="middle" fill="#8b949e" font-size="8">safetensors→FP16→Qx</text>
+      <line x1="770" y1="95" x2="790" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="790" y="70" width="140" height="50" rx="8" fill="#2d1f4e" stroke="#bc8cff"/><text x="860" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">6. Crear Manifest</text><text x="860" y="107" text-anchor="middle" fill="#8b949e" font-size="9">manifest.py</text>
+      <line x1="930" y1="95" x2="950" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="950" y="70" width="140" height="50" rx="8" fill="#1a3a2a" stroke="#39d353"/><text x="1020" y="92" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">7. Registrar</text><text x="1020" y="107" text-anchor="middle" fill="#8b949e" font-size="9">registry.add()</text>
+
+      <!-- Annotations -->
+      <text x="75" y="55" text-anchor="middle" fill="#58a6ff" font-size="8">HfApi.model_info()</text>
+      <text x="225" y="55" text-anchor="middle" fill="#f85149" font-size="8">check + accept</text>
+      <text x="375" y="55" text-anchor="middle" fill="#3fb950" font-size="8">hf_hub_download/</text>
+      <text x="375" y="43" text-anchor="middle" fill="#3fb950" font-size="8">snapshot_download</text>
+      <text x="1020" y="55" text-anchor="middle" fill="#39d353" font-size="8">models.json</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ========== 14. FLUJO RUN ========== -->
+<section id="flujo-run">
+  <h2>14. Flujo Completo: hfl run</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Pipeline de Chat Interactivo</div>
+    <svg viewBox="0 0 900 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <rect x="10" y="60" width="130" height="50" rx="8" fill="#3a2a1a" stroke="#f0883e"/><text x="75" y="82" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">1. Registry.get()</text><text x="75" y="97" text-anchor="middle" fill="#8b949e" font-size="9">buscar por nombre/alias</text>
+      <line x1="140" y1="85" x2="160" y2="85" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="160" y="60" width="150" height="50" rx="8" fill="#2d1f4e" stroke="#bc8cff"/><text x="235" y="82" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">2. select_engine()</text><text x="235" y="97" text-anchor="middle" fill="#8b949e" font-size="9">auto → formato + HW</text>
+      <line x1="310" y1="85" x2="330" y2="85" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="330" y="60" width="130" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/><text x="395" y="82" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">3. engine.load()</text><text x="395" y="97" text-anchor="middle" fill="#8b949e" font-size="9">cargar en RAM/VRAM</text>
+      <line x1="460" y1="85" x2="480" y2="85" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="480" y="45" width="150" height="80" rx="8" fill="#1f3a5f" stroke="#58a6ff"/><text x="555" y="70" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">4. Chat Loop</text><text x="555" y="87" text-anchor="middle" fill="#8b949e" font-size="9">input → messages.append()</text><text x="555" y="102" text-anchor="middle" fill="#8b949e" font-size="9">→ chat_stream()</text><text x="555" y="117" text-anchor="middle" fill="#8b949e" font-size="9">→ print tokens</text>
+      <line x1="630" y1="85" x2="650" y2="85" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="650" y="60" width="120" height="50" rx="8" fill="#21262d" stroke="#30363d"/><text x="710" y="82" text-anchor="middle" fill="#c9d1d9" font-size="10" font-weight="bold">5. /exit</text><text x="710" y="97" text-anchor="middle" fill="#8b949e" font-size="9">engine.unload()</text>
+
+      <!-- Loop arrow -->
+      <path d="M 555 125 Q 555 150 520 150 Q 480 150 480 120" fill="none" stroke="#d29922" stroke-width="1" stroke-dasharray="3" marker-end="url(#arrow-o)"/>
+      <text x="520" y="162" text-anchor="middle" fill="#d29922" font-size="8">loop hasta /exit</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ========== 15. FLUJO SERVE ========== -->
+<section id="flujo-serve">
+  <h2>15. Flujo Completo: hfl serve</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Pipeline del Servidor API</div>
+    <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <!-- Client -->
+      <rect x="10" y="70" width="100" height="50" rx="8" fill="#3a2f1a" stroke="#d29922"/><text x="60" y="92" text-anchor="middle" fill="#d29922" font-size="10" font-weight="bold">Cliente</text><text x="60" y="107" text-anchor="middle" fill="#8b949e" font-size="8">HTTP/SSE</text>
+      <line x1="110" y1="95" x2="130" y2="95" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrow-o)"/>
+
+      <!-- Middleware -->
+      <rect x="130" y="55" width="130" height="80" rx="8" fill="#21262d" stroke="#30363d"/><text x="195" y="78" text-anchor="middle" fill="#d29922" font-size="10" font-weight="bold">Middleware</text><text x="195" y="95" text-anchor="middle" fill="#8b949e" font-size="8">CORS</text><text x="195" y="108" text-anchor="middle" fill="#8b949e" font-size="8">Disclaimer (R9)</text><text x="195" y="121" text-anchor="middle" fill="#8b949e" font-size="8">Privacy Logger (R6)</text>
+      <line x1="260" y1="95" x2="280" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Router -->
+      <rect x="280" y="55" width="160" height="80" rx="8" fill="#1a2332" stroke="#58a6ff"/><text x="360" y="78" text-anchor="middle" fill="#58a6ff" font-size="10" font-weight="bold">Router</text><text x="360" y="95" text-anchor="middle" fill="#8b949e" font-size="8">routes_openai.py</text><text x="360" y="108" text-anchor="middle" fill="#8b949e" font-size="8">routes_native.py</text><text x="360" y="121" text-anchor="middle" fill="#8b949e" font-size="8">/health, /</text>
+      <line x1="440" y1="95" x2="460" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Ensure model -->
+      <rect x="460" y="60" width="160" height="65" rx="8" fill="#3a2a1a" stroke="#f0883e"/><text x="540" y="82" text-anchor="middle" fill="#f0883e" font-size="10" font-weight="bold">_ensure_model_loaded</text><text x="540" y="98" text-anchor="middle" fill="#8b949e" font-size="8">Registry → select_engine</text><text x="540" y="111" text-anchor="middle" fill="#8b949e" font-size="8">→ engine.load() (si necesario)</text>
+      <line x1="620" y1="95" x2="640" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Engine -->
+      <rect x="640" y="60" width="120" height="65" rx="8" fill="#2d1f4e" stroke="#bc8cff"/><text x="700" y="82" text-anchor="middle" fill="#bc8cff" font-size="10" font-weight="bold">Engine</text><text x="700" y="98" text-anchor="middle" fill="#8b949e" font-size="8">chat() / generate()</text><text x="700" y="111" text-anchor="middle" fill="#8b949e" font-size="8">chat_stream() ...</text>
+      <line x1="760" y1="95" x2="780" y2="95" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-g)"/>
+
+      <!-- Response -->
+      <rect x="780" y="70" width="100" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/><text x="830" y="92" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="bold">Response</text><text x="830" y="107" text-anchor="middle" fill="#8b949e" font-size="8">JSON / SSE</text>
+
+      <!-- Pre-load annotation -->
+      <text x="540" y="148" text-anchor="middle" fill="#d29922" font-size="8">Auto-carga: si se pide modelo distinto, descarga el actual y carga el nuevo</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ========== 16. LEGAL ========== -->
+<section id="legal">
+  <h2>16. Cumplimiento Legal y Auditoría</h2>
+  <p>HFL implementa un sistema exhaustivo de cumplimiento legal documentado con referencias a auditoría (R1-R9):</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4><span class="badge badge-red">R1</span> Licencias de Modelos</h4>
+      <p>Verificación obligatoria antes de descarga. Clasificación en 5 niveles de riesgo. Presentación al usuario con panel visual. Aceptación explícita requerida para licencias no permisivas. Metadata de licencia persistida en ModelManifest.</p>
+    </div>
+    <div class="card">
+      <h4><span class="badge badge-red">R3</span> Procedencia de Conversiones</h4>
+      <p>ProvenanceLog inmutable registra cada conversión: origen, destino, herramienta, versión, licencia, timestamp. Advertencia legal en pantalla durante conversión: "la licencia original sigue vigente".</p>
+    </div>
+    <div class="card">
+      <h4><span class="badge badge-yellow">R4</span> EU AI Act</h4>
+      <p>Campos en ModelManifest para clasificación GPAI: <code>gpai_classification</code> ("gpai", "gpai-systemic", "exempt") y <code>training_flops</code>. Archivo <code>NOTICE-EU-AI-ACT.md</code>.</p>
+    </div>
+    <div class="card">
+      <h4><span class="badge badge-blue">R6</span> Privacidad</h4>
+      <p>Token HF solo en memoria. Logging privacy-safe: NUNCA se registran prompts, outputs AI, tokens, User-Agent. Solo metadata (método, path, status, duración). Archivo <code>PRIVACY.md</code>.</p>
+    </div>
+    <div class="card">
+      <h4><span class="badge badge-purple">R8</span> ToS de HuggingFace</h4>
+      <p>Rate limiting (0.5s entre llamadas API). User-Agent identificativo (<code>hfl/0.1.0</code>). Respeto al sistema de gating: NO se bypasea la aceptación de licencias. El usuario debe aceptar en huggingface.co primero.</p>
+    </div>
+    <div class="card">
+      <h4><span class="badge badge-green">R9</span> Disclaimer AI</h4>
+      <p>Middleware <code>DisclaimerMiddleware</code> añade header <code>X-AI-Disclaimer</code> a todas las respuestas de endpoints AI. Disclaimer en chat CLI: "Los modelos AI pueden generar información incorrecta..."</p>
+    </div>
+  </div>
+
+  <h3>Archivos Legales del Proyecto</h3>
+  <table>
+    <tr><td><code>LICENSE</code></td><td>HRUL v1.0 — Licencia propia del proyecto</td></tr>
+    <tr><td><code>LICENSE-DEPENDENCIES.md</code></td><td>Licencias de todas las dependencias de terceros</td></tr>
+    <tr><td><code>PRIVACY.md</code></td><td>Política de privacidad (no se recopilan datos)</td></tr>
+    <tr><td><code>NOTICE-EU-AI-ACT.md</code></td><td>Cumplimiento con EU AI Act</td></tr>
+    <tr><td><code>DISCLAIMER.md</code></td><td>Exención de responsabilidad general</td></tr>
+  </table>
+</section>
+
+<!-- ========== 17. PATRONES ========== -->
+<section id="patrones">
+  <h2>17. Patrones de Diseño</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>Strategy Pattern (Engine)</h4>
+      <p>La interfaz <code>InferenceEngine</code> (ABC) define el contrato. Tres implementaciones concretas (LlamaCpp, Transformers, vLLM) son intercambiables. El <code>selector.py</code> actúa como factory que elige la estrategia correcta según contexto.</p>
+    </div>
+    <div class="card">
+      <h4>Lazy Loading / Lazy Imports</h4>
+      <p>Todas las dependencias pesadas (torch, transformers, vllm, llama-cpp-python) se importan solo cuando se necesitan. Los imports dentro de funciones evitan que una instalación mínima falle por dependencias opcionales ausentes.</p>
+    </div>
+    <div class="card">
+      <h4>Singleton (Config + Registry)</h4>
+      <p><code>config = HFLConfig()</code> se instancia una vez al importar el módulo. <code>ModelRegistry</code> siempre lee del mismo <code>models.json</code>. <code>ProvenanceLog</code> tiene instancia global lazy con <code>get_provenance_log()</code>.</p>
+    </div>
+    <div class="card">
+      <h4>Dataclass como Value Objects</h4>
+      <p><code>ChatMessage</code>, <code>GenerationConfig</code>, <code>GenerationResult</code>, <code>ModelManifest</code>, <code>ResolvedModel</code>, <code>ConversionRecord</code>, <code>LicenseInfo</code> — todos son dataclasses inmutables o semi-inmutables que encapsulan datos.</p>
+    </div>
+    <div class="card">
+      <h4>Pipeline / Chain (CLI pull)</h4>
+      <p>El comando <code>pull</code> implementa un pipeline secuencial de 7 pasos: resolver → verificar licencia → descargar → detectar formato → convertir (condicional) → crear manifest → registrar. Cada paso es un componente desacoplado.</p>
+    </div>
+    <div class="card">
+      <h4>Adapter Pattern (API dual)</h4>
+      <p>Los mismos motores de inferencia se exponen a través de dos interfaces API diferentes (OpenAI y Ollama) mediante routers separados que adaptan los formatos de request/response al formato esperado por cada ecosistema.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 18. DEPENDENCIAS ========== -->
+<section id="dependencias">
+  <h2>18. Dependencias y Extras</h2>
+  <div class="diagram-container">
+    <div class="diagram-title">Mapa de Dependencias por Grupo</div>
+    <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
+      <!-- Core -->
+      <rect x="300" y="10" width="300" height="40" rx="8" fill="#1f3a5f" stroke="#58a6ff"/>
+      <text x="450" y="35" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="bold">Core (siempre instalado)</text>
+      <text x="100" y="75" fill="#c9d1d9" font-size="10">typer  rich  huggingface-hub  fastapi  uvicorn  pydantic  httpx  sse-starlette  pyyaml</text>
+
+      <!-- Extras -->
+      <rect x="20" y="100" width="200" height="60" rx="8" fill="#1a3a2a" stroke="#3fb950"/>
+      <text x="120" y="120" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="bold">[llama]</text>
+      <text x="120" y="140" text-anchor="middle" fill="#8b949e" font-size="9">llama-cpp-python ≥0.3</text>
+
+      <rect x="240" y="100" width="200" height="60" rx="8" fill="#2d1f4e" stroke="#bc8cff"/>
+      <text x="340" y="120" text-anchor="middle" fill="#bc8cff" font-size="11" font-weight="bold">[transformers]</text>
+      <text x="340" y="135" text-anchor="middle" fill="#8b949e" font-size="9">transformers ≥4.47  torch ≥2.5</text>
+      <text x="340" y="148" text-anchor="middle" fill="#8b949e" font-size="9">accelerate ≥1.2  sentencepiece</text>
+
+      <rect x="460" y="100" width="200" height="60" rx="8" fill="#3a2f1a" stroke="#d29922"/>
+      <text x="560" y="120" text-anchor="middle" fill="#d29922" font-size="11" font-weight="bold">[vllm]</text>
+      <text x="560" y="140" text-anchor="middle" fill="#8b949e" font-size="9">vllm ≥0.6</text>
+
+      <rect x="680" y="100" width="200" height="60" rx="8" fill="#3a1a1a" stroke="#f85149"/>
+      <text x="780" y="120" text-anchor="middle" fill="#f85149" font-size="11" font-weight="bold">[convert]</text>
+      <text x="780" y="140" text-anchor="middle" fill="#8b949e" font-size="9">gguf ≥0.10</text>
+
+      <!-- Dev -->
+      <rect x="20" y="185" width="430" height="40" rx="8" fill="#21262d" stroke="#30363d"/>
+      <text x="235" y="210" text-anchor="middle" fill="#8b949e" font-size="11">[dev] pytest ≥8.0  pytest-asyncio  ruff ≥0.8  pytest-cov</text>
+
+      <!-- Build -->
+      <rect x="470" y="185" width="410" height="40" rx="8" fill="#21262d" stroke="#30363d"/>
+      <text x="675" y="210" text-anchor="middle" fill="#8b949e" font-size="11">[build] pyinstaller ≥6.0  |  [all] = llama + transformers + vllm + convert</text>
+
+      <!-- Build system -->
+      <rect x="20" y="240" width="860" height="30" rx="6" fill="#0d1117" stroke="#30363d"/>
+      <text x="450" y="260" text-anchor="middle" fill="#8b949e" font-size="10">Build system: hatchling  |  Target: Python ≥3.10  |  Linting: ruff (E, F, W, I)  |  Line length: 100</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ========== 19. TESTING ========== -->
+<section id="tests">
+  <h2>19. Testing</h2>
+  <p>Suite de tests con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 13 archivos de test con fixtures compartidas en <code>conftest.py</code>.</p>
+
+  <table>
+    <tr><th>Archivo</th><th>Cobertura</th></tr>
+    <tr><td><code>test_api.py</code></td><td>Endpoints OpenAI y Ollama, streaming, schemas</td></tr>
+    <tr><td><code>test_cli.py</code></td><td>Todos los comandos CLI con typer.testing</td></tr>
+    <tr><td><code>test_config.py</code></td><td>HFLConfig, paths, dirs, env vars</td></tr>
+    <tr><td><code>test_converter.py</code></td><td>detect_format, check_convertibility, GGUFConverter</td></tr>
+    <tr><td><code>test_engine.py</code></td><td>LlamaCppEngine, selección automática</td></tr>
+    <tr><td><code>test_exceptions.py</code></td><td>Toda la jerarquía de excepciones</td></tr>
+    <tr><td><code>test_hub.py</code></td><td>Auth, resolver, downloader, license checker</td></tr>
+    <tr><td><code>test_integration.py</code></td><td>Flujos end-to-end (pull→run)</td></tr>
+    <tr><td><code>test_middleware.py</code></td><td>RequestLogger privacy, DisclaimerMiddleware</td></tr>
+    <tr><td><code>test_provenance.py</code></td><td>ProvenanceLog, ConversionRecord, persistencia</td></tr>
+    <tr><td><code>test_registry.py</code></td><td>ModelRegistry: add, get, alias, remove, list</td></tr>
+    <tr><td><code>test_vllm_engine.py</code></td><td>VLLMEngine con mocks</td></tr>
+  </table>
+
+  <p><strong>Fixtures principales</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (directorio temporal con monkeypatch), <code>mock_hf_api</code> (mock de HfApi), <code>sample_manifest</code> (modelo de ejemplo), <code>populated_registry</code> (registro pre-populado).</p>
+</section>
+
+<!-- ========== 20. BUILD ========== -->
+<section id="build">
+  <h2>20. Build y Distribución</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Build System: Hatchling</h4>
+      <p>Configurado en <code>pyproject.toml</code>. Packages source en <code>src/hfl</code>. Entry point: <code>hfl = "hfl.cli.main:app"</code>. Instalación con <code>pip install .</code> o <code>pip install .[all]</code> para todas las dependencias opcionales.</p>
+    </div>
+    <div class="card">
+      <h4>PyInstaller (hfl.spec)</h4>
+      <p>Spec para generar ejecutable standalone. Permite distribuir HFL como binario único sin requerir Python instalado. Se genera con <code>pyinstaller hfl.spec</code> y el resultado queda en <code>dist/hfl</code>.</p>
+    </div>
+  </div>
+
+  <h3>Almacenamiento Local</h3>
+  <pre><code>~/.hfl/
+├── models/               <span class="comment"># Archivos de modelos descargados</span>
+│   └── org--model/       <span class="comment"># Directorio por modelo (org--model format)</span>
+├── cache/                <span class="comment"># Caché de HuggingFace Hub</span>
+├── tools/
+│   └── llama.cpp/        <span class="comment"># Herramientas compiladas para conversión</span>
+│       └── build/bin/    <span class="comment"># Binarios: llama-quantize, etc.</span>
+├── models.json           <span class="comment"># Registro de modelos (array de ModelManifest)</span>
+└── provenance.json       <span class="comment"># Log inmutable de conversiones</span></code></pre>
+</section>
+
+<!-- ========== FOOTER ========== -->
+<div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
+  <p><strong>HFL v0.1.0</strong> — Documentación de Arquitectura Exhaustiva</p>
+  <p>Generado el 19 de febrero de 2026 — Todos los diagramas son SVG interactivos</p>
+  <p>Licencia: HRUL v1.0 — Copyright © 2026 Gabriel Galán Pelayo</p>
+</div>
+
+</div>
+</body>
+</html>

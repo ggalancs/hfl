@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo engine (base, llama_cpp, transformers, selector)."""
+"""Tests for the engine module (base, llama_cpp, transformers, selector)."""
 
 import pytest
 import sys
@@ -8,10 +8,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-# Mock llama_cpp antes de importar los módulos
+# Mock llama_cpp before importing modules
 @pytest.fixture(autouse=True)
 def mock_llama_cpp_module():
-    """Mock del módulo llama_cpp para todos los tests."""
+    """Mock of the llama_cpp module for all tests."""
     mock_llama = MagicMock()
     mock_llama.Llama = MagicMock()
     with patch.dict(sys.modules, {"llama_cpp": mock_llama}):
@@ -19,10 +19,10 @@ def mock_llama_cpp_module():
 
 
 class TestChatMessage:
-    """Tests para ChatMessage dataclass."""
+    """Tests for ChatMessage dataclass."""
 
     def test_creation(self):
-        """Verifica creación de ChatMessage."""
+        """Verifies ChatMessage creation."""
         from hfl.engine.base import ChatMessage
 
         msg = ChatMessage(role="user", content="Hello")
@@ -31,7 +31,7 @@ class TestChatMessage:
         assert msg.content == "Hello"
 
     def test_system_message(self):
-        """Verifica mensaje de sistema."""
+        """Verifies system message."""
         from hfl.engine.base import ChatMessage
 
         msg = ChatMessage(role="system", content="You are helpful")
@@ -40,7 +40,7 @@ class TestChatMessage:
         assert msg.content == "You are helpful"
 
     def test_assistant_message(self):
-        """Verifica mensaje de asistente."""
+        """Verifies assistant message."""
         from hfl.engine.base import ChatMessage
 
         msg = ChatMessage(role="assistant", content="Hi there!")
@@ -49,10 +49,10 @@ class TestChatMessage:
 
 
 class TestGenerationConfig:
-    """Tests para GenerationConfig dataclass."""
+    """Tests for GenerationConfig dataclass."""
 
     def test_default_values(self):
-        """Verifica valores por defecto."""
+        """Verifies default values."""
         from hfl.engine.base import GenerationConfig
 
         cfg = GenerationConfig()
@@ -66,7 +66,7 @@ class TestGenerationConfig:
         assert cfg.seed == -1
 
     def test_custom_values(self):
-        """Verifica valores personalizados."""
+        """Verifies custom values."""
         from hfl.engine.base import GenerationConfig
 
         cfg = GenerationConfig(
@@ -89,10 +89,10 @@ class TestGenerationConfig:
 
 
 class TestGenerationResult:
-    """Tests para GenerationResult dataclass."""
+    """Tests for GenerationResult dataclass."""
 
     def test_default_values(self):
-        """Verifica valores por defecto."""
+        """Verifies default values."""
         from hfl.engine.base import GenerationResult
 
         result = GenerationResult(text="Hello")
@@ -104,7 +104,7 @@ class TestGenerationResult:
         assert result.stop_reason == "stop"
 
     def test_full_result(self):
-        """Verifica resultado completo."""
+        """Verifies complete result."""
         from hfl.engine.base import GenerationResult
 
         result = GenerationResult(
@@ -123,10 +123,10 @@ class TestGenerationResult:
 
 
 class TestLlamaCppEngine:
-    """Tests para LlamaCppEngine."""
+    """Tests for LlamaCppEngine."""
 
     def test_initialization(self, mock_llama_cpp_module):
-        """Verifica inicialización del engine."""
+        """Verifies engine initialization."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
@@ -137,7 +137,7 @@ class TestLlamaCppEngine:
         assert engine.model_name == ""
 
     def test_load_model(self, mock_llama_cpp_module):
-        """Verifica carga de modelo."""
+        """Verifies model loading."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
@@ -147,7 +147,7 @@ class TestLlamaCppEngine:
         assert engine.model_name == "model.gguf"
 
     def test_load_with_kwargs(self, mock_llama_cpp_module):
-        """Verifica carga con parámetros adicionales."""
+        """Verifies loading with additional parameters."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
@@ -162,7 +162,7 @@ class TestLlamaCppEngine:
         assert engine.is_loaded
 
     def test_unload_model(self, mock_llama_cpp_module):
-        """Verifica descarga de modelo."""
+        """Verifies model unloading."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
@@ -173,13 +173,13 @@ class TestLlamaCppEngine:
         assert not engine.is_loaded
 
     def test_generate(self, mock_llama_cpp_module):
-        """Verifica generación de texto."""
+        """Verifies text generation."""
         from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import GenerationConfig
 
         engine = LlamaCppEngine()
 
-        # Configurar mock del modelo
+        # Configure model mock
         mock_model = MagicMock()
         mock_model.return_value = {
             "choices": [{"text": "Generated text", "finish_reason": "stop"}],
@@ -196,7 +196,7 @@ class TestLlamaCppEngine:
             assert result.stop_reason == "stop"
 
     def test_generate_stream(self, mock_llama_cpp_module):
-        """Verifica generación en streaming."""
+        """Verifies streaming generation."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
@@ -215,7 +215,7 @@ class TestLlamaCppEngine:
             assert tokens == ["Hello", " world", "!"]
 
     def test_chat(self, mock_llama_cpp_module):
-        """Verifica chat completion."""
+        """Verifies chat completion."""
         from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import ChatMessage
 
@@ -237,7 +237,7 @@ class TestLlamaCppEngine:
             mock_model.create_chat_completion.assert_called_once()
 
     def test_chat_stream(self, mock_llama_cpp_module):
-        """Verifica chat completion en streaming."""
+        """Verifies streaming chat completion."""
         from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import ChatMessage
 
@@ -259,10 +259,10 @@ class TestLlamaCppEngine:
 
 
 class TestEngineSelector:
-    """Tests para engine/selector.py."""
+    """Tests for engine/selector.py."""
 
     def test_select_llama_cpp_for_gguf(self, temp_dir, mock_llama_cpp_module):
-        """Selecciona LlamaCppEngine para GGUF."""
+        """Selects LlamaCppEngine for GGUF."""
         from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
 
@@ -274,7 +274,7 @@ class TestEngineSelector:
         assert isinstance(engine, LlamaCppEngine)
 
     def test_select_explicit_backend(self, temp_dir, mock_llama_cpp_module):
-        """Selecciona backend explícito."""
+        """Selects explicit backend."""
         from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
 
@@ -283,26 +283,26 @@ class TestEngineSelector:
         assert isinstance(engine, LlamaCppEngine)
 
     def test_select_invalid_backend(self, temp_dir):
-        """Error con backend inválido."""
+        """Error with invalid backend."""
         from hfl.engine.selector import _create_engine
 
-        with pytest.raises(ValueError, match="Backend desconocido"):
+        with pytest.raises(ValueError, match="Unknown backend"):
             _create_engine("invalid")
 
     def test_has_cuda_detection(self):
-        """Verifica detección de CUDA."""
+        """Verifies CUDA detection."""
         from hfl.engine.selector import _has_cuda
 
-        # Sin torch instalado o sin CUDA debería devolver False
+        # Without torch installed or without CUDA should return False
         result = _has_cuda()
         assert isinstance(result, bool)
 
     def test_select_fallback_to_llama_cpp(self, temp_dir, mock_llama_cpp_module):
-        """Fallback a llama.cpp cuando no hay CUDA."""
+        """Fallback to llama.cpp when CUDA is not available."""
         from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
 
-        # Crear archivo safetensors
+        # Create safetensors file
         (temp_dir / "model.safetensors").write_bytes(b"ST")
 
         with patch("hfl.engine.selector._has_cuda", return_value=False):
@@ -312,19 +312,19 @@ class TestEngineSelector:
 
 
 class TestMissingDependencyErrors:
-    """Tests para errores de dependencias faltantes."""
+    """Tests for missing dependency errors."""
 
     def test_missing_dependency_error_exists(self):
-        """Verifica que MissingDependencyError esté definido."""
+        """Verifies that MissingDependencyError is defined."""
         from hfl.engine.selector import MissingDependencyError
 
         assert issubclass(MissingDependencyError, Exception)
 
     def test_missing_llama_cpp_raises_error(self, temp_dir):
-        """Verifica que se lance MissingDependencyError cuando falta llama_cpp."""
+        """Verifies that MissingDependencyError is raised when llama_cpp is missing."""
         from hfl.engine.selector import MissingDependencyError
 
-        # Crear un MissingDependencyError manualmente para verificar su contenido
+        # Manually create a MissingDependencyError to verify its content
         error = MissingDependencyError(
             "El backend llama-cpp requiere la librería 'llama-cpp-python'.\n"
             "Instálala con: pip install llama-cpp-python"
@@ -334,7 +334,7 @@ class TestMissingDependencyErrors:
         assert "pip install" in str(error)
 
     def test_missing_llama_cpp_error_message_contains_gpu_instructions(self, temp_dir):
-        """Verifica que el mensaje de error incluya instrucciones para GPU."""
+        """Verifies that the error message includes GPU instructions."""
         from hfl.engine.selector import _get_llama_cpp_engine, MissingDependencyError
 
         with patch(
@@ -349,7 +349,7 @@ class TestMissingDependencyErrors:
             assert "Metal" in error_msg
 
     def test_select_engine_gguf_without_llama_cpp(self, temp_dir):
-        """Verifica que select_engine falle con mensaje claro cuando falta llama_cpp."""
+        """Verifies that select_engine fails with clear message when llama_cpp is missing."""
         from hfl.engine.selector import select_engine, MissingDependencyError
 
         gguf_file = temp_dir / "model.gguf"
@@ -365,7 +365,7 @@ class TestMissingDependencyErrors:
             assert "llama-cpp-python" in str(exc_info.value)
 
     def test_create_engine_explicit_llama_cpp_without_dependency(self):
-        """Verifica que _create_engine('llama-cpp') falle con mensaje claro."""
+        """Verifies that _create_engine('llama-cpp') fails with clear message."""
         from hfl.engine.selector import _create_engine, MissingDependencyError
 
         with patch(
@@ -376,7 +376,7 @@ class TestMissingDependencyErrors:
                 _create_engine("llama-cpp")
 
     def test_missing_transformers_raises_error(self):
-        """Verifica que se lance MissingDependencyError cuando falta transformers."""
+        """Verifies that MissingDependencyError is raised when transformers is missing."""
         from hfl.engine.selector import _get_transformers_engine, MissingDependencyError
 
         with patch(
@@ -391,10 +391,10 @@ class TestMissingDependencyErrors:
             assert "pip install" in error_msg
 
     def test_missing_vllm_raises_error(self):
-        """Verifica que se lance MissingDependencyError cuando falta vllm."""
+        """Verifies that MissingDependencyError is raised when vllm is missing."""
         from hfl.engine.selector import _get_vllm_engine, MissingDependencyError
 
-        # Simular que el import de vllm_engine falla
+        # Simulate that vllm_engine import fails
         with patch.dict(sys.modules, {"hfl.engine.vllm_engine": None}):
             with pytest.raises(MissingDependencyError) as exc_info:
                 _get_vllm_engine()
@@ -405,10 +405,10 @@ class TestMissingDependencyErrors:
 
 
 class TestTransformersEngine:
-    """Tests para TransformersEngine (requiere mock completo)."""
+    """Tests for TransformersEngine (requires complete mock)."""
 
     def test_initialization(self):
-        """Verifica inicialización del engine."""
+        """Verifies engine initialization."""
         from hfl.engine.transformers_engine import TransformersEngine
 
         engine = TransformersEngine()
@@ -419,7 +419,7 @@ class TestTransformersEngine:
         assert not engine.is_loaded
 
     def test_build_prompt_with_chat_template(self):
-        """Verifica construcción de prompt con chat template."""
+        """Verifies prompt construction with chat template."""
         from hfl.engine.transformers_engine import TransformersEngine
         from hfl.engine.base import ChatMessage
 
@@ -438,12 +438,12 @@ class TestTransformersEngine:
         engine._tokenizer.apply_chat_template.assert_called_once()
 
     def test_build_prompt_fallback(self):
-        """Verifica fallback cuando no hay chat template."""
+        """Verifies fallback when there is no chat template."""
         from hfl.engine.transformers_engine import TransformersEngine
         from hfl.engine.base import ChatMessage
 
         engine = TransformersEngine()
-        engine._tokenizer = MagicMock(spec=[])  # Sin apply_chat_template
+        engine._tokenizer = MagicMock(spec=[])  # Without apply_chat_template
 
         messages = [
             ChatMessage(role="system", content="You are helpful"),
@@ -456,7 +456,7 @@ class TestTransformersEngine:
         assert "Hello" in result
 
     def test_model_name_property(self):
-        """Verifica propiedad model_name."""
+        """Verifies model_name property."""
         from hfl.engine.transformers_engine import TransformersEngine
 
         engine = TransformersEngine()
@@ -465,7 +465,7 @@ class TestTransformersEngine:
         assert engine.model_name == "test/model"
 
     def test_is_loaded_property(self):
-        """Verifica propiedad is_loaded."""
+        """Verifies is_loaded property."""
         from hfl.engine.transformers_engine import TransformersEngine
 
         engine = TransformersEngine()

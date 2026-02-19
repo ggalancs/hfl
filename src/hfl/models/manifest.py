@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Modelo de datos para metadata de modelos locales."""
+"""Data model for local model metadata."""
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -8,44 +8,44 @@ from datetime import datetime
 
 @dataclass
 class ModelManifest:
-    """Metadata completa de un modelo descargado."""
+    """Complete metadata for a downloaded model."""
 
-    # Identificación (campos requeridos primero)
-    name: str  # Nombre corto (ej: "llama3.3-70b-q4")
-    repo_id: str  # HuggingFace repo (ej: "meta-llama/Llama-3.3-70B")
+    # Identification (required fields first)
+    name: str  # Short name (e.g., "llama3.3-70b-q4")
+    repo_id: str  # HuggingFace repo (e.g., "meta-llama/Llama-3.3-70B")
 
-    # Almacenamiento
-    local_path: str  # Ruta absoluta al modelo
+    # Storage
+    local_path: str  # Absolute path to the model
     format: str  # "gguf", "safetensors", "pytorch"
 
-    # Campos opcionales (con default)
-    alias: str | None = None  # Alias definido por usuario (ej: "coder")
-    size_bytes: int = 0  # Tamaño en disco
+    # Optional fields (with default)
+    alias: str | None = None  # User-defined alias (e.g., "coder")
+    size_bytes: int = 0  # Size on disk
 
-    # Cuantización
+    # Quantization
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
-    original_format: str | None = None  # Formato original si se convirtió
+    original_format: str | None = None  # Original format if converted
 
-    # Modelo
+    # Model
     architecture: str | None = None  # llama, mistral, gemma, etc.
     parameters: str | None = None  # "7B", "70B", etc.
-    context_length: int = 4096  # Longitud de contexto
+    context_length: int = 4096  # Context length
 
     # Chat template
-    chat_template: str | None = None  # Jinja2 template para chat
+    chat_template: str | None = None  # Jinja2 template for chat
 
-    # Licencia (R1 - Auditoría Legal)
-    license: str | None = None  # Identificador SPDX de la licencia
-    license_name: str | None = None  # Nombre completo legible
-    license_url: str | None = None  # URL a los términos completos
+    # License (R1 - Legal Audit)
+    license: str | None = None  # SPDX license identifier
+    license_name: str | None = None  # Human-readable full name
+    license_url: str | None = None  # URL to full terms
     license_restrictions: list[str] = field(default_factory=list)
-    # ej: ["non-commercial", "no-derivative", "attribution-required"]
-    gated: bool = False  # Requirió aceptación de términos
-    license_accepted_at: str | None = None  # Timestamp de aceptación
+    # e.g., ["non-commercial", "no-derivative", "attribution-required"]
+    gated: bool = False  # Required acceptance of terms
+    license_accepted_at: str | None = None  # Acceptance timestamp
 
-    # EU AI Act (R4 - Auditoría Legal)
+    # EU AI Act (R4 - Legal Audit)
     gpai_classification: str | None = None  # "gpai", "gpai-systemic", "exempt"
-    training_flops: str | None = None  # Si está disponible en model card
+    training_flops: str | None = None  # If available in model card
 
     # Timestamps
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -60,7 +60,7 @@ class ModelManifest:
 
     @property
     def display_size(self) -> str:
-        """Tamaño legible (ej: '4.2 GB')."""
+        """Human-readable size (e.g., '4.2 GB')."""
         gb = self.size_bytes / (1024**3)
         if gb >= 1:
             return f"{gb:.1f} GB"

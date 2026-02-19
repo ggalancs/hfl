@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Configuración global de pytest y fixtures compartidos.
+Global pytest configuration and shared fixtures.
 """
 
 import pytest
@@ -14,25 +14,25 @@ from unittest.mock import MagicMock, patch
 
 @pytest.fixture
 def temp_dir():
-    """Crea un directorio temporal para tests."""
+    """Creates a temporary directory for tests."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
 
 
 @pytest.fixture
 def temp_config(temp_dir, monkeypatch):
-    """Crea una configuración temporal aislada para tests."""
-    # Importar después de que el módulo esté disponible
+    """Creates an isolated temporary configuration for tests."""
+    # Import after the module is available
     from hfl.config import HFLConfig
 
     test_config = HFLConfig(home_dir=temp_dir)
     test_config.ensure_dirs()
 
-    # Monkeypatch la configuración global
+    # Monkeypatch the global configuration
     import hfl.config
     monkeypatch.setattr(hfl.config, "config", test_config)
 
-    # También necesitamos parchear donde se importa directamente
+    # We also need to patch where it's imported directly
     import hfl.models.registry
     monkeypatch.setattr(hfl.models.registry, "config", test_config)
 
@@ -47,7 +47,7 @@ def temp_config(temp_dir, monkeypatch):
 
 @pytest.fixture
 def mock_hf_api():
-    """Mock del API de HuggingFace."""
+    """Mock of the HuggingFace API."""
     with patch("huggingface_hub.HfApi") as mock:
         api_instance = MagicMock()
         mock.return_value = api_instance
@@ -56,7 +56,7 @@ def mock_hf_api():
 
 @pytest.fixture
 def sample_model_info():
-    """Información de modelo de ejemplo."""
+    """Sample model information."""
     mock_info = MagicMock()
     mock_info.id = "test-org/test-model"
     mock_info.siblings = [
@@ -69,7 +69,7 @@ def sample_model_info():
 
 @pytest.fixture
 def sample_gguf_model_info():
-    """Información de modelo GGUF de ejemplo."""
+    """Sample GGUF model information."""
     mock_info = MagicMock()
     mock_info.id = "test-org/test-model-gguf"
     mock_info.siblings = [
@@ -82,7 +82,7 @@ def sample_gguf_model_info():
 
 @pytest.fixture
 def sample_manifest():
-    """Manifest de modelo de ejemplo."""
+    """Sample model manifest."""
     from hfl.models.manifest import ModelManifest
     return ModelManifest(
         name="test-model-q4_k_m",
@@ -99,7 +99,7 @@ def sample_manifest():
 
 @pytest.fixture
 def mock_llama_model():
-    """Mock de modelo llama-cpp."""
+    """Mock of llama-cpp model."""
     mock = MagicMock()
     mock.return_value = {
         "choices": [{"text": "Hello, world!", "finish_reason": "stop"}],
@@ -114,13 +114,13 @@ def mock_llama_model():
 
 @pytest.fixture
 def populated_registry(temp_config, sample_manifest):
-    """Registry con modelos de ejemplo."""
+    """Registry with sample models."""
     from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     registry.add(sample_manifest)
 
-    # Añadir otro modelo
+    # Add another model
     from hfl.models.manifest import ModelManifest
     registry.add(ModelManifest(
         name="another-model-q5_k_m",
@@ -136,7 +136,7 @@ def populated_registry(temp_config, sample_manifest):
 
 @pytest.fixture
 def mock_llama_cpp():
-    """Mock del módulo llama_cpp completo."""
+    """Mock of the complete llama_cpp module."""
     mock_llama = MagicMock()
     mock_llama_class = MagicMock()
     mock_llama.Llama = mock_llama_class

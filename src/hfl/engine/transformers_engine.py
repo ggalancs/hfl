@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Backend basado en HuggingFace Transformers.
+Backend based on HuggingFace Transformers.
 
-Usa el modelo en su formato nativo (safetensors) con GPU.
-Soporta cuantización dinámica via bitsandbytes.
+Uses the model in its native format (safetensors) with GPU.
+Supports dynamic quantization via bitsandbytes.
 """
 
 import time
@@ -19,7 +19,7 @@ from hfl.engine.base import (
 
 
 class TransformersEngine(InferenceEngine):
-    """Motor de inferencia HuggingFace Transformers."""
+    """HuggingFace Transformers inference engine."""
 
     def __init__(self):
         self._model = None
@@ -28,15 +28,15 @@ class TransformersEngine(InferenceEngine):
 
     def load(self, model_path: str, **kwargs) -> None:
         """
-        Carga un modelo desde directorio local o repo HF.
+        Loads a model from local directory or HF repo.
 
         Args:
-            model_path: Ruta local o repo_id de HuggingFace
+            model_path: Local path or HuggingFace repo_id
             **kwargs:
                 quantization: "4bit", "8bit", None
                 device_map: "auto" (default), "cpu", "cuda:0"
                 torch_dtype: "auto", "float16", "bfloat16"
-                max_memory: dict de memoria máxima por dispositivo
+                max_memory: dict of maximum memory per device
                 trust_remote_code: bool (default False)
         """
         import torch
@@ -81,7 +81,7 @@ class TransformersEngine(InferenceEngine):
                 torch.cuda.empty_cache()
 
     def _build_prompt(self, messages: list[ChatMessage]) -> str:
-        """Construye el prompt usando el chat template del tokenizer."""
+        """Builds the prompt using the tokenizer's chat template."""
         msgs = [{"role": m.role, "content": m.content} for m in messages]
 
         if hasattr(self._tokenizer, "apply_chat_template"):
@@ -91,7 +91,7 @@ class TransformersEngine(InferenceEngine):
                 add_generation_prompt=True,
             )
 
-        # Fallback genérico
+        # Generic fallback
         parts = []
         for m in messages:
             if m.role == "system":
@@ -127,7 +127,7 @@ class TransformersEngine(InferenceEngine):
             )
         elapsed = time.perf_counter() - t0
 
-        # Decodificar solo los tokens nuevos
+        # Decode only the new tokens
         new_tokens = outputs[0][prompt_tokens:]
         text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
         n_gen = len(new_tokens)

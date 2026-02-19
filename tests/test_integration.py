@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests de integración end-to-end."""
+"""End-to-end integration tests."""
 
 import pytest
 import sys
@@ -11,7 +11,7 @@ import json
 
 @pytest.fixture(autouse=True)
 def mock_llama_cpp():
-    """Mock llama_cpp para todos los tests de integración."""
+    """Mock llama_cpp for all integration tests."""
     mock = MagicMock()
     mock.Llama = MagicMock()
     with patch.dict(sys.modules, {"llama_cpp": mock}):
@@ -19,15 +19,15 @@ def mock_llama_cpp():
 
 
 class TestFullWorkflow:
-    """Tests de flujo completo de trabajo."""
+    """Tests for complete workflow."""
 
     def test_pull_list_inspect_rm_workflow(self, temp_config):
-        """Flujo completo: pull → list → inspect → rm."""
+        """Complete workflow: pull -> list -> inspect -> rm."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
         from hfl.hub.resolver import ResolvedModel
 
-        # Simular pull creando manifest directamente
+        # Simulate pull by creating manifest directly
         manifest = ModelManifest(
             name="workflow-test-q4_k_m",
             repo_id="test/workflow-model",
@@ -37,10 +37,10 @@ class TestFullWorkflow:
             quantization="Q4_K_M",
         )
 
-        # Crear archivo
+        # Create file
         (temp_config.models_dir / "workflow-model.gguf").write_bytes(b"GGUF")
 
-        # Registrar
+        # Register
         registry = ModelRegistry()
         registry.add(manifest)
 
@@ -61,10 +61,10 @@ class TestFullWorkflow:
         assert registry.get("workflow-test-q4_k_m") is None
 
     def test_resolve_and_detect_format(self, temp_config):
-        """Resolución de modelo y detección de formato."""
+        """Model resolution and format detection."""
         from hfl.converter.formats import detect_format, ModelFormat
 
-        # Crear estructuras de modelo
+        # Create model structures
         gguf_model = temp_config.models_dir / "gguf-model"
         gguf_model.mkdir()
         (gguf_model / "model.gguf").write_bytes(b"GGUF")
@@ -74,30 +74,30 @@ class TestFullWorkflow:
         (st_model / "model.safetensors").write_bytes(b"ST")
         (st_model / "config.json").write_text("{}")
 
-        # Detectar formatos
+        # Detect formats
         assert detect_format(gguf_model) == ModelFormat.GGUF
         assert detect_format(st_model) == ModelFormat.SAFETENSORS
 
     def test_engine_selection_workflow(self, temp_config):
-        """Selección de engine según formato."""
+        """Engine selection based on format."""
         from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
 
-        # Crear modelo GGUF
+        # Create GGUF model
         gguf_model = temp_config.models_dir / "test.gguf"
         gguf_model.write_bytes(b"GGUF")
 
-        # Seleccionar engine
+        # Select engine
         engine = select_engine(gguf_model)
 
         assert isinstance(engine, LlamaCppEngine)
 
     def test_registry_persistence_workflow(self, temp_config):
-        """Persistencia del registry entre sesiones."""
+        """Registry persistence between sessions."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
-        # Sesión 1: Añadir modelos
+        # Session 1: Add models
         registry1 = ModelRegistry()
         for i in range(3):
             manifest = ModelManifest(
@@ -109,7 +109,7 @@ class TestFullWorkflow:
             )
             registry1.add(manifest)
 
-        # Sesión 2: Cargar y verificar
+        # Session 2: Load and verify
         registry2 = ModelRegistry()
         models = registry2.list_all()
 
@@ -121,31 +121,31 @@ class TestFullWorkflow:
 
 
 class TestAPIIntegration:
-    """Tests de integración de API."""
+    """API integration tests."""
 
     def test_api_model_lifecycle(self, temp_config, sample_manifest):
-        """Ciclo de vida del modelo a través de la API."""
+        """Model lifecycle through the API."""
         from fastapi.testclient import TestClient
         from hfl.api.server import app, state
         from hfl.models.registry import ModelRegistry
 
         client = TestClient(app)
 
-        # Inicialmente sin modelos
+        # Initially no models
         response = client.get("/v1/models")
         assert response.status_code == 200
         assert len(response.json()["data"]) == 0
 
-        # Registrar modelo
+        # Register model
         registry = ModelRegistry()
         registry.add(sample_manifest)
 
-        # Ahora hay modelo
+        # Now there is a model
         response = client.get("/v1/models")
         assert response.status_code == 200
         assert len(response.json()["data"]) == 1
 
-        # También visible en Ollama API
+        # Also visible in Ollama API
         response = client.get("/api/tags")
         assert response.status_code == 200
         assert len(response.json()["models"]) == 1
@@ -154,14 +154,14 @@ class TestAPIIntegration:
         registry.remove(sample_manifest.name)
 
     def test_openai_ollama_compatibility(self, temp_config, sample_manifest):
-        """Compatibilidad entre endpoints OpenAI y Ollama."""
+        """Compatibility between OpenAI and Ollama endpoints."""
         from fastapi.testclient import TestClient
         from hfl.api.server import app, state
         from hfl.models.registry import ModelRegistry
 
         client = TestClient(app)
 
-        # Registrar modelo
+        # Register model
         registry = ModelRegistry()
         registry.add(sample_manifest)
 
@@ -195,7 +195,7 @@ class TestAPIIntegration:
             assert openai_response.status_code == 200
             assert ollama_response.status_code == 200
 
-            # Ambos devuelven el mismo contenido
+            # Both return the same content
             openai_content = openai_response.json()["choices"][0]["message"]["content"]
             ollama_content = ollama_response.json()["message"]["content"]
             assert openai_content == ollama_content == "Test response"
@@ -207,33 +207,33 @@ class TestAPIIntegration:
 
 
 class TestErrorHandling:
-    """Tests de manejo de errores."""
+    """Tests for error handling."""
 
     def test_invalid_quantization_level(self):
-        """Manejo de nivel de cuantización inválido."""
+        """Handling of invalid quantization level."""
         from hfl.hub.resolver import _detect_quant
 
-        # No debería fallar, solo devolver None
+        # Should not fail, just return None
         result = _detect_quant("model-INVALID.gguf")
         assert result is None
 
     def test_corrupted_manifest(self, temp_config):
-        """Manejo de manifest corrupto en registry."""
+        """Handling of corrupted manifest in registry."""
         from hfl.models.registry import ModelRegistry
 
-        # Escribir datos corruptos
+        # Write corrupted data
         temp_config.registry_path.write_text('[{"name": "incomplete"}]')
 
-        # Debería manejar graciosamente
+        # Should handle gracefully
         try:
             registry = ModelRegistry()
-            # Puede cargar o no dependiendo de la validación
+            # May or may not load depending on validation
         except Exception:
-            # Aceptable si falla de forma controlada
+            # Acceptable if it fails in a controlled manner
             pass
 
     def test_missing_model_path(self, temp_config):
-        """Manejo de path de modelo inexistente."""
+        """Handling of non-existent model path."""
         from hfl.converter.formats import detect_format, ModelFormat
 
         result = detect_format(Path("/nonexistent/model/path"))
@@ -241,16 +241,16 @@ class TestErrorHandling:
 
 
 class TestPerformance:
-    """Tests de rendimiento básico."""
+    """Basic performance tests."""
 
     def test_registry_many_models(self, temp_config):
-        """Registry con muchos modelos."""
+        """Registry with many models."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
         registry = ModelRegistry()
 
-        # Añadir 100 modelos
+        # Add 100 models
         for i in range(100):
             manifest = ModelManifest(
                 name=f"perf-model-{i:03d}",
@@ -260,25 +260,25 @@ class TestPerformance:
             )
             registry.add(manifest)
 
-        # Verificar carga
+        # Verify loading
         models = registry.list_all()
         assert len(models) == 100
 
-        # Búsqueda rápida
+        # Fast search
         model = registry.get("perf-model-050")
         assert model is not None
 
     def test_format_detection_many_files(self, temp_dir):
-        """Detección de formato con muchos archivos."""
+        """Format detection with many files."""
         from hfl.converter.formats import detect_format, ModelFormat
 
-        # Crear muchos archivos
+        # Create many files
         for i in range(50):
             (temp_dir / f"file_{i}.txt").write_text(f"content {i}")
 
-        # Añadir archivo GGUF al final
+        # Add GGUF file at the end
         (temp_dir / "model.gguf").write_bytes(b"GGUF")
 
-        # Debería encontrarlo
+        # Should find it
         result = detect_format(temp_dir)
         assert result == ModelFormat.GGUF

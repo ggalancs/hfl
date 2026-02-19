@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Resolución inteligente de nombres de modelo.
+Smart resolution of model names.
 
-Soporta múltiples formatos de entrada:
-  - "meta-llama/Llama-3.3-70B-Instruct"       → repo exacto
-  - "llama3.3:70b"                              → búsqueda por alias
-  - "TheBloke/Llama-3.3-70B-Instruct-GGUF"     → GGUF pre-cuantizado
+Supports multiple input formats:
+  - "meta-llama/Llama-3.3-70B-Instruct"       -> exact repo
+  - "llama3.3:70b"                              -> search by alias
+  - "TheBloke/Llama-3.3-70B-Instruct-GGUF"     -> pre-quantized GGUF
 """
 
 from dataclasses import dataclass
@@ -16,44 +16,44 @@ from huggingface_hub import HfApi
 
 @dataclass
 class ResolvedModel:
-    repo_id: str  # org/model en HF
+    repo_id: str  # org/model in HF
     revision: str = "main"  # branch/tag/commit
-    filename: str | None = None  # Archivo específico (para GGUF)
+    filename: str | None = None  # Specific file (for GGUF)
     format: str = "auto"  # auto, gguf, safetensors, pytorch
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
 
 
 def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
     """
-    Resuelve una especificación de modelo a un ResolvedModel concreto.
+    Resolve a model specification to a concrete ResolvedModel.
 
-    Formatos soportados:
-    - "org/model"                    → repo directo
-    - "org/model:Q4_K_M"             → repo con cuantización (estilo Ollama)
-    - "nombre-modelo"                → búsqueda por nombre
+    Supported formats:
+    - "org/model"                    -> direct repo
+    - "org/model:Q4_K_M"             -> repo with quantization (Ollama style)
+    - "model-name"                   -> search by name
 
-    Estrategia de resolución:
-    1. Extraer cuantización si usa formato repo:quant
-    2. Si contiene '/', tratar como repo_id directo
-    3. Si el repo tiene archivos GGUF, usarlos directamente
-    4. Si no, usar safetensors y marcar para conversión
+    Resolution strategy:
+    1. Extract quantization if using repo:quant format
+    2. If contains '/', treat as direct repo_id
+    3. If the repo has GGUF files, use them directly
+    4. Otherwise, use safetensors and mark for conversion
     """
     api = HfApi()
 
-    # Extraer cuantización del formato "repo:Q4_K_M" (estilo Ollama)
+    # Extract quantization from "repo:Q4_K_M" format (Ollama style)
     if ":" in model_spec:
         parts = model_spec.rsplit(":", 1)
-        # Verificar que la parte después de : parece una cuantización
+        # Verify that the part after : looks like a quantization
         if _is_quantization(parts[1]):
             model_spec = parts[0]
-            # La cuantización explícita en el spec tiene prioridad
+            # Explicit quantization in the spec takes priority
             quantization = parts[1]
 
-    # Caso 1: repo_id directo (org/model)
+    # Case 1: direct repo_id (org/model)
     if "/" in model_spec:
         repo_id = model_spec
     else:
-        # Caso 2: búsqueda por nombre
+        # Case 2: search by name
         results = api.list_models(
             search=model_spec,
             sort="downloads",
@@ -62,10 +62,10 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
         )
         results = list(results)
         if not results:
-            raise ValueError(f"No se encontró modelo: {model_spec}")
+            raise ValueError(f"Model not found: {model_spec}")
         repo_id = results[0].id
 
-    # Detectar formato disponible
+    # Detect available format
     siblings = api.model_info(repo_id).siblings or []
     filenames = [s.rfilename for s in siblings]
 
@@ -73,7 +73,7 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
     safetensor_files = [f for f in filenames if f.endswith(".safetensors")]
 
     if gguf_files:
-        # Seleccionar el GGUF que mejor coincida con la cuantización pedida
+        # Select the GGUF that best matches the requested quantization
         target_file = _select_gguf(gguf_files, quantization)
         return ResolvedModel(
             repo_id=repo_id,
@@ -96,14 +96,14 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
 
 
 def _select_gguf(files: list[str], quant: str | None) -> str:
-    """Selecciona el archivo GGUF más apropiado."""
+    """Select the most appropriate GGUF file."""
     if quant:
         quant_upper = quant.upper()
         for f in files:
             if quant_upper in f.upper():
                 return f
 
-    # Prioridad por defecto: Q4_K_M > Q5_K_M > Q4_K_S > primer archivo
+    # Default priority: Q4_K_M > Q5_K_M > Q4_K_S > first file
     priority = ["Q4_K_M", "Q5_K_M", "Q4_K_S", "Q5_K_S", "Q6_K", "Q8_0"]
     for q in priority:
         for f in files:
@@ -114,7 +114,7 @@ def _select_gguf(files: list[str], quant: str | None) -> str:
 
 
 def _detect_quant(filename: str) -> str | None:
-    """Detecta el nivel de cuantización del nombre del archivo."""
+    """Detect the quantization level from the filename."""
     quant_levels = _get_quant_levels()
     upper = filename.upper()
     for q in quant_levels:
@@ -124,7 +124,7 @@ def _detect_quant(filename: str) -> str | None:
 
 
 def _get_quant_levels() -> list[str]:
-    """Lista de niveles de cuantización conocidos."""
+    """List of known quantization levels."""
     return [
         "Q2_K",
         "Q3_K_S",
@@ -158,15 +158,15 @@ def _get_quant_levels() -> list[str]:
 
 
 def _is_quantization(s: str) -> bool:
-    """Verifica si una cadena parece un nivel de cuantización."""
+    """Check if a string looks like a quantization level."""
     if not s:
         return False
     upper = s.upper()
-    # Verificar coincidencia exacta o parcial con niveles conocidos
+    # Check for exact or partial match with known levels
     for q in _get_quant_levels():
         if upper == q or upper == q.replace("_", ""):
             return True
-    # Patrón genérico: Q seguido de número, o F16/F32, o IQ
+    # Generic pattern: Q followed by number, or F16/F32, or IQ
     if upper.startswith(("Q", "F", "IQ")) and any(c.isdigit() for c in upper):
         return True
     return False

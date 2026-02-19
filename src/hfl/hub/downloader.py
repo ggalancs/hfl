@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Descarga de modelos desde HuggingFace Hub con progreso visual.
+Model download from HuggingFace Hub with visual progress.
 
-Soporta:
-- Descarga de archivos GGUF individuales
-- Descarga de repos completos (safetensors)
-- Reanudación de descargas interrumpidas
-- Cache inteligente (no re-descarga si ya existe)
+Supports:
+- Individual GGUF file download
+- Complete repo download (safetensors)
+- Resume of interrupted downloads
+- Smart cache (no re-download if already exists)
 
-Cumplimiento con ToS de HuggingFace (R8 - Auditoría Legal):
-- Rate limiting entre llamadas API
-- User-Agent identificativo
+Compliance with HuggingFace ToS (R8 - Legal Audit):
+- Rate limiting between API calls
+- Identifying User-Agent
 """
 
 import os
@@ -27,12 +27,12 @@ from hfl.hub.resolver import ResolvedModel
 
 console = Console()
 
-# Rate limiting para cumplir con ToS de HuggingFace (R8)
+# Rate limiting to comply with HuggingFace ToS (R8)
 _last_api_call: float = 0
-_MIN_INTERVAL: float = 0.5  # Mínimo 0.5 segundos entre llamadas API
+_MIN_INTERVAL: float = 0.5  # Minimum 0.5 seconds between API calls
 
-# Configurar User-Agent para identificar el tool (R8)
-# Esto permite a HuggingFace identificar el origen de las solicitudes
+# Configure User-Agent to identify the tool (R8)
+# This allows HuggingFace to identify the origin of requests
 try:
     from hfl import __version__
 except ImportError:
@@ -42,7 +42,7 @@ os.environ.setdefault("HF_HUB_USER_AGENT", f"hfl/{__version__}")
 
 
 def _rate_limit() -> None:
-    """Aplica rate limiting entre llamadas API."""
+    """Apply rate limiting between API calls."""
     global _last_api_call
     elapsed = time.time() - _last_api_call
     if elapsed < _MIN_INTERVAL:
@@ -52,26 +52,26 @@ def _rate_limit() -> None:
 
 def pull_model(resolved: ResolvedModel) -> Path:
     """
-    Descarga un modelo y devuelve la ruta local.
+    Download a model and return the local path.
 
-    Para GGUF: descarga el archivo individual.
-    Para safetensors: descarga el snapshot completo del repo.
+    For GGUF: downloads the individual file.
+    For safetensors: downloads the complete repo snapshot.
     """
-    # Rate limiting antes de llamadas API (R8 - ToS compliance)
+    # Rate limiting before API calls (R8 - ToS compliance)
     _rate_limit()
     token = ensure_auth(resolved.repo_id)
 
-    # Directorio destino: ~/.hfl/models/<org>/<model>/
+    # Destination directory: ~/.hfl/models/<org>/<model>/
     model_dir = config.models_dir / resolved.repo_id.replace("/", "--")
     model_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(
-        f"[bold cyan]Descargando[/] {resolved.repo_id}"
+        f"[bold cyan]Downloading[/] {resolved.repo_id}"
         + (f" ({resolved.filename})" if resolved.filename else "")
     )
 
     if resolved.format == "gguf" and resolved.filename:
-        # Descarga de archivo GGUF individual
+        # Individual GGUF file download
         # (resume_download is deprecated - downloads always resume automatically)
         local_path = hf_hub_download(
             repo_id=resolved.repo_id,
@@ -82,8 +82,8 @@ def pull_model(resolved: ResolvedModel) -> Path:
         )
         return Path(local_path)
     else:
-        # Descarga del snapshot completo
-        # Filtrar solo los archivos necesarios
+        # Complete snapshot download
+        # Filter only the necessary files
         allow_patterns = []
         if resolved.format == "safetensors":
             allow_patterns = [

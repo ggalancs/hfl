@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Verificación y clasificación de licencias de modelos.
+Model license verification and classification.
 
-Cada modelo descargado DEBE pasar por este checker antes
-de proceder con la descarga y/o conversión.
+Each downloaded model MUST pass through this checker before
+proceeding with the download and/or conversion.
 
-Este módulo implementa las recomendaciones de la auditoría legal R1
-para mitigar el riesgo de violación de licencias de modelos.
+This module implements the recommendations from legal audit R1
+to mitigate the risk of model license violations.
 """
 
 from dataclasses import dataclass
@@ -17,18 +17,18 @@ from huggingface_hub import HfApi
 
 
 class LicenseRisk(Enum):
-    """Clasificación de riesgo de licencias."""
+    """License risk classification."""
 
-    PERMISSIVE = "permissive"  # Apache 2.0, MIT — uso libre
-    CONDITIONAL = "conditional"  # Llama, Gemma — restricciones específicas
-    NON_COMMERCIAL = "non_commercial"  # CC-BY-NC, MRL — NO uso comercial
+    PERMISSIVE = "permissive"  # Apache 2.0, MIT - free use
+    CONDITIONAL = "conditional"  # Llama, Gemma - specific restrictions
+    NON_COMMERCIAL = "non_commercial"  # CC-BY-NC, MRL - NO commercial use
     RESTRICTED = "restricted"  # MNPL, research-only
-    UNKNOWN = "unknown"  # No se pudo determinar
+    UNKNOWN = "unknown"  # Could not be determined
 
 
-# Licencias conocidas y su clasificación
+# Known licenses and their classification
 LICENSE_CLASSIFICATION: dict[str, LicenseRisk] = {
-    # Permisivas
+    # Permissive
     "apache-2.0": LicenseRisk.PERMISSIVE,
     "mit": LicenseRisk.PERMISSIVE,
     "bsd-2-clause": LicenseRisk.PERMISSIVE,
@@ -37,7 +37,7 @@ LICENSE_CLASSIFICATION: dict[str, LicenseRisk] = {
     "unlicense": LicenseRisk.PERMISSIVE,
     "wtfpl": LicenseRisk.PERMISSIVE,
     "cc-by-4.0": LicenseRisk.PERMISSIVE,
-    # Condicionales (requieren atención)
+    # Conditional (require attention)
     "openrail": LicenseRisk.CONDITIONAL,
     "openrail++": LicenseRisk.CONDITIONAL,
     "bigscience-openrail-m": LicenseRisk.CONDITIONAL,
@@ -51,15 +51,15 @@ LICENSE_CLASSIFICATION: dict[str, LicenseRisk] = {
     "qwen": LicenseRisk.CONDITIONAL,
     "deepseek": LicenseRisk.CONDITIONAL,
     "cc-by-sa-4.0": LicenseRisk.CONDITIONAL,
-    # No comerciales
+    # Non-commercial
     "cc-by-nc-4.0": LicenseRisk.NON_COMMERCIAL,
     "cc-by-nc-sa-4.0": LicenseRisk.NON_COMMERCIAL,
     "cc-by-nc-nd-4.0": LicenseRisk.NON_COMMERCIAL,
-    # Restringidas
+    # Restricted
     "other": LicenseRisk.UNKNOWN,
 }
 
-# Restricciones específicas por familia de licencia
+# Specific restrictions by license family
 LICENSE_RESTRICTIONS: dict[str, list[str]] = {
     "llama2": [
         "commercial-use-up-to-700M-MAU",
@@ -140,7 +140,7 @@ LICENSE_RESTRICTIONS: dict[str, list[str]] = {
 
 @dataclass
 class LicenseInfo:
-    """Información de licencia de un modelo."""
+    """License information for a model."""
 
     license_id: str
     license_name: str
@@ -152,56 +152,56 @@ class LicenseInfo:
 
 def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
     """
-    Consulta y clasifica la licencia de un modelo de HuggingFace.
+    Query and classify the license of a HuggingFace model.
 
     Args:
-        repo_id: ID del repositorio (ej: "meta-llama/Llama-3.1-8B")
-        token: Token de autenticación opcional
+        repo_id: Repository ID (e.g.: "meta-llama/Llama-3.1-8B")
+        token: Optional authentication token
 
     Returns:
-        LicenseInfo con todos los detalles de la licencia.
+        LicenseInfo with all license details.
     """
     api = HfApi()
     info = api.model_info(repo_id, token=token)
 
-    # Intentar obtener licencia de card_data
+    # Try to get license from card_data
     license_id = None
     license_name = None
     license_url = None
     card_data = getattr(info, "card_data", None)
 
     if card_data:
-        # Obtener license básica
+        # Get basic license
         if hasattr(card_data, "license"):
             license_id = card_data.license
 
-        # Obtener license_name (más específica, ej: "qwen2" cuando license es "other")
+        # Get license_name (more specific, e.g.: "qwen2" when license is "other")
         if hasattr(card_data, "license_name"):
             license_name = card_data.license_name
 
-        # Obtener license_link si existe
+        # Get license_link if it exists
         if hasattr(card_data, "license_link"):
             license_url = card_data.license_link
 
-    # Fallback: buscar en tags
+    # Fallback: search in tags
     if not license_id:
         tags = getattr(info, "tags", []) or []
         license_tags = [t.replace("license:", "") for t in tags if t.startswith("license:")]
         license_id = license_tags[0] if license_tags else "other"
 
-    # Normalizar license_id y license_name
+    # Normalize license_id and license_name
     license_id = license_id.lower().strip() if license_id else "other"
     license_name_normalized = license_name.lower().strip() if license_name else None
 
-    # Si license_id es "other" pero tenemos license_name, usar license_name para clasificación
+    # If license_id is "other" but we have license_name, use license_name for classification
     classification_key = license_id
     if license_id == "other" and license_name_normalized:
         classification_key = license_name_normalized
 
-    # Buscar clasificación
+    # Search for classification
     risk = LICENSE_CLASSIFICATION.get(classification_key, LicenseRisk.UNKNOWN)
 
-    # Si aún es UNKNOWN pero tenemos license_name, buscar coincidencia parcial
+    # If still UNKNOWN but we have license_name, search for partial match
     if risk == LicenseRisk.UNKNOWN and license_name_normalized:
         for known_license, known_risk in LICENSE_CLASSIFICATION.items():
             if known_license in license_name_normalized or license_name_normalized in known_license:
@@ -209,20 +209,20 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
                 classification_key = known_license
                 break
 
-    # Buscar restricciones (intentar coincidencia parcial para variantes)
+    # Search for restrictions (try partial match for variants)
     restrictions = []
     for key, restr in LICENSE_RESTRICTIONS.items():
         if key in classification_key or classification_key in key:
             restrictions = restr
             break
 
-    # Detectar si es gated
+    # Detect if gated
     gated = getattr(info, "gated", False) or False
 
-    # Determinar el nombre de licencia para mostrar
+    # Determine license name for display
     display_name = license_name if license_name else license_id.replace("-", " ").title()
 
-    # Determinar URL de licencia
+    # Determine license URL
     if not license_url:
         license_url = f"https://huggingface.co/{repo_id}#license"
 
@@ -238,16 +238,16 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
 
 def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
     """
-    Presenta la licencia al usuario y requiere aceptación explícita.
+    Present the license to the user and require explicit acceptance.
 
-    Obligatorio para licencias CONDITIONAL, NON_COMMERCIAL, RESTRICTED y UNKNOWN.
+    Mandatory for CONDITIONAL, NON_COMMERCIAL, RESTRICTED and UNKNOWN licenses.
 
     Args:
-        license_info: Información de la licencia
-        repo_id: ID del repositorio
+        license_info: License information
+        repo_id: Repository ID
 
     Returns:
-        True si el usuario acepta, False si rechaza.
+        True if user accepts, False if user rejects.
     """
     import typer
     from rich.console import Console
@@ -255,66 +255,66 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
 
     console = Console()
 
-    # Licencias permisivas no requieren confirmación
+    # Permissive licenses do not require confirmation
     if license_info.risk == LicenseRisk.PERMISSIVE:
-        console.print(f"  [green]Licencia:[/] {license_info.license_id} (permisiva)")
+        console.print(f"  [green]License:[/] {license_info.license_id} (permissive)")
         return True
 
-    # Construir mensaje según nivel de riesgo
+    # Build message according to risk level
     if license_info.risk == LicenseRisk.NON_COMMERCIAL:
         color = "red"
-        title = "LICENCIA NO COMERCIAL"
-        warning = "Este modelo NO puede usarse con fines comerciales."
+        title = "NON-COMMERCIAL LICENSE"
+        warning = "This model CANNOT be used for commercial purposes."
     elif license_info.risk == LicenseRisk.RESTRICTED:
         color = "red"
-        title = "LICENCIA RESTRINGIDA"
-        warning = "Este modelo tiene restricciones severas de uso."
+        title = "RESTRICTED LICENSE"
+        warning = "This model has severe use restrictions."
     elif license_info.risk == LicenseRisk.UNKNOWN:
         color = "yellow"
-        title = "LICENCIA DESCONOCIDA"
-        warning = "No se pudo determinar la licencia. Revise los términos manualmente."
+        title = "UNKNOWN LICENSE"
+        warning = "Could not determine the license. Please review the terms manually."
     else:  # CONDITIONAL
         color = "yellow"
-        title = "LICENCIA CON RESTRICCIONES"
-        warning = "Este modelo tiene condiciones de uso específicas."
+        title = "LICENSE WITH RESTRICTIONS"
+        warning = "This model has specific terms of use."
 
-    # Construir panel de información
+    # Build information panel
     restrictions_text = ""
     if license_info.restrictions:
-        restrictions_text = "\n\nRestricciones:\n" + "\n".join(
+        restrictions_text = "\n\nRestrictions:\n" + "\n".join(
             f"  - {r}" for r in license_info.restrictions
         )
 
     gated_text = ""
     if license_info.gated:
-        gated_text = "\n\n[bold]Modelo Gated:[/] Requiere aceptación previa en huggingface.co"
+        gated_text = "\n\n[bold]Gated Model:[/] Requires prior acceptance at huggingface.co"
 
     console.print(
         Panel(
             f"[bold {color}]{title}[/]\n\n"
-            f"Modelo: {repo_id}\n"
-            f"Licencia: {license_info.license_id}\n\n"
+            f"Model: {repo_id}\n"
+            f"License: {license_info.license_id}\n\n"
             f"{warning}"
             f"{restrictions_text}"
             f"{gated_text}"
-            f"\n\nDetalles: {license_info.url}",
-            title="Términos de Uso",
+            f"\n\nDetails: {license_info.url}",
+            title="Terms of Use",
             border_style=color,
         )
     )
 
     return typer.confirm(
-        "¿Aceptas los términos de esta licencia y confirmas que tu uso es conforme?",
+        "Do you accept the terms of this license and confirm your use is compliant?",
         default=False,
     )
 
 
 def get_license_summary(license_info: LicenseInfo) -> str:
     """
-    Genera un resumen corto de la licencia para mostrar en tablas.
+    Generate a short license summary for display in tables.
 
     Returns:
-        String corto con el ID y emoji indicador de riesgo.
+        Short string with the ID and risk indicator emoji.
     """
     risk_emoji = {
         LicenseRisk.PERMISSIVE: "[green]OK[/]",

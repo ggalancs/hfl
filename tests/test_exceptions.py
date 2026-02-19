@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo exceptions."""
+"""Tests for the exceptions module."""
 
 import pytest
 
 
 class TestHFLError:
-    """Tests para la excepción base."""
+    """Tests for the base exception."""
 
     def test_basic_message(self):
-        """Mensaje básico sin detalles."""
+        """Basic message without details."""
         from hfl.exceptions import HFLError
 
         err = HFLError("Test error")
@@ -18,7 +18,7 @@ class TestHFLError:
         assert err.details is None
 
     def test_message_with_details(self):
-        """Mensaje con detalles adicionales."""
+        """Message with additional details."""
         from hfl.exceptions import HFLError
 
         err = HFLError("Test error", "Additional details")
@@ -28,10 +28,10 @@ class TestHFLError:
 
 
 class TestModelErrors:
-    """Tests para errores de modelos."""
+    """Tests for model errors."""
 
     def test_model_not_found(self):
-        """ModelNotFoundError tiene mensaje útil."""
+        """ModelNotFoundError has useful message."""
         from hfl.exceptions import ModelNotFoundError
 
         err = ModelNotFoundError("test-model")
@@ -40,7 +40,7 @@ class TestModelErrors:
         assert err.model_name == "test-model"
 
     def test_model_already_exists(self):
-        """ModelAlreadyExistsError tiene nombre del modelo."""
+        """ModelAlreadyExistsError has model name."""
         from hfl.exceptions import ModelAlreadyExistsError
 
         err = ModelAlreadyExistsError("existing-model")
@@ -49,10 +49,10 @@ class TestModelErrors:
 
 
 class TestDownloadErrors:
-    """Tests para errores de descarga."""
+    """Tests for download errors."""
 
     def test_download_error(self):
-        """DownloadError básico."""
+        """Basic DownloadError."""
         from hfl.exceptions import DownloadError
 
         err = DownloadError("org/model", "Connection timeout")
@@ -61,19 +61,19 @@ class TestDownloadErrors:
         assert err.repo_id == "org/model"
 
     def test_network_error(self):
-        """NetworkError hereda de DownloadError."""
+        """NetworkError inherits from DownloadError."""
         from hfl.exceptions import NetworkError, DownloadError
 
         err = NetworkError("org/model", "DNS resolution failed")
         assert isinstance(err, DownloadError)
-        assert "Error de red" in str(err)
+        assert "Network error" in str(err)
 
 
 class TestConversionErrors:
-    """Tests para errores de conversión."""
+    """Tests for conversion errors."""
 
     def test_conversion_error(self):
-        """ConversionError tiene formatos."""
+        """ConversionError has formats."""
         from hfl.exceptions import ConversionError
 
         err = ConversionError("safetensors", "gguf", "Out of memory")
@@ -83,7 +83,7 @@ class TestConversionErrors:
         assert err.target_format == "gguf"
 
     def test_tool_not_found(self):
-        """ToolNotFoundError hereda de ConversionError."""
+        """ToolNotFoundError inherits from ConversionError."""
         from hfl.exceptions import ToolNotFoundError, ConversionError
 
         err = ToolNotFoundError("llama-quantize")
@@ -93,10 +93,10 @@ class TestConversionErrors:
 
 
 class TestLicenseErrors:
-    """Tests para errores de licencia."""
+    """Tests for license errors."""
 
     def test_license_not_accepted(self):
-        """LicenseNotAcceptedError tiene info de licencia."""
+        """LicenseNotAcceptedError has license info."""
         from hfl.exceptions import LicenseNotAcceptedError, LicenseError
 
         err = LicenseNotAcceptedError("meta-llama/Llama-3", "llama3")
@@ -107,7 +107,7 @@ class TestLicenseErrors:
         assert err.license_type == "llama3"
 
     def test_gated_model_error(self):
-        """GatedModelError tiene URL de aceptación."""
+        """GatedModelError has acceptance URL."""
         from hfl.exceptions import GatedModelError
 
         err = GatedModelError("meta-llama/Llama-3")
@@ -116,18 +116,18 @@ class TestLicenseErrors:
 
 
 class TestEngineErrors:
-    """Tests para errores de motor."""
+    """Tests for engine errors."""
 
     def test_model_not_loaded(self):
-        """ModelNotLoadedError mensaje claro."""
+        """ModelNotLoadedError clear message."""
         from hfl.exceptions import ModelNotLoadedError, EngineError
 
         err = ModelNotLoadedError()
         assert isinstance(err, EngineError)
-        assert "no cargado" in str(err).lower()
+        assert "not loaded" in str(err).lower()
 
     def test_missing_dependency(self):
-        """MissingDependencyError tiene comando de instalación."""
+        """MissingDependencyError has install command."""
         from hfl.exceptions import MissingDependencyError
 
         err = MissingDependencyError(
@@ -139,7 +139,7 @@ class TestEngineErrors:
         assert err.package == "llama-cpp-python"
 
     def test_out_of_memory(self):
-        """OutOfMemoryError tiene info de memoria."""
+        """OutOfMemoryError has memory info."""
         from hfl.exceptions import OutOfMemoryError
 
         err = OutOfMemoryError(required_gb=16.0, available_gb=8.0)
@@ -150,10 +150,10 @@ class TestEngineErrors:
 
 
 class TestAuthErrors:
-    """Tests para errores de autenticación."""
+    """Tests for authentication errors."""
 
     def test_invalid_token(self):
-        """InvalidTokenError tiene URL de tokens."""
+        """InvalidTokenError has tokens URL."""
         from hfl.exceptions import InvalidTokenError, AuthenticationError
 
         err = InvalidTokenError()
@@ -161,7 +161,7 @@ class TestAuthErrors:
         assert "huggingface.co/settings/tokens" in str(err)
 
     def test_token_required(self):
-        """TokenRequiredError tiene repo_id."""
+        """TokenRequiredError has repo_id."""
         from hfl.exceptions import TokenRequiredError
 
         err = TokenRequiredError("private/model")
@@ -171,10 +171,10 @@ class TestAuthErrors:
 
 
 class TestConfigErrors:
-    """Tests para errores de configuración."""
+    """Tests for configuration errors."""
 
     def test_invalid_config_basic(self):
-        """InvalidConfigError mensaje básico."""
+        """InvalidConfigError basic message."""
         from hfl.exceptions import InvalidConfigError, ConfigurationError
 
         err = InvalidConfigError("quantization", "INVALID")
@@ -183,7 +183,7 @@ class TestConfigErrors:
         assert "INVALID" in str(err)
 
     def test_invalid_config_with_valid_values(self):
-        """InvalidConfigError con valores válidos."""
+        """InvalidConfigError with valid values."""
         from hfl.exceptions import InvalidConfigError
 
         err = InvalidConfigError(
@@ -196,10 +196,10 @@ class TestConfigErrors:
 
 
 class TestExceptionHierarchy:
-    """Tests para verificar la jerarquía de excepciones."""
+    """Tests to verify exception hierarchy."""
 
     def test_all_inherit_from_hfl_error(self):
-        """Todas las excepciones heredan de HFLError."""
+        """All exceptions inherit from HFLError."""
         from hfl.exceptions import (
             HFLError,
             ModelNotFoundError,
@@ -226,7 +226,7 @@ class TestExceptionHierarchy:
             assert isinstance(exc, Exception)
 
     def test_can_catch_by_base_class(self):
-        """Se pueden capturar por clase base."""
+        """Can catch by base class."""
         from hfl.exceptions import HFLError, ModelNotFoundError
 
         try:

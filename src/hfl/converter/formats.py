@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Detección y validación de formatos de modelo."""
+"""Detection and validation of model formats."""
 
 from enum import Enum
 from pathlib import Path
@@ -14,7 +14,7 @@ class ModelFormat(Enum):
 
 
 def detect_format(model_path: Path) -> ModelFormat:
-    """Detecta el formato de un modelo dado su directorio o archivo."""
+    """Detects the format of a model given its directory or file."""
     if model_path.is_file():
         if model_path.suffix == ".gguf":
             return ModelFormat.GGUF
@@ -38,7 +38,7 @@ def detect_format(model_path: Path) -> ModelFormat:
 
 
 def find_model_file(model_path: Path, fmt: ModelFormat) -> Path | None:
-    """Encuentra el archivo principal del modelo."""
+    """Finds the main model file."""
     if model_path.is_file():
         return model_path
 
@@ -46,4 +46,4 @@ def find_model_file(model_path: Path, fmt: ModelFormat) -> Path | None:
         gguf_files = list(model_path.rglob("*.gguf"))
         return gguf_files[0] if gguf_files else None
 
-    return model_path  # Para safetensors/pytorch, devolver el directorio
+    return model_path  # For safetensors/pytorch, return the directory

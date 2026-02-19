@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Motor de inferencia vLLM para producción.
+vLLM inference engine for production.
 
-vLLM es un motor de inferencia de alto rendimiento optimizado para GPUs NVIDIA.
-Soporta PagedAttention, batching continuo, y otras optimizaciones.
+vLLM is a high-performance inference engine optimized for NVIDIA GPUs.
+Supports PagedAttention, continuous batching, and other optimizations.
 
-Este módulo es un placeholder para implementación futura.
+This module is a placeholder for future implementation.
 """
 
 from vllm import LLM, SamplingParams
@@ -20,7 +20,7 @@ from hfl.engine.base import (
 
 
 class VLLMEngine(InferenceEngine):
-    """Motor de inferencia basado en vLLM."""
+    """vLLM-based inference engine."""
 
     def __init__(self):
         self._model = None
@@ -35,18 +35,18 @@ class VLLMEngine(InferenceEngine):
         return self._model_path
 
     def load(self, model_path: str, **kwargs) -> None:
-        """Carga un modelo con vLLM."""
+        """Loads a model with vLLM."""
         self._model_path = model_path
         self._model = LLM(model=model_path, **kwargs)
 
     def unload(self) -> None:
-        """Descarga el modelo."""
+        """Unloads the model."""
         self._model = None
 
     def generate(self, prompt: str, config: GenerationConfig | None = None) -> GenerationResult:
-        """Genera texto."""
+        """Generates text."""
         if not self._model:
-            raise RuntimeError("Modelo no cargado")
+            raise RuntimeError("Model not loaded")
 
         cfg = config or GenerationConfig()
         sampling_params = SamplingParams(
@@ -67,7 +67,7 @@ class VLLMEngine(InferenceEngine):
         )
 
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None):
-        """vLLM streaming no soportado en esta implementación básica."""
+        """vLLM streaming not supported in this basic implementation."""
         result = self.generate(prompt, config)
         yield result.text
 
@@ -79,12 +79,12 @@ class VLLMEngine(InferenceEngine):
         return self.generate(prompt, config)
 
     def chat_stream(self, messages: list[ChatMessage], config: GenerationConfig | None = None):
-        """Chat completion en streaming."""
+        """Streaming chat completion."""
         result = self.chat(messages, config)
         yield result.text
 
     def _build_prompt(self, messages: list[ChatMessage]) -> str:
-        """Construye un prompt simple a partir de mensajes."""
+        """Builds a simple prompt from messages."""
         parts = []
         for msg in messages:
             if msg.role == "system":

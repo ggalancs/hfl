@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Endpoints compatibles con la API nativa de Ollama.
-Permite usar hfl como drop-in replacement de Ollama.
+Endpoints compatible with the Ollama native API.
+Allows using hfl as a drop-in replacement for Ollama.
 """
 
 import json
@@ -154,7 +154,7 @@ async def api_chat(req: ChatRequest):
 
 @router.get("/api/tags")
 async def api_tags():
-    """Lista modelos (compatible con Ollama)."""
+    """List models (Ollama compatible)."""
     registry = ModelRegistry()
     return {
         "models": [
@@ -179,11 +179,11 @@ async def api_tags():
 
 @router.get("/api/version")
 async def api_version():
-    """Versión del servidor (compatible con Ollama)."""
+    """Server version (Ollama compatible)."""
     return {"version": "0.1.0"}
 
 
 @router.head("/")
 async def head_root():
-    """Health check para compatibilidad con Ollama."""
+    """Health check for Ollama compatibility."""
     return {}

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo CLI (main commands)."""
+"""Tests for the CLI module (main commands)."""
 
 import pytest
 import sys
@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_llama_cpp():
-    """Mock llama_cpp para todos los tests."""
+    """Mock llama_cpp for tests that need it."""
     mock = MagicMock()
     with patch.dict(sys.modules, {"llama_cpp": mock}):
         yield mock
@@ -18,22 +18,22 @@ def mock_llama_cpp():
 
 @pytest.fixture
 def runner():
-    """Runner para tests de CLI."""
+    """Runner for CLI tests."""
     return CliRunner()
 
 
 @pytest.fixture
 def cli_app():
-    """Aplicación CLI para tests."""
+    """CLI application for tests."""
     from hfl.cli.main import app
     return app
 
 
 class TestVersionCommand:
-    """Tests para comando version."""
+    """Tests for version command."""
 
     def test_version(self, runner, cli_app):
-        """Verifica comando version."""
+        """Verifies version command."""
         result = runner.invoke(cli_app, ["version"])
 
         assert result.exit_code == 0
@@ -43,22 +43,22 @@ class TestVersionCommand:
 
 
 class TestListCommand:
-    """Tests para comando list."""
+    """Tests for list command."""
 
     def test_list_empty(self, runner, cli_app, temp_config):
-        """Lista vacía de modelos."""
+        """Empty model list."""
         result = runner.invoke(cli_app, ["list"])
 
         assert result.exit_code == 0
-        assert "No hay modelos descargados" in result.stdout
+        assert "No downloaded models" in result.stdout
 
     def test_list_with_models(self, runner, cli_app, populated_registry):
-        """Lista con modelos."""
+        """List with models."""
         result = runner.invoke(cli_app, ["list"])
 
         assert result.exit_code == 0
-        # La tabla de Rich trunca nombres largos con "…" (U+2026)
-        # Verificamos prefijos o la cuantización que siempre aparece
+        # Rich table truncates long names with "..." (U+2026)
+        # We verify prefixes or the quantization that always appears
         assert "Q4_K_M" in result.stdout
         assert "Q5_K_M" in result.stdout
         assert "test-org" in result.stdout or "test-model" in result.stdout
@@ -66,17 +66,17 @@ class TestListCommand:
 
 
 class TestInspectCommand:
-    """Tests para comando inspect."""
+    """Tests for inspect command."""
 
     def test_inspect_not_found(self, runner, cli_app, temp_config):
-        """Inspeccionar modelo inexistente."""
+        """Inspect non-existent model."""
         result = runner.invoke(cli_app, ["inspect", "nonexistent"])
 
         assert result.exit_code == 1
-        assert "Modelo no encontrado" in result.stdout
+        assert "Model not found" in result.stdout
 
     def test_inspect_success(self, runner, cli_app, populated_registry):
-        """Inspeccionar modelo existente."""
+        """Inspect existing model."""
         result = runner.invoke(cli_app, ["inspect", "test-model-q4_k_m"])
 
         assert result.exit_code == 0
@@ -86,17 +86,17 @@ class TestInspectCommand:
 
 
 class TestAliasCommand:
-    """Tests para comando alias."""
+    """Tests for alias command."""
 
     def test_alias_model_not_found(self, runner, cli_app, temp_config):
-        """Alias a modelo inexistente."""
+        """Alias to non-existent model."""
         result = runner.invoke(cli_app, ["alias", "nonexistent", "myalias"])
 
         assert result.exit_code == 1
-        assert "Modelo no encontrado" in result.stdout
+        assert "Model not found" in result.stdout
 
     def test_alias_success(self, runner, cli_app, temp_config, temp_dir):
-        """Asignar alias exitosamente."""
+        """Successfully assign alias."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -116,17 +116,17 @@ class TestAliasCommand:
         result = runner.invoke(cli_app, ["alias", "very-long-model-name-q4_k_m", "short"])
 
         assert result.exit_code == 0
-        assert "Alias asignado" in result.stdout
+        assert "Alias assigned" in result.stdout
         assert "short" in result.stdout
 
-        # Verificar que el alias funciona
+        # Verify that the alias works
         registry = ModelRegistry()
         model = registry.get("short")
         assert model is not None
         assert model.name == "very-long-model-name-q4_k_m"
 
     def test_alias_duplicate_rejected(self, runner, cli_app, temp_config, temp_dir):
-        """Alias duplicado es rechazado."""
+        """Duplicate alias is rejected."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -153,10 +153,10 @@ class TestAliasCommand:
         result = runner.invoke(cli_app, ["alias", "model-2", "taken"])
 
         assert result.exit_code == 1
-        assert "ya está en uso" in result.stdout
+        assert "already in use" in result.stdout
 
     def test_run_by_alias(self, runner, cli_app, temp_config, temp_dir):
-        """Ejecutar modelo por alias."""
+        """Run model by alias."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -181,10 +181,10 @@ class TestAliasCommand:
 
             result = runner.invoke(cli_app, ["run", "short"], input="/exit\n")
 
-            assert "Cargando" in result.stdout
+            assert "Loading" in result.stdout
 
     def test_inspect_by_alias(self, runner, cli_app, temp_config, temp_dir):
-        """Inspeccionar modelo por alias."""
+        """Inspect model by alias."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -209,36 +209,36 @@ class TestAliasCommand:
 
 
 class TestRmCommand:
-    """Tests para comando rm."""
+    """Tests for rm command."""
 
     def test_rm_not_found(self, runner, cli_app, temp_config):
-        """Eliminar modelo inexistente."""
+        """Delete non-existent model."""
         result = runner.invoke(cli_app, ["rm", "nonexistent"])
 
         assert result.exit_code == 1
-        assert "Modelo no encontrado" in result.stdout
+        assert "Model not found" in result.stdout
 
     def test_rm_cancelled(self, runner, cli_app, populated_registry):
-        """Cancelar eliminación."""
+        """Cancel deletion."""
         result = runner.invoke(cli_app, ["rm", "test-model-q4_k_m"], input="n\n")
 
         assert result.exit_code == 0
-        # El modelo debería seguir existiendo
+        # The model should still exist
         from hfl.models.registry import ModelRegistry
         registry = ModelRegistry()
         assert registry.get("test-model-q4_k_m") is not None
 
     def test_rm_confirmed(self, runner, cli_app, temp_config, temp_dir):
-        """Confirmar eliminación."""
+        """Confirm deletion."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
-        # Crear archivo temporal para el modelo
+        # Create temporary file for the model
         model_path = temp_dir / "test-model"
         model_path.mkdir()
         (model_path / "model.gguf").write_bytes(b"GGUF")
 
-        # Registrar modelo con path real
+        # Register model with real path
         registry = ModelRegistry()
         registry.add(ModelManifest(
             name="rm-test-model",
@@ -252,18 +252,18 @@ class TestRmCommand:
         result = runner.invoke(cli_app, ["rm", "rm-test-model"], input="y\n")
 
         assert result.exit_code == 0
-        assert "Eliminado" in result.stdout
+        assert "Deleted" in result.stdout
 
-        # Verificar que se eliminó del registro
+        # Verify it was removed from the registry
         registry = ModelRegistry()
         assert registry.get("rm-test-model") is None
 
 
 class TestPullCommand:
-    """Tests para comando pull."""
+    """Tests for pull command."""
 
     def test_pull_success(self, runner, cli_app, temp_config):
-        """Pull exitoso de modelo GGUF."""
+        """Successful GGUF model pull."""
         from hfl.hub.resolver import ResolvedModel
 
         with patch("hfl.hub.resolver.resolve") as mock_resolve:
@@ -280,14 +280,14 @@ class TestPullCommand:
                 model_path.write_bytes(b"GGUF content")
                 mock_pull.return_value = model_path
 
-                # Usar --skip-license para evitar llamadas a HuggingFace API
+                # Use --skip-license to avoid HuggingFace API calls
                 result = runner.invoke(cli_app, ["pull", "test/model", "--skip-license"])
 
                 assert result.exit_code == 0
-                assert "Resolviendo" in result.stdout
+                assert "Resolving" in result.stdout
 
     def test_pull_with_quantize_option(self, runner, cli_app, temp_config):
-        """Pull con opción de cuantización."""
+        """Pull with quantization option."""
         from hfl.hub.resolver import ResolvedModel
 
         with patch("hfl.hub.resolver.resolve") as mock_resolve:
@@ -304,13 +304,13 @@ class TestPullCommand:
                 model_path.write_bytes(b"GGUF")
                 mock_pull.return_value = model_path
 
-                # Usar --skip-license para evitar llamadas a HuggingFace API
+                # Use --skip-license to avoid HuggingFace API calls
                 result = runner.invoke(cli_app, ["pull", "test/model", "-q", "Q5_K_M", "--skip-license"])
 
                 mock_resolve.assert_called_once()
 
     def test_pull_invalid_format_shows_helpful_error(self, runner, cli_app, temp_config):
-        """Pull con formato inválido muestra error amigable."""
+        """Pull with invalid format shows friendly error."""
         from huggingface_hub.utils import HFValidationError
 
         with patch("hfl.hub.resolver.resolve") as mock_resolve:
@@ -321,21 +321,21 @@ class TestPullCommand:
             result = runner.invoke(cli_app, ["pull", "invalid:model:format", "--skip-license"])
 
             assert result.exit_code == 1
-            # Verifica que muestra información sobre el error
+            # Verify that it shows error information
             assert "alphanumeric" in result.stdout or "Error" in result.stdout
 
     def test_pull_model_not_found_error(self, runner, cli_app, temp_config):
-        """Pull con modelo no encontrado muestra error claro."""
+        """Pull with model not found shows clear error."""
         with patch("hfl.hub.resolver.resolve") as mock_resolve:
-            mock_resolve.side_effect = ValueError("No se encontró modelo: nonexistent")
+            mock_resolve.side_effect = ValueError("Model not found: nonexistent")
 
             result = runner.invoke(cli_app, ["pull", "nonexistent", "--skip-license"])
 
             assert result.exit_code == 1
-            assert "No se encontró modelo" in result.stdout
+            assert "Model not found" in result.stdout
 
     def test_pull_with_colon_quantization(self, runner, cli_app, temp_config):
-        """Pull con formato repo:quantization (estilo Ollama)."""
+        """Pull with repo:quantization format (Ollama style)."""
         from hfl.hub.resolver import ResolvedModel
 
         with patch("hfl.hub.resolver.resolve") as mock_resolve:
@@ -358,26 +358,26 @@ class TestPullCommand:
 
 
 class TestRunCommand:
-    """Tests para comando run."""
+    """Tests for run command."""
 
     def test_run_model_not_found(self, runner, cli_app, temp_config):
-        """Run con modelo inexistente."""
+        """Run with non-existent model."""
         result = runner.invoke(cli_app, ["run", "nonexistent"])
 
         assert result.exit_code == 1
-        assert "Modelo no encontrado" in result.stdout
+        assert "Model not found" in result.stdout
 
     def test_run_missing_dependency_shows_helpful_error(self, runner, cli_app, temp_config, temp_dir):
-        """Run muestra error útil cuando falta dependencia."""
+        """Run shows helpful error when dependency is missing."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
         from hfl.engine.selector import MissingDependencyError
 
-        # Crear archivo de modelo
+        # Create model file
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
-        # Registrar modelo
+        # Register model
         registry = ModelRegistry()
         registry.add(ModelManifest(
             name="missing-dep-test",
@@ -388,30 +388,30 @@ class TestRunCommand:
             quantization="Q4_K_M",
         ))
 
-        # Simular que falta llama_cpp (parchear en selector donde se importa)
+        # Simulate that llama_cpp is missing (patch in selector where it's imported)
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_select.side_effect = MissingDependencyError(
-                "El backend llama-cpp requiere 'llama-cpp-python'.\n"
-                "Instálala con: pip install llama-cpp-python"
+                "The llama-cpp backend requires 'llama-cpp-python'.\n"
+                "Install it with: pip install llama-cpp-python"
             )
 
             result = runner.invoke(cli_app, ["run", "missing-dep-test"])
 
             assert result.exit_code == 1
-            assert "Dependencia faltante" in result.stdout
+            assert "Missing dependency" in result.stdout
             assert "llama-cpp-python" in result.stdout
             assert "pip install" in result.stdout
 
     def test_run_with_exit(self, runner, cli_app, temp_config, temp_dir):
-        """Run con salida inmediata."""
+        """Run with immediate exit."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
-        # Crear archivo de modelo
+        # Create model file
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
-        # Registrar modelo
+        # Register model
         registry = ModelRegistry()
         registry.add(ModelManifest(
             name="run-test-model",
@@ -429,10 +429,10 @@ class TestRunCommand:
 
             result = runner.invoke(cli_app, ["run", "run-test-model"], input="/exit\n")
 
-            assert "Cargando" in result.stdout
+            assert "Loading" in result.stdout
 
     def test_run_streaming_with_special_characters(self, runner, cli_app, temp_config, temp_dir):
-        """Run con caracteres especiales en la respuesta (evita errores de Rich markup)."""
+        """Run with special characters in response (avoids Rich markup errors)."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -451,25 +451,25 @@ class TestRunCommand:
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
-            # Respuesta con caracteres que podrían causar errores de Rich markup
+            # Response with characters that could cause Rich markup errors
             mock_engine.chat_stream.return_value = iter([
                 "Here's code: ",
-                "[bold]",  # Podría interpretarse como markup de Rich
+                "[bold]",  # Could be interpreted as Rich markup
                 " and ",
-                "[/]",     # Podría causar MarkupError
+                "[/]",     # Could cause MarkupError
                 " brackets",
             ])
             mock_select.return_value = mock_engine
 
             result = runner.invoke(cli_app, ["run", "special-char-model"], input="test\n/exit\n")
 
-            # No debe haber errores de markup
+            # Should not have markup errors
             assert result.exit_code == 0
             assert "MarkupError" not in result.stdout
             assert "Traceback" not in result.stdout
 
     def test_run_streaming_complete_response(self, runner, cli_app, temp_config, temp_dir):
-        """Run captura respuesta completa del streaming."""
+        """Run captures complete streaming response."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -498,7 +498,7 @@ class TestRunCommand:
             assert "World" in result.stdout
 
     def test_run_empty_response(self, runner, cli_app, temp_config, temp_dir):
-        """Run maneja respuesta vacía correctamente."""
+        """Run handles empty response correctly."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -517,7 +517,7 @@ class TestRunCommand:
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
-            mock_engine.chat_stream.return_value = iter([])  # Respuesta vacía
+            mock_engine.chat_stream.return_value = iter([])  # Empty response
             mock_select.return_value = mock_engine
 
             result = runner.invoke(cli_app, ["run", "empty-response-model"], input="Hi\n/exit\n")
@@ -526,7 +526,7 @@ class TestRunCommand:
             assert "Traceback" not in result.stdout
 
     def test_run_multi_turn_conversation(self, runner, cli_app, temp_config, temp_dir):
-        """Run maneja conversación multi-turno."""
+        """Run handles multi-turn conversation."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -545,7 +545,7 @@ class TestRunCommand:
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
-            # Simular múltiples respuestas
+            # Simulate multiple responses
             mock_engine.chat_stream.side_effect = [
                 iter(["First response"]),
                 iter(["Second response"]),
@@ -563,7 +563,7 @@ class TestRunCommand:
             assert "Second response" in result.stdout
 
     def test_run_quit_commands(self, runner, cli_app, temp_config, temp_dir):
-        """Run reconoce varios comandos de salida."""
+        """Run recognizes various exit commands."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -588,11 +588,11 @@ class TestRunCommand:
 
                 result = runner.invoke(cli_app, ["run", f"quit-test-{i}"], input=f"{exit_cmd}\n")
 
-                assert result.exit_code == 0, f"Fallo con comando {exit_cmd}"
-                assert "Sesión terminada" in result.stdout
+                assert result.exit_code == 0, f"Failed with command {exit_cmd}"
+                assert "Session ended" in result.stdout
 
     def test_run_empty_input_ignored(self, runner, cli_app, temp_config, temp_dir):
-        """Run ignora entradas vacías."""
+        """Run ignores empty inputs."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -614,7 +614,7 @@ class TestRunCommand:
             mock_engine.chat_stream.return_value = iter(["Response"])
             mock_select.return_value = mock_engine
 
-            # Enviar líneas vacías que deberían ignorarse
+            # Send empty lines that should be ignored
             result = runner.invoke(
                 cli_app,
                 ["run", "empty-input-model"],
@@ -622,11 +622,11 @@ class TestRunCommand:
             )
 
             assert result.exit_code == 0
-            # chat_stream solo debe llamarse una vez (para "Hello")
+            # chat_stream should only be called once (for "Hello")
             assert mock_engine.chat_stream.call_count == 1
 
     def test_run_with_system_prompt(self, runner, cli_app, temp_config, temp_dir):
-        """Run con prompt de sistema."""
+        """Run with system prompt."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -655,13 +655,13 @@ class TestRunCommand:
             )
 
             assert result.exit_code == 0
-            # Verificar que se llamó con un mensaje de sistema
+            # Verify that it was called with a system message
             call_args = mock_engine.chat_stream.call_args
             messages = call_args[0][0]
             assert any(m.role == "system" for m in messages)
 
     def test_run_unicode_response(self, runner, cli_app, temp_config, temp_dir):
-        """Run maneja respuestas con Unicode correctamente."""
+        """Run handles Unicode responses correctly."""
         from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
 
@@ -680,7 +680,7 @@ class TestRunCommand:
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
-            # Respuesta con emojis y caracteres especiales
+            # Response with emojis and special characters
             mock_engine.chat_stream.return_value = iter([
                 "¡Hola! ", "こんにちは ", "🎉", " Привет"
             ])
@@ -693,26 +693,26 @@ class TestRunCommand:
 
 
 class TestServeCommand:
-    """Tests para comando serve."""
+    """Tests for serve command."""
 
     def test_serve_imports(self, cli_app):
-        """Verifica que serve importa correctamente."""
+        """Verifies that serve imports correctly."""
         from hfl.cli.main import serve
         assert callable(serve)
 
 
 class TestSearchCommand:
-    """Tests para comando search."""
+    """Tests for search command."""
 
     def test_search_too_short(self, runner, cli_app, temp_config):
-        """Búsqueda con texto muy corto."""
+        """Search with text too short."""
         result = runner.invoke(cli_app, ["search", "ab"])
 
         assert result.exit_code == 1
-        assert "al menos 3 caracteres" in result.stdout
+        assert "at least 3 characters" in result.stdout
 
     def test_search_no_results(self, runner, cli_app, temp_config):
-        """Búsqueda sin resultados."""
+        """Search with no results."""
         with patch("huggingface_hub.HfApi") as mock_api_class:
             mock_api = MagicMock()
             mock_api.list_models.return_value = []
@@ -721,10 +721,10 @@ class TestSearchCommand:
             result = runner.invoke(cli_app, ["search", "xyznonexistent"])
 
             assert result.exit_code == 0
-            assert "No se encontraron modelos" in result.stdout
+            assert "No models found" in result.stdout
 
     def test_search_with_results(self, runner, cli_app, temp_config):
-        """Búsqueda con resultados."""
+        """Search with results."""
         with patch("huggingface_hub.HfApi") as mock_api_class:
             mock_model = MagicMock()
             mock_model.id = "org/test-model"
@@ -742,7 +742,7 @@ class TestSearchCommand:
             assert "org/test-model" in result.stdout
 
     def test_search_gguf_only(self, runner, cli_app, temp_config):
-        """Búsqueda solo GGUF."""
+        """Search GGUF only."""
         with patch("huggingface_hub.HfApi") as mock_api_class:
             mock_model_gguf = MagicMock()
             mock_model_gguf.id = "org/model-gguf"
@@ -761,29 +761,29 @@ class TestSearchCommand:
 
 
 class TestHelperFunctions:
-    """Tests para funciones auxiliares del CLI."""
+    """Tests for CLI helper functions."""
 
     def test_format_size_gb(self):
-        """Formateo de tamaño en GB."""
+        """Size formatting in GB."""
         from hfl.cli.main import _format_size
 
         assert "5.0 GB" in _format_size(5 * 1024**3)
         assert "1.5 GB" in _format_size(int(1.5 * 1024**3))
 
     def test_format_size_mb(self):
-        """Formateo de tamaño en MB."""
+        """Size formatting in MB."""
         from hfl.cli.main import _format_size
 
         assert "500 MB" in _format_size(500 * 1024**2)
 
     def test_format_size_zero(self):
-        """Formateo de tamaño cero."""
+        """Zero size formatting."""
         from hfl.cli.main import _format_size
 
         assert _format_size(0) == "N/A"
 
     def test_display_model_row(self, capsys):
-        """Verifica formato de fila de modelo."""
+        """Verifies model row format."""
         from hfl.cli.main import _display_model_row
 
         mock_model = MagicMock()
@@ -794,14 +794,14 @@ class TestHelperFunctions:
         mock_model.pipeline_tag = "text-generation"
 
         _display_model_row(mock_model, 1)
-        # No falla = test pasa
+        # No failure = test passes
 
 
 class TestCLIApp:
-    """Tests generales para la aplicación CLI."""
+    """General tests for the CLI application."""
 
     def test_help(self, runner, cli_app):
-        """Verifica ayuda general."""
+        """Verifies general help."""
         result = runner.invoke(cli_app, ["--help"])
 
         assert result.exit_code == 0
@@ -813,17 +813,20 @@ class TestCLIApp:
         assert "rm" in result.stdout
         assert "inspect" in result.stdout
 
-    def test_pull_help(self, runner, cli_app):
-        """Verifica ayuda de pull."""
-        result = runner.invoke(cli_app, ["pull", "--help"])
+    def test_pull_help(self, runner):
+        """Verifies pull help."""
+        # Import fresh app to avoid interference from mock_llama_cpp
+        from hfl.cli.main import app
+        result = runner.invoke(app, ["pull", "--help"])
 
         assert result.exit_code == 0
         assert "--quantize" in result.stdout
         assert "--format" in result.stdout
 
-    def test_search_help(self, runner, cli_app):
-        """Verifica ayuda de search."""
-        result = runner.invoke(cli_app, ["search", "--help"])
+    def test_search_help(self, runner):
+        """Verifies search help."""
+        from hfl.cli.main import app
+        result = runner.invoke(app, ["search", "--help"])
 
         assert result.exit_code == 0
         assert "--limit" in result.stdout
@@ -831,18 +834,20 @@ class TestCLIApp:
         assert "--gguf" in result.stdout
         assert "--sort" in result.stdout
 
-    def test_run_help(self, runner, cli_app):
-        """Verifica ayuda de run."""
-        result = runner.invoke(cli_app, ["run", "--help"])
+    def test_run_help(self, runner):
+        """Verifies run help."""
+        from hfl.cli.main import app
+        result = runner.invoke(app, ["run", "--help"])
 
         assert result.exit_code == 0
         assert "--backend" in result.stdout
         assert "--ctx" in result.stdout
         assert "--system" in result.stdout
 
-    def test_serve_help(self, runner, cli_app):
-        """Verifica ayuda de serve."""
-        result = runner.invoke(cli_app, ["serve", "--help"])
+    def test_serve_help(self, runner):
+        """Verifies serve help."""
+        from hfl.cli.main import app
+        result = runner.invoke(app, ["serve", "--help"])
 
         assert result.exit_code == 0
         assert "--host" in result.stdout

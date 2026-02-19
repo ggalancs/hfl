@@ -1,30 +1,30 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-Conversión de modelos HuggingFace (safetensors/pytorch) a formato GGUF.
+Conversion of HuggingFace models (safetensors/pytorch) to GGUF format.
 
-Este es el paso más crítico del pipeline. Utiliza las herramientas de
-llama.cpp para la conversión y cuantización.
+This is the most critical step of the pipeline. It uses llama.cpp tools
+for conversion and quantization.
 
-Flujo:
-  safetensors → convert_hf_to_gguf.py (FP16) → quantize → GGUF final
+Flow:
+  safetensors -> convert_hf_to_gguf.py (FP16) -> quantize -> final GGUF
 
-Requiere: llama.cpp clonado y compilado en ~/.hfl/tools/llama.cpp
+Requires: llama.cpp cloned and compiled in ~/.hfl/tools/llama.cpp
 
-NOTA LEGAL (R3 - Auditoría Legal):
-La conversión de formato preserva los pesos del modelo original.
-La licencia y restricciones del modelo original siguen vigentes
-sobre el archivo convertido. hfl registra la procedencia de
-cada conversión para cumplimiento legal.
+LEGAL NOTE (R3 - Legal Audit):
+Format conversion preserves the weights of the original model.
+The license and restrictions of the original model remain in effect
+on the converted file. hfl records the provenance of each conversion
+for legal compliance.
 
-Modelos soportados para conversión GGUF:
-- Modelos de texto (LLMs) con arquitecturas soportadas por llama.cpp
-- Requieren config.json con model_type válido
+Models supported for GGUF conversion:
+- Text models (LLMs) with architectures supported by llama.cpp
+- Require config.json with a valid model_type
 
-Modelos NO soportados:
-- LoRA adapters (archivos adapter_*.safetensors sin modelo base)
-- Modelos de imagen (Stable Diffusion, FLUX, etc.)
-- Modelos sin config.json
+Unsupported models:
+- LoRA adapters (adapter_*.safetensors files without base model)
+- Image models (Stable Diffusion, FLUX, etc.)
+- Models without config.json
 """
 
 import json
@@ -46,9 +46,9 @@ class UnsupportedModelError(Exception):
     pass
 
 
-# Tipos de modelo que NO pueden convertirse a GGUF
+# Model types that CANNOT be converted to GGUF
 UNSUPPORTED_MODEL_TYPES = {
-    # Modelos de imagen
+    # Image models
     "stable-diffusion",
     "sdxl",
     "flux",
@@ -58,18 +58,18 @@ UNSUPPORTED_MODEL_TYPES = {
     # LoRA adapters
     "lora",
     "adapter",
-    # Otros
+    # Others
     "clip",
     "vit",
     "audio",
     "whisper",
 }
 
-# Patrones de archivos que indican modelos no convertibles
+# File patterns that indicate non-convertible models
 UNSUPPORTED_FILE_PATTERNS = {
     "adapter_model.safetensors",  # LoRA adapter
     "adapter_config.json",  # LoRA config
-    "diffusion_pytorch_model.safetensors",  # Difusión
+    "diffusion_pytorch_model.safetensors",  # Diffusion
     "unet/",  # Stable Diffusion UNet
     "vae/",  # VAE
 }
@@ -77,81 +77,81 @@ UNSUPPORTED_FILE_PATTERNS = {
 
 def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
     """
-    Verifica si un modelo puede convertirse a formato GGUF.
+    Checks if a model can be converted to GGUF format.
 
     Args:
-        model_path: Ruta al directorio del modelo descargado
+        model_path: Path to the downloaded model directory
 
     Returns:
-        Tuple (es_convertible, razón)
-        - (True, "") si es convertible
-        - (False, razón) si no es convertible
+        Tuple (is_convertible, reason)
+        - (True, "") if convertible
+        - (False, reason) if not convertible
     """
-    # 1. Verificar que existe config.json
+    # 1. Check that config.json exists
     config_path = model_path / "config.json"
     if not config_path.exists():
-        # Verificar si es un LoRA adapter
+        # Check if it's a LoRA adapter
         adapter_config = model_path / "adapter_config.json"
         if adapter_config.exists():
             return (
                 False,
-                "Este es un LoRA adapter, no un modelo completo. "
-                "Los LoRA adapters requieren un modelo base para funcionar.",
+                "This is a LoRA adapter, not a complete model. "
+                "LoRA adapters require a base model to function.",
             )
 
-        # Verificar si hay archivos de difusión
+        # Check if there are diffusion files
         for pattern in UNSUPPORTED_FILE_PATTERNS:
             if (model_path / pattern).exists() or list(model_path.glob(f"*{pattern}*")):
                 return (
                     False,
-                    "Este parece ser un modelo de difusión de imágenes. "
-                    "GGUF solo soporta modelos de texto (LLMs).",
+                    "This appears to be an image diffusion model. "
+                    "GGUF only supports text models (LLMs).",
                 )
 
         return (
             False,
-            "No se encontró config.json. Este modelo no tiene el formato "
-            "estándar de HuggingFace para modelos de texto.",
+            "config.json not found. This model does not have the standard "
+            "HuggingFace format for text models.",
         )
 
-    # 2. Leer config.json y verificar model_type
+    # 2. Read config.json and verify model_type
     try:
         with open(config_path) as f:
             config_data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        return (False, f"No se pudo leer config.json: {e}")
+        return (False, f"Could not read config.json: {e}")
 
     model_type = config_data.get("model_type", "").lower()
 
     if not model_type:
-        # Sin model_type, verificar otros indicadores
+        # Without model_type, check other indicators
         if "adapter_config" in config_data or "_name_or_path" in str(config_data.get("base_model")):
             return (
                 False,
-                "Este es un LoRA adapter. Los LoRA adapters requieren "
-                "un modelo base para funcionar.",
+                "This is a LoRA adapter. LoRA adapters require "
+                "a base model to function.",
             )
         return (
             False,
-            "config.json no contiene 'model_type'. "
-            "El modelo no puede ser identificado.",
+            "config.json does not contain 'model_type'. "
+            "The model cannot be identified.",
         )
 
-    # 3. Verificar si el model_type está en la lista de no soportados
+    # 3. Check if the model_type is in the unsupported list
     for unsupported in UNSUPPORTED_MODEL_TYPES:
         if unsupported in model_type:
             return (
                 False,
-                f"El tipo de modelo '{model_type}' no es soportado para conversión GGUF. "
-                "GGUF solo soporta modelos de texto (LLMs).",
+                f"The model type '{model_type}' is not supported for GGUF conversion. "
+                "GGUF only supports text models (LLMs).",
             )
 
-    # 4. El modelo parece ser convertible
+    # 4. The model appears to be convertible
     return (True, "")
 
 
 def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
-    """Obtiene la versión/commit de llama.cpp instalado."""
+    """Gets the version/commit of the installed llama.cpp."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -165,7 +165,7 @@ def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
 
 
 class GGUFConverter:
-    """Gestiona la conversión de modelos a formato GGUF."""
+    """Manages the conversion of models to GGUF format."""
 
     def __init__(self):
         self.llama_cpp_dir = config.llama_cpp_dir
@@ -174,13 +174,13 @@ class GGUFConverter:
 
     def ensure_tools(self):
         """
-        Verifica que llama.cpp esté disponible.
-        Si no lo está, lo clona y compila automáticamente.
+        Verifies that llama.cpp is available.
+        If not, clones and compiles it automatically.
         """
         if self.convert_script.exists() and self.quantize_bin.exists():
             return
 
-        console.print("[yellow]Instalando herramientas de conversión (llama.cpp)...[/]")
+        console.print("[yellow]Installing conversion tools (llama.cpp)...[/]")
 
         if not self.llama_cpp_dir.exists():
             self.llama_cpp_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -195,11 +195,11 @@ class GGUFConverter:
                 check=True,
             )
 
-        # Compilar llama.cpp
+        # Compile llama.cpp
         build_dir = self.llama_cpp_dir / "build"
         build_dir.mkdir(exist_ok=True)
 
-        # Detectar si hay CUDA disponible
+        # Detect if CUDA is available
         cuda_flag = "-DGGML_CUDA=ON" if shutil.which("nvcc") else ""
 
         cmake_cmd = ["cmake", ".."]
@@ -213,7 +213,7 @@ class GGUFConverter:
             check=True,
         )
 
-        # Instalar dependencias Python del script de conversión
+        # Install Python dependencies for the conversion script
         requirements_file = self.llama_cpp_dir / "requirements.txt"
         if requirements_file.exists():
             subprocess.run(
@@ -221,7 +221,7 @@ class GGUFConverter:
                 check=True,
             )
 
-        console.print("[green]Herramientas de conversión listas.[/]")
+        console.print("[green]Conversion tools ready.[/]")
 
     def convert(
         self,
@@ -233,32 +233,32 @@ class GGUFConverter:
         license_accepted: bool = False,
     ) -> Path:
         """
-        Convierte un modelo HF a GGUF cuantizado.
+        Converts an HF model to quantized GGUF.
 
         Args:
-            model_path: Ruta al directorio del modelo HF (con config.json)
-            output_path: Ruta base para el archivo de salida
-            quantization: Nivel de cuantización (Q4_K_M, Q5_K_M, Q6_K, Q8_0, F16)
-            source_repo: Repositorio HuggingFace original (para provenance)
-            original_license: Licencia del modelo original
-            license_accepted: Si el usuario aceptó la licencia
+            model_path: Path to the HF model directory (with config.json)
+            output_path: Base path for the output file
+            quantization: Quantization level (Q4_K_M, Q5_K_M, Q6_K, Q8_0, F16)
+            source_repo: Original HuggingFace repository (for provenance)
+            original_license: License of the original model
+            license_accepted: Whether the user accepted the license
 
         Returns:
-            Path al archivo GGUF final.
+            Path to the final GGUF file.
         """
         self.ensure_tools()
 
-        # R3 - Advertencia legal sobre preservación de licencia
+        # R3 - Legal warning about license preservation
         console.print(
-            "\n[yellow]Nota:[/] La conversión de formato preserva los pesos del modelo "
-            "original. La licencia y restricciones del modelo original siguen "
-            "vigentes sobre el archivo convertido.\n"
+            "\n[yellow]Note:[/] Format conversion preserves the weights of the original "
+            "model. The license and restrictions of the original model remain "
+            "in effect on the converted file.\n"
         )
 
-        # Paso 1: Convertir a GGUF FP16 (formato intermedio)
+        # Step 1: Convert to GGUF FP16 (intermediate format)
         fp16_path = output_path.with_suffix(".fp16.gguf")
 
-        console.print("[cyan]Paso 1/2:[/] Convirtiendo a GGUF FP16...")
+        console.print("[cyan]Step 1/2:[/] Converting to GGUF FP16...")
 
         subprocess.run(
             [
@@ -274,16 +274,16 @@ class GGUFConverter:
         )
 
         if quantization.upper() == "F16":
-            # Si piden FP16, ya terminamos
+            # If FP16 is requested, we're done
             final_path = output_path.with_suffix(".f16.gguf")
             fp16_path.rename(final_path)
             return final_path
 
-        # Paso 2: Cuantizar al nivel solicitado
+        # Step 2: Quantize to the requested level
         quant = quantization.upper()
         final_path = output_path.with_suffix(f".{quant}.gguf")
 
-        console.print(f"[cyan]Paso 2/2:[/] Cuantizando a {quant}...")
+        console.print(f"[cyan]Step 2/2:[/] Quantizing to {quant}...")
 
         subprocess.run(
             [
@@ -295,10 +295,10 @@ class GGUFConverter:
             check=True,
         )
 
-        # Limpiar el FP16 intermedio
+        # Clean up intermediate FP16
         fp16_path.unlink(missing_ok=True)
 
-        # R3 - Registrar provenance de la conversión
+        # R3 - Record conversion provenance
         if source_repo:
             try:
                 from hfl.converter.formats import detect_format
@@ -318,20 +318,20 @@ class GGUFConverter:
                     notes=f"Converted using hfl from {model_path}",
                 )
             except Exception as e:
-                console.print(f"[dim]Advertencia: No se pudo registrar provenance: {e}[/]")
+                console.print(f"[dim]Warning: Could not record provenance: {e}[/]")
 
-        console.print(f"[green]Conversión completada:[/] {final_path}")
+        console.print(f"[green]Conversion completed:[/] {final_path}")
         return final_path
 
 
-# Referencia rápida de niveles de cuantización:
+# Quick reference for quantization levels:
 #
-# Nivel       | Bits/peso | % Calidad | Caso de uso
-# ------------|-----------|-----------|----------------------------------
-# Q2_K        | ~2.5      | ~80%      | Extrema compresión, baja calidad
-# Q3_K_M      | ~3.5      | ~87%      | Poca RAM, calidad aceptable
-# Q4_K_M      | ~4.5      | ~92%      | ★ DEFAULT — mejor balance
-# Q5_K_M      | ~5.0      | ~96%      | Alta calidad, más RAM
-# Q6_K        | ~6.5      | ~97%      | Premium, casi sin pérdida
-# Q8_0        | ~8.0      | ~98%+     | Máxima calidad cuantizada
-# F16         | 16.0      | 100%      | Sin cuantización
+# Level       | Bits/weight | % Quality | Use case
+# ------------|-------------|-----------|----------------------------------
+# Q2_K        | ~2.5        | ~80%      | Extreme compression, low quality
+# Q3_K_M      | ~3.5        | ~87%      | Low RAM, acceptable quality
+# Q4_K_M      | ~4.5        | ~92%      | * DEFAULT - best balance
+# Q5_K_M      | ~5.0        | ~96%      | High quality, more RAM
+# Q6_K        | ~6.5        | ~97%      | Premium, almost no loss
+# Q8_0        | ~8.0        | ~98%+     | Maximum quantized quality
+# F16         | 16.0        | 100%      | No quantization

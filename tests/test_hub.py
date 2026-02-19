@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests para el módulo hub (auth, resolver, downloader)."""
+"""Tests for the hub module (auth, resolver, downloader)."""
 
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -8,22 +8,23 @@ from pathlib import Path
 
 
 class TestAuth:
-    """Tests para hub/auth.py."""
+    """Tests for hub/auth.py."""
 
     def test_ensure_auth_public_model(self, mock_hf_api):
-        """Verifica que modelos públicos no requieren token."""
+        """Verifies that public models work without token."""
         mock_hf_api.model_info.return_value = MagicMock()
 
         from hfl.hub.auth import ensure_auth
 
         with patch("hfl.hub.auth.HfApi", return_value=mock_hf_api):
-            result = ensure_auth("public-org/public-model")
+            with patch("hfl.hub.auth.get_hf_token", return_value=None):
+                result = ensure_auth("public-org/public-model")
 
         assert result is None
 
     def test_ensure_auth_gated_model_with_token(self, mock_hf_api, temp_config, monkeypatch):
-        """Verifica autenticación con token para modelos gated."""
-        # Primera llamada falla (sin token), segunda tiene éxito
+        """Verifies authentication with token for gated models."""
+        # First call fails (no token), second succeeds
         mock_hf_api.model_info.side_effect = [
             Exception("Gated model"),
             MagicMock(),
@@ -40,7 +41,7 @@ class TestAuth:
         assert result == "valid-token"
 
     def test_ensure_auth_raises_on_invalid_token(self, mock_hf_api, temp_config):
-        """Verifica que se lanza error con token inválido."""
+        """Verifies that error is raised with invalid token."""
         mock_hf_api.model_info.side_effect = Exception("Unauthorized")
 
         from hfl.hub.auth import ensure_auth
@@ -48,15 +49,15 @@ class TestAuth:
         with patch("hfl.hub.auth.HfApi", return_value=mock_hf_api):
             with patch("hfl.hub.auth.config") as mock_config:
                 mock_config.hf_token = "invalid-token"
-                with pytest.raises(RuntimeError, match="No se puede acceder"):
+                with pytest.raises(RuntimeError, match="Cannot access"):
                     ensure_auth("private-org/private-model")
 
 
 class TestResolver:
-    """Tests para hub/resolver.py."""
+    """Tests for hub/resolver.py."""
 
     def test_resolved_model_dataclass(self):
-        """Verifica la creación de ResolvedModel."""
+        """Verifies ResolvedModel creation."""
         from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(
@@ -74,7 +75,7 @@ class TestResolver:
         assert resolved.quantization == "Q4_K_M"
 
     def test_resolved_model_defaults(self):
-        """Verifica valores por defecto de ResolvedModel."""
+        """Verifies ResolvedModel default values."""
         from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(repo_id="org/model")
@@ -85,7 +86,7 @@ class TestResolver:
         assert resolved.quantization is None
 
     def test_resolve_direct_repo_id_gguf(self, mock_hf_api, sample_gguf_model_info):
-        """Verifica resolución de repo_id directo con GGUF."""
+        """Verifies resolution of direct repo_id with GGUF."""
         mock_hf_api.model_info.return_value = sample_gguf_model_info
 
         from hfl.hub.resolver import resolve
@@ -98,7 +99,7 @@ class TestResolver:
         assert "Q4_K_M" in result.filename
 
     def test_resolve_direct_repo_id_safetensors(self, mock_hf_api, sample_model_info):
-        """Verifica resolución de repo_id directo con safetensors."""
+        """Verifies resolution of direct repo_id with safetensors."""
         mock_hf_api.model_info.return_value = sample_model_info
 
         from hfl.hub.resolver import resolve
@@ -110,12 +111,12 @@ class TestResolver:
         assert result.format == "safetensors"
 
     def test_resolve_search_by_name(self, mock_hf_api, sample_model_info):
-        """Verifica resolución por búsqueda de nombre."""
+        """Verifies resolution by name search."""
         mock_model = MagicMock()
         mock_model.id = "found-org/found-model"
         mock_hf_api.list_models.return_value = [mock_model]
 
-        # Ajustar sample_model_info para que coincida con el modelo encontrado
+        # Adjust sample_model_info to match the found model
         sample_model_info.id = "found-org/found-model"
         mock_hf_api.model_info.return_value = sample_model_info
 
@@ -128,17 +129,17 @@ class TestResolver:
         assert result.repo_id == "found-org/found-model"
 
     def test_resolve_not_found(self, mock_hf_api):
-        """Verifica error cuando no se encuentra el modelo."""
+        """Verifies error when model is not found."""
         mock_hf_api.list_models.return_value = []
 
         from hfl.hub.resolver import resolve
 
         with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
-            with pytest.raises(ValueError, match="No se encontró modelo"):
+            with pytest.raises(ValueError, match="Model not found"):
                 resolve("nonexistent")
 
     def test_select_gguf_with_specific_quant(self):
-        """Verifica selección de GGUF con cuantización específica."""
+        """Verifies GGUF selection with specific quantization."""
         from hfl.hub.resolver import _select_gguf
 
         files = ["model-Q4_K_M.gguf", "model-Q5_K_M.gguf", "model-Q8_0.gguf"]
@@ -150,16 +151,16 @@ class TestResolver:
         assert result == "model-Q8_0.gguf"
 
     def test_select_gguf_default_priority(self):
-        """Verifica prioridad por defecto de selección GGUF."""
+        """Verifies default GGUF selection priority."""
         from hfl.hub.resolver import _select_gguf
 
         files = ["model-Q8_0.gguf", "model-Q4_K_M.gguf", "model-Q3_K_M.gguf"]
 
         result = _select_gguf(files, None)
-        assert result == "model-Q4_K_M.gguf"  # Q4_K_M tiene prioridad
+        assert result == "model-Q4_K_M.gguf"  # Q4_K_M has priority
 
     def test_select_gguf_fallback_to_first(self):
-        """Verifica fallback al primer archivo si no hay match."""
+        """Verifies fallback to first file if no match."""
         from hfl.hub.resolver import _select_gguf
 
         files = ["model-custom.gguf", "model-other.gguf"]
@@ -168,7 +169,7 @@ class TestResolver:
         assert result == "model-custom.gguf"
 
     def test_detect_quant(self):
-        """Verifica detección de nivel de cuantización."""
+        """Verifies quantization level detection."""
         from hfl.hub.resolver import _detect_quant
 
         assert _detect_quant("model-Q4_K_M.gguf") == "Q4_K_M"
@@ -178,10 +179,10 @@ class TestResolver:
         assert _detect_quant("model.gguf") is None
 
     def test_is_quantization(self):
-        """Verifica detección de cadenas de cuantización."""
+        """Verifies quantization string detection."""
         from hfl.hub.resolver import _is_quantization
 
-        # Cuantizaciones válidas
+        # Valid quantizations
         assert _is_quantization("Q4_K_M") is True
         assert _is_quantization("q4_k_m") is True  # case insensitive
         assert _is_quantization("Q5_K_S") is True
@@ -191,7 +192,7 @@ class TestResolver:
         assert _is_quantization("IQ4_NL") is True
         assert _is_quantization("IQ2_XS") is True
 
-        # No son cuantizaciones
+        # Not quantizations
         assert _is_quantization("main") is False
         assert _is_quantization("v1.0") is False
         assert _is_quantization("latest") is False
@@ -199,7 +200,7 @@ class TestResolver:
         assert _is_quantization("model-name") is False
 
     def test_resolve_with_colon_quantization(self, mock_hf_api, sample_gguf_model_info):
-        """Verifica resolución con formato repo:quantization (estilo Ollama)."""
+        """Verifies resolution with repo:quantization format (Ollama style)."""
         mock_hf_api.model_info.return_value = sample_gguf_model_info
 
         from hfl.hub.resolver import resolve
@@ -212,8 +213,8 @@ class TestResolver:
         assert "Q5_K_M" in result.filename
 
     def test_resolve_colon_not_quantization(self, mock_hf_api, sample_gguf_model_info):
-        """Verifica que : sin cuantización válida no se parsea incorrectamente."""
-        # Simular un repo que tiene : en el nombre (raro pero posible en búsquedas)
+        """Verifies that : without valid quantization is not parsed incorrectly."""
+        # Simulate a repo that has : in the name (rare but possible in searches)
         mock_model = MagicMock()
         mock_model.id = "org/model"
         mock_hf_api.list_models.return_value = [mock_model]
@@ -222,33 +223,33 @@ class TestResolver:
         from hfl.hub.resolver import resolve
 
         with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
-            # "model:latest" - latest no es cuantización, debería buscar "model:latest"
+            # "model:latest" - latest is not a quantization, should search "model:latest"
             result = resolve("model:latest")
 
-        # Debería haber buscado el modelo
+        # Should have searched for the model
         mock_hf_api.list_models.assert_called()
 
     def test_resolve_quantization_priority(self, mock_hf_api, sample_gguf_model_info):
-        """Verifica que cuantización en spec tiene prioridad sobre parámetro."""
+        """Verifies that quantization in spec has priority over parameter."""
         mock_hf_api.model_info.return_value = sample_gguf_model_info
 
         from hfl.hub.resolver import resolve
 
         with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
-            # Q5_K_M en spec debería tener prioridad sobre Q4_K_M en parámetro
+            # Q5_K_M in spec should have priority over Q4_K_M in parameter
             result = resolve("test-org/test-model-gguf:Q5_K_M", quantization="Q4_K_M")
 
         assert result.quantization == "Q5_K_M"
 
 
 class TestLicenseChecker:
-    """Tests para hub/license_checker.py."""
+    """Tests for hub/license_checker.py."""
 
     def test_check_license_with_license_name(self, mock_hf_api):
-        """Verifica que usa license_name cuando license es 'other'."""
+        """Verifies that it uses license_name when license is 'other'."""
         from hfl.hub.license_checker import check_model_license, LicenseRisk
 
-        # Simular modelo con license: other pero license_name: qwen2
+        # Simulate model with license: other but license_name: qwen2
         mock_info = MagicMock()
         mock_card_data = MagicMock()
         mock_card_data.license = "other"
@@ -267,7 +268,7 @@ class TestLicenseChecker:
         assert result.url == "https://example.com/LICENSE"
 
     def test_check_license_permissive(self, mock_hf_api):
-        """Verifica detección de licencia permisiva."""
+        """Verifies permissive license detection."""
         from hfl.hub.license_checker import check_model_license, LicenseRisk
 
         mock_info = MagicMock()
@@ -285,7 +286,7 @@ class TestLicenseChecker:
         assert result.risk == LicenseRisk.PERMISSIVE
 
     def test_check_license_non_commercial(self, mock_hf_api):
-        """Verifica detección de licencia no comercial."""
+        """Verifies non-commercial license detection."""
         from hfl.hub.license_checker import check_model_license, LicenseRisk
 
         mock_info = MagicMock()
@@ -303,7 +304,7 @@ class TestLicenseChecker:
         assert "non-commercial-only" in result.restrictions
 
     def test_check_license_unknown_fallback(self, mock_hf_api):
-        """Verifica fallback a unknown para licencias no reconocidas."""
+        """Verifies fallback to unknown for unrecognized licenses."""
         from hfl.hub.license_checker import check_model_license, LicenseRisk
 
         mock_info = MagicMock()
@@ -321,10 +322,10 @@ class TestLicenseChecker:
 
 
 class TestDownloader:
-    """Tests para hub/downloader.py."""
+    """Tests for hub/downloader.py."""
 
     def test_pull_model_gguf(self, mock_hf_api, temp_config):
-        """Verifica descarga de modelo GGUF."""
+        """Verifies GGUF model download."""
         from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
 
@@ -344,7 +345,7 @@ class TestDownloader:
                 assert isinstance(result, Path)
 
     def test_pull_model_safetensors(self, mock_hf_api, temp_config):
-        """Verifica descarga de modelo safetensors (snapshot)."""
+        """Verifies safetensors model download (snapshot)."""
         from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
 
@@ -360,13 +361,13 @@ class TestDownloader:
                 result = pull_model(resolved)
 
                 mock_download.assert_called_once()
-                # Verificar allow_patterns para safetensors
+                # Verify allow_patterns for safetensors
                 call_kwargs = mock_download.call_args[1]
                 assert "*.safetensors" in call_kwargs["allow_patterns"]
                 assert "config.json" in call_kwargs["allow_patterns"]
 
     def test_pull_model_with_auth(self, mock_hf_api, temp_config):
-        """Verifica descarga con autenticación."""
+        """Verifies download with authentication."""
         from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
 
@@ -386,7 +387,7 @@ class TestDownloader:
                 assert call_kwargs["token"] == "my-token"
 
     def test_pull_model_creates_directory(self, mock_hf_api, temp_config):
-        """Verifica que se crea el directorio del modelo."""
+        """Verifies that model directory is created."""
         from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Configuración central de hfl."""
+"""Central configuration for hfl."""
 
 import os
 from dataclasses import dataclass, field
@@ -9,14 +9,14 @@ from pathlib import Path
 
 @dataclass
 class HFLConfig:
-    """Configuración global de la aplicación."""
+    """Global application configuration."""
 
-    # Directorio raíz (~/.hfl por defecto)
+    # Root directory (~/.hfl by default)
     home_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("HFL_HOME", Path.home() / ".hfl"))
     )
 
-    # Subdirectorios
+    # Subdirectories
     @property
     def models_dir(self) -> Path:
         return self.home_dir / "models"
@@ -31,17 +31,17 @@ class HFLConfig:
 
     @property
     def llama_cpp_dir(self) -> Path:
-        """Directorio donde se clona/compila llama.cpp para conversión."""
+        """Directory where llama.cpp is cloned/compiled for conversion."""
         return self.home_dir / "tools" / "llama.cpp"
 
-    # Servidor
+    # Server
     host: str = "127.0.0.1"
-    port: int = 11434  # Mismo puerto que Ollama para drop-in compatibility
+    port: int = 11434  # Same port as Ollama for drop-in compatibility
 
-    # Inferencia
+    # Inference
     default_ctx_size: int = 4096
-    default_n_gpu_layers: int = -1  # -1 = todas las capas a GPU
-    default_threads: int = 0  # 0 = auto-detectar
+    default_n_gpu_layers: int = -1  # -1 = all layers to GPU
+    default_threads: int = 0  # 0 = auto-detect
 
     # HuggingFace
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.
@@ -50,14 +50,14 @@ class HFLConfig:
     hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
     def ensure_dirs(self):
-        """Crea los directorios necesarios."""
+        """Creates the necessary directories."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        # Inicializar registro si no existe
+        # Initialize registry if it doesn't exist
         if not self.registry_path.exists():
             self.registry_path.write_text("[]")
 
 
-# Instancia global
+# Global instance
 config = HFLConfig()
 config.ensure_dirs()
