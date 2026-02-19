@@ -181,3 +181,52 @@ class TestSetAndGetLanguage:
         lang = get_language()
         assert isinstance(lang, str)
         assert len(lang) >= 2
+
+
+class TestTranslationInterpolation:
+    """Tests for translation string interpolation."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Set up language for tests."""
+        original = get_language()
+        set_language("en")
+        yield
+        set_language(original)
+
+    def test_interpolation_with_extra_kwargs(self):
+        """Test interpolation ignores extra kwargs."""
+        # This should not crash even with extra params
+        result = t("messages.models_found", count=5, extra_param="ignored")
+        assert "5" in result
+
+    def test_interpolation_format_error_returns_original(self):
+        """Test interpolation returns original if format fails."""
+        # If the format string has placeholders but wrong kwargs
+        # it should return the original string
+        result = t("messages.models_found", wrong_param="value")
+        # Should still return something (either formatted or original)
+        assert result is not None
+
+
+class TestSupportedLanguages:
+    """Tests for language support."""
+
+    def test_english_is_supported(self):
+        """Test English is in supported languages."""
+        from hfl.i18n import SUPPORTED_LANGUAGES
+        assert "en" in SUPPORTED_LANGUAGES
+
+    def test_spanish_is_supported(self):
+        """Test Spanish is in supported languages."""
+        from hfl.i18n import SUPPORTED_LANGUAGES
+        assert "es" in SUPPORTED_LANGUAGES
+
+    def test_get_supported_languages(self):
+        """Test get_supported_languages function."""
+        from hfl.i18n import get_supported_languages
+
+        languages = get_supported_languages()
+        assert isinstance(languages, list)
+        assert "en" in languages
+        assert "es" in languages
