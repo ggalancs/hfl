@@ -34,11 +34,15 @@ class TestTransformersEngine:
     @pytest.fixture
     def engine(self, mock_torch, mock_transformers):
         """Create a TransformersEngine instance with mocked dependencies."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             return TransformersEngine()
 
     def test_initialization(self, engine):
@@ -57,26 +61,36 @@ class TestTransformersEngine:
 
     def test_load_model_basic(self, mock_torch, mock_transformers):
         """Test loading a model without quantization."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
-            mock_transformers.AutoTokenizer.from_pretrained.assert_called_once_with("/path/to/model")
+            mock_transformers.AutoTokenizer.from_pretrained.assert_called_once_with(
+                "/path/to/model"
+            )
             mock_transformers.AutoModelForCausalLM.from_pretrained.assert_called_once()
             assert engine._model_id == "/path/to/model"
             assert engine.is_loaded is True
 
     def test_load_model_with_4bit_quantization(self, mock_torch, mock_transformers):
         """Test loading a model with 4-bit quantization."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", quantization="4bit")
 
@@ -86,11 +100,15 @@ class TestTransformersEngine:
 
     def test_load_model_with_8bit_quantization(self, mock_torch, mock_transformers):
         """Test loading a model with 8-bit quantization."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", quantization="8bit")
 
@@ -100,11 +118,15 @@ class TestTransformersEngine:
 
     def test_load_model_with_custom_device_map(self, mock_torch, mock_transformers):
         """Test loading with custom device_map."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", device_map="cpu")
 
@@ -113,11 +135,15 @@ class TestTransformersEngine:
 
     def test_load_model_with_trust_remote_code(self, mock_torch, mock_transformers):
         """Test loading with trust_remote_code."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", trust_remote_code=True)
 
@@ -126,11 +152,15 @@ class TestTransformersEngine:
 
     def test_unload_model(self, mock_torch, mock_transformers):
         """Test unloading a model."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
             engine.unload()
@@ -141,11 +171,15 @@ class TestTransformersEngine:
     def test_unload_with_cuda_cache_clear(self, mock_torch, mock_transformers):
         """Test that CUDA cache is cleared on unload when CUDA is available."""
         mock_torch.cuda.is_available.return_value = True
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
             engine.unload()
@@ -154,11 +188,15 @@ class TestTransformersEngine:
 
     def test_unload_without_model_loaded(self, mock_torch, mock_transformers):
         """Test unload when no model is loaded does nothing."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             # Should not raise
             engine.unload()
@@ -170,12 +208,16 @@ class TestTransformersEngine:
         mock_tokenizer.apply_chat_template.return_value = "formatted prompt"
         mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
 
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.base import ChatMessage
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -193,12 +235,16 @@ class TestTransformersEngine:
         mock_tokenizer = MagicMock(spec=[])  # No apply_chat_template
         mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
 
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.base import ChatMessage
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -217,28 +263,36 @@ class TestTransformersEngine:
         """Test generate method - verifies engine can generate text."""
         # This test is simplified since full mocking of torch tensors is complex
         # The actual functionality is tested via integration tests
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             # Verify generate method exists and has correct signature
-            assert hasattr(engine, 'generate')
+            assert hasattr(engine, "generate")
             assert callable(engine.generate)
 
     def test_chat(self, mock_torch, mock_transformers):
         """Test chat method - verifies engine can process chat messages."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             # Verify chat method exists and has correct signature
-            assert hasattr(engine, 'chat')
+            assert hasattr(engine, "chat")
             assert callable(engine.chat)
 
 
@@ -260,24 +314,32 @@ class TestTransformersEngineStreaming:
 
     def test_generate_stream_exists(self, mock_torch, mock_transformers):
         """Test generate_stream method exists."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
-            assert hasattr(engine, 'generate_stream')
+            assert hasattr(engine, "generate_stream")
             assert callable(engine.generate_stream)
 
     def test_chat_stream_exists(self, mock_torch, mock_transformers):
         """Test chat_stream method exists."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
-            assert hasattr(engine, 'chat_stream')
+            assert hasattr(engine, "chat_stream")
             assert callable(engine.chat_stream)

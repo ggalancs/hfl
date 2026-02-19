@@ -14,6 +14,7 @@ class TestRateLimit:
         """Test that first call doesn't sleep."""
         # Reset the last API call
         import hfl.hub.downloader as dl
+
         dl._last_api_call = 0
 
         with patch("hfl.hub.downloader.time.sleep"):

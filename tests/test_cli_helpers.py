@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Tests for CLI helper functions."""
 
-
 from hfl.cli.main import (
     _estimate_model_size,
     _extract_params_from_name,

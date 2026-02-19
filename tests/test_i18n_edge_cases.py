@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Edge case tests for i18n module."""
 
-
 import pytest
 
 from hfl.i18n import (
@@ -77,17 +76,7 @@ class TestGetNestedValueEdgeCases:
 
     def test_deeply_nested_value(self):
         """Test getting deeply nested value."""
-        data = {
-            "level1": {
-                "level2": {
-                    "level3": {
-                        "level4": {
-                            "key": "deep_value"
-                        }
-                    }
-                }
-            }
-        }
+        data = {"level1": {"level2": {"level3": {"level4": {"key": "deep_value"}}}}}
 
         result = _get_nested_value(data, "level1.level2.level3.level4.key")
 

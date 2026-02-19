@@ -48,8 +48,8 @@ class TestModelSwitching:
                 "/v1/chat/completions",
                 json={
                     "model": "model-b",  # Different model
-                    "messages": [{"role": "user", "content": "hi"}]
-                }
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
             )
 
             # Should return 404 for model not found
@@ -74,15 +74,15 @@ class TestModelSwitching:
             tokens_generated=5,
             tokens_prompt=3,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         response = client.post(
             "/v1/chat/completions",
             json={
                 "model": "test-model",  # Same model
-                "messages": [{"role": "user", "content": "hi"}]
-            }
+                "messages": [{"role": "user", "content": "hi"}],
+            },
         )
 
         # Should succeed without reloading
@@ -115,8 +115,8 @@ class TestModelNotFound:
                 "/v1/chat/completions",
                 json={
                     "model": "nonexistent-model",
-                    "messages": [{"role": "user", "content": "hi"}]
-                }
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
             )
 
             assert response.status_code == 404
@@ -132,11 +132,7 @@ class TestModelNotFound:
             mock_registry_class.return_value = mock_registry
 
             response = client.post(
-                "/v1/completions",
-                json={
-                    "model": "nonexistent-model",
-                    "prompt": "Hello"
-                }
+                "/v1/completions", json={"model": "nonexistent-model", "prompt": "Hello"}
             )
 
             assert response.status_code == 404

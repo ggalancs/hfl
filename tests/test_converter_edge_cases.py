@@ -142,7 +142,7 @@ class TestGGUFConverterEnsureTools:
         converter = GGUFConverter()
 
         # Mock the paths to exist
-        with patch.object(converter, 'llama_cpp_dir', tmp_path):
+        with patch.object(converter, "llama_cpp_dir", tmp_path):
             convert_script = tmp_path / "convert_hf_to_gguf.py"
             convert_script.touch()
 

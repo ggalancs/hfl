@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Edge case tests for hub resolver module."""
 
-
 from hfl.hub.resolver import _get_quant_levels, _is_quantization
 
 

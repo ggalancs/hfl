@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Extended tests for engine selector module."""
 
-
 import pytest
 
 from hfl.engine.selector import (

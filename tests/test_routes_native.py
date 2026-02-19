@@ -32,7 +32,7 @@ class TestOllamaChat:
             tokens_generated=5,
             tokens_prompt=3,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -45,10 +45,7 @@ class TestOllamaChat:
 
         response = client.post(
             "/api/chat",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}]
-            }
+            json={"model": "test-model", "messages": [{"role": "user", "content": "hi"}]},
         )
 
         assert response.status_code == 200
@@ -72,8 +69,8 @@ class TestOllamaChat:
                 "/api/chat",
                 json={
                     "model": "nonexistent-model",
-                    "messages": [{"role": "user", "content": "hi"}]
-                }
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
             )
 
             assert response.status_code == 404
@@ -102,7 +99,7 @@ class TestOllamaGenerate:
             tokens_generated=1,
             tokens_prompt=1,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -113,13 +110,7 @@ class TestOllamaGenerate:
 
         client = TestClient(app)
 
-        response = client.post(
-            "/api/generate",
-            json={
-                "model": "test-model",
-                "prompt": "Hello"
-            }
-        )
+        response = client.post("/api/generate", json={"model": "test-model", "prompt": "Hello"})
 
         assert response.status_code == 200
         data = response.json()

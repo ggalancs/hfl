@@ -32,7 +32,7 @@ class TestChatCompletionsExtended:
             tokens_generated=1,
             tokens_prompt=3,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -48,8 +48,8 @@ class TestChatCompletionsExtended:
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
-                "stop": ["END", "STOP"]
-            }
+                "stop": ["END", "STOP"],
+            },
         )
 
         assert response.status_code == 200
@@ -67,7 +67,7 @@ class TestChatCompletionsExtended:
             tokens_generated=1,
             tokens_prompt=3,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -83,8 +83,8 @@ class TestChatCompletionsExtended:
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
-                "stop": "END"
-            }
+                "stop": "END",
+            },
         )
 
         assert response.status_code == 200
@@ -101,7 +101,7 @@ class TestChatCompletionsExtended:
             tokens_generated=2,
             tokens_prompt=3,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -114,10 +114,7 @@ class TestChatCompletionsExtended:
 
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}]
-            }
+            json={"model": "test-model", "messages": [{"role": "user", "content": "hi"}]},
         )
 
         assert response.status_code == 200
@@ -146,7 +143,7 @@ class TestCompletionsExtended:
             tokens_generated=1,
             tokens_prompt=1,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -159,12 +156,7 @@ class TestCompletionsExtended:
 
         response = client.post(
             "/v1/completions",
-            json={
-                "model": "test-model",
-                "prompt": "Hello",
-                "temperature": 0.5,
-                "top_p": 0.8
-            }
+            json={"model": "test-model", "prompt": "Hello", "temperature": 0.5, "top_p": 0.8},
         )
 
         assert response.status_code == 200
@@ -182,7 +174,7 @@ class TestCompletionsExtended:
             tokens_generated=1,
             tokens_prompt=1,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -194,12 +186,7 @@ class TestCompletionsExtended:
         client = TestClient(app)
 
         response = client.post(
-            "/v1/completions",
-            json={
-                "model": "test-model",
-                "prompt": "Hello",
-                "max_tokens": 100
-            }
+            "/v1/completions", json={"model": "test-model", "prompt": "Hello", "max_tokens": 100}
         )
 
         assert response.status_code == 200

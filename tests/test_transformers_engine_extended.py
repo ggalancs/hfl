@@ -33,11 +33,15 @@ class TestTransformersEngineProperties:
 
     def test_is_loaded_true_after_load(self, mock_torch, mock_transformers):
         """Test is_loaded returns True after loading a model."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             assert engine.is_loaded is False
@@ -48,11 +52,15 @@ class TestTransformersEngineProperties:
 
     def test_model_name_after_load(self, mock_torch, mock_transformers):
         """Test model_name returns correct path after loading."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             assert engine.model_name == ""
@@ -63,11 +71,15 @@ class TestTransformersEngineProperties:
 
     def test_is_loaded_false_after_unload(self, mock_torch, mock_transformers):
         """Test is_loaded returns False after unloading."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -99,12 +111,16 @@ class TestTransformersEngineBuildPrompt:
         mock_tokenizer = MagicMock(spec=[])  # No apply_chat_template
         mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
 
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.base import ChatMessage
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -120,12 +136,16 @@ class TestTransformersEngineBuildPrompt:
         mock_tokenizer = MagicMock(spec=[])  # No apply_chat_template
         mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
 
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.base import ChatMessage
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -156,11 +176,15 @@ class TestTransformersEngineLoadOptions:
 
     def test_load_with_no_quantization(self, mock_torch, mock_transformers):
         """Test load without quantization."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model")
 
@@ -169,11 +193,15 @@ class TestTransformersEngineLoadOptions:
 
     def test_load_with_torch_dtype(self, mock_torch, mock_transformers):
         """Test load with custom torch_dtype."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", torch_dtype="float16")
 
@@ -182,11 +210,15 @@ class TestTransformersEngineLoadOptions:
 
     def test_load_with_max_memory(self, mock_torch, mock_transformers):
         """Test load with max_memory setting."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
             engine.load("/path/to/model", device_map="auto")
 
@@ -209,64 +241,84 @@ class TestTransformersEngineMethodSignatures:
 
     def test_generate_method_signature(self, mock_torch, mock_transformers):
         """Test generate method has correct signature."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             import inspect
+
             sig = inspect.signature(engine.generate)
             params = list(sig.parameters.keys())
 
-            assert 'prompt' in params
-            assert 'config' in params
+            assert "prompt" in params
+            assert "config" in params
 
     def test_generate_stream_method_signature(self, mock_torch, mock_transformers):
         """Test generate_stream method has correct signature."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             import inspect
+
             sig = inspect.signature(engine.generate_stream)
             params = list(sig.parameters.keys())
 
-            assert 'prompt' in params
-            assert 'config' in params
+            assert "prompt" in params
+            assert "config" in params
 
     def test_chat_method_signature(self, mock_torch, mock_transformers):
         """Test chat method has correct signature."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             import inspect
+
             sig = inspect.signature(engine.chat)
             params = list(sig.parameters.keys())
 
-            assert 'messages' in params
-            assert 'config' in params
+            assert "messages" in params
+            assert "config" in params
 
     def test_chat_stream_method_signature(self, mock_torch, mock_transformers):
         """Test chat_stream method has correct signature."""
-        with patch.dict(sys.modules, {
-            'torch': mock_torch,
-            'transformers': mock_transformers,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "torch": mock_torch,
+                "transformers": mock_transformers,
+            },
+        ):
             from hfl.engine.transformers_engine import TransformersEngine
+
             engine = TransformersEngine()
 
             import inspect
+
             sig = inspect.signature(engine.chat_stream)
             params = list(sig.parameters.keys())
 
-            assert 'messages' in params
-            assert 'config' in params
+            assert "messages" in params
+            assert "config" in params

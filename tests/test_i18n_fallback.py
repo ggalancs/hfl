@@ -212,11 +212,13 @@ class TestSupportedLanguages:
     def test_english_is_supported(self):
         """Test English is in supported languages."""
         from hfl.i18n import SUPPORTED_LANGUAGES
+
         assert "en" in SUPPORTED_LANGUAGES
 
     def test_spanish_is_supported(self):
         """Test Spanish is in supported languages."""
         from hfl.i18n import SUPPORTED_LANGUAGES
+
         assert "es" in SUPPORTED_LANGUAGES
 
     def test_get_supported_languages(self):

@@ -109,6 +109,7 @@ class TestVersionFallback:
         """Test that __version__ is available."""
         try:
             from hfl import __version__
+
             assert __version__ is not None
             assert isinstance(__version__, str)
         except ImportError:

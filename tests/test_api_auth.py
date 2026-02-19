@@ -56,10 +56,7 @@ class TestAPIKeyMiddleware:
         state.api_key = "test-secret-key"
         client = TestClient(app)
 
-        response = client.get(
-            "/v1/models",
-            headers={"Authorization": "Bearer test-secret-key"}
-        )
+        response = client.get("/v1/models", headers={"Authorization": "Bearer test-secret-key"})
 
         assert response.status_code == 200
 
@@ -68,10 +65,7 @@ class TestAPIKeyMiddleware:
         state.api_key = "test-secret-key"
         client = TestClient(app)
 
-        response = client.get(
-            "/v1/models",
-            headers={"X-API-Key": "test-secret-key"}
-        )
+        response = client.get("/v1/models", headers={"X-API-Key": "test-secret-key"})
 
         assert response.status_code == 200
 
@@ -80,10 +74,7 @@ class TestAPIKeyMiddleware:
         state.api_key = "test-secret-key"
         client = TestClient(app)
 
-        response = client.get(
-            "/v1/models",
-            headers={"Authorization": "Bearer wrong-key"}
-        )
+        response = client.get("/v1/models", headers={"Authorization": "Bearer wrong-key"})
 
         assert response.status_code == 401
 
@@ -92,10 +83,7 @@ class TestAPIKeyMiddleware:
         state.api_key = "test-secret-key"
         client = TestClient(app)
 
-        response = client.get(
-            "/v1/models",
-            headers={"X-API-Key": "wrong-key"}
-        )
+        response = client.get("/v1/models", headers={"X-API-Key": "wrong-key"})
 
         assert response.status_code == 401
 
@@ -114,10 +102,7 @@ class TestAPIKeyMiddleware:
         state.api_key = "test-secret-key"
         client = TestClient(app)
 
-        response = client.get(
-            "/v1/models",
-            headers={"Authorization": "NotBearer test-secret-key"}
-        )
+        response = client.get("/v1/models", headers={"Authorization": "NotBearer test-secret-key"})
 
         assert response.status_code == 401
 
@@ -139,7 +124,7 @@ class TestDisclaimerMiddleware:
 
         response = client.post(
             "/v1/chat/completions",
-            json={"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+            json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
         )
 
         # Even on error, the disclaimer should be present
@@ -149,10 +134,7 @@ class TestDisclaimerMiddleware:
         """Test that disclaimer header is added to completions."""
         client = TestClient(app)
 
-        response = client.post(
-            "/v1/completions",
-            json={"model": "test", "prompt": "hi"}
-        )
+        response = client.post("/v1/completions", json={"model": "test", "prompt": "hi"})
 
         assert "X-AI-Disclaimer" in response.headers
 
@@ -160,10 +142,7 @@ class TestDisclaimerMiddleware:
         """Test that disclaimer header is added to /api/generate."""
         client = TestClient(app)
 
-        response = client.post(
-            "/api/generate",
-            json={"model": "test", "prompt": "hi"}
-        )
+        response = client.post("/api/generate", json={"model": "test", "prompt": "hi"})
 
         assert "X-AI-Disclaimer" in response.headers
 
@@ -172,8 +151,7 @@ class TestDisclaimerMiddleware:
         client = TestClient(app)
 
         response = client.post(
-            "/api/chat",
-            json={"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+            "/api/chat", json={"model": "test", "messages": [{"role": "user", "content": "hi"}]}
         )
 
         assert "X-AI-Disclaimer" in response.headers
@@ -192,7 +170,7 @@ class TestDisclaimerMiddleware:
 
         response = client.post(
             "/v1/chat/completions",
-            json={"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+            json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
         )
 
         disclaimer = response.headers.get("X-AI-Disclaimer", "")

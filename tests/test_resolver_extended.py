@@ -20,11 +20,7 @@ class TestSelectGguf:
 
     def test_select_with_exact_quant_match(self):
         """Test selecting GGUF with exact quantization match."""
-        files = [
-            "model-Q4_K_M.gguf",
-            "model-Q5_K_M.gguf",
-            "model-Q8_0.gguf"
-        ]
+        files = ["model-Q4_K_M.gguf", "model-Q5_K_M.gguf", "model-Q8_0.gguf"]
 
         result = _select_gguf(files, "Q5_K_M")
 
@@ -32,10 +28,7 @@ class TestSelectGguf:
 
     def test_select_with_lowercase_quant(self):
         """Test selecting with lowercase quantization."""
-        files = [
-            "model-Q4_K_M.gguf",
-            "model-Q8_0.gguf"
-        ]
+        files = ["model-Q4_K_M.gguf", "model-Q8_0.gguf"]
 
         result = _select_gguf(files, "q4_k_m")
 
@@ -43,11 +36,7 @@ class TestSelectGguf:
 
     def test_select_priority_q4_k_m(self):
         """Test Q4_K_M is selected by default priority."""
-        files = [
-            "model-Q8_0.gguf",
-            "model-Q4_K_M.gguf",
-            "model-Q6_K.gguf"
-        ]
+        files = ["model-Q8_0.gguf", "model-Q4_K_M.gguf", "model-Q6_K.gguf"]
 
         result = _select_gguf(files, None)
 
@@ -55,11 +44,7 @@ class TestSelectGguf:
 
     def test_select_priority_q5_k_m(self):
         """Test Q5_K_M is selected when Q4_K_M not available."""
-        files = [
-            "model-Q8_0.gguf",
-            "model-Q5_K_M.gguf",
-            "model-Q6_K.gguf"
-        ]
+        files = ["model-Q8_0.gguf", "model-Q5_K_M.gguf", "model-Q6_K.gguf"]
 
         result = _select_gguf(files, None)
 
@@ -67,10 +52,7 @@ class TestSelectGguf:
 
     def test_select_fallback_to_first(self):
         """Test fallback to first file when no priority match."""
-        files = [
-            "model-IQ2_XS.gguf",
-            "model-IQ3_XXS.gguf"
-        ]
+        files = ["model-IQ2_XS.gguf", "model-IQ3_XXS.gguf"]
 
         result = _select_gguf(files, None)
 
@@ -303,10 +285,7 @@ class TestResolvedModel:
 
     def test_resolved_model_defaults(self):
         """Test ResolvedModel default values."""
-        model = ResolvedModel(
-            repo_id="org/model",
-            format="gguf"
-        )
+        model = ResolvedModel(repo_id="org/model", format="gguf")
 
         assert model.repo_id == "org/model"
         assert model.format == "gguf"
@@ -321,7 +300,7 @@ class TestResolvedModel:
             format="gguf",
             filename="model.Q4_K_M.gguf",
             revision="v1.0",
-            quantization="Q4_K_M"
+            quantization="Q4_K_M",
         )
 
         assert model.repo_id == "org/model"

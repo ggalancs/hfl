@@ -17,6 +17,7 @@ class TestGetSystemLanguage:
 
             # Need to reimport to get fresh function
             from hfl.i18n import _get_system_language
+
             result = _get_system_language()
 
             assert result == "es"
@@ -27,6 +28,7 @@ class TestGetSystemLanguage:
             mock_locale.return_value = ("en_US", "UTF-8")
 
             from hfl.i18n import _get_system_language
+
             result = _get_system_language()
 
             assert result == "en"
@@ -38,6 +40,7 @@ class TestGetSystemLanguage:
 
             with patch.dict(os.environ, {"LC_ALL": "", "LC_MESSAGES": "", "LANG": ""}, clear=False):
                 from hfl.i18n import DEFAULT_LANGUAGE, _get_system_language
+
                 result = _get_system_language()
 
                 assert result == DEFAULT_LANGUAGE
@@ -49,6 +52,7 @@ class TestGetSystemLanguage:
 
             with patch.dict(os.environ, {"LC_ALL": "es_ES.UTF-8"}, clear=False):
                 from hfl.i18n import _get_system_language
+
                 result = _get_system_language()
 
                 assert result == "es"
@@ -61,6 +65,7 @@ class TestGetSystemLanguage:
             env_vars = {"LC_ALL": "", "LC_MESSAGES": "", "LANG": "es.UTF-8"}
             with patch.dict(os.environ, env_vars, clear=False):
                 from hfl.i18n import _get_system_language
+
                 result = _get_system_language()
 
                 assert result == "es"
@@ -71,6 +76,7 @@ class TestGetSystemLanguage:
             mock_locale.side_effect = Exception("Locale error")
 
             from hfl.i18n import DEFAULT_LANGUAGE, _get_system_language
+
             result = _get_system_language()
 
             assert result == DEFAULT_LANGUAGE
@@ -83,6 +89,7 @@ class TestGetLanguageExtended:
     def clear_cache(self):
         """Clear language cache before each test."""
         from hfl.i18n import get_language
+
         get_language.cache_clear()
         yield
         get_language.cache_clear()
@@ -91,6 +98,7 @@ class TestGetLanguageExtended:
         """Test that HFL_LANG with regional suffix is handled."""
         with patch.dict(os.environ, {"HFL_LANG": "es_MX"}):
             from hfl.i18n import get_language
+
             get_language.cache_clear()
             result = get_language()
 
@@ -100,6 +108,7 @@ class TestGetLanguageExtended:
         """Test unsupported language with regional suffix falls back."""
         with patch.dict(os.environ, {"HFL_LANG": "fr_FR"}):
             from hfl.i18n import get_language
+
             get_language.cache_clear()
 
             with patch("hfl.i18n._get_system_language") as mock_sys:
@@ -113,6 +122,7 @@ class TestGetLanguageExtended:
         """Test that empty HFL_LANG falls back to system."""
         with patch.dict(os.environ, {"HFL_LANG": ""}):
             from hfl.i18n import get_language
+
             get_language.cache_clear()
 
             with patch("hfl.i18n._get_system_language") as mock_sys:
@@ -129,6 +139,7 @@ class TestSetLanguage:
     def clear_cache(self):
         """Clear language cache before each test."""
         from hfl.i18n import get_language
+
         get_language.cache_clear()
         yield
         get_language.cache_clear()
@@ -217,6 +228,7 @@ class TestLoadTranslations:
         # This test would require removing the actual file, which is destructive
         # Instead, we just verify the function exists
         from hfl.i18n import _load_translations
+
         assert callable(_load_translations)
 
 
@@ -277,6 +289,7 @@ class TestTranslateFunction:
         """Ensure English language for tests."""
         monkeypatch.setenv("HFL_LANG", "en")
         from hfl.i18n import get_language
+
         get_language.cache_clear()
         yield
         get_language.cache_clear()
@@ -318,6 +331,7 @@ class TestTranslateFunction:
         """Test fallback to English when key missing in current language."""
         with patch.dict(os.environ, {"HFL_LANG": "es"}):
             from hfl.i18n import get_language, t
+
             get_language.cache_clear()
 
             # Use a key that exists in both

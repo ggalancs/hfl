@@ -14,6 +14,7 @@ class TestGetHfToken:
         with patch("hfl.hub.auth.config") as mock_config:
             mock_config.hf_token = "env_token_123"
             from hfl.hub.auth import get_hf_token
+
             assert get_hf_token() == "env_token_123"
 
     def test_token_from_huggingface_hub(self):
@@ -23,6 +24,7 @@ class TestGetHfToken:
             with patch("hfl.hub.auth.get_token") as mock_get_token:
                 mock_get_token.return_value = "hf_token_456"
                 from hfl.hub.auth import get_hf_token
+
                 assert get_hf_token() == "hf_token_456"
 
     def test_no_token_available(self):
@@ -32,6 +34,7 @@ class TestGetHfToken:
             with patch("hfl.hub.auth.get_token") as mock_get_token:
                 mock_get_token.return_value = None
                 from hfl.hub.auth import get_hf_token
+
                 assert get_hf_token() is None
 
     def test_huggingface_hub_exception(self):
@@ -41,6 +44,7 @@ class TestGetHfToken:
             with patch("hfl.hub.auth.get_token") as mock_get_token:
                 mock_get_token.side_effect = Exception("Token error")
                 from hfl.hub.auth import get_hf_token
+
                 assert get_hf_token() is None
 
 
@@ -58,6 +62,7 @@ class TestEnsureAuth:
                 mock_get_token.return_value = None
 
                 from hfl.hub.auth import ensure_auth
+
                 result = ensure_auth("public/model")
 
                 assert result is None
@@ -73,6 +78,7 @@ class TestEnsureAuth:
                 mock_get_token.return_value = "existing_token"
 
                 from hfl.hub.auth import ensure_auth
+
                 result = ensure_auth("meta-llama/Llama-3.1-8B")
 
                 assert result == "existing_token"
@@ -99,6 +105,7 @@ class TestEnsureAuth:
                         mock_prompt.return_value = "user_provided_token"
 
                         from hfl.hub.auth import ensure_auth
+
                         result = ensure_auth("meta-llama/Llama-3.1-8B")
 
                         assert result == "user_provided_token"
@@ -119,6 +126,7 @@ class TestEnsureAuth:
                         mock_prompt.return_value = "invalid_token"
 
                         from hfl.hub.auth import ensure_auth
+
                         with pytest.raises(RuntimeError) as exc_info:
                             ensure_auth("meta-llama/Llama-3.1-8B")
 

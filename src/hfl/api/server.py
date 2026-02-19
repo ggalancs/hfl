@@ -147,9 +147,7 @@ async def health():
     }
 
 
-def start_server(
-    host: str | None = None, port: int | None = None, api_key: str | None = None
-):
+def start_server(host: str | None = None, port: int | None = None, api_key: str | None = None):
     """Start the API server.
 
     Args:

@@ -37,6 +37,7 @@ class TestGetLlamaCppEngine:
     def test_function_signature(self):
         """Test that the function has the expected signature."""
         import inspect
+
         sig = inspect.signature(_get_llama_cpp_engine)
         assert len(sig.parameters) == 0  # No parameters
 
@@ -64,6 +65,7 @@ class TestGetVllmEngine:
     def test_function_signature(self):
         """Test that the function has the expected signature."""
         import inspect
+
         sig = inspect.signature(_get_vllm_engine)
         assert len(sig.parameters) == 0  # No parameters
 
@@ -78,6 +80,7 @@ class TestHasCuda:
     def test_function_signature(self):
         """Test that the function has the expected signature."""
         import inspect
+
         sig = inspect.signature(_has_cuda)
         assert len(sig.parameters) == 0  # No parameters
 
@@ -86,6 +89,7 @@ class TestHasCuda:
         # We can't easily call _has_cuda in test environment due to torch conflicts
         # So we just verify the function exists with correct signature
         import inspect
+
         source = inspect.getsource(_has_cuda)
         assert "return" in source
         assert "torch.cuda.is_available()" in source

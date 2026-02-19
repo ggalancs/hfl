@@ -161,7 +161,7 @@ class TestChatCompletionsStreamingEdgeCases:
             tokens_generated=5,
             tokens_prompt=10,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -178,9 +178,9 @@ class TestChatCompletionsStreamingEdgeCases:
                 "model": "test-model",
                 "messages": [
                     {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": "Hello!"}
-                ]
-            }
+                    {"role": "user", "content": "Hello!"},
+                ],
+            },
         )
 
         assert response.status_code == 200
@@ -194,7 +194,7 @@ class TestChatCompletionsStreamingEdgeCases:
             tokens_generated=3,
             tokens_prompt=20,
             tokens_per_second=50.0,
-            stop_reason="stop"
+            stop_reason="stop",
         )
 
         mock_model = MagicMock()
@@ -212,9 +212,9 @@ class TestChatCompletionsStreamingEdgeCases:
                 "messages": [
                     {"role": "user", "content": "Hello!"},
                     {"role": "assistant", "content": "Hi there!"},
-                    {"role": "user", "content": "Thanks!"}
-                ]
-            }
+                    {"role": "user", "content": "Thanks!"},
+                ],
+            },
         )
 
         assert response.status_code == 200
