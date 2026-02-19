@@ -1,6 +1,32 @@
 # hfl
 
+[![License: HRUL v1.0](https://img.shields.io/badge/License-HRUL%20v1.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://github.com/ggalancs/hfl/actions/workflows/test.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/test.yml)
+[![Lint](https://github.com/ggalancs/hfl/actions/workflows/lint.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/lint.yml)
+[![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen.svg)](https://github.com/ggalancs/hfl)
+
 Run HuggingFace models locally like Ollama.
+
+## Why HFL?
+
+**Ollama has a curated catalog of ~500 models. HuggingFace Hub has 500,000+.**
+
+If you want to run a model that isn't in Ollama's catalog — a specific fine-tune, a recent release from a small lab, a niche model — you have to manually download from HuggingFace, convert to GGUF with llama.cpp, quantize, and configure inference. **HFL automates all of this in a single command.**
+
+| Feature | Ollama | HFL |
+|---------|--------|-----|
+| Model catalog | ~500 curated | 500K+ (all HF Hub) |
+| Auto-conversion | Not needed (pre-converted) | Yes (safetensors→GGUF) |
+| Ease of use | Excellent | Good |
+| OpenAI API compatible | Yes | Yes |
+| Ollama API compatible | Native | Yes (drop-in) |
+| Multi-backend | llama.cpp only | llama.cpp + Transformers + vLLM |
+| License verification | No | Yes (5 risk levels) |
+| Legal traceability | No | Yes (provenance log) |
+| Maturity | High (established) | Pre-alpha (v0.1.0) |
+
+**HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
 
 ## Features
 
@@ -10,6 +36,18 @@ Run HuggingFace models locally like Ollama.
 - **Automatic Conversion**: Downloads HuggingFace models and converts to GGUF automatically
 - **Smart Quantization**: Supports Q2_K through F16 quantization levels
 - **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
+- **Bilingual CLI**: Help text in English and Spanish
+
+## Prerequisites
+
+- **Python 3.10+** (required)
+- **git** (for cloning llama.cpp during first conversion)
+- **cmake** and **C++ compiler** (for building llama.cpp quantization tools)
+  - macOS: `xcode-select --install`
+  - Ubuntu/Debian: `sudo apt install build-essential cmake`
+  - Windows: Install Visual Studio Build Tools
+
+> **Note:** Build tools are only needed if you convert safetensors models to GGUF. If you only use pre-quantized GGUF models, they're not required.
 
 ## Installation
 
@@ -197,6 +235,16 @@ Environment variables:
 - `HFL_HOME`: Data directory (default: `~/.hfl`)
 - `HF_TOKEN`: HuggingFace token for gated models (alternative to `hfl login`)
 
+## Known Limitations
+
+This is a v0.1.0 release. Known limitations include:
+
+- **vLLM backend is experimental**: Basic implementation without full streaming support
+- **No API authentication**: The REST API has no auth; don't expose to untrusted networks
+- **No rate limiting on API**: Only HuggingFace Hub calls are rate-limited
+- **CORS is permissive**: API allows all origins (configurable in future versions)
+- **Windows support**: Not fully tested; Unix-like systems recommended
+
 ## Documentation
 
 Complete architecture documentation with diagrams is available:
@@ -223,6 +271,9 @@ pip install -e ".[dev]"
 
 # Run tests
 pytest
+
+# Run tests with coverage
+pytest --cov=hfl --cov-report=term-missing
 
 # Format code
 ruff format .
