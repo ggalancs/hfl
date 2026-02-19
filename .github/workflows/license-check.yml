@@ -19,19 +19,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pip-licenses
+          pip install "pip-licenses>=4.0,<5.0"
           pip install -e .
 
       - name: Check for copyleft licenses
         run: |
           echo "Checking for GPL/AGPL/LGPL licenses..."
-          pip-licenses --fail-on="GPL;GPLv2;GPLv3;AGPL;AGPLv3;LGPL;LGPLv2;LGPLv3" \
-            --format=plain --with-urls
+          pip-licenses -f plain -u --fail-on="GPL;GPLv2;GPLv3;AGPL;AGPLv3;LGPL;LGPLv2;LGPLv3"
 
       - name: Generate license report
         if: always()
         run: |
-          pip-licenses --format=markdown --with-urls > license-report.md
+          pip-licenses -f markdown -u > license-report.md
           cat license-report.md
 
       - name: Upload license report
