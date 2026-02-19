@@ -2,11 +2,18 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the CLI module (main commands)."""
 
+import re
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
 
 
 @pytest.fixture
@@ -851,41 +858,45 @@ class TestCLIApp:
         from hfl.cli.main import app
 
         result = runner.invoke(app, ["pull", "--help"])
+        output = strip_ansi(result.stdout)
 
         assert result.exit_code == 0
-        assert "--quantize" in result.stdout
-        assert "--format" in result.stdout
+        assert "--quantize" in output
+        assert "--format" in output
 
     def test_search_help(self, runner):
         """Verifies search help."""
         from hfl.cli.main import app
 
         result = runner.invoke(app, ["search", "--help"])
+        output = strip_ansi(result.stdout)
 
         assert result.exit_code == 0
-        assert "--limit" in result.stdout
-        assert "--page-size" in result.stdout
-        assert "--gguf" in result.stdout
-        assert "--sort" in result.stdout
+        assert "--limit" in output
+        assert "--page-size" in output
+        assert "--gguf" in output
+        assert "--sort" in output
 
     def test_run_help(self, runner):
         """Verifies run help."""
         from hfl.cli.main import app
 
         result = runner.invoke(app, ["run", "--help"])
+        output = strip_ansi(result.stdout)
 
         assert result.exit_code == 0
-        assert "--backend" in result.stdout
-        assert "--ctx" in result.stdout
-        assert "--system" in result.stdout
+        assert "--backend" in output
+        assert "--ctx" in output
+        assert "--system" in output
 
     def test_serve_help(self, runner):
         """Verifies serve help."""
         from hfl.cli.main import app
 
         result = runner.invoke(app, ["serve", "--help"])
+        output = strip_ansi(result.stdout)
 
         assert result.exit_code == 0
-        assert "--host" in result.stdout
-        assert "--port" in result.stdout
-        assert "--model" in result.stdout
+        assert "--host" in output
+        assert "--port" in output
+        assert "--model" in output
