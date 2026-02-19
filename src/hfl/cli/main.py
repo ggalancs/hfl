@@ -22,7 +22,7 @@ from rich.table import Table
 
 app = typer.Typer(
     name="hfl",
-    help="Run HuggingFace models locally.",
+    help="Run HuggingFace models locally. | Ejecuta modelos de HuggingFace localmente.",
     no_args_is_help=True,
 )
 console = Console()
@@ -40,7 +40,7 @@ def pull(
         False, "--skip-license", help="Skip license verification"
     ),
 ):
-    """Download a model from HuggingFace Hub."""
+    """Download a model from HuggingFace Hub. | Descarga un modelo de HuggingFace Hub."""
     from datetime import datetime
 
     from hfl.converter.formats import ModelFormat, detect_format
@@ -172,7 +172,7 @@ def run(
         False, "--verbose", "-v", help="Show backend logs (Metal, CUDA)"
     ),
 ):
-    """Start an interactive chat with a model."""
+    """Start an interactive chat with a model. | Inicia un chat interactivo con un modelo."""
     from pathlib import Path
 
     from hfl.engine.base import ChatMessage
@@ -243,7 +243,7 @@ def serve(
     port: int = typer.Option(11434, "--port", "-p"),
     model: str = typer.Option(None, "--model", "-m", help="Pre-load model"),
 ):
-    """Start the API server (OpenAI + Ollama compatible)."""
+    """Start the API server (OpenAI + Ollama compatible). | Inicia el servidor API (compatible con OpenAI y Ollama)."""
     from hfl.api.server import start_server, state
 
     # R6 - Privacy warning when exposing to the network
@@ -282,7 +282,7 @@ def serve(
 
 @app.command(name="list")
 def list_models():
-    """List all downloaded models."""
+    """List all downloaded models. | Lista todos los modelos descargados."""
     from rich.table import Table
 
     from hfl.models.registry import ModelRegistry
@@ -481,18 +481,19 @@ def search(
 ):
     """
     Search models on HuggingFace Hub with interactive pagination.
+    Busca modelos en HuggingFace Hub con paginación interactiva.
 
-    Controls:
-      SPACE/ENTER    Next page
-      q/Q/ESC        Exit
-      p              Previous page (if available)
+    Controls / Controles:
+      SPACE/ENTER    Next page / Página siguiente
+      q/Q/ESC        Exit / Salir
+      p              Previous page / Página anterior
 
-    Examples:
+    Examples / Ejemplos:
       hfl search llama
       hfl search mistral --gguf
       hfl search phi --limit 50 --page-size 5
-      hfl search qwen --max-params 14        # Models less than 14B
-      hfl search llama --min-params 70       # Models 70B or more
+      hfl search qwen --max-params 14        # Models < 14B
+      hfl search llama --min-params 70       # Models >= 70B
     """
     from huggingface_hub import HfApi
 
@@ -633,7 +634,7 @@ def search(
 
 @app.command()
 def rm(model: str = typer.Argument(help="Name of the model to delete")):
-    """Delete a local model."""
+    """Delete a local model. | Elimina un modelo local."""
     import shutil
     from pathlib import Path
 
@@ -666,7 +667,7 @@ def rm(model: str = typer.Argument(help="Name of the model to delete")):
 
 @app.command()
 def inspect(model: str = typer.Argument(help="Model name")):
-    """Show detailed information about a model."""
+    """Show detailed information about a model. | Muestra información detallada de un modelo."""
     from rich.panel import Panel
     from rich.text import Text
 
@@ -716,9 +717,9 @@ def set_alias(
     alias: str = typer.Argument(help="Alias to assign"),
 ):
     """
-    Assign an alias to an existing model.
+    Assign an alias to an existing model. | Asigna un alias a un modelo existente.
 
-    Examples:
+    Examples / Ejemplos:
       hfl alias huihui-qwen3-coder-30b-a3b-instruct-abliterated-i1-gguf-q4_k_m coder
       hfl run coder
     """
@@ -756,13 +757,13 @@ def login(
 ):
     """
     Configure your HuggingFace token for faster downloads.
+    Configura tu token de HuggingFace para descargas más rápidas.
 
-    Get your token at: https://huggingface.co/settings/tokens
+    Get your token at / Obtén tu token en: https://huggingface.co/settings/tokens
 
-    The token is saved securely using huggingface_hub.
-    This allows:
-      - Faster downloads (higher rate limits)
-      - Access to gated models (after accepting their license on HF)
+    Benefits / Beneficios:
+      - Faster downloads / Descargas más rápidas
+      - Access to gated models / Acceso a modelos con restricciones
     """
     from huggingface_hub import login as hf_login
     from huggingface_hub import whoami
@@ -786,7 +787,7 @@ def login(
 
 @app.command()
 def logout():
-    """Remove the saved HuggingFace token."""
+    """Remove the saved HuggingFace token. | Elimina el token de HuggingFace guardado."""
     from huggingface_hub import logout as hf_logout
 
     try:
@@ -798,7 +799,7 @@ def logout():
 
 @app.command()
 def version():
-    """Show the version of hfl."""
+    """Show the version of hfl. | Muestra la versión de hfl."""
     from hfl import __version__
 
     console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")
