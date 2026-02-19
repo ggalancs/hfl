@@ -390,10 +390,12 @@ Los modelos de IA pueden generar contenido inexacto, sesgado o inapropiado. Los 
 
 ## Licencia
 
-hfl está licenciado bajo la **hfl Responsible Use License (HRUL) v1.0**.
+hfl se distribuye como source-available bajo la **hfl Responsible Use License (HRUL) v1.0**.
 
 Esta licencia permite uso libre, modificación y distribución comercial con una condición: los trabajos derivados que se distribuyan públicamente deben mantener las características de cumplimiento legal (verificación de licencias, descargos de IA, seguimiento de procedencia, protecciones de privacidad y respeto de restricciones).
 
 Eres libre de reescribir, extender, renombrar y vender derivados — simplemente no puedes eliminar las características de seguridad.
 
-Ver [LICENSE](LICENSE) para el texto completo.
+**Nota:** La HRUL no es una licencia open-source aprobada por la OSI. Es una licencia source-available con requisitos de uso responsable, inspirada en Apache 2.0, el copyleft de GPL, y la familia de licencias RAIL para IA.
+
+Ver [LICENSE](LICENSE) para el texto completo y [LICENSE-FAQ.md](LICENSE-FAQ.md) para preguntas frecuentes.

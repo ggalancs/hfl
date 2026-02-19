@@ -1,6 +1,6 @@
 # hfl
 
-[![License: HRUL v1.0](https://img.shields.io/badge/License-HRUL%20v1.0-blue.svg)](LICENSE)
+[![License: HRUL v1.0](https://img.shields.io/badge/License-HRUL%20v1.0-blue.svg)](LICENSE) [![License FAQ](https://img.shields.io/badge/License-FAQ-informational.svg)](LICENSE-FAQ.md)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen.svg)](https://github.com/ggalancs/hfl)
@@ -390,10 +390,12 @@ AI models may generate inaccurate, biased, or inappropriate content. Users are s
 
 ## License
 
-hfl is licensed under the **hfl Responsible Use License (HRUL) v1.0**.
+hfl is source-available under the **hfl Responsible Use License (HRUL) v1.0**.
 
 This license allows free use, modification, and commercial distribution with one condition: derivative works that are publicly distributed must maintain the legal compliance features (license checking, AI disclaimers, provenance tracking, privacy protections, and gating respect).
 
 You are free to rewrite, extend, rebrand, and sell derivatives — you just can't strip out the safety features.
 
-See [LICENSE](LICENSE) for the full text.
+**Note:** The HRUL is not an OSI-approved open-source license. It is a source-available license with responsible use requirements, inspired by Apache 2.0, GPL copyleft, and the RAIL family of AI licenses.
+
+See [LICENSE](LICENSE) for the full text and [LICENSE-FAQ.md](LICENSE-FAQ.md) for common questions.
