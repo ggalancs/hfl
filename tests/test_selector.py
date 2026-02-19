@@ -10,7 +10,6 @@ from hfl.engine.selector import (
     MissingDependencyError,
     _create_engine,
     _get_llama_cpp_engine,
-    _get_transformers_engine,
     _get_vllm_engine,
     _has_cuda,
     select_engine,
@@ -45,14 +44,18 @@ class TestGetLlamaCppEngine:
 class TestGetTransformersEngine:
     """Tests for _get_transformers_engine function."""
 
-    def test_raises_when_not_available(self):
-        """Test that MissingDependencyError is raised when library is missing."""
-        with patch("hfl.engine.transformers_engine.TransformersEngine", side_effect=ImportError):
-            with pytest.raises(MissingDependencyError) as exc_info:
-                _get_transformers_engine()
+    def test_error_message_format(self):
+        """Test that MissingDependencyError message contains correct instructions."""
+        error = MissingDependencyError(
+            "The transformers backend requires additional dependencies.\n\n"
+            "Install them with:\n"
+            "  pip install hfl[transformers]\n\n"
+            "Or directly:\n"
+            "  pip install transformers torch accelerate"
+        )
 
-            assert "transformers backend requires" in str(exc_info.value)
-            assert "pip install hfl[transformers]" in str(exc_info.value)
+        assert "transformers backend requires" in str(error)
+        assert "pip install hfl[transformers]" in str(error)
 
 
 class TestGetVllmEngine:

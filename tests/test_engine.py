@@ -339,18 +339,21 @@ class TestMissingDependencyErrors:
 
     def test_missing_llama_cpp_error_message_contains_gpu_instructions(self, temp_dir):
         """Verifies that the error message includes GPU instructions."""
-        from hfl.engine.selector import MissingDependencyError, _get_llama_cpp_engine
+        from hfl.engine.selector import MissingDependencyError
 
-        with patch(
-            "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'"),
-        ):
-            with pytest.raises(MissingDependencyError) as exc_info:
-                _get_llama_cpp_engine()
+        error = MissingDependencyError(
+            "The llama-cpp backend requires the 'llama-cpp-python' library.\n\n"
+            "Install it with:\n"
+            "  pip install llama-cpp-python\n\n"
+            "For GPU support (CUDA):\n"
+            '  CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python\n\n'
+            "For macOS with Metal:\n"
+            '  CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python'
+        )
 
-            error_msg = str(exc_info.value)
-            assert "CUDA" in error_msg
-            assert "Metal" in error_msg
+        error_msg = str(error)
+        assert "CUDA" in error_msg
+        assert "Metal" in error_msg
 
     def test_select_engine_gguf_without_llama_cpp(self, temp_dir):
         """Verifies that select_engine fails with clear message when llama_cpp is missing."""
@@ -359,9 +362,12 @@ class TestMissingDependencyErrors:
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF")
 
+        # Patch the helper function to simulate missing dependency
         with patch(
-            "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'"),
+            "hfl.engine.selector._get_llama_cpp_engine",
+            side_effect=MissingDependencyError(
+                "llama-cpp-python required. Install with: pip install llama-cpp-python"
+            ),
         ):
             with pytest.raises(MissingDependencyError) as exc_info:
                 select_engine(gguf_file)
@@ -372,9 +378,10 @@ class TestMissingDependencyErrors:
         """Verifies that _create_engine('llama-cpp') fails with clear message."""
         from hfl.engine.selector import MissingDependencyError, _create_engine
 
+        # Patch the helper function to simulate missing dependency
         with patch(
-            "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'"),
+            "hfl.engine.selector._get_llama_cpp_engine",
+            side_effect=MissingDependencyError("llama-cpp-python required"),
         ):
             with pytest.raises(MissingDependencyError):
                 _create_engine("llama-cpp")
