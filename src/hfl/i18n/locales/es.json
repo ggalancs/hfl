@@ -33,7 +33,8 @@
       "options": {
         "host": "Dirección del host",
         "port": "Número de puerto",
-        "model": "Pre-cargar un modelo al iniciar"
+        "model": "Pre-cargar un modelo al iniciar",
+        "api_key": "Clave API para autenticación (recomendado para exposición en red)"
       }
     },
     "list": {
@@ -111,6 +112,8 @@
     "authenticated_as": "Autenticado como",
     "token_saved": "Token guardado. Las descargas serán más rápidas.",
     "token_removed": "Token eliminado correctamente.",
+    "api_key_enabled": "Autenticación con clave API habilitada.",
+    "auth_required": "Autenticación: Bearer <api-key> o cabecera X-API-Key requerida",
     "searching": "Buscando '{query}' en HuggingFace Hub...",
     "models_found": "{count} modelos encontrados",
     "page_info": "Página {current}/{total} ({start}-{end} de {count})",
@@ -148,6 +151,7 @@
     "could_not_verify_license": "No se pudo verificar la licencia",
     "continue_without_license": "¿Continuar sin verificar licencia?",
     "network_exposure": "Exponiendo el servidor a la red. Los prompts enviados a la API serán accesibles desde cualquier dispositivo en la red.",
+    "no_api_key": "No se ha establecido clave API. Cualquiera en la red puede acceder a la API.",
     "continue_question": "¿Continuar?"
   },
   "legal": {

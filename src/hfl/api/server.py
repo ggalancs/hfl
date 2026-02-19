@@ -18,6 +18,9 @@ Implemented endpoints:
 
 Legal Compliance (R9 - Audit):
 - Disclaimer header in all AI responses
+
+Security:
+- Optional API key authentication via --api-key flag
 """
 
 from contextlib import asynccontextmanager
@@ -25,6 +28,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.routes_native import router as native_router
@@ -36,9 +40,46 @@ from hfl.config import config
 class ServerState:
     engine = None  # Active InferenceEngine
     current_model = None  # ModelManifest of loaded model
+    api_key: str | None = None  # Optional API key for authentication
 
 
 state = ServerState()
+
+
+# API Key Authentication Middleware
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Middleware that validates API key if configured."""
+
+    # Endpoints that don't require authentication
+    PUBLIC_ENDPOINTS = {"/", "/health", "/api/version"}
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip auth if no API key is configured
+        if not state.api_key:
+            return await call_next(request)
+
+        # Skip auth for public endpoints
+        if request.url.path in self.PUBLIC_ENDPOINTS:
+            return await call_next(request)
+
+        # Check for API key in Authorization header (Bearer token)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            if token == state.api_key:
+                return await call_next(request)
+
+        # Check for API key in X-API-Key header
+        api_key_header = request.headers.get("X-API-Key", "")
+        if api_key_header == state.api_key:
+            return await call_next(request)
+
+        # Authentication failed
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or missing API key"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # R9 - Disclaimer Middleware (Legal Audit)
@@ -85,6 +126,9 @@ app.add_middleware(
 # R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)
 
+# Add API key authentication middleware
+app.add_middleware(APIKeyMiddleware)
+
 app.include_router(openai_router)
 app.include_router(native_router)
 
@@ -103,7 +147,20 @@ async def health():
     }
 
 
-def start_server(host: str | None = None, port: int | None = None):
+def start_server(
+    host: str | None = None, port: int | None = None, api_key: str | None = None
+):
+    """Start the API server.
+
+    Args:
+        host: Host address to bind (default: from config)
+        port: Port number (default: from config)
+        api_key: Optional API key for authentication. If set, all requests
+                 must include either:
+                 - Authorization: Bearer <api_key>
+                 - X-API-Key: <api_key>
+    """
+    state.api_key = api_key
     uvicorn.run(
         app,
         host=host or config.host,

@@ -255,6 +255,7 @@ def serve(
     host: str = typer.Option("127.0.0.1", "--host", help=t("commands.serve.options.host")),
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
+    api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
     from hfl.api.server import start_server, state
@@ -262,6 +263,10 @@ def serve(
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
         console.print(f"[yellow]Warning:[/] {t('warnings.network_exposure')}")
+        if api_key:
+            console.print(f"[green]{t('messages.api_key_enabled')}[/]")
+        else:
+            console.print(f"[yellow]{t('warnings.no_api_key')}[/]")
         if not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 
@@ -286,7 +291,9 @@ def serve(
     console.print(f"[bold green]{t('messages.server_at', host=host, port=port)}[/]")
     console.print("  OpenAI: POST /v1/chat/completions")
     console.print("  Ollama: POST /api/chat")
-    start_server(host=host, port=port)
+    if api_key:
+        console.print(f"  [cyan]{t('messages.auth_required')}[/]")
+    start_server(host=host, port=port, api_key=api_key)
 
 
 @app.command(name="list")

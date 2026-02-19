@@ -38,6 +38,54 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 - **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
 - **Internationalized**: Full i18n support (English, Spanish) - set `HFL_LANG` to change language
 
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              HFL Architecture                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
+│  │  hfl pull   │───────▶ │  HuggingFace Hub │───────▶ │  Local Storage  │   │
+│  │             │         │                  │         │   ~/.hfl/       │   │
+│  └─────────────┘         │  • Search API    │         │   ├── models/   │   │
+│        │                 │  • Download      │         │   ├── cache/    │   │
+│        │                 │  • License info  │         │   └── registry  │   │
+│        ▼                 └──────────────────┘         └─────────────────┘   │
+│  ┌─────────────┐                                              │             │
+│  │  Converter  │◀─────────────────────────────────────────────┘             │
+│  │             │                                                            │
+│  │ safetensors │──────────▶ GGUF (quantized Q2_K...F16)                     │
+│  └─────────────┘                                                            │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
+│  │  hfl run    │───────▶ │ Inference Engine │───────▶ │  Interactive    │   │
+│  │             │         │                  │         │     Chat        │   │
+│  └─────────────┘         │  • llama.cpp     │         └─────────────────┘   │
+│                          │  • Transformers  │                               │
+│                          │  • vLLM          │                               │
+│                          └──────────────────┘                               │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
+│  │  hfl serve  │───────▶ │   REST API       │───────▶ │  OpenAI SDK /   │   │
+│  │             │         │                  │         │  Ollama clients │   │
+│  └─────────────┘         │  • /v1/chat/...  │         └─────────────────┘   │
+│                          │  • /api/chat     │                               │
+│                          │  • /api/generate │                               │
+│                          └──────────────────┘                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Flow Summary:**
+1. **Pull**: Download from HuggingFace Hub → Convert to GGUF (if needed) → Store locally
+2. **Run**: Load model into inference engine → Start interactive chat session
+3. **Serve**: Start API server → Accept OpenAI/Ollama-compatible requests
+
 ## Prerequisites
 
 - **Python 3.10+** (required)
@@ -257,10 +305,23 @@ Supported languages: English (`en`), Spanish (`es`)
 This is a v0.1.0 release. Known limitations include:
 
 - **vLLM backend is experimental**: Basic implementation without full streaming support
-- **No API authentication**: The REST API has no auth; don't expose to untrusted networks
 - **No rate limiting on API**: Only HuggingFace Hub calls are rate-limited
 - **CORS is permissive**: API allows all origins (configurable in future versions)
 - **Windows support**: Not fully tested; Unix-like systems recommended
+
+### API Authentication
+
+The API server supports optional authentication via the `--api-key` flag:
+
+```bash
+# Start server with authentication
+hfl serve --api-key your-secret-key
+
+# Client requests must include the key
+curl -H "Authorization: Bearer your-secret-key" http://localhost:11434/v1/models
+# Or
+curl -H "X-API-Key: your-secret-key" http://localhost:11434/v1/models
+```
 
 ## Documentation
 

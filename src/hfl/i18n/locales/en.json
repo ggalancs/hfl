@@ -33,7 +33,8 @@
       "options": {
         "host": "Host address to bind",
         "port": "Port number",
-        "model": "Pre-load a model at startup"
+        "model": "Pre-load a model at startup",
+        "api_key": "API key for authentication (recommended for network exposure)"
       }
     },
     "list": {
@@ -111,6 +112,8 @@
     "authenticated_as": "Authenticated as",
     "token_saved": "Token saved. Downloads will now be faster.",
     "token_removed": "Token removed successfully.",
+    "api_key_enabled": "API key authentication enabled.",
+    "auth_required": "Authentication: Bearer <api-key> or X-API-Key header required",
     "searching": "Searching '{query}' on HuggingFace Hub...",
     "models_found": "{count} models found",
     "page_info": "Page {current}/{total} ({start}-{end} of {count})",
@@ -148,6 +151,7 @@
     "could_not_verify_license": "Could not verify license",
     "continue_without_license": "Continue without verifying license?",
     "network_exposure": "Exposing the server to the network. Prompts sent to the API will be accessible from any device on the network.",
+    "no_api_key": "No API key set. Anyone on the network can access the API.",
     "continue_question": "Continue?"
   },
   "legal": {
