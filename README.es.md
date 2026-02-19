@@ -101,17 +101,21 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 ## Instalación
 
 ```bash
+# Clonar el repositorio
+git clone https://github.com/ggalancs/hfl
+cd hfl
+
 # Instalación básica (CPU + GGUF)
-pip install hfl
+pip install .
 
 # Con soporte GPU (Transformers + bitsandbytes)
-pip install "hfl[transformers]"
+pip install ".[transformers]"
 
 # Con vLLM para producción
-pip install "hfl[vllm]"
+pip install ".[vllm]"
 
 # Todo incluido
-pip install "hfl[all]"
+pip install ".[all]"
 ```
 
 ## Inicio Rápido
