@@ -30,14 +30,24 @@ console = Console()
 
 @app.command()
 def pull(
-    model: str = typer.Argument(help="HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct)"),
-    quantize: str = typer.Option("Q4_K_M", "--quantize", "-q", help="Quantization level"),
-    format: str = typer.Option("auto", "--format", "-f", help="Format: auto, gguf, safetensors"),
+    model: str = typer.Argument(
+        help="HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct) | Modelo HF (ej.: meta-llama/Llama-3.3-70B-Instruct)"
+    ),
+    quantize: str = typer.Option(
+        "Q4_K_M", "--quantize", "-q",
+        help="Quantization level | Nivel de cuantización"
+    ),
+    format: str = typer.Option(
+        "auto", "--format", "-f",
+        help="Format: auto, gguf, safetensors | Formato: auto, gguf, safetensors"
+    ),
     alias: str = typer.Option(
-        None, "--alias", "-a", help="Short alias to refer to the model (e.g.: 'coder')"
+        None, "--alias", "-a",
+        help="Short alias for the model (e.g.: 'coder') | Alias corto para el modelo (ej.: 'coder')"
     ),
     skip_license: bool = typer.Option(
-        False, "--skip-license", help="Skip license verification"
+        False, "--skip-license",
+        help="Skip license verification | Omitir verificación de licencia"
     ),
 ):
     """Download a model from HuggingFace Hub. | Descarga un modelo de HuggingFace Hub."""
@@ -164,12 +174,24 @@ def pull(
 
 @app.command()
 def run(
-    model: str = typer.Argument(help="Local model name"),
-    backend: str = typer.Option("auto", "--backend", "-b"),
-    ctx: int = typer.Option(4096, "--ctx", "-c", help="Context size"),
-    system: str = typer.Option(None, "--system", "-s", help="System prompt"),
+    model: str = typer.Argument(
+        help="Local model name | Nombre del modelo local"
+    ),
+    backend: str = typer.Option(
+        "auto", "--backend", "-b",
+        help="Inference backend | Backend de inferencia"
+    ),
+    ctx: int = typer.Option(
+        4096, "--ctx", "-c",
+        help="Context size | Tamaño del contexto"
+    ),
+    system: str = typer.Option(
+        None, "--system", "-s",
+        help="System prompt | Prompt del sistema"
+    ),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show backend logs (Metal, CUDA)"
+        False, "--verbose", "-v",
+        help="Show backend logs (Metal, CUDA) | Mostrar logs del backend (Metal, CUDA)"
     ),
 ):
     """Start an interactive chat with a model. | Inicia un chat interactivo con un modelo."""
@@ -239,9 +261,18 @@ def run(
 
 @app.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(11434, "--port", "-p"),
-    model: str = typer.Option(None, "--model", "-m", help="Pre-load model"),
+    host: str = typer.Option(
+        "127.0.0.1", "--host",
+        help="Host address | Dirección del host"
+    ),
+    port: int = typer.Option(
+        11434, "--port", "-p",
+        help="Port number | Número de puerto"
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m",
+        help="Pre-load model | Pre-cargar modelo"
+    ),
 ):
     """Start the API server (OpenAI + Ollama compatible). | Inicia el servidor API (compatible con OpenAI y Ollama)."""
     from hfl.api.server import start_server, state
@@ -465,18 +496,32 @@ def _get_params_value(model_id: str) -> float | None:
 
 @app.command()
 def search(
-    query: str = typer.Argument(help="Text to search (minimum 3 characters)"),
-    limit: int = typer.Option(100, "--limit", "-l", help="Maximum number of results"),
-    page_size: int = typer.Option(10, "--page-size", "-n", help="Results per page"),
-    gguf_only: bool = typer.Option(False, "--gguf", "-g", help="Show only models with GGUF"),
+    query: str = typer.Argument(
+        help="Text to search (min 3 chars) | Texto a buscar (mín 3 caracteres)"
+    ),
+    limit: int = typer.Option(
+        100, "--limit", "-l",
+        help="Maximum results | Máximo de resultados"
+    ),
+    page_size: int = typer.Option(
+        10, "--page-size", "-n",
+        help="Results per page | Resultados por página"
+    ),
+    gguf_only: bool = typer.Option(
+        False, "--gguf", "-g",
+        help="Show only GGUF models | Mostrar solo modelos GGUF"
+    ),
     max_params: float = typer.Option(
-        None, "--max-params", "-p", help="Maximum parameters in B (e.g.: 70 for <70B)"
+        None, "--max-params", "-p",
+        help="Max parameters in B (e.g.: 70) | Máx parámetros en B (ej.: 70)"
     ),
     min_params: float = typer.Option(
-        None, "--min-params", help="Minimum parameters in B (e.g.: 7 for >7B)"
+        None, "--min-params",
+        help="Min parameters in B (e.g.: 7) | Mín parámetros en B (ej.: 7)"
     ),
     sort: str = typer.Option(
-        "downloads", "--sort", "-s", help="Sort by: downloads, likes, created"
+        "downloads", "--sort", "-s",
+        help="Sort: downloads, likes, created | Ordenar: downloads, likes, created"
     ),
 ):
     """
@@ -633,7 +678,11 @@ def search(
 
 
 @app.command()
-def rm(model: str = typer.Argument(help="Name of the model to delete")):
+def rm(
+    model: str = typer.Argument(
+        help="Name of the model to delete | Nombre del modelo a eliminar"
+    )
+):
     """Delete a local model. | Elimina un modelo local."""
     import shutil
     from pathlib import Path
@@ -666,7 +715,11 @@ def rm(model: str = typer.Argument(help="Name of the model to delete")):
 
 
 @app.command()
-def inspect(model: str = typer.Argument(help="Model name")):
+def inspect(
+    model: str = typer.Argument(
+        help="Model name | Nombre del modelo"
+    )
+):
     """Show detailed information about a model. | Muestra información detallada de un modelo."""
     from rich.panel import Panel
     from rich.text import Text
@@ -713,8 +766,12 @@ def inspect(model: str = typer.Argument(help="Model name")):
 
 @app.command(name="alias")
 def set_alias(
-    model: str = typer.Argument(help="Model name"),
-    alias: str = typer.Argument(help="Alias to assign"),
+    model: str = typer.Argument(
+        help="Model name | Nombre del modelo"
+    ),
+    alias: str = typer.Argument(
+        help="Alias to assign | Alias a asignar"
+    ),
 ):
     """
     Assign an alias to an existing model. | Asigna un alias a un modelo existente.
@@ -752,7 +809,7 @@ def login(
         None,
         "--token",
         "-t",
-        help="HuggingFace token (if not provided, will be requested interactively)",
+        help="HuggingFace token (interactive if not provided) | Token de HuggingFace (interactivo si no se proporciona)",
     ),
 ):
     """
