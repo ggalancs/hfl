@@ -140,6 +140,7 @@
     <a href="#engine">Module engine — Inference Engines</a>
     <a href="#converter">Module converter — Format Conversion</a>
     <a href="#api">Module api — REST Server</a>
+    <a href="#i18n">Module i18n — Internationalization</a>
     <a href="#exceptions">Exception Hierarchy</a>
     <a href="#flujo-pull">Complete Flow: hfl pull</a>
     <a href="#flujo-run">Complete Flow: hfl run</a>
@@ -149,6 +150,7 @@
     <a href="#dependencias">Dependencies and Extras</a>
     <a href="#tests">Testing</a>
     <a href="#build">Build and Distribution</a>
+    <a href="#ci">CI/CD & GitHub</a>
   </div>
 </nav>
 
@@ -160,7 +162,7 @@
   <div class="grid-2">
     <div class="card">
       <div class="card-header"><span class="icon">🎯</span><h3>Problem It Solves</h3></div>
-      <p>Users need to run LLMs locally without depending on cloud APIs. Ollama solves this but with a limited catalog. HFL connects directly to HuggingFace Hub, offering access to the world's largest catalog of open-source models, with download, automatic GGUF conversion, and local execution.</p>
+      <p>Users need to run LLMs locally without depending on cloud APIs. Ollama solves this but with a limited catalog. HFL connects directly to HuggingFace Hub, offering access to the world's largest catalog of open-weight models, with download, automatic GGUF conversion, and local execution.</p>
     </div>
     <div class="card">
       <div class="card-header"><span class="icon">🏗️</span><h3>Design Philosophy</h3></div>
@@ -221,6 +223,12 @@
 ├── <span class="file">NOTICE-EU-AI-ACT.md</span>     <span class="desc">— EU AI Act compliance</span>
 ├── <span class="file">DISCLAIMER.md</span>            <span class="desc">— Liability disclaimer</span>
 ├── <span class="file">README.md</span>                <span class="desc">— Main documentation</span>
+├── <span class="file">README.es.md</span>             <span class="desc">— Main documentation (Spanish)</span>
+├── <span class="file">LICENSE-FAQ.md</span>            <span class="desc">— License FAQ for HRUL</span>
+├── <span class="file">CONTRIBUTING.md</span>           <span class="desc">— Contributing guide</span>
+├── <span class="file">CODE_OF_CONDUCT.md</span>        <span class="desc">— Code of Conduct (Contributor Covenant 2.1)</span>
+├── <span class="file">CHANGELOG.md</span>              <span class="desc">— Changelog (Keep a Changelog format)</span>
+├── <span class="file">SECURITY.md</span>               <span class="desc">— Security policy</span>
 │
 ├── <span class="dir">src/hfl/</span>                 <span class="desc">— MAIN SOURCE CODE</span>
 │   ├── <span class="file">__init__.py</span>          <span class="desc">— Package version (0.1.0)</span>
@@ -259,17 +267,38 @@
 │   │   ├── <span class="file">provenance.py</span>    <span class="desc">— ConversionRecord + ProvenanceLog</span>
 │   │   └── <span class="file">registry.py</span>      <span class="desc">— ModelRegistry — local JSON inventory</span>
 │   │
-│   └── <span class="dir">converter/</span>           <span class="desc">— FORMAT CONVERSION</span>
-│       ├── <span class="file">__init__.py</span>
-│       ├── <span class="file">formats.py</span>       <span class="desc">— ModelFormat enum + detect_format()</span>
-│       └── <span class="file">gguf_converter.py</span> <span class="desc">— GGUFConverter — conversion + quantization</span>
+│   ├── <span class="dir">converter/</span>           <span class="desc">— FORMAT CONVERSION</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">formats.py</span>       <span class="desc">— ModelFormat enum + detect_format()</span>
+│   │   └── <span class="file">gguf_converter.py</span> <span class="desc">— GGUFConverter — conversion + quantization</span>
+│   │
+│   └── <span class="dir">i18n/</span>                — INTERNATIONALIZATION
+│       ├── <span class="file">__init__.py</span>      <span class="desc">— t(), get_language(), set_language(), _load_translations()</span>
+│       └── <span class="dir">locales/</span>         <span class="desc">— Translation files</span>
+│           ├── <span class="file">en.json</span>      <span class="desc">— English translations</span>
+│           └── <span class="file">es.json</span>      <span class="desc">— Spanish translations</span>
 │
 └── <span class="dir">tests/</span>                   <span class="desc">— TEST SUITE</span>
     ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures: tmp dirs, mock APIs, sample models</span>
     ├── <span class="file">test_api.py</span>          <span class="file">test_cli.py</span>          <span class="file">test_config.py</span>
     ├── <span class="file">test_converter.py</span>    <span class="file">test_engine.py</span>       <span class="file">test_exceptions.py</span>
-    ├── <span class="file">test_hub.py</span>          <span class="file">test_integration.py</span>  <span class="file">test_middleware.py</span>
-    ├── <span class="file">test_provenance.py</span>   <span class="file">test_registry.py</span>     <span class="file">test_vllm_engine.py</span>
+    ├── <span class="file">test_hub.py</span>          <span class="file">test_i18n.py</span>        <span class="file">test_integration.py</span>
+    ├── <span class="file">test_middleware.py</span>   <span class="file">test_provenance.py</span>   <span class="file">test_registry.py</span>
+    └── <span class="file">test_vllm_engine.py</span>
+
+├── <span class="dir">.github/</span>                 <span class="desc">— GITHUB INFRASTRUCTURE</span>
+│   ├── <span class="dir">workflows/</span>
+│   │   ├── <span class="file">ci.yml</span>           <span class="desc">— CI: lint + test + type-check (Python 3.10/3.11/3.12)</span>
+│   │   ├── <span class="file">pages.yml</span>        <span class="desc">— Deploy docs to GitHub Pages</span>
+│   │   ├── <span class="file">build-executables.yml</span> <span class="desc">— Cross-platform executable builds</span>
+│   │   ├── <span class="file">lint.yml</span>         <span class="desc">— Linting with ruff</span>
+│   │   ├── <span class="file">test.yml</span>         <span class="desc">— Tests with pytest</span>
+│   │   ├── <span class="file">security.yml</span>     <span class="desc">— Security audit</span>
+│   │   └── <span class="file">license-check.yml</span> <span class="desc">— License verification</span>
+│   ├── <span class="dir">ISSUE_TEMPLATE/</span>
+│   │   ├── <span class="file">bug_report.yml</span>   <span class="desc">— Bug report template</span>
+│   │   └── <span class="file">feature_request.yml</span> <span class="desc">— Feature request template</span>
+│   └── <span class="file">PULL_REQUEST_TEMPLATE.md</span> <span class="desc">— PR template with compliance checklist</span>
 </pre>
   </div>
 </section>
@@ -459,7 +488,7 @@
     <tr><th>Command</th><th>Description</th><th>Key Options</th></tr>
     <tr><td><code>hfl pull &lt;model&gt;</code></td><td>Download model from HF Hub</td><td><code>--quantize Q4_K_M</code>, <code>--format auto|gguf|safetensors</code>, <code>--alias</code>, <code>--skip-license</code></td></tr>
     <tr><td><code>hfl run &lt;model&gt;</code></td><td>Interactive terminal chat</td><td><code>--backend auto|llama-cpp|transformers|vllm</code>, <code>--ctx</code>, <code>--system</code>, <code>--verbose</code></td></tr>
-    <tr><td><code>hfl serve</code></td><td>REST API server</td><td><code>--host</code>, <code>--port</code>, <code>--model</code> (pre-load)</td></tr>
+    <tr><td><code>hfl serve</code></td><td>REST API server</td><td><code>--host</code>, <code>--port</code>, <code>--model</code> (pre-load), <code>--api-key</code> (authentication)</td></tr>
     <tr><td><code>hfl list</code></td><td>List local models with Rich table</td><td>Shows name, alias, format, quantization, license (risk-colored), size</td></tr>
     <tr><td><code>hfl search &lt;query&gt;</code></td><td>Interactive paginated search on HF Hub</td><td><code>--gguf</code>, <code>--max-params</code>, <code>--min-params</code>, <code>--sort</code>, <code>--page-size</code></td></tr>
     <tr><td><code>hfl rm &lt;model&gt;</code></td><td>Remove model with confirmation</td><td>Deletes files + registry entry</td></tr>
@@ -596,8 +625,8 @@
       <p>Uses models in native format with GPU. Dynamic quantization support: 4bit (NF4 double quant via BitsAndBytes) and 8bit. Streaming via <code>TextIteratorStreamer</code> in separate thread. Uses tokenizer's <code>apply_chat_template()</code> or Llama-style fallback.</p>
     </div>
     <div class="card">
-      <h4>VLLMEngine</h4>
-      <p>Placeholder for production GPU. Wraps <code>vllm.LLM</code> with <code>SamplingParams</code>. Basic streaming (yields complete result). Simple prompt build <code>Role: content</code>. Requires NVIDIA GPU with CUDA.</p>
+      <h4><span class="badge badge-yellow">EXPERIMENTAL</span> VLLMEngine</h4>
+      <p><span class="badge badge-yellow">EXPERIMENTAL</span> Production GPU backend. Wraps <code>vllm.LLM</code> with <code>SamplingParams</code>. Basic streaming (yields complete result). Simple prompt build <code>Role: content</code>. Requires NVIDIA GPU with CUDA.</p>
     </div>
   </div>
 
@@ -669,7 +698,7 @@
 
       <!-- Middleware stack -->
       <rect x="250" y="75" width="400" height="30" rx="6" fill="#21262d" stroke="#30363d"/>
-      <text x="450" y="95" text-anchor="middle" fill="#d29922" font-size="10">CORSMiddleware → DisclaimerMiddleware → RequestLogger</text>
+      <text x="450" y="95" text-anchor="middle" fill="#d29922" font-size="10">CORS → APIKeyMiddleware → DisclaimerMiddleware → RequestLogger</text>
 
       <!-- OpenAI routes -->
       <rect x="50" y="130" width="380" height="250" rx="10" fill="#0d1117" stroke="#58a6ff"/>
@@ -720,17 +749,45 @@
   </div>
 
   <h3>ServerState</h3>
-  <p>Simple class with <code>engine</code> (active InferenceEngine) and <code>current_model</code> (loaded ModelManifest). Instantiated as global singleton. Server lifespan handles cleanup on close.</p>
+  <p>Class with <code>engine</code> (active InferenceEngine), <code>current_model</code> (loaded ModelManifest) and <code>api_key</code> (str|None for authentication). Instantiated as global singleton. Server lifespan handles cleanup on close.</p>
 
   <h3>Middleware Stack</h3>
   <p><strong>CORSMiddleware</strong> — Allows all origins, methods, and headers (local development).</p>
+  <p><strong>APIKeyMiddleware</strong> — Optional authentication via <code>--api-key</code> flag. Supports <code>Authorization: Bearer &lt;key&gt;</code> and <code>X-API-Key: &lt;key&gt;</code> headers. Public endpoints (<code>/health</code>, <code>/</code>) exempt.</p>
   <p><strong>DisclaimerMiddleware</strong> — Adds <code>X-AI-Disclaimer</code> header to AI generation endpoint responses (R9).</p>
   <p><strong>RequestLogger</strong> — Privacy-safe logging. NEVER logs: bodies (prompts/outputs), auth headers, User-Agent. Only: method, path, status, duration.</p>
 </section>
 
-<!-- ========== 12. EXCEPTIONS ========== -->
+<!-- ========== 12. I18N ========== -->
+<section id="i18n">
+  <h2>12. Module i18n — Internationalization</h2>
+  <div class="card">
+    <p><strong>File:</strong> <code>src/hfl/i18n/__init__.py</code></p>
+    <p>Complete internationalization system that allows the CLI to display all messages in multiple languages. Uses JSON translation files with nested keys and dot-notation access.</p>
+  </div>
+
+  <h3>Main Functions</h3>
+  <table>
+    <tr><th>Function</th><th>Description</th></tr>
+    <tr><td><code>t(key, **kwargs)</code></td><td>Translates a key (e.g., <code>t("commands.pull.downloading")</code>). Supports interpolation with <code>.format(**kwargs)</code>. Cached with <code>lru_cache</code> for performance.</td></tr>
+    <tr><td><code>get_language()</code></td><td>Returns the current language. Reads from <code>HFL_LANG</code> env var, defaults to <code>"en"</code></td></tr>
+    <tr><td><code>set_language(lang)</code></td><td>Changes language at runtime and clears the translation cache</td></tr>
+    <tr><td><code>_load_translations(lang)</code></td><td>Loads the language JSON file from <code>locales/</code></td></tr>
+    <tr><td><code>_get_nested_value(data, key)</code></td><td>Navigates nested dictionaries with dot notation</td></tr>
+  </table>
+
+  <h3>Translation Files</h3>
+  <p>Each language has a JSON file (~193 lines) in <code>src/hfl/i18n/locales/</code>:</p>
+  <p><code>en.json</code> (English) and <code>es.json</code> (Spanish). Keys follow the structure <code>module.action.message</code>, for example: <code>commands.pull.downloading</code>, <code>commands.search.no_results</code>, <code>errors.model_not_found</code>.</p>
+
+  <div class="highlight highlight-info">
+    <strong>Usage:</strong> Set language with <code>export HFL_LANG=es</code>. All CLI commands use <code>t()</code> for their messages, allowing language changes without modifying code.
+  </div>
+</section>
+
+<!-- ========== 13. EXCEPTIONS ========== -->
 <section id="exceptions">
-  <h2>12. Exception Hierarchy</h2>
+  <h2>13. Exception Hierarchy</h2>
   <div class="diagram-container">
     <div class="diagram-title">Custom Exception Tree</div>
     <svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -798,9 +855,9 @@
   <p>All inherit from <code>HFLError(message, details)</code> with <code>__str__</code> combining both. Each exception includes specific contextual data (model_name, repo_id, required_gb, etc.) for detailed diagnostics.</p>
 </section>
 
-<!-- ========== 13. PULL FLOW ========== -->
+<!-- ========== 14. PULL FLOW ========== -->
 <section id="flujo-pull">
-  <h2>13. Complete Flow: hfl pull</h2>
+  <h2>14. Complete Flow: hfl pull</h2>
   <div class="diagram-container">
     <div class="diagram-title">Model Download and Registration Pipeline</div>
     <svg viewBox="0 0 1100 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1100px;margin:0 auto;display:block;">
@@ -834,9 +891,9 @@
   </div>
 </section>
 
-<!-- ========== 14. RUN FLOW ========== -->
+<!-- ========== 15. RUN FLOW ========== -->
 <section id="flujo-run">
-  <h2>14. Complete Flow: hfl run</h2>
+  <h2>15. Complete Flow: hfl run</h2>
   <div class="diagram-container">
     <div class="diagram-title">Interactive Chat Pipeline</div>
     <svg viewBox="0 0 900 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -861,9 +918,9 @@
   </div>
 </section>
 
-<!-- ========== 15. SERVE FLOW ========== -->
+<!-- ========== 16. SERVE FLOW ========== -->
 <section id="flujo-serve">
-  <h2>15. Complete Flow: hfl serve</h2>
+  <h2>16. Complete Flow: hfl serve</h2>
   <div class="diagram-container">
     <div class="diagram-title">API Server Pipeline</div>
     <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -872,7 +929,7 @@
       <line x1="110" y1="95" x2="130" y2="95" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrow-o)"/>
 
       <!-- Middleware -->
-      <rect x="130" y="55" width="130" height="80" rx="8" fill="#21262d" stroke="#30363d"/><text x="195" y="78" text-anchor="middle" fill="#d29922" font-size="10" font-weight="bold">Middleware</text><text x="195" y="95" text-anchor="middle" fill="#8b949e" font-size="8">CORS</text><text x="195" y="108" text-anchor="middle" fill="#8b949e" font-size="8">Disclaimer (R9)</text><text x="195" y="121" text-anchor="middle" fill="#8b949e" font-size="8">Privacy Logger (R6)</text>
+      <rect x="130" y="55" width="130" height="80" rx="8" fill="#21262d" stroke="#30363d"/><text x="195" y="78" text-anchor="middle" fill="#d29922" font-size="10" font-weight="bold">Middleware</text><text x="195" y="95" text-anchor="middle" fill="#8b949e" font-size="8">CORS</text><text x="195" y="108" text-anchor="middle" fill="#8b949e" font-size="8">APIKey</text><text x="195" y="121" text-anchor="middle" fill="#8b949e" font-size="8">Disclaimer (R9)</text>
       <line x1="260" y1="95" x2="280" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
 
       <!-- Router -->
@@ -896,9 +953,9 @@
   </div>
 </section>
 
-<!-- ========== 16. LEGAL ========== -->
+<!-- ========== 17. LEGAL ========== -->
 <section id="legal">
-  <h2>16. Legal Compliance and Audit</h2>
+  <h2>17. Legal Compliance and Audit</h2>
   <p>HFL implements a comprehensive legal compliance system documented with audit references (R1-R9):</p>
 
   <div class="grid-2">
@@ -931,6 +988,7 @@
   <h3>Project Legal Files</h3>
   <table>
     <tr><td><code>LICENSE</code></td><td>HRUL v1.0 — Project's custom license</td></tr>
+    <tr><td><code>LICENSE-FAQ.md</code></td><td>Frequently asked questions about the HRUL v1.0 license</td></tr>
     <tr><td><code>LICENSE-DEPENDENCIES.md</code></td><td>Licenses of all third-party dependencies</td></tr>
     <tr><td><code>PRIVACY.md</code></td><td>Privacy policy (no data collection)</td></tr>
     <tr><td><code>NOTICE-EU-AI-ACT.md</code></td><td>EU AI Act compliance</td></tr>
@@ -938,9 +996,9 @@
   </table>
 </section>
 
-<!-- ========== 17. PATTERNS ========== -->
+<!-- ========== 18. PATTERNS ========== -->
 <section id="patrones">
-  <h2>17. Design Patterns</h2>
+  <h2>18. Design Patterns</h2>
 
   <div class="grid-2">
     <div class="card">
@@ -970,9 +1028,9 @@
   </div>
 </section>
 
-<!-- ========== 18. DEPENDENCIES ========== -->
+<!-- ========== 19. DEPENDENCIES ========== -->
 <section id="dependencias">
-  <h2>18. Dependencies and Extras</h2>
+  <h2>19. Dependencies and Extras</h2>
   <div class="diagram-container">
     <div class="diagram-title">Dependency Map by Group</div>
     <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1014,10 +1072,10 @@
   </div>
 </section>
 
-<!-- ========== 19. TESTING ========== -->
+<!-- ========== 20. TESTING ========== -->
 <section id="tests">
-  <h2>19. Testing</h2>
-  <p>Test suite with <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 13 test files with shared fixtures in <code>conftest.py</code>.</p>
+  <h2>20. Testing</h2>
+  <p>Test suite with <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 14 test files with shared fixtures in <code>conftest.py</code>.</p>
 
   <table>
     <tr><th>File</th><th>Coverage</th></tr>
@@ -1028,6 +1086,7 @@
     <tr><td><code>test_engine.py</code></td><td>LlamaCppEngine, automatic selection</td></tr>
     <tr><td><code>test_exceptions.py</code></td><td>Complete exception hierarchy</td></tr>
     <tr><td><code>test_hub.py</code></td><td>Auth, resolver, downloader, license checker</td></tr>
+    <tr><td><code>test_i18n.py</code></td><td>i18n system: t(), get/set_language, translation completeness</td></tr>
     <tr><td><code>test_integration.py</code></td><td>End-to-end flows (pull→run)</td></tr>
     <tr><td><code>test_middleware.py</code></td><td>RequestLogger privacy, DisclaimerMiddleware</td></tr>
     <tr><td><code>test_provenance.py</code></td><td>ProvenanceLog, ConversionRecord, persistence</td></tr>
@@ -1038,9 +1097,9 @@
   <p><strong>Main fixtures</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (temporary directory with monkeypatch), <code>mock_hf_api</code> (HfApi mock), <code>sample_manifest</code> (sample model), <code>populated_registry</code> (pre-populated registry).</p>
 </section>
 
-<!-- ========== 20. BUILD ========== -->
+<!-- ========== 21. BUILD ========== -->
 <section id="build">
-  <h2>20. Build and Distribution</h2>
+  <h2>21. Build and Distribution</h2>
   <div class="grid-2">
     <div class="card">
       <h4>Build System: Hatchling</h4>
@@ -1064,11 +1123,33 @@
 └── provenance.json       <span class="comment"># Immutable conversion log</span></code></pre>
 </section>
 
+<!-- ========== 22. CI/CD ========== -->
+<section id="ci">
+  <h2>22. CI/CD & GitHub</h2>
+
+  <h3>GitHub Actions Workflows</h3>
+  <table>
+    <tr><th>Workflow</th><th>Trigger</th><th>Description</th></tr>
+    <tr><td><code>ci.yml</code></td><td>Push/PR to main</td><td>Full pipeline: lint (ruff) + tests (pytest matrix Python 3.10/3.11/3.12) + type-check</td></tr>
+    <tr><td><code>pages.yml</code></td><td>Push to main</td><td>Auto-deploy HTML docs to GitHub Pages</td></tr>
+    <tr><td><code>build-executables.yml</code></td><td>Release/manual</td><td>Cross-platform executable builds with PyInstaller</td></tr>
+    <tr><td><code>lint.yml</code></td><td>Push/PR</td><td>Linting with ruff (E, F, W, I)</td></tr>
+    <tr><td><code>test.yml</code></td><td>Push/PR</td><td>Tests with pytest + coverage</td></tr>
+    <tr><td><code>security.yml</code></td><td>Scheduled/manual</td><td>Dependency security audit</td></tr>
+    <tr><td><code>license-check.yml</code></td><td>Push/PR</td><td>Dependency license verification</td></tr>
+  </table>
+
+  <h3>GitHub Templates</h3>
+  <p><strong>Issue Templates:</strong> <code>bug_report.yml</code> (structured form with system info, reproduction steps, logs) and <code>feature_request.yml</code> (problem statement, proposed solution, affected component).</p>
+  <p><strong>PR Template:</strong> Checklist including verification of all 5 Compliance Modules (license, provenance, disclaimer, privacy, gating) per HRUL requirements.</p>
+  <p><strong>Community files:</strong> <code>CONTRIBUTING.md</code> (dev setup, code style, PR process), <code>CODE_OF_CONDUCT.md</code> (Contributor Covenant v2.1), <code>SECURITY.md</code> (vulnerability reporting policy).</p>
+</section>
+
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
   <p><strong>HFL v0.1.0</strong> — Comprehensive Architecture Documentation</p>
   <p>Generated on February 19, 2026 — All diagrams are interactive SVGs</p>
-  <p>License: HRUL v1.0 — Copyright 2026 Gabriel Galan Pelayo</p>
+  <p>License: HRUL v1.0 (source-available)</p>
 </div>
 
 </div>
