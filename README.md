@@ -197,6 +197,22 @@ Environment variables:
 - `HFL_HOME`: Data directory (default: `~/.hfl`)
 - `HF_TOKEN`: HuggingFace token for gated models (alternative to `hfl login`)
 
+## Documentation
+
+Complete architecture documentation with diagrams is available:
+
+- **[📖 View Architecture Documentation](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)** - Interactive HTML documentation with architecture diagrams, module descriptions, and flow charts
+
+The documentation covers:
+- System architecture and design patterns
+- Module structure and dependencies
+- Inference engine selection logic
+- GGUF conversion pipeline
+- Legal compliance features
+- API endpoints reference
+
+> **Note:** Documentation is also available in [Spanish](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html).
+
 ## Development
 
 ```bash
