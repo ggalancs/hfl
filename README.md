@@ -7,6 +7,8 @@
 
 Run HuggingFace models locally like Ollama.
 
+> **[Versión en Español](README.es.md)**
+
 ## Why HFL?
 
 **Ollama has a curated catalog of ~500 models. HuggingFace Hub has 500,000+.**
