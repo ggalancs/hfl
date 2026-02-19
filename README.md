@@ -36,7 +36,7 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 - **Automatic Conversion**: Downloads HuggingFace models and converts to GGUF automatically
 - **Smart Quantization**: Supports Q2_K through F16 quantization levels
 - **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
-- **Bilingual CLI**: Help text in English and Spanish
+- **Internationalized**: Full i18n support (English, Spanish) - set `HFL_LANG` to change language
 
 ## Prerequisites
 
@@ -234,6 +234,23 @@ Get your token at: https://huggingface.co/settings/tokens
 Environment variables:
 - `HFL_HOME`: Data directory (default: `~/.hfl`)
 - `HF_TOKEN`: HuggingFace token for gated models (alternative to `hfl login`)
+- `HFL_LANG`: Interface language (`en` for English, `es` for Spanish). Defaults to English.
+
+### Language Support
+
+hfl supports multiple languages. Set the `HFL_LANG` environment variable to change the CLI language:
+
+```bash
+# Use Spanish
+export HFL_LANG=es
+hfl --help
+
+# Use English (default)
+export HFL_LANG=en
+hfl --help
+```
+
+Supported languages: English (`en`), Spanish (`es`)
 
 ## Known Limitations
 

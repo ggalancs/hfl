@@ -11,6 +11,10 @@ Usage:
   hfl search <text>
   hfl rm <model>
   hfl inspect <model>
+
+Language:
+  Set HFL_LANG environment variable to change language (en, es).
+  Default: en (English)
 """
 
 import sys
@@ -19,9 +23,11 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from hfl.i18n import t
+
 app = typer.Typer(
     name="hfl",
-    help="Run HuggingFace models locally. | Ejecuta modelos de HuggingFace localmente.",
+    help=t("app.description"),
     no_args_is_help=True,
 )
 console = Console()
@@ -29,27 +35,27 @@ console = Console()
 
 @app.command()
 def pull(
-    model: str = typer.Argument(help="HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct)"),
+    model: str = typer.Argument(help=t("commands.pull.args.model")),
     quantize: str = typer.Option(
-        "Q4_K_M", "--quantize", "-q", help="Quantization level | Nivel de cuantización"
+        "Q4_K_M", "--quantize", "-q", help=t("commands.pull.options.quantize")
     ),
     format: str = typer.Option(
         "auto",
         "--format",
         "-f",
-        help="Format: auto, gguf, safetensors | Formato: auto, gguf, safetensors",
+        help=t("commands.pull.options.format"),
     ),
     alias: str = typer.Option(
         None,
         "--alias",
         "-a",
-        help="Short alias for the model (e.g.: 'coder')",
+        help=t("commands.pull.options.alias"),
     ),
     skip_license: bool = typer.Option(
-        False, "--skip-license", help="Skip license verification | Omitir verificación de licencia"
+        False, "--skip-license", help=t("commands.pull.options.skip_license")
     ),
 ):
-    """Download a model from HuggingFace Hub. | Descarga un modelo de HuggingFace Hub."""
+    """Download a model from HuggingFace Hub."""
     from datetime import datetime
 
     from hfl.converter.formats import ModelFormat, detect_format
@@ -60,30 +66,30 @@ def pull(
     from hfl.models.registry import ModelRegistry
 
     # 1. Resolve model
-    console.print(f"[bold]Resolving[/] {model}...")
+    console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
     try:
         resolved = resolve(model, quantization=quantize)
     except (ValueError, Exception) as e:
         error_msg = str(e)
         if "Repo id must" in error_msg or "repo_name" in error_msg:
-            console.print("[red]Format error:[/] The model name is invalid.")
-            console.print("\n[yellow]Supported formats:[/]")
-            console.print("  - org/model                  -> direct HuggingFace repo")
-            console.print("  - org/model:Q4_K_M           -> repo with quantization")
-            console.print("  - model-name                 -> search by name")
-            console.print(f"\n[dim]Input received:[/] {model}")
-            console.print(f"[dim]Detail:[/] {e}")
-        elif "No se encontró modelo" in error_msg:
+            console.print(f"[red]{t('errors.format_error')}[/]")
+            console.print(f"\n[yellow]{t('errors.supported_formats')}[/]")
+            console.print(f"  - {t('errors.format_org_model')}")
+            console.print(f"  - {t('errors.format_org_model_quant')}")
+            console.print(f"  - {t('errors.format_model_name')}")
+            console.print(f"\n[dim]{t('errors.input_received')}:[/] {model}")
+            console.print(f"[dim]{t('errors.detail')}:[/] {e}")
+        elif "not found" in error_msg.lower() or "No se encontró" in error_msg:
             console.print(f"[red]Error:[/] {e}")
-            console.print("[dim]Check the name or use 'hfl search' to search.[/]")
+            console.print(f"[dim]{t('errors.check_name_or_search')}[/]")
         else:
-            console.print(f"[red]Error resolving model:[/] {e}")
+            console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
         raise typer.Exit(1)
 
-    console.print(f"  Repo: {resolved.repo_id}")
-    console.print(f"  Format: {resolved.format}")
+    console.print(f"  {t('messages.repo')}: {resolved.repo_id}")
+    console.print(f"  {t('messages.format')}: {resolved.format}")
     if resolved.filename:
-        console.print(f"  File: {resolved.filename}")
+        console.print(f"  {t('messages.file')}: {resolved.filename}")
 
     # 2. Verify license (R1 - Legal Audit)
     license_info = None
@@ -92,17 +98,17 @@ def pull(
         try:
             license_info = check_model_license(resolved.repo_id)
             if not require_user_acceptance(license_info, resolved.repo_id):
-                console.print("[yellow]Download cancelled.[/]")
+                console.print(f"[yellow]{t('warnings.download_cancelled')}[/]")
                 raise typer.Exit(0)
             license_accepted_at = datetime.now().isoformat()
         except Exception as e:
-            console.print(f"[yellow]Warning:[/] Could not verify license: {e}")
-            if not typer.confirm("Continue without verifying license?", default=False):
+            console.print(f"[yellow]{t('warnings.could_not_verify_license')}:[/] {e}")
+            if not typer.confirm(t("warnings.continue_without_license"), default=False):
                 raise typer.Exit(0)
 
     # 3. Download
     local_path = pull_model(resolved)
-    console.print(f"[green]Downloaded to:[/] {local_path}")
+    console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
 
     # 3. Convert if necessary
     fmt = detect_format(local_path)
@@ -115,15 +121,13 @@ def pull(
         is_convertible, reason = check_model_convertibility(local_path)
 
         if not is_convertible:
-            console.print(f"\n[yellow]Cannot convert to GGUF:[/] {reason}")
-            console.print(
-                "\n[dim]The model has been downloaded but cannot be run with llama.cpp.[/]"
-            )
-            console.print("[dim]Consider searching for a GGUF version of the model:[/]")
+            console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
+            console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
+            console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
             console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
             raise typer.Exit(1)
 
-        console.print(f"[yellow]Converting to GGUF ({quantize})...[/]")
+        console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
         converter = GGUFConverter()
         output_name = resolved.repo_id.replace("/", "--")
         output_path = local_path.parent / output_name
@@ -163,30 +167,29 @@ def pull(
     registry.add(manifest)
 
     # Show result with alias if defined
+    ready_msg = f"{t('messages.model_ready')}: {manifest.name} ({manifest.display_size})"
     if alias:
-        console.print(f"\n[bold green]Model ready:[/] {manifest.name} ({manifest.display_size})")
-        console.print(f"[cyan]Alias:[/] {alias}")
-        console.print(f"[dim]Use:[/] hfl run {alias}")
+        console.print(f"\n[bold green]{ready_msg}[/]")
+        console.print(f"[cyan]{t('messages.alias_label')}:[/] {alias}")
+        console.print(f"[dim]{t('messages.use_command')}:[/] hfl run {alias}")
     else:
-        console.print(f"\n[bold green]Model ready:[/] {manifest.name} ({manifest.display_size})")
+        console.print(f"\n[bold green]{ready_msg}[/]")
 
 
 @app.command()
 def run(
-    model: str = typer.Argument(help="Local model name | Nombre del modelo local"),
-    backend: str = typer.Option(
-        "auto", "--backend", "-b", help="Inference backend | Backend de inferencia"
-    ),
-    ctx: int = typer.Option(4096, "--ctx", "-c", help="Context size | Tamaño del contexto"),
-    system: str = typer.Option(None, "--system", "-s", help="System prompt | Prompt del sistema"),
+    model: str = typer.Argument(help=t("commands.run.args.model")),
+    backend: str = typer.Option("auto", "--backend", "-b", help=t("commands.run.options.backend")),
+    ctx: int = typer.Option(4096, "--ctx", "-c", help=t("commands.run.options.ctx")),
+    system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
     verbose: bool = typer.Option(
         False,
         "--verbose",
         "-v",
-        help="Show backend logs (Metal, CUDA) | Mostrar logs del backend (Metal, CUDA)",
+        help=t("commands.run.options.verbose"),
     ),
 ):
-    """Start an interactive chat with a model. | Inicia un chat interactivo con un modelo."""
+    """Start an interactive chat with a model."""
     from pathlib import Path
 
     from hfl.engine.base import ChatMessage
@@ -196,25 +199,21 @@ def run(
     registry = ModelRegistry()
     manifest = registry.get(model)
     if not manifest:
-        console.print(f"[red]Model not found:[/] {model}")
-        console.print("Use 'hfl list' to see available models.")
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+        console.print(t("errors.use_list_to_see"))
         raise typer.Exit(1)
 
-    console.print(f"[cyan]Loading[/] {manifest.name}...")
+    console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
     try:
         engine = select_engine(Path(manifest.local_path), backend=backend)
         engine.load(manifest.local_path, n_ctx=ctx, verbose=verbose)
     except MissingDependencyError as e:
-        console.print(f"[red]Missing dependency:[/]\n\n{e}")
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
         raise typer.Exit(1)
-    console.print("[green]Model loaded.[/] Type '/exit' to quit.\n")
+    console.print(f"[green]{t('messages.model_loaded')}[/]\n")
 
     # R9 - Legal disclaimer before starting chat
-    console.print(
-        "[dim]AI models may generate incorrect, biased, or inappropriate "
-        "information. The user is responsible for the use they make "
-        "of the generated responses.[/]\n"
-    )
+    console.print(f"[dim]{t('legal.ai_disclaimer')}[/]\n")
 
     messages: list[ChatMessage] = []
     if system:
@@ -248,26 +247,22 @@ def run(
         messages.append(ChatMessage(role="assistant", content="".join(full_response)))
 
     engine.unload()
-    console.print("\n[dim]Session ended.[/]")
+    console.print(f"\n[dim]{t('messages.session_ended')}[/]")
 
 
 @app.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", "--host", help="Host address | Dirección del host"),
-    port: int = typer.Option(11434, "--port", "-p", help="Port number | Número de puerto"),
-    model: str = typer.Option(None, "--model", "-m", help="Pre-load model | Pre-cargar modelo"),
+    host: str = typer.Option("127.0.0.1", "--host", help=t("commands.serve.options.host")),
+    port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
+    model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
     from hfl.api.server import start_server, state
 
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
-        console.print(
-            "[yellow]Warning:[/] Exposing the server to the network. "
-            "Prompts sent to the API will be accessible from "
-            "any device on the network."
-        )
-        if not typer.confirm("Continue?", default=True):
+        console.print(f"[yellow]Warning:[/] {t('warnings.network_exposure')}")
+        if not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 
     if model:
@@ -279,16 +274,16 @@ def serve(
         registry = ModelRegistry()
         manifest = registry.get(model)
         if manifest:
-            console.print(f"[cyan]Pre-loading[/] {manifest.name}...")
+            console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
             try:
                 state.engine = select_engine(Path(manifest.local_path))
                 state.engine.load(manifest.local_path)
                 state.current_model = manifest
             except MissingDependencyError as e:
-                console.print(f"[red]Missing dependency:[/]\n\n{e}")
+                console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
                 raise typer.Exit(1)
 
-    console.print(f"[bold green]hfl server[/] at http://{host}:{port}")
+    console.print(f"[bold green]{t('messages.server_at', host=host, port=port)}[/]")
     console.print("  OpenAI: POST /v1/chat/completions")
     console.print("  Ollama: POST /api/chat")
     start_server(host=host, port=port)
@@ -296,7 +291,7 @@ def serve(
 
 @app.command(name="list")
 def list_models():
-    """List all downloaded models. | Lista todos los modelos descargados."""
+    """List all downloaded models."""
     from rich.table import Table
 
     from hfl.models.registry import ModelRegistry
@@ -305,16 +300,16 @@ def list_models():
     models = registry.list_all()
 
     if not models:
-        console.print("[dim]No downloaded models. Use 'hfl pull' to download.[/]")
+        console.print(f"[dim]{t('table.no_models')}[/]")
         return
 
-    table = Table(title="Local Models")
-    table.add_column("Name", style="cyan")
-    table.add_column("Alias", style="green")
-    table.add_column("Format")
-    table.add_column("Quantization")
-    table.add_column("License")
-    table.add_column("Size", justify="right")
+    table = Table(title=t("table.local_models"))
+    table.add_column(t("table.name"), style="cyan")
+    table.add_column(t("table.alias"), style="green")
+    table.add_column(t("table.format"))
+    table.add_column(t("table.quantization"))
+    table.add_column(t("table.license"))
+    table.add_column(t("table.size"), justify="right")
 
     for m in models:
         # R1 - Show license with risk indicator
@@ -344,7 +339,7 @@ def list_models():
 def _format_size(size_bytes: int) -> str:
     """Format size in bytes to human-readable format."""
     if size_bytes == 0:
-        return "N/A"
+        return t("inspect.na")
     gb = size_bytes / (1024**3)
     if gb >= 1:
         return f"{gb:.1f} GB"
@@ -477,56 +472,39 @@ def _get_params_value(model_id: str) -> float | None:
 
 @app.command()
 def search(
-    query: str = typer.Argument(
-        help="Text to search (min 3 chars) | Texto a buscar (mín 3 caracteres)"
-    ),
-    limit: int = typer.Option(100, "--limit", "-l", help="Maximum results | Máximo de resultados"),
+    query: str = typer.Argument(help=t("commands.search.args.query")),
+    limit: int = typer.Option(100, "--limit", "-l", help=t("commands.search.options.limit")),
     page_size: int = typer.Option(
-        10, "--page-size", "-n", help="Results per page | Resultados por página"
+        10, "--page-size", "-n", help=t("commands.search.options.page_size")
     ),
     gguf_only: bool = typer.Option(
-        False, "--gguf", "-g", help="Show only GGUF models | Mostrar solo modelos GGUF"
+        False, "--gguf", "-g", help=t("commands.search.options.gguf_only")
     ),
     max_params: float = typer.Option(
         None,
         "--max-params",
         "-p",
-        help="Max parameters in B (e.g.: 70) | Máx parámetros en B (ej.: 70)",
+        help=t("commands.search.options.max_params"),
     ),
     min_params: float = typer.Option(
-        None, "--min-params", help="Min parameters in B (e.g.: 7) | Mín parámetros en B (ej.: 7)"
+        None, "--min-params", help=t("commands.search.options.min_params")
     ),
     sort: str = typer.Option(
         "downloads",
         "--sort",
         "-s",
-        help="Sort: downloads, likes, created | Ordenar: downloads, likes, created",
+        help=t("commands.search.options.sort"),
     ),
 ):
-    """
-    Search models on HuggingFace Hub with interactive pagination.
-    Busca modelos en HuggingFace Hub con paginación interactiva.
-
-    Controls / Controles:
-      SPACE/ENTER    Next page / Página siguiente
-      q/Q/ESC        Exit / Salir
-      p              Previous page / Página anterior
-
-    Examples / Ejemplos:
-      hfl search llama
-      hfl search mistral --gguf
-      hfl search phi --limit 50 --page-size 5
-      hfl search qwen --max-params 14        # Models < 14B
-      hfl search llama --min-params 70       # Models >= 70B
-    """
+    """Search models on HuggingFace Hub with interactive pagination."""
     from huggingface_hub import HfApi
 
     # Validate minimum length
     if len(query.strip()) < 3:
-        console.print("[red]Error:[/] Search must have at least 3 characters.")
+        console.print(f"[red]Error:[/] {t('errors.search_min_chars')}")
         raise typer.Exit(1)
 
-    console.print(f"[bold]Searching[/] '{query}' on HuggingFace Hub...\n")
+    console.print(f"[bold]{t('messages.searching', query=query)}[/]\n")
 
     api = HfApi()
 
@@ -543,11 +521,11 @@ def search(
             )
         )
     except Exception as e:
-        console.print(f"[red]Error searching:[/] {e}")
+        console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1)
 
     if not models:
-        console.print(f"[yellow]No models found for:[/] '{query}'")
+        console.print(f"[yellow]{t('errors.no_models_found', query=query)}[/]")
         return
 
     # Filter by GGUF if requested
@@ -560,7 +538,7 @@ def search(
             and any(s.rfilename.endswith(".gguf") for s in m.siblings)
         ]
         if not models:
-            console.print(f"[yellow]No GGUF models found for:[/] '{query}'")
+            console.print(f"[yellow]{t('errors.no_gguf_models_found', query=query)}[/]")
             return
 
     # Filter by number of parameters
@@ -583,7 +561,9 @@ def search(
                 filter_desc.append(f"<{max_params}B")
             if min_params is not None:
                 filter_desc.append(f">{min_params}B")
-            console.print(f"[yellow]No models {' and '.join(filter_desc)} found for:[/] '{query}'")
+            filter_str = " and ".join(filter_desc)
+            msg = t("errors.no_models_params_found", filter=filter_str, query=query)
+            console.print(f"[yellow]{msg}[/]")
             return
 
     total = len(models)
@@ -593,7 +573,7 @@ def search(
     # Show header
     console.print(
         Panel(
-            f"[bold]{total}[/] models found  |  "
+            f"[bold]{t('messages.models_found', count=total)}[/]  |  "
             f"[dim]SPACE/ENTER[/] continue  |  "
             f"[dim]q[/] quit  |  "
             f"[dim]p[/] previous",
@@ -614,10 +594,15 @@ def search(
 
         # Show pagination status
         console.print()
-        page_info = (
-            f"[dim]-- Page {current_page + 1}/{total_pages} "
-            f"({start_idx + 1}-{end_idx} of {total}) --[/]"
+        page_msg = t(
+            "messages.page_info",
+            current=current_page + 1,
+            total=total_pages,
+            start=start_idx + 1,
+            end=end_idx,
+            count=total,
         )
+        page_info = f"[dim]-- {page_msg} --[/]"
 
         if current_page < total_pages - 1:
             console.print(f"{page_info}  [dim]SPACE[/] more  [dim]q[/] quit", end="")
@@ -637,7 +622,9 @@ def search(
             console.print("\r" + " " * 80 + "\r", end="")
 
             if key in ("q", "Q", "\x1b", "\x03"):  # q, Q, ESC, Ctrl+C
-                console.print(f"\n[dim]Search finished. Showing {end_idx} of {total} results.[/]")
+                console.print(
+                    f"\n[dim]{t('messages.search_finished', shown=end_idx, total=total)}[/]"
+                )
                 break
             elif key == "p" and current_page > 0:
                 current_page -= 1
@@ -647,19 +634,19 @@ def search(
                 console.print()  # New line before next page
         else:
             # Last page
-            console.print(f"{page_info}  [bold green]End of results[/]")
+            console.print(f"{page_info}  [bold green]{t('messages.end_of_results')}[/]")
             current_page += 1
 
     # Show help at the end
     console.print()
-    console.print("[dim]To download a model use:[/] hfl pull <model>")
+    console.print(f"[dim]{t('messages.to_download')}[/]")
 
 
 @app.command()
 def rm(
-    model: str = typer.Argument(help="Name of the model to delete | Nombre del modelo a eliminar"),
+    model: str = typer.Argument(help=t("commands.rm.args.model")),
 ):
-    """Delete a local model. | Elimina un modelo local."""
+    """Delete a local model."""
     import shutil
     from pathlib import Path
 
@@ -669,12 +656,12 @@ def rm(
     manifest = registry.get(model)
 
     if not manifest:
-        console.print(f"[red]Model not found:[/] {model}")
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         raise typer.Exit(1)
 
     # Confirm
     confirm = typer.confirm(
-        f"Delete {manifest.name} ({manifest.display_size})?",
+        t("confirm.delete_model", name=manifest.name, size=manifest.display_size),
     )
     if not confirm:
         return
@@ -687,12 +674,12 @@ def rm(
         path.unlink()
 
     registry.remove(model)
-    console.print(f"[green]Deleted:[/] {manifest.name}")
+    console.print(f"[green]{t('messages.deleted')}:[/] {manifest.name}")
 
 
 @app.command()
-def inspect(model: str = typer.Argument(help="Model name | Nombre del modelo")):
-    """Show detailed information about a model. | Muestra información detallada de un modelo."""
+def inspect(model: str = typer.Argument(help=t("commands.inspect.args.model"))):
+    """Show detailed information about a model."""
     from rich.panel import Panel
     from rich.text import Text
 
@@ -702,72 +689,68 @@ def inspect(model: str = typer.Argument(help="Model name | Nombre del modelo")):
     manifest = registry.get(model)
 
     if not manifest:
-        console.print(f"[red]Model not found:[/] {model}")
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         raise typer.Exit(1)
 
     info = Text()
-    info.append(f"Name:          {manifest.name}\n")
+    info.append(f"{t('inspect.name')}:          {manifest.name}\n")
     if manifest.alias:
-        info.append(f"Alias:         {manifest.alias}\n")
-    info.append(f"HF Repo:       {manifest.repo_id}\n")
-    info.append(f"Local path:    {manifest.local_path}\n")
-    info.append(f"Format:        {manifest.format}\n")
-    info.append(f"Quantization:  {manifest.quantization or 'N/A'}\n")
-    info.append(f"Architecture:  {manifest.architecture or 'auto-detect'}\n")
-    info.append(f"Parameters:    {manifest.parameters or 'unknown'}\n")
-    info.append(f"Context:       {manifest.context_length} tokens\n")
-    info.append(f"Size:          {manifest.display_size}\n")
-    info.append(f"Downloaded:    {manifest.created_at}\n")
+        info.append(f"{t('inspect.alias')}:         {manifest.alias}\n")
+    info.append(f"{t('inspect.hf_repo')}:       {manifest.repo_id}\n")
+    info.append(f"{t('inspect.local_path')}:    {manifest.local_path}\n")
+    info.append(f"{t('inspect.format')}:        {manifest.format}\n")
+    info.append(f"{t('inspect.quantization')}:  {manifest.quantization or t('inspect.na')}\n")
+    info.append(
+        f"{t('inspect.architecture')}:  {manifest.architecture or t('inspect.auto_detect')}\n"
+    )
+    info.append(f"{t('inspect.parameters')}:    {manifest.parameters or t('inspect.unknown')}\n")
+    info.append(f"{t('inspect.context')}:       {manifest.context_length} {t('inspect.tokens')}\n")
+    info.append(f"{t('inspect.size')}:          {manifest.display_size}\n")
+    info.append(f"{t('inspect.downloaded')}:    {manifest.created_at}\n")
 
     # R1 - Show license information
-    info.append("\n[License]\n")
-    info.append(f"License:       {manifest.license or 'unknown'}\n")
+    info.append(f"\n[{t('inspect.license_section')}]\n")
+    info.append(f"{t('inspect.license')}:       {manifest.license or t('inspect.unknown')}\n")
     if manifest.license_url:
-        info.append(f"URL:           {manifest.license_url}\n")
+        info.append(f"{t('inspect.url')}:           {manifest.license_url}\n")
     if manifest.gated:
-        info.append("Gated:         Yes (required acceptance on HF)\n")
+        info.append(f"{t('inspect.gated')}:         {t('inspect.gated_yes')}\n")
     if manifest.license_restrictions:
-        info.append("Restrictions:\n")
+        info.append(f"{t('inspect.restrictions')}:\n")
         for r in manifest.license_restrictions:
             info.append(f"  - {r}\n")
     if manifest.license_accepted_at:
-        info.append(f"Accepted:      {manifest.license_accepted_at[:10]}\n")
+        info.append(f"{t('inspect.accepted')}:      {manifest.license_accepted_at[:10]}\n")
 
     console.print(Panel(info, title=f"[bold]{manifest.name}[/]", border_style="cyan"))
 
 
 @app.command(name="alias")
 def set_alias(
-    model: str = typer.Argument(help="Model name | Nombre del modelo"),
-    alias: str = typer.Argument(help="Alias to assign | Alias a asignar"),
+    model: str = typer.Argument(help=t("commands.alias.args.model")),
+    alias: str = typer.Argument(help=t("commands.alias.args.alias")),
 ):
-    """
-    Assign an alias to an existing model. | Asigna un alias a un modelo existente.
-
-    Examples / Ejemplos:
-      hfl alias huihui-qwen3-coder-30b-a3b-instruct-abliterated-i1-gguf-q4_k_m coder
-      hfl run coder
-    """
+    """Assign an alias to an existing model."""
     from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
     manifest = registry.get(model)
 
     if not manifest:
-        console.print(f"[red]Model not found:[/] {model}")
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         raise typer.Exit(1)
 
     # Verify that the alias is not in use
     existing = registry.get(alias)
     if existing and existing.name != manifest.name:
-        console.print(f"[red]The alias '{alias}' is already in use by:[/] {existing.name}")
+        console.print(f"[red]{t('errors.alias_in_use', alias=alias, model=existing.name)}[/]")
         raise typer.Exit(1)
 
     if registry.set_alias(manifest.name, alias):
-        console.print(f"[green]Alias assigned:[/] {alias} -> {manifest.name}")
-        console.print(f"[dim]You can now use:[/] hfl run {alias}")
+        console.print(f"[green]{t('messages.alias_assigned')}:[/] {alias} -> {manifest.name}")
+        console.print(f"[dim]{t('messages.you_can_now_use')}:[/] hfl run {alias}")
     else:
-        console.print("[red]Error assigning alias[/]")
+        console.print(f"[red]{t('errors.error_assigning_alias')}[/]")
         raise typer.Exit(1)
 
 
@@ -777,19 +760,10 @@ def login(
         None,
         "--token",
         "-t",
-        help="HuggingFace token (interactive if not provided)",
+        help=t("commands.login.options.token"),
     ),
 ):
-    """
-    Configure your HuggingFace token for faster downloads.
-    Configura tu token de HuggingFace para descargas más rápidas.
-
-    Get your token at / Obtén tu token en: https://huggingface.co/settings/tokens
-
-    Benefits / Beneficios:
-      - Faster downloads / Descargas más rápidas
-      - Access to gated models / Acceso a modelos con restricciones
-    """
+    """Configure your HuggingFace token for faster downloads."""
     from huggingface_hub import login as hf_login
     from huggingface_hub import whoami
 
@@ -797,34 +771,36 @@ def login(
         if token:
             hf_login(token=token, add_to_git_credential=False)
         else:
-            console.print("[bold]Configure HuggingFace token[/]\n")
-            console.print("Get your token at: [cyan]https://huggingface.co/settings/tokens[/]\n")
+            console.print(f"[bold]{t('messages.configure_hf_token')}[/]\n")
+            console.print(
+                f"{t('messages.get_token_at')}: [cyan]https://huggingface.co/settings/tokens[/]\n"
+            )
             hf_login(add_to_git_credential=False)
 
         # Verify it works
         user_info = whoami()
-        console.print(f"\n[green]Authenticated as:[/] {user_info['name']}")
-        console.print("[dim]Token saved. Downloads will now be faster.[/]")
+        console.print(f"\n[green]{t('messages.authenticated_as')}:[/] {user_info['name']}")
+        console.print(f"[dim]{t('messages.token_saved')}[/]")
     except Exception as e:
-        console.print(f"[red]Error authenticating:[/] {e}")
+        console.print(f"[red]{t('errors.error_authenticating')}:[/] {e}")
         raise typer.Exit(1)
 
 
 @app.command()
 def logout():
-    """Remove the saved HuggingFace token. | Elimina el token de HuggingFace guardado."""
+    """Remove the saved HuggingFace token."""
     from huggingface_hub import logout as hf_logout
 
     try:
         hf_logout()
-        console.print("[green]Token removed successfully.[/]")
+        console.print(f"[green]{t('messages.token_removed')}[/]")
     except Exception as e:
         console.print(f"[yellow]Warning:[/] {e}")
 
 
 @app.command()
 def version():
-    """Show the version of hfl. | Muestra la versión de hfl."""
+    """Show the hfl version."""
     from hfl import __version__
 
     console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")

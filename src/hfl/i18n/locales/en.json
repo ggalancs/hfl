@@ -1,0 +1,193 @@
+{
+  "app": {
+    "name": "hfl",
+    "description": "Run HuggingFace models locally like Ollama."
+  },
+  "commands": {
+    "pull": {
+      "description": "Download a model from HuggingFace Hub.",
+      "args": {
+        "model": "HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct)"
+      },
+      "options": {
+        "quantize": "Quantization level (Q2_K to F16)",
+        "format": "Output format: auto, gguf, safetensors",
+        "alias": "Short alias for the model (e.g.: 'coder')",
+        "skip_license": "Skip license verification"
+      }
+    },
+    "run": {
+      "description": "Start an interactive chat with a model.",
+      "args": {
+        "model": "Local model name"
+      },
+      "options": {
+        "backend": "Inference backend (auto, llama.cpp, transformers, vllm)",
+        "ctx": "Context size in tokens",
+        "system": "System prompt",
+        "verbose": "Show backend logs (Metal, CUDA)"
+      }
+    },
+    "serve": {
+      "description": "Start the API server (OpenAI + Ollama compatible).",
+      "options": {
+        "host": "Host address to bind",
+        "port": "Port number",
+        "model": "Pre-load a model at startup"
+      }
+    },
+    "list": {
+      "description": "List all downloaded models."
+    },
+    "search": {
+      "description": "Search models on HuggingFace Hub with interactive pagination.",
+      "long_description": "Search models on HuggingFace Hub with interactive pagination.\n\nControls:\n  SPACE/ENTER    Next page\n  q/Q/ESC        Exit\n  p              Previous page\n\nExamples:\n  hfl search llama\n  hfl search mistral --gguf\n  hfl search phi --limit 50 --page-size 5\n  hfl search qwen --max-params 14        # Models < 14B\n  hfl search llama --min-params 70       # Models >= 70B",
+      "args": {
+        "query": "Search text (min 3 chars)"
+      },
+      "options": {
+        "limit": "Maximum results",
+        "page_size": "Results per page",
+        "gguf_only": "Show only models with GGUF files",
+        "max_params": "Max parameters in billions (e.g.: 70)",
+        "min_params": "Min parameters in billions (e.g.: 7)",
+        "sort": "Sort by: downloads, likes, created"
+      }
+    },
+    "rm": {
+      "description": "Delete a local model.",
+      "args": {
+        "model": "Name of the model to delete"
+      }
+    },
+    "inspect": {
+      "description": "Show detailed information about a model.",
+      "args": {
+        "model": "Model name"
+      }
+    },
+    "alias": {
+      "description": "Assign an alias to an existing model.",
+      "long_description": "Assign an alias to an existing model.\n\nExamples:\n  hfl alias qwen3-coder-30b-instruct-q4_k_m coder\n  hfl run coder",
+      "args": {
+        "model": "Model name",
+        "alias": "Alias to assign"
+      }
+    },
+    "login": {
+      "description": "Configure your HuggingFace token for faster downloads.",
+      "long_description": "Configure your HuggingFace token for faster downloads.\n\nGet your token at: https://huggingface.co/settings/tokens\n\nBenefits:\n  - Faster downloads (authenticated rate limits)\n  - Access to gated models (Llama, Gemma, etc.)",
+      "options": {
+        "token": "HuggingFace token (interactive if not provided)"
+      }
+    },
+    "logout": {
+      "description": "Remove the saved HuggingFace token."
+    },
+    "version": {
+      "description": "Show the hfl version."
+    }
+  },
+  "messages": {
+    "resolving": "Resolving",
+    "repo": "Repo",
+    "format": "Format",
+    "file": "File",
+    "downloaded_to": "Downloaded to",
+    "converting_to_gguf": "Converting to GGUF ({quantize})...",
+    "model_ready": "Model ready",
+    "alias_label": "Alias",
+    "use_command": "Use",
+    "loading": "Loading",
+    "model_loaded": "Model loaded. Type '/exit' to quit.",
+    "session_ended": "Session ended.",
+    "pre_loading": "Pre-loading",
+    "server_at": "hfl server at http://{host}:{port}",
+    "deleted": "Deleted",
+    "alias_assigned": "Alias assigned",
+    "you_can_now_use": "You can now use",
+    "configure_hf_token": "Configure HuggingFace token",
+    "get_token_at": "Get your token at",
+    "authenticated_as": "Authenticated as",
+    "token_saved": "Token saved. Downloads will now be faster.",
+    "token_removed": "Token removed successfully.",
+    "searching": "Searching '{query}' on HuggingFace Hub...",
+    "models_found": "{count} models found",
+    "page_info": "Page {current}/{total} ({start}-{end} of {count})",
+    "end_of_results": "End of results",
+    "search_finished": "Search finished. Showing {shown} of {total} results.",
+    "to_download": "To download a model use: hfl pull <model>"
+  },
+  "errors": {
+    "format_error": "Format error: The model name is invalid.",
+    "supported_formats": "Supported formats:",
+    "format_org_model": "org/model                  -> direct HuggingFace repo",
+    "format_org_model_quant": "org/model:Q4_K_M           -> repo with quantization",
+    "format_model_name": "model-name                 -> search by name",
+    "input_received": "Input received",
+    "detail": "Detail",
+    "check_name_or_search": "Check the name or use 'hfl search' to search.",
+    "error_resolving": "Error resolving model",
+    "model_not_found": "Model not found",
+    "use_list_to_see": "Use 'hfl list' to see available models.",
+    "missing_dependency": "Missing dependency",
+    "cannot_convert_gguf": "Cannot convert to GGUF",
+    "model_downloaded_but": "The model has been downloaded but cannot be run with llama.cpp.",
+    "consider_searching_gguf": "Consider searching for a GGUF version of the model:",
+    "search_min_chars": "Search must have at least 3 characters.",
+    "error_searching": "Error searching",
+    "no_models_found": "No models found for: '{query}'",
+    "no_gguf_models_found": "No GGUF models found for: '{query}'",
+    "no_models_params_found": "No models {filter} found for: '{query}'",
+    "error_authenticating": "Error authenticating",
+    "alias_in_use": "The alias '{alias}' is already in use by: {model}",
+    "error_assigning_alias": "Error assigning alias"
+  },
+  "warnings": {
+    "download_cancelled": "Download cancelled.",
+    "could_not_verify_license": "Could not verify license",
+    "continue_without_license": "Continue without verifying license?",
+    "network_exposure": "Exposing the server to the network. Prompts sent to the API will be accessible from any device on the network.",
+    "continue_question": "Continue?"
+  },
+  "legal": {
+    "ai_disclaimer": "AI models may generate incorrect, biased, or inappropriate information. The user is responsible for the use they make of the generated responses."
+  },
+  "table": {
+    "local_models": "Local Models",
+    "name": "Name",
+    "alias": "Alias",
+    "format": "Format",
+    "quantization": "Quantization",
+    "license": "License",
+    "size": "Size",
+    "no_models": "No downloaded models. Use 'hfl pull' to download."
+  },
+  "inspect": {
+    "name": "Name",
+    "alias": "Alias",
+    "hf_repo": "HF Repo",
+    "local_path": "Local path",
+    "format": "Format",
+    "quantization": "Quantization",
+    "architecture": "Architecture",
+    "parameters": "Parameters",
+    "context": "Context",
+    "size": "Size",
+    "downloaded": "Downloaded",
+    "license_section": "License",
+    "license": "License",
+    "url": "URL",
+    "gated": "Gated",
+    "gated_yes": "Yes (required acceptance on HF)",
+    "restrictions": "Restrictions",
+    "accepted": "Accepted",
+    "unknown": "unknown",
+    "auto_detect": "auto-detect",
+    "na": "N/A",
+    "tokens": "tokens"
+  },
+  "confirm": {
+    "delete_model": "Delete {name} ({size})?"
+  }
+}

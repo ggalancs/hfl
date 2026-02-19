@@ -1,0 +1,193 @@
+{
+  "app": {
+    "name": "hfl",
+    "description": "Ejecuta modelos de HuggingFace localmente como Ollama."
+  },
+  "commands": {
+    "pull": {
+      "description": "Descarga un modelo de HuggingFace Hub.",
+      "args": {
+        "model": "Modelo HF (ej.: meta-llama/Llama-3.3-70B-Instruct)"
+      },
+      "options": {
+        "quantize": "Nivel de cuantización (Q2_K a F16)",
+        "format": "Formato de salida: auto, gguf, safetensors",
+        "alias": "Alias corto para el modelo (ej.: 'coder')",
+        "skip_license": "Omitir verificación de licencia"
+      }
+    },
+    "run": {
+      "description": "Inicia un chat interactivo con un modelo.",
+      "args": {
+        "model": "Nombre del modelo local"
+      },
+      "options": {
+        "backend": "Backend de inferencia (auto, llama.cpp, transformers, vllm)",
+        "ctx": "Tamaño del contexto en tokens",
+        "system": "Prompt del sistema",
+        "verbose": "Mostrar logs del backend (Metal, CUDA)"
+      }
+    },
+    "serve": {
+      "description": "Inicia el servidor API (compatible con OpenAI + Ollama).",
+      "options": {
+        "host": "Dirección del host",
+        "port": "Número de puerto",
+        "model": "Pre-cargar un modelo al iniciar"
+      }
+    },
+    "list": {
+      "description": "Lista todos los modelos descargados."
+    },
+    "search": {
+      "description": "Busca modelos en HuggingFace Hub con paginación interactiva.",
+      "long_description": "Busca modelos en HuggingFace Hub con paginación interactiva.\n\nControles:\n  SPACE/ENTER    Página siguiente\n  q/Q/ESC        Salir\n  p              Página anterior\n\nEjemplos:\n  hfl search llama\n  hfl search mistral --gguf\n  hfl search phi --limit 50 --page-size 5\n  hfl search qwen --max-params 14        # Modelos < 14B\n  hfl search llama --min-params 70       # Modelos >= 70B",
+      "args": {
+        "query": "Texto a buscar (mín 3 caracteres)"
+      },
+      "options": {
+        "limit": "Máximo de resultados",
+        "page_size": "Resultados por página",
+        "gguf_only": "Mostrar solo modelos con archivos GGUF",
+        "max_params": "Máx parámetros en billones (ej.: 70)",
+        "min_params": "Mín parámetros en billones (ej.: 7)",
+        "sort": "Ordenar por: downloads, likes, created"
+      }
+    },
+    "rm": {
+      "description": "Elimina un modelo local.",
+      "args": {
+        "model": "Nombre del modelo a eliminar"
+      }
+    },
+    "inspect": {
+      "description": "Muestra información detallada de un modelo.",
+      "args": {
+        "model": "Nombre del modelo"
+      }
+    },
+    "alias": {
+      "description": "Asigna un alias a un modelo existente.",
+      "long_description": "Asigna un alias a un modelo existente.\n\nEjemplos:\n  hfl alias qwen3-coder-30b-instruct-q4_k_m coder\n  hfl run coder",
+      "args": {
+        "model": "Nombre del modelo",
+        "alias": "Alias a asignar"
+      }
+    },
+    "login": {
+      "description": "Configura tu token de HuggingFace para descargas más rápidas.",
+      "long_description": "Configura tu token de HuggingFace para descargas más rápidas.\n\nObtén tu token en: https://huggingface.co/settings/tokens\n\nBeneficios:\n  - Descargas más rápidas (límites autenticados)\n  - Acceso a modelos con restricciones (Llama, Gemma, etc.)",
+      "options": {
+        "token": "Token de HuggingFace (interactivo si no se proporciona)"
+      }
+    },
+    "logout": {
+      "description": "Elimina el token de HuggingFace guardado."
+    },
+    "version": {
+      "description": "Muestra la versión de hfl."
+    }
+  },
+  "messages": {
+    "resolving": "Resolviendo",
+    "repo": "Repo",
+    "format": "Formato",
+    "file": "Archivo",
+    "downloaded_to": "Descargado en",
+    "converting_to_gguf": "Convirtiendo a GGUF ({quantize})...",
+    "model_ready": "Modelo listo",
+    "alias_label": "Alias",
+    "use_command": "Usa",
+    "loading": "Cargando",
+    "model_loaded": "Modelo cargado. Escribe '/exit' para salir.",
+    "session_ended": "Sesión finalizada.",
+    "pre_loading": "Pre-cargando",
+    "server_at": "servidor hfl en http://{host}:{port}",
+    "deleted": "Eliminado",
+    "alias_assigned": "Alias asignado",
+    "you_can_now_use": "Ahora puedes usar",
+    "configure_hf_token": "Configurar token de HuggingFace",
+    "get_token_at": "Obtén tu token en",
+    "authenticated_as": "Autenticado como",
+    "token_saved": "Token guardado. Las descargas serán más rápidas.",
+    "token_removed": "Token eliminado correctamente.",
+    "searching": "Buscando '{query}' en HuggingFace Hub...",
+    "models_found": "{count} modelos encontrados",
+    "page_info": "Página {current}/{total} ({start}-{end} de {count})",
+    "end_of_results": "Fin de resultados",
+    "search_finished": "Búsqueda finalizada. Mostrando {shown} de {total} resultados.",
+    "to_download": "Para descargar un modelo usa: hfl pull <modelo>"
+  },
+  "errors": {
+    "format_error": "Error de formato: El nombre del modelo es inválido.",
+    "supported_formats": "Formatos soportados:",
+    "format_org_model": "org/modelo                 -> repo directo de HuggingFace",
+    "format_org_model_quant": "org/modelo:Q4_K_M          -> repo con cuantización",
+    "format_model_name": "nombre-modelo              -> búsqueda por nombre",
+    "input_received": "Entrada recibida",
+    "detail": "Detalle",
+    "check_name_or_search": "Verifica el nombre o usa 'hfl search' para buscar.",
+    "error_resolving": "Error resolviendo modelo",
+    "model_not_found": "Modelo no encontrado",
+    "use_list_to_see": "Usa 'hfl list' para ver los modelos disponibles.",
+    "missing_dependency": "Dependencia faltante",
+    "cannot_convert_gguf": "No se puede convertir a GGUF",
+    "model_downloaded_but": "El modelo se ha descargado pero no se puede ejecutar con llama.cpp.",
+    "consider_searching_gguf": "Considera buscar una versión GGUF del modelo:",
+    "search_min_chars": "La búsqueda debe tener al menos 3 caracteres.",
+    "error_searching": "Error buscando",
+    "no_models_found": "No se encontraron modelos para: '{query}'",
+    "no_gguf_models_found": "No se encontraron modelos GGUF para: '{query}'",
+    "no_models_params_found": "No se encontraron modelos {filter} para: '{query}'",
+    "error_authenticating": "Error autenticando",
+    "alias_in_use": "El alias '{alias}' ya está en uso por: {model}",
+    "error_assigning_alias": "Error asignando alias"
+  },
+  "warnings": {
+    "download_cancelled": "Descarga cancelada.",
+    "could_not_verify_license": "No se pudo verificar la licencia",
+    "continue_without_license": "¿Continuar sin verificar licencia?",
+    "network_exposure": "Exponiendo el servidor a la red. Los prompts enviados a la API serán accesibles desde cualquier dispositivo en la red.",
+    "continue_question": "¿Continuar?"
+  },
+  "legal": {
+    "ai_disclaimer": "Los modelos de IA pueden generar información incorrecta, sesgada o inapropiada. El usuario es responsable del uso que haga de las respuestas generadas."
+  },
+  "table": {
+    "local_models": "Modelos Locales",
+    "name": "Nombre",
+    "alias": "Alias",
+    "format": "Formato",
+    "quantization": "Cuantización",
+    "license": "Licencia",
+    "size": "Tamaño",
+    "no_models": "No hay modelos descargados. Usa 'hfl pull' para descargar."
+  },
+  "inspect": {
+    "name": "Nombre",
+    "alias": "Alias",
+    "hf_repo": "Repo HF",
+    "local_path": "Ruta local",
+    "format": "Formato",
+    "quantization": "Cuantización",
+    "architecture": "Arquitectura",
+    "parameters": "Parámetros",
+    "context": "Contexto",
+    "size": "Tamaño",
+    "downloaded": "Descargado",
+    "license_section": "Licencia",
+    "license": "Licencia",
+    "url": "URL",
+    "gated": "Restringido",
+    "gated_yes": "Sí (requiere aceptación en HF)",
+    "restrictions": "Restricciones",
+    "accepted": "Aceptada",
+    "unknown": "desconocido",
+    "auto_detect": "auto-detectar",
+    "na": "N/A",
+    "tokens": "tokens"
+  },
+  "confirm": {
+    "delete_model": "¿Eliminar {name} ({size})?"
+  }
+}

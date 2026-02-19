@@ -12,6 +12,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def set_english_language(monkeypatch):
+    """Ensure all tests run with English language."""
+    monkeypatch.setenv("HFL_LANG", "en")
+    # Clear the language cache so it picks up the new env var
+    from hfl.i18n import get_language
+
+    get_language.cache_clear()
+
+
 @pytest.fixture
 def temp_dir():
     """Creates a temporary directory for tests."""
