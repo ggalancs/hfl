@@ -2,9 +2,10 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the hub module (auth, resolver, downloader)."""
 
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestAuth:
@@ -224,7 +225,7 @@ class TestResolver:
 
         with patch("hfl.hub.resolver.HfApi", return_value=mock_hf_api):
             # "model:latest" - latest is not a quantization, should search "model:latest"
-            result = resolve("model:latest")
+            resolve("model:latest")
 
         # Should have searched for the model
         mock_hf_api.list_models.assert_called()
@@ -247,7 +248,7 @@ class TestLicenseChecker:
 
     def test_check_license_with_license_name(self, mock_hf_api):
         """Verifies that it uses license_name when license is 'other'."""
-        from hfl.hub.license_checker import check_model_license, LicenseRisk
+        from hfl.hub.license_checker import LicenseRisk, check_model_license
 
         # Simulate model with license: other but license_name: qwen2
         mock_info = MagicMock()
@@ -269,7 +270,7 @@ class TestLicenseChecker:
 
     def test_check_license_permissive(self, mock_hf_api):
         """Verifies permissive license detection."""
-        from hfl.hub.license_checker import check_model_license, LicenseRisk
+        from hfl.hub.license_checker import LicenseRisk, check_model_license
 
         mock_info = MagicMock()
         mock_card_data = MagicMock(spec=["license"])
@@ -287,7 +288,7 @@ class TestLicenseChecker:
 
     def test_check_license_non_commercial(self, mock_hf_api):
         """Verifies non-commercial license detection."""
-        from hfl.hub.license_checker import check_model_license, LicenseRisk
+        from hfl.hub.license_checker import LicenseRisk, check_model_license
 
         mock_info = MagicMock()
         mock_card_data = MagicMock(spec=["license"])
@@ -305,7 +306,7 @@ class TestLicenseChecker:
 
     def test_check_license_unknown_fallback(self, mock_hf_api):
         """Verifies fallback to unknown for unrecognized licenses."""
-        from hfl.hub.license_checker import check_model_license, LicenseRisk
+        from hfl.hub.license_checker import LicenseRisk, check_model_license
 
         mock_info = MagicMock()
         mock_card_data = MagicMock(spec=["license"])
@@ -326,8 +327,8 @@ class TestDownloader:
 
     def test_pull_model_gguf(self, mock_hf_api, temp_config):
         """Verifies GGUF model download."""
-        from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
+        from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(
             repo_id="test/model",
@@ -346,8 +347,8 @@ class TestDownloader:
 
     def test_pull_model_safetensors(self, mock_hf_api, temp_config):
         """Verifies safetensors model download (snapshot)."""
-        from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
+        from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(
             repo_id="test/model",
@@ -358,7 +359,7 @@ class TestDownloader:
             with patch("hfl.hub.downloader.snapshot_download") as mock_download:
                 mock_download.return_value = str(temp_config.models_dir / "test--model")
 
-                result = pull_model(resolved)
+                pull_model(resolved)
 
                 mock_download.assert_called_once()
                 # Verify allow_patterns for safetensors
@@ -368,8 +369,8 @@ class TestDownloader:
 
     def test_pull_model_with_auth(self, mock_hf_api, temp_config):
         """Verifies download with authentication."""
-        from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
+        from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(
             repo_id="gated/model",
@@ -388,8 +389,8 @@ class TestDownloader:
 
     def test_pull_model_creates_directory(self, mock_hf_api, temp_config):
         """Verifies that model directory is created."""
-        from hfl.hub.resolver import ResolvedModel
         from hfl.hub.downloader import pull_model
+        from hfl.hub.resolver import ResolvedModel
 
         resolved = ResolvedModel(
             repo_id="new-org/new-model",

@@ -4,12 +4,12 @@
 Global pytest configuration and shared fixtures.
 """
 
-import pytest
-import tempfile
-import json
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture
@@ -30,16 +30,20 @@ def temp_config(temp_dir, monkeypatch):
 
     # Monkeypatch the global configuration
     import hfl.config
+
     monkeypatch.setattr(hfl.config, "config", test_config)
 
     # We also need to patch where it's imported directly
     import hfl.models.registry
+
     monkeypatch.setattr(hfl.models.registry, "config", test_config)
 
     import hfl.converter.gguf_converter
+
     monkeypatch.setattr(hfl.converter.gguf_converter, "config", test_config)
 
     import hfl.hub.downloader
+
     monkeypatch.setattr(hfl.hub.downloader, "config", test_config)
 
     yield test_config
@@ -84,6 +88,7 @@ def sample_gguf_model_info():
 def sample_manifest():
     """Sample model manifest."""
     from hfl.models.manifest import ModelManifest
+
     return ModelManifest(
         name="test-model-q4_k_m",
         repo_id="test-org/test-model",
@@ -122,14 +127,17 @@ def populated_registry(temp_config, sample_manifest):
 
     # Add another model
     from hfl.models.manifest import ModelManifest
-    registry.add(ModelManifest(
-        name="another-model-q5_k_m",
-        repo_id="other-org/another-model",
-        local_path="/tmp/another-model",
-        format="gguf",
-        size_bytes=10 * 1024**3,
-        quantization="Q5_K_M",
-    ))
+
+    registry.add(
+        ModelManifest(
+            name="another-model-q5_k_m",
+            repo_id="other-org/another-model",
+            local_path="/tmp/another-model",
+            format="gguf",
+            size_bytes=10 * 1024**3,
+            quantization="Q5_K_M",
+        )
+    )
 
     return registry
 

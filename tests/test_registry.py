@@ -2,9 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the models module (manifest, registry)."""
 
-import pytest
 import json
-from pathlib import Path
 from datetime import datetime
 
 
@@ -298,9 +296,10 @@ class TestModelRegistry:
 
     def test_list_all_sorted_by_date(self, temp_config):
         """List sorted by date (most recent first)."""
-        from hfl.models.registry import ModelRegistry
-        from hfl.models.manifest import ModelManifest
         import time
+
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -331,8 +330,8 @@ class TestModelRegistry:
 
     def test_avoid_duplicates(self, temp_config):
         """Avoid duplicates (same name)."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -399,9 +398,9 @@ class TestModelRegistry:
 
     def test_load_missing_file(self, temp_dir):
         """Handling of missing file."""
+        import hfl.config
         from hfl.config import HFLConfig
         from hfl.models.registry import ModelRegistry
-        import hfl.config
 
         # Config without ensure_dirs
         test_config = HFLConfig(home_dir=temp_dir)
@@ -421,8 +420,8 @@ class TestModelRegistry:
 
     def test_multiple_models(self, temp_config):
         """Multiple models in registry."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -443,8 +442,8 @@ class TestModelRegistry:
 
     def test_concurrent_modifications(self, temp_config):
         """Modifications from multiple instances."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # First instance adds model
         registry1 = ModelRegistry()
@@ -502,8 +501,8 @@ class TestModelAlias:
 
     def test_get_by_alias(self, temp_config):
         """Search model by alias."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
         manifest = ModelManifest(
@@ -523,8 +522,8 @@ class TestModelAlias:
 
     def test_get_by_name_still_works_with_alias(self, temp_config):
         """Search by name still works when there is an alias."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
         manifest = ModelManifest(
@@ -548,8 +547,8 @@ class TestModelAlias:
 
     def test_set_alias_on_existing_model(self, temp_config):
         """Assign alias to existing model."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
         manifest = ModelManifest(
@@ -571,8 +570,8 @@ class TestModelAlias:
 
     def test_set_alias_fails_if_in_use(self, temp_config):
         """Does not allow duplicate aliases."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -602,8 +601,8 @@ class TestModelAlias:
 
     def test_set_alias_fails_if_name_conflict(self, temp_config):
         """Does not allow alias that matches another model's name."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -637,8 +636,8 @@ class TestModelAlias:
 
     def test_alias_persistence(self, temp_config):
         """Alias persists correctly."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # Create and save
         registry1 = ModelRegistry()

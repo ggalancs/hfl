@@ -2,10 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the models/provenance module."""
 
-import pytest
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 
 class TestConversionRecord:
@@ -85,7 +82,7 @@ class TestProvenanceLog:
 
     def test_record_conversion(self, temp_dir):
         """Records a conversion."""
-        from hfl.models.provenance import ProvenanceLog, ConversionRecord
+        from hfl.models.provenance import ConversionRecord, ProvenanceLog
 
         log_path = temp_dir / "provenance.json"
         log = ProvenanceLog(log_path)
@@ -109,7 +106,7 @@ class TestProvenanceLog:
 
     def test_get_history(self, temp_dir):
         """Gets history of a specific repo."""
-        from hfl.models.provenance import ProvenanceLog, ConversionRecord
+        from hfl.models.provenance import ConversionRecord, ProvenanceLog
 
         log_path = temp_dir / "provenance.json"
         log = ProvenanceLog(log_path)
@@ -126,7 +123,7 @@ class TestProvenanceLog:
 
     def test_get_all(self, temp_dir):
         """Gets all records sorted."""
-        from hfl.models.provenance import ProvenanceLog, ConversionRecord
+        from hfl.models.provenance import ConversionRecord, ProvenanceLog
 
         log_path = temp_dir / "provenance.json"
         log = ProvenanceLog(log_path)
@@ -145,15 +142,17 @@ class TestProvenanceLog:
 
     def test_find_by_target(self, temp_dir):
         """Finds record by target path."""
-        from hfl.models.provenance import ProvenanceLog, ConversionRecord
+        from hfl.models.provenance import ConversionRecord, ProvenanceLog
 
         log_path = temp_dir / "provenance.json"
         log = ProvenanceLog(log_path)
 
-        log.record(ConversionRecord(
-            source_repo="test/model",
-            target_path="/path/to/model.gguf",
-        ))
+        log.record(
+            ConversionRecord(
+                source_repo="test/model",
+                target_path="/path/to/model.gguf",
+            )
+        )
 
         result = log.find_by_target("/path/to/model.gguf")
         assert result is not None
@@ -169,8 +168,8 @@ class TestLogConversionHelper:
 
     def test_log_conversion_basic(self, temp_config):
         """Records basic conversion."""
-        from hfl.models.provenance import log_conversion, get_provenance_log
         import hfl.models.provenance as provenance_module
+        from hfl.models.provenance import log_conversion
 
         # Reset global log
         provenance_module._provenance_log = None
@@ -187,8 +186,8 @@ class TestLogConversionHelper:
 
     def test_log_conversion_with_quantization(self, temp_config):
         """Records conversion with quantization."""
-        from hfl.models.provenance import log_conversion
         import hfl.models.provenance as provenance_module
+        from hfl.models.provenance import log_conversion
 
         provenance_module._provenance_log = None
 
@@ -204,8 +203,8 @@ class TestLogConversionHelper:
 
     def test_log_conversion_with_license(self, temp_config):
         """Records conversion with license info."""
-        from hfl.models.provenance import log_conversion
         import hfl.models.provenance as provenance_module
+        from hfl.models.provenance import log_conversion
 
         provenance_module._provenance_log = None
 
@@ -227,8 +226,8 @@ class TestGetProvenanceLog:
 
     def test_returns_same_instance(self, temp_config):
         """Returns the same instance."""
-        from hfl.models.provenance import get_provenance_log
         import hfl.models.provenance as provenance_module
+        from hfl.models.provenance import get_provenance_log
 
         provenance_module._provenance_log = None
 
@@ -239,8 +238,8 @@ class TestGetProvenanceLog:
 
     def test_creates_instance_if_none(self, temp_config):
         """Creates instance if it doesn't exist."""
-        from hfl.models.provenance import get_provenance_log
         import hfl.models.provenance as provenance_module
+        from hfl.models.provenance import get_provenance_log
 
         provenance_module._provenance_log = None
 

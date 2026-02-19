@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the exceptions module."""
 
-import pytest
-
 
 class TestHFLError:
     """Tests for the base exception."""
@@ -62,7 +60,7 @@ class TestDownloadErrors:
 
     def test_network_error(self):
         """NetworkError inherits from DownloadError."""
-        from hfl.exceptions import NetworkError, DownloadError
+        from hfl.exceptions import DownloadError, NetworkError
 
         err = NetworkError("org/model", "DNS resolution failed")
         assert isinstance(err, DownloadError)
@@ -84,7 +82,7 @@ class TestConversionErrors:
 
     def test_tool_not_found(self):
         """ToolNotFoundError inherits from ConversionError."""
-        from hfl.exceptions import ToolNotFoundError, ConversionError
+        from hfl.exceptions import ConversionError, ToolNotFoundError
 
         err = ToolNotFoundError("llama-quantize")
         assert isinstance(err, ConversionError)
@@ -97,7 +95,7 @@ class TestLicenseErrors:
 
     def test_license_not_accepted(self):
         """LicenseNotAcceptedError has license info."""
-        from hfl.exceptions import LicenseNotAcceptedError, LicenseError
+        from hfl.exceptions import LicenseError, LicenseNotAcceptedError
 
         err = LicenseNotAcceptedError("meta-llama/Llama-3", "llama3")
         assert isinstance(err, LicenseError)
@@ -120,7 +118,7 @@ class TestEngineErrors:
 
     def test_model_not_loaded(self):
         """ModelNotLoadedError clear message."""
-        from hfl.exceptions import ModelNotLoadedError, EngineError
+        from hfl.exceptions import EngineError, ModelNotLoadedError
 
         err = ModelNotLoadedError()
         assert isinstance(err, EngineError)
@@ -154,7 +152,7 @@ class TestAuthErrors:
 
     def test_invalid_token(self):
         """InvalidTokenError has tokens URL."""
-        from hfl.exceptions import InvalidTokenError, AuthenticationError
+        from hfl.exceptions import AuthenticationError, InvalidTokenError
 
         err = InvalidTokenError()
         assert isinstance(err, AuthenticationError)
@@ -175,7 +173,7 @@ class TestConfigErrors:
 
     def test_invalid_config_basic(self):
         """InvalidConfigError basic message."""
-        from hfl.exceptions import InvalidConfigError, ConfigurationError
+        from hfl.exceptions import ConfigurationError, InvalidConfigError
 
         err = InvalidConfigError("quantization", "INVALID")
         assert isinstance(err, ConfigurationError)
@@ -186,9 +184,7 @@ class TestConfigErrors:
         """InvalidConfigError with valid values."""
         from hfl.exceptions import InvalidConfigError
 
-        err = InvalidConfigError(
-            "quantization", "INVALID", ["Q4_K_M", "Q5_K_M", "Q8_0"]
-        )
+        err = InvalidConfigError("quantization", "INVALID", ["Q4_K_M", "Q5_K_M", "Q8_0"])
         assert "Q4_K_M" in str(err)
         assert "Q5_K_M" in str(err)
         assert err.key == "quantization"
@@ -201,14 +197,14 @@ class TestExceptionHierarchy:
     def test_all_inherit_from_hfl_error(self):
         """All exceptions inherit from HFLError."""
         from hfl.exceptions import (
-            HFLError,
-            ModelNotFoundError,
-            DownloadError,
-            ConversionError,
-            LicenseError,
-            EngineError,
             AuthenticationError,
             ConfigurationError,
+            ConversionError,
+            DownloadError,
+            EngineError,
+            HFLError,
+            LicenseError,
+            ModelNotFoundError,
         )
 
         exceptions = [

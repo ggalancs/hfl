@@ -2,10 +2,10 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the engine module (base, llama_cpp, transformers, selector)."""
 
-import pytest
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # Mock llama_cpp before importing modules
@@ -174,8 +174,8 @@ class TestLlamaCppEngine:
 
     def test_generate(self, mock_llama_cpp_module):
         """Verifies text generation."""
-        from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import GenerationConfig
+        from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
 
@@ -202,11 +202,13 @@ class TestLlamaCppEngine:
         engine = LlamaCppEngine()
 
         mock_model = MagicMock()
-        mock_model.return_value = iter([
-            {"choices": [{"text": "Hello"}]},
-            {"choices": [{"text": " world"}]},
-            {"choices": [{"text": "!"}]},
-        ])
+        mock_model.return_value = iter(
+            [
+                {"choices": [{"text": "Hello"}]},
+                {"choices": [{"text": " world"}]},
+                {"choices": [{"text": "!"}]},
+            ]
+        )
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
             engine.load("/path/to/model.gguf")
@@ -216,8 +218,8 @@ class TestLlamaCppEngine:
 
     def test_chat(self, mock_llama_cpp_module):
         """Verifies chat completion."""
-        from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
 
@@ -238,16 +240,18 @@ class TestLlamaCppEngine:
 
     def test_chat_stream(self, mock_llama_cpp_module):
         """Verifies streaming chat completion."""
-        from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
 
         mock_model = MagicMock()
-        mock_model.create_chat_completion.return_value = iter([
-            {"choices": [{"delta": {"content": "Hi"}}]},
-            {"choices": [{"delta": {"content": " there"}}]},
-        ])
+        mock_model.create_chat_completion.return_value = iter(
+            [
+                {"choices": [{"delta": {"content": "Hi"}}]},
+                {"choices": [{"delta": {"content": " there"}}]},
+            ]
+        )
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
             engine.load("/path/to/model.gguf")
@@ -263,8 +267,8 @@ class TestEngineSelector:
 
     def test_select_llama_cpp_for_gguf(self, temp_dir, mock_llama_cpp_module):
         """Selects LlamaCppEngine for GGUF."""
-        from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
+        from hfl.engine.selector import select_engine
 
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF")
@@ -275,8 +279,8 @@ class TestEngineSelector:
 
     def test_select_explicit_backend(self, temp_dir, mock_llama_cpp_module):
         """Selects explicit backend."""
-        from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
+        from hfl.engine.selector import select_engine
 
         engine = select_engine(temp_dir, backend="llama-cpp")
 
@@ -299,8 +303,8 @@ class TestEngineSelector:
 
     def test_select_fallback_to_llama_cpp(self, temp_dir, mock_llama_cpp_module):
         """Fallback to llama.cpp when CUDA is not available."""
-        from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
+        from hfl.engine.selector import select_engine
 
         # Create safetensors file
         (temp_dir / "model.safetensors").write_bytes(b"ST")
@@ -335,11 +339,11 @@ class TestMissingDependencyErrors:
 
     def test_missing_llama_cpp_error_message_contains_gpu_instructions(self, temp_dir):
         """Verifies that the error message includes GPU instructions."""
-        from hfl.engine.selector import _get_llama_cpp_engine, MissingDependencyError
+        from hfl.engine.selector import MissingDependencyError, _get_llama_cpp_engine
 
         with patch(
             "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'")
+            side_effect=ImportError("No module named 'llama_cpp'"),
         ):
             with pytest.raises(MissingDependencyError) as exc_info:
                 _get_llama_cpp_engine()
@@ -350,14 +354,14 @@ class TestMissingDependencyErrors:
 
     def test_select_engine_gguf_without_llama_cpp(self, temp_dir):
         """Verifies that select_engine fails with clear message when llama_cpp is missing."""
-        from hfl.engine.selector import select_engine, MissingDependencyError
+        from hfl.engine.selector import MissingDependencyError, select_engine
 
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF")
 
         with patch(
             "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'")
+            side_effect=ImportError("No module named 'llama_cpp'"),
         ):
             with pytest.raises(MissingDependencyError) as exc_info:
                 select_engine(gguf_file)
@@ -366,22 +370,22 @@ class TestMissingDependencyErrors:
 
     def test_create_engine_explicit_llama_cpp_without_dependency(self):
         """Verifies that _create_engine('llama-cpp') fails with clear message."""
-        from hfl.engine.selector import _create_engine, MissingDependencyError
+        from hfl.engine.selector import MissingDependencyError, _create_engine
 
         with patch(
             "hfl.engine.llama_cpp.LlamaCppEngine",
-            side_effect=ImportError("No module named 'llama_cpp'")
+            side_effect=ImportError("No module named 'llama_cpp'"),
         ):
             with pytest.raises(MissingDependencyError):
                 _create_engine("llama-cpp")
 
     def test_missing_transformers_raises_error(self):
         """Verifies that MissingDependencyError is raised when transformers is missing."""
-        from hfl.engine.selector import _get_transformers_engine, MissingDependencyError
+        from hfl.engine.selector import MissingDependencyError, _get_transformers_engine
 
         with patch(
             "hfl.engine.transformers_engine.TransformersEngine",
-            side_effect=ImportError("No module named 'transformers'")
+            side_effect=ImportError("No module named 'transformers'"),
         ):
             with pytest.raises(MissingDependencyError) as exc_info:
                 _get_transformers_engine()
@@ -392,7 +396,7 @@ class TestMissingDependencyErrors:
 
     def test_missing_vllm_raises_error(self):
         """Verifies that MissingDependencyError is raised when vllm is missing."""
-        from hfl.engine.selector import _get_vllm_engine, MissingDependencyError
+        from hfl.engine.selector import MissingDependencyError, _get_vllm_engine
 
         # Simulate that vllm_engine import fails
         with patch.dict(sys.modules, {"hfl.engine.vllm_engine": None}):
@@ -420,8 +424,8 @@ class TestTransformersEngine:
 
     def test_build_prompt_with_chat_template(self):
         """Verifies prompt construction with chat template."""
-        from hfl.engine.transformers_engine import TransformersEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.transformers_engine import TransformersEngine
 
         engine = TransformersEngine()
         engine._tokenizer = MagicMock()
@@ -439,8 +443,8 @@ class TestTransformersEngine:
 
     def test_build_prompt_fallback(self):
         """Verifies fallback when there is no chat template."""
-        from hfl.engine.transformers_engine import TransformersEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.transformers_engine import TransformersEngine
 
         engine = TransformersEngine()
         engine._tokenizer = MagicMock(spec=[])  # Without apply_chat_template

@@ -2,11 +2,11 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """End-to-end integration tests."""
 
-import pytest
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import json
+
+import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -23,9 +23,8 @@ class TestFullWorkflow:
 
     def test_pull_list_inspect_rm_workflow(self, temp_config):
         """Complete workflow: pull -> list -> inspect -> rm."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
-        from hfl.hub.resolver import ResolvedModel
+        from hfl.models.registry import ModelRegistry
 
         # Simulate pull by creating manifest directly
         manifest = ModelManifest(
@@ -62,7 +61,7 @@ class TestFullWorkflow:
 
     def test_resolve_and_detect_format(self, temp_config):
         """Model resolution and format detection."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         # Create model structures
         gguf_model = temp_config.models_dir / "gguf-model"
@@ -80,8 +79,8 @@ class TestFullWorkflow:
 
     def test_engine_selection_workflow(self, temp_config):
         """Engine selection based on format."""
-        from hfl.engine.selector import select_engine
         from hfl.engine.llama_cpp import LlamaCppEngine
+        from hfl.engine.selector import select_engine
 
         # Create GGUF model
         gguf_model = temp_config.models_dir / "test.gguf"
@@ -94,8 +93,8 @@ class TestFullWorkflow:
 
     def test_registry_persistence_workflow(self, temp_config):
         """Registry persistence between sessions."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # Session 1: Add models
         registry1 = ModelRegistry()
@@ -126,7 +125,8 @@ class TestAPIIntegration:
     def test_api_model_lifecycle(self, temp_config, sample_manifest):
         """Model lifecycle through the API."""
         from fastapi.testclient import TestClient
-        from hfl.api.server import app, state
+
+        from hfl.api.server import app
         from hfl.models.registry import ModelRegistry
 
         client = TestClient(app)
@@ -156,6 +156,7 @@ class TestAPIIntegration:
     def test_openai_ollama_compatibility(self, temp_config, sample_manifest):
         """Compatibility between OpenAI and Ollama endpoints."""
         from fastapi.testclient import TestClient
+
         from hfl.api.server import app, state
         from hfl.models.registry import ModelRegistry
 
@@ -179,18 +180,24 @@ class TestAPIIntegration:
 
         try:
             # OpenAI endpoint
-            openai_response = client.post("/v1/chat/completions", json={
-                "model": sample_manifest.name,
-                "messages": [{"role": "user", "content": "Hello"}],
-                "stream": False,
-            })
+            openai_response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": sample_manifest.name,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+            )
 
             # Ollama endpoint
-            ollama_response = client.post("/api/chat", json={
-                "model": sample_manifest.name,
-                "messages": [{"role": "user", "content": "Hello"}],
-                "stream": False,
-            })
+            ollama_response = client.post(
+                "/api/chat",
+                json={
+                    "model": sample_manifest.name,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+            )
 
             assert openai_response.status_code == 200
             assert ollama_response.status_code == 200
@@ -226,7 +233,7 @@ class TestErrorHandling:
 
         # Should handle gracefully
         try:
-            registry = ModelRegistry()
+            ModelRegistry()
             # May or may not load depending on validation
         except Exception:
             # Acceptable if it fails in a controlled manner
@@ -234,7 +241,7 @@ class TestErrorHandling:
 
     def test_missing_model_path(self, temp_config):
         """Handling of non-existent model path."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         result = detect_format(Path("/nonexistent/model/path"))
         assert result == ModelFormat.UNKNOWN
@@ -245,8 +252,8 @@ class TestPerformance:
 
     def test_registry_many_models(self, temp_config):
         """Registry with many models."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         registry = ModelRegistry()
 
@@ -270,7 +277,7 @@ class TestPerformance:
 
     def test_format_detection_many_files(self, temp_dir):
         """Format detection with many files."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         # Create many files
         for i in range(50):

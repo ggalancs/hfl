@@ -2,9 +2,10 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the engine/vllm_engine module."""
 
-import pytest
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # Mock vLLM before importing the module
@@ -90,8 +91,8 @@ class TestVLLMEngine:
 
     def test_generate_with_model(self, mock_vllm):
         """Generate with loaded model."""
-        from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import GenerationConfig
+        from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 
@@ -124,8 +125,8 @@ class TestVLLMEngine:
 
     def test_chat(self, mock_vllm):
         """Chat completion."""
-        from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 
@@ -144,8 +145,8 @@ class TestVLLMEngine:
 
     def test_chat_stream(self, mock_vllm):
         """Chat stream."""
-        from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 
@@ -162,8 +163,8 @@ class TestVLLMEngine:
 
     def test_build_prompt_system(self, mock_vllm):
         """Builds prompt with system message."""
-        from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 
@@ -179,8 +180,8 @@ class TestVLLMEngine:
 
     def test_build_prompt_with_assistant(self, mock_vllm):
         """Builds prompt with assistant history."""
-        from hfl.engine.vllm_engine import VLLMEngine
         from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
 
         engine = VLLMEngine()
 

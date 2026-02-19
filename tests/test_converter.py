@@ -3,11 +3,11 @@
 """Tests for the converter module (formats, gguf_converter)."""
 
 import json
-import pytest
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestModelFormat:
@@ -37,7 +37,7 @@ class TestDetectFormat:
 
     def test_detect_gguf_file(self, temp_dir):
         """Detects GGUF file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF content")
@@ -47,7 +47,7 @@ class TestDetectFormat:
 
     def test_detect_safetensors_file(self, temp_dir):
         """Detects safetensors file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         st_file = temp_dir / "model.safetensors"
         st_file.write_bytes(b"safetensors content")
@@ -57,7 +57,7 @@ class TestDetectFormat:
 
     def test_detect_pytorch_bin_file(self, temp_dir):
         """Detects pytorch .bin file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         pt_file = temp_dir / "model.bin"
         pt_file.write_bytes(b"pytorch content")
@@ -67,7 +67,7 @@ class TestDetectFormat:
 
     def test_detect_pytorch_pt_file(self, temp_dir):
         """Detects pytorch .pt file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         pt_file = temp_dir / "model.pt"
         pt_file.write_bytes(b"pytorch content")
@@ -77,7 +77,7 @@ class TestDetectFormat:
 
     def test_detect_pytorch_pth_file(self, temp_dir):
         """Detects pytorch .pth file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         pt_file = temp_dir / "model.pth"
         pt_file.write_bytes(b"pytorch content")
@@ -87,7 +87,7 @@ class TestDetectFormat:
 
     def test_detect_gguf_in_directory(self, temp_dir):
         """Detects GGUF in directory."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         (temp_dir / "model.gguf").write_bytes(b"GGUF")
         (temp_dir / "config.json").write_text("{}")
@@ -97,7 +97,7 @@ class TestDetectFormat:
 
     def test_detect_safetensors_in_directory(self, temp_dir):
         """Detects safetensors in directory."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
         (temp_dir / "config.json").write_text("{}")
@@ -107,7 +107,7 @@ class TestDetectFormat:
 
     def test_detect_pytorch_in_directory(self, temp_dir):
         """Detects pytorch in directory."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         (temp_dir / "pytorch_model.bin").write_bytes(b"PT")
         (temp_dir / "config.json").write_text("{}")
@@ -117,7 +117,7 @@ class TestDetectFormat:
 
     def test_detect_unknown_file(self, temp_dir):
         """Returns UNKNOWN for unknown file."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         txt_file = temp_dir / "readme.txt"
         txt_file.write_text("readme")
@@ -127,7 +127,7 @@ class TestDetectFormat:
 
     def test_detect_unknown_directory(self, temp_dir):
         """Returns UNKNOWN for directory without models."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         (temp_dir / "readme.txt").write_text("readme")
         (temp_dir / "data.json").write_text("{}")
@@ -137,14 +137,14 @@ class TestDetectFormat:
 
     def test_detect_nonexistent_path(self):
         """Returns UNKNOWN for non-existent path."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         result = detect_format(Path("/nonexistent/path"))
         assert result == ModelFormat.UNKNOWN
 
     def test_detect_gguf_priority_over_safetensors(self, temp_dir):
         """GGUF has priority over safetensors."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         (temp_dir / "model.gguf").write_bytes(b"GGUF")
         (temp_dir / "model.safetensors").write_bytes(b"ST")
@@ -154,7 +154,7 @@ class TestDetectFormat:
 
     def test_detect_nested_files(self, temp_dir):
         """Detects files in subdirectories."""
-        from hfl.converter.formats import detect_format, ModelFormat
+        from hfl.converter.formats import ModelFormat, detect_format
 
         subdir = temp_dir / "subdir"
         subdir.mkdir()
@@ -169,7 +169,7 @@ class TestFindModelFile:
 
     def test_find_gguf_file_direct(self, temp_dir):
         """Finds direct GGUF file."""
-        from hfl.converter.formats import find_model_file, ModelFormat
+        from hfl.converter.formats import ModelFormat, find_model_file
 
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF")
@@ -179,7 +179,7 @@ class TestFindModelFile:
 
     def test_find_gguf_in_directory(self, temp_dir):
         """Finds GGUF in directory."""
-        from hfl.converter.formats import find_model_file, ModelFormat
+        from hfl.converter.formats import ModelFormat, find_model_file
 
         gguf_file = temp_dir / "model.gguf"
         gguf_file.write_bytes(b"GGUF")
@@ -189,7 +189,7 @@ class TestFindModelFile:
 
     def test_find_safetensors_returns_directory(self, temp_dir):
         """For safetensors returns the directory."""
-        from hfl.converter.formats import find_model_file, ModelFormat
+        from hfl.converter.formats import ModelFormat, find_model_file
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
 
@@ -198,7 +198,7 @@ class TestFindModelFile:
 
     def test_find_no_gguf_returns_none(self, temp_dir):
         """Returns None if no GGUF found."""
-        from hfl.converter.formats import find_model_file, ModelFormat
+        from hfl.converter.formats import ModelFormat, find_model_file
 
         (temp_dir / "model.safetensors").write_bytes(b"ST")
 
@@ -285,14 +285,25 @@ class TestGGUFConverter:
         """Verifies supported quantization levels."""
         from hfl.converter.gguf_converter import GGUFConverter
 
-        converter = GGUFConverter()
+        GGUFConverter()
 
         # List of quantization levels
         quant_levels = [
-            "Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L",
-            "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M",
-            "Q5_0", "Q5_1", "Q5_K_S", "Q5_K_M",
-            "Q6_K", "Q8_0", "F16",
+            "Q2_K",
+            "Q3_K_S",
+            "Q3_K_M",
+            "Q3_K_L",
+            "Q4_0",
+            "Q4_1",
+            "Q4_K_S",
+            "Q4_K_M",
+            "Q5_0",
+            "Q5_1",
+            "Q5_K_S",
+            "Q5_K_M",
+            "Q6_K",
+            "Q8_0",
+            "F16",
         ]
 
         # All are valid strings
@@ -378,8 +389,7 @@ class TestGGUFConverter:
 
         pip_cmd = pip_calls[0]
         assert pip_cmd[0] == sys.executable, (
-            f"pip must be invoked with sys.executable ({sys.executable}), "
-            f"not with '{pip_cmd[0]}'"
+            f"pip must be invoked with sys.executable ({sys.executable}), not with '{pip_cmd[0]}'"
         )
         assert pip_cmd[1] == "-m"
         assert pip_cmd[2] == "pip"
@@ -414,7 +424,9 @@ class TestGGUFConverter:
         with patch.object(converter, "ensure_tools"):
             with patch("subprocess.run", side_effect=mock_run):
                 result = converter.convert(
-                    model_path, output_path, "Q4_K_M",
+                    model_path,
+                    output_path,
+                    "Q4_K_M",
                     source_repo="test/model",
                     original_license="apache-2.0",
                     license_accepted=True,
@@ -433,10 +445,7 @@ class TestGetLlamaCppVersion:
         from hfl.converter.gguf_converter import _get_llama_cpp_version
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="abc1234\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="abc1234\n")
 
             result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
 

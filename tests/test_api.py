@@ -2,9 +2,10 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the API module (server, routes_openai, routes_native)."""
 
-import pytest
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 def client(temp_config):
     """Test client for the API."""
     from hfl.api.server import app
+
     return TestClient(app)
 
 
@@ -112,20 +114,26 @@ class TestOpenAIEndpoints:
 
     def test_chat_completions_no_model(self, client):
         """Chat completions without model."""
-        response = client.post("/v1/chat/completions", json={
-            "model": "nonexistent",
-            "messages": [{"role": "user", "content": "hi"}],
-        })
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "nonexistent",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
 
         assert response.status_code == 404
 
     def test_chat_completions_success(self, client_with_model):
         """Successful chat completions."""
-        response = client_with_model.post("/v1/chat/completions", json={
-            "model": "test-model-q4_k_m",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False,
-        })
+        response = client_with_model.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -137,23 +145,29 @@ class TestOpenAIEndpoints:
 
     def test_chat_completions_with_system(self, client_with_model):
         """Chat completions with system message."""
-        response = client_with_model.post("/v1/chat/completions", json={
-            "model": "test-model-q4_k_m",
-            "messages": [
-                {"role": "system", "content": "You are helpful"},
-                {"role": "user", "content": "Hello"},
-            ],
-        })
+        response = client_with_model.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [
+                    {"role": "system", "content": "You are helpful"},
+                    {"role": "user", "content": "Hello"},
+                ],
+            },
+        )
 
         assert response.status_code == 200
 
     def test_chat_completions_stream(self, client_with_model):
         """Chat completions with streaming."""
-        response = client_with_model.post("/v1/chat/completions", json={
-            "model": "test-model-q4_k_m",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "stream": True,
-        })
+        response = client_with_model.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+        )
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
@@ -165,21 +179,27 @@ class TestOpenAIEndpoints:
 
     def test_completions_no_model(self, client):
         """Completions without model."""
-        response = client.post("/v1/completions", json={
-            "model": "nonexistent",
-            "prompt": "Hello",
-        })
+        response = client.post(
+            "/v1/completions",
+            json={
+                "model": "nonexistent",
+                "prompt": "Hello",
+            },
+        )
 
         assert response.status_code == 404
 
     def test_completions_success(self, client_with_model):
         """Successful completions."""
-        response = client_with_model.post("/v1/completions", json={
-            "model": "test-model-q4_k_m",
-            "prompt": "Once upon a time",
-            "max_tokens": 50,
-            "stream": False,
-        })
+        response = client_with_model.post(
+            "/v1/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Once upon a time",
+                "max_tokens": 50,
+                "stream": False,
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -189,36 +209,45 @@ class TestOpenAIEndpoints:
 
     def test_completions_with_list_prompt(self, client_with_model):
         """Completions with prompt as list."""
-        response = client_with_model.post("/v1/completions", json={
-            "model": "test-model-q4_k_m",
-            "prompt": ["First prompt", "Second prompt"],
-            "max_tokens": 50,
-        })
+        response = client_with_model.post(
+            "/v1/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": ["First prompt", "Second prompt"],
+                "max_tokens": 50,
+            },
+        )
 
         assert response.status_code == 200
 
     def test_completions_stream(self, client_with_model):
         """Completions with streaming."""
-        response = client_with_model.post("/v1/completions", json={
-            "model": "test-model-q4_k_m",
-            "prompt": "Hello",
-            "stream": True,
-        })
+        response = client_with_model.post(
+            "/v1/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Hello",
+                "stream": True,
+            },
+        )
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
 
     def test_chat_completions_params(self, client_with_model):
         """Verifies that parameters are passed correctly."""
-        response = client_with_model.post("/v1/chat/completions", json={
-            "model": "test-model-q4_k_m",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "temperature": 0.5,
-            "top_p": 0.8,
-            "max_tokens": 100,
-            "stop": ["END"],
-            "seed": 42,
-        })
+        response = client_with_model.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "temperature": 0.5,
+                "top_p": 0.8,
+                "max_tokens": 100,
+                "stop": ["END"],
+                "seed": 42,
+            },
+        )
 
         assert response.status_code == 200
 
@@ -267,20 +296,26 @@ class TestNativeEndpoints:
 
     def test_api_generate_no_model(self, client):
         """Generate without model."""
-        response = client.post("/api/generate", json={
-            "model": "nonexistent",
-            "prompt": "Hello",
-        })
+        response = client.post(
+            "/api/generate",
+            json={
+                "model": "nonexistent",
+                "prompt": "Hello",
+            },
+        )
 
         assert response.status_code == 404
 
     def test_api_generate_success(self, client_with_model):
         """Successful generate."""
-        response = client_with_model.post("/api/generate", json={
-            "model": "test-model-q4_k_m",
-            "prompt": "Hello",
-            "stream": False,
-        })
+        response = client_with_model.post(
+            "/api/generate",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Hello",
+                "stream": False,
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -290,17 +325,20 @@ class TestNativeEndpoints:
 
     def test_api_generate_stream(self, client_with_model):
         """Generate with streaming."""
-        response = client_with_model.post("/api/generate", json={
-            "model": "test-model-q4_k_m",
-            "prompt": "Hello",
-            "stream": True,
-        })
+        response = client_with_model.post(
+            "/api/generate",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Hello",
+                "stream": True,
+            },
+        )
 
         assert response.status_code == 200
         assert "application/x-ndjson" in response.headers["content-type"]
 
         # Verify NDJSON format
-        lines = [l for l in response.text.strip().split("\n") if l]
+        lines = [ln for ln in response.text.strip().split("\n") if ln]
         for line in lines:
             data = json.loads(line)
             assert "model" in data
@@ -308,20 +346,26 @@ class TestNativeEndpoints:
 
     def test_api_chat_no_model(self, client):
         """Chat without model."""
-        response = client.post("/api/chat", json={
-            "model": "nonexistent",
-            "messages": [{"role": "user", "content": "hi"}],
-        })
+        response = client.post(
+            "/api/chat",
+            json={
+                "model": "nonexistent",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
 
         assert response.status_code == 404
 
     def test_api_chat_success(self, client_with_model):
         """Successful chat."""
-        response = client_with_model.post("/api/chat", json={
-            "model": "test-model-q4_k_m",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False,
-        })
+        response = client_with_model.post(
+            "/api/chat",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -332,30 +376,36 @@ class TestNativeEndpoints:
 
     def test_api_chat_stream(self, client_with_model):
         """Chat with streaming."""
-        response = client_with_model.post("/api/chat", json={
-            "model": "test-model-q4_k_m",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "stream": True,
-        })
+        response = client_with_model.post(
+            "/api/chat",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+        )
 
         assert response.status_code == 200
         assert "application/x-ndjson" in response.headers["content-type"]
 
     def test_api_generate_with_options(self, client_with_model):
         """Generate with options."""
-        response = client_with_model.post("/api/generate", json={
-            "model": "test-model-q4_k_m",
-            "prompt": "Hello",
-            "stream": False,
-            "options": {
-                "temperature": 0.5,
-                "top_p": 0.8,
-                "top_k": 50,
-                "num_predict": 100,
-                "repeat_penalty": 1.2,
-                "seed": 42,
+        response = client_with_model.post(
+            "/api/generate",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Hello",
+                "stream": False,
+                "options": {
+                    "temperature": 0.5,
+                    "top_p": 0.8,
+                    "top_k": 50,
+                    "num_predict": 100,
+                    "repeat_penalty": 1.2,
+                    "seed": 42,
+                },
             },
-        })
+        )
 
         assert response.status_code == 200
 
@@ -365,20 +415,26 @@ class TestMiddleware:
 
     def test_cors_headers(self, client):
         """Verifies CORS headers."""
-        response = client.options("/", headers={
-            "Origin": "http://localhost:3000",
-            "Access-Control-Request-Method": "POST",
-        })
+        response = client.options(
+            "/",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
 
         # CORS middleware should respond
         assert response.status_code in [200, 400]
 
     def test_error_handling(self, client):
         """Verifies error handling."""
-        response = client.post("/v1/chat/completions", json={
-            "model": "invalid",
-            "messages": "invalid",  # Should be a list
-        })
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "invalid",
+                "messages": "invalid",  # Should be a list
+            },
+        )
 
         assert response.status_code in [404, 422]  # Not found or validation error
 

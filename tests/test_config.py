@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the configuration module."""
 
-import pytest
-import os
 from pathlib import Path
 
 
@@ -15,6 +13,7 @@ class TestHFLConfig:
         monkeypatch.delenv("HFL_HOME", raising=False)
 
         from hfl.config import HFLConfig
+
         config = HFLConfig()
 
         assert config.home_dir == Path.home() / ".hfl"
@@ -24,6 +23,7 @@ class TestHFLConfig:
         monkeypatch.setenv("HFL_HOME", str(temp_dir))
 
         from hfl.config import HFLConfig
+
         config = HFLConfig()
 
         assert config.home_dir == temp_dir
@@ -61,6 +61,7 @@ class TestHFLConfig:
         monkeypatch.setenv("HF_TOKEN", "test-token-123")
 
         from hfl.config import HFLConfig
+
         config = HFLConfig()
 
         assert config.hf_token == "test-token-123"
@@ -70,6 +71,7 @@ class TestHFLConfig:
         monkeypatch.delenv("HF_TOKEN", raising=False)
 
         from hfl.config import HFLConfig
+
         config = HFLConfig()
 
         assert config.hf_token is None

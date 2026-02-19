@@ -2,9 +2,10 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the CLI module (main commands)."""
 
-import pytest
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 from typer.testing import CliRunner
 
 
@@ -26,6 +27,7 @@ def runner():
 def cli_app():
     """CLI application for tests."""
     from hfl.cli.main import app
+
     return app
 
 
@@ -97,21 +99,23 @@ class TestAliasCommand:
 
     def test_alias_success(self, runner, cli_app, temp_config, temp_dir):
         """Successfully assign alias."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="very-long-model-name-q4_k_m",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="very-long-model-name-q4_k_m",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         result = runner.invoke(cli_app, ["alias", "very-long-model-name-q4_k_m", "short"])
 
@@ -127,28 +131,32 @@ class TestAliasCommand:
 
     def test_alias_duplicate_rejected(self, runner, cli_app, temp_config, temp_dir):
         """Duplicate alias is rejected."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="model-1",
-            repo_id="test-org/model-1",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            alias="taken",
-        ))
-        registry.add(ModelManifest(
-            name="model-2",
-            repo_id="test-org/model-2",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-        ))
+        registry.add(
+            ModelManifest(
+                name="model-1",
+                repo_id="test-org/model-1",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                alias="taken",
+            )
+        )
+        registry.add(
+            ModelManifest(
+                name="model-2",
+                repo_id="test-org/model-2",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+            )
+        )
 
         result = runner.invoke(cli_app, ["alias", "model-2", "taken"])
 
@@ -157,22 +165,24 @@ class TestAliasCommand:
 
     def test_run_by_alias(self, runner, cli_app, temp_config, temp_dir):
         """Run model by alias."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="very-long-model-name",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-            alias="short",
-        ))
+        registry.add(
+            ModelManifest(
+                name="very-long-model-name",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+                alias="short",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -185,21 +195,23 @@ class TestAliasCommand:
 
     def test_inspect_by_alias(self, runner, cli_app, temp_config, temp_dir):
         """Inspect model by alias."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="long-name",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            alias="mymodel",
-        ))
+        registry.add(
+            ModelManifest(
+                name="long-name",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                alias="mymodel",
+            )
+        )
 
         result = runner.invoke(cli_app, ["inspect", "mymodel"])
 
@@ -225,13 +237,14 @@ class TestRmCommand:
         assert result.exit_code == 0
         # The model should still exist
         from hfl.models.registry import ModelRegistry
+
         registry = ModelRegistry()
         assert registry.get("test-model-q4_k_m") is not None
 
     def test_rm_confirmed(self, runner, cli_app, temp_config, temp_dir):
         """Confirm deletion."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # Create temporary file for the model
         model_path = temp_dir / "test-model"
@@ -240,14 +253,16 @@ class TestRmCommand:
 
         # Register model with real path
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="rm-test-model",
-            repo_id="test/rm-model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="rm-test-model",
+                repo_id="test/rm-model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         result = runner.invoke(cli_app, ["rm", "rm-test-model"], input="y\n")
 
@@ -305,7 +320,7 @@ class TestPullCommand:
                 mock_pull.return_value = model_path
 
                 # Use --skip-license to avoid HuggingFace API calls
-                result = runner.invoke(cli_app, ["pull", "test/model", "-q", "Q5_K_M", "--skip-license"])
+                runner.invoke(cli_app, ["pull", "test/model", "-q", "Q5_K_M", "--skip-license"])
 
                 mock_resolve.assert_called_once()
 
@@ -367,11 +382,11 @@ class TestRunCommand:
         assert result.exit_code == 1
         assert "Model not found" in result.stdout
 
-    def test_run_missing_dependency_shows_helpful_error(self, runner, cli_app, temp_config, temp_dir):
+    def test_run_missing_dep_shows_help(self, runner, cli_app, temp_config, temp_dir):
         """Run shows helpful error when dependency is missing."""
-        from hfl.models.registry import ModelRegistry
-        from hfl.models.manifest import ModelManifest
         from hfl.engine.selector import MissingDependencyError
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # Create model file
         model_path = temp_dir / "test-model.gguf"
@@ -379,14 +394,16 @@ class TestRunCommand:
 
         # Register model
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="missing-dep-test",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="missing-dep-test",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         # Simulate that llama_cpp is missing (patch in selector where it's imported)
         with patch("hfl.engine.selector.select_engine") as mock_select:
@@ -404,8 +421,8 @@ class TestRunCommand:
 
     def test_run_with_exit(self, runner, cli_app, temp_config, temp_dir):
         """Run with immediate exit."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         # Create model file
         model_path = temp_dir / "test-model.gguf"
@@ -413,14 +430,16 @@ class TestRunCommand:
 
         # Register model
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="run-test-model",
-            repo_id="test-org/run-model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="run-test-model",
+                repo_id="test-org/run-model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -433,32 +452,36 @@ class TestRunCommand:
 
     def test_run_streaming_with_special_characters(self, runner, cli_app, temp_config, temp_dir):
         """Run with special characters in response (avoids Rich markup errors)."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="special-char-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="special-char-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
             # Response with characters that could cause Rich markup errors
-            mock_engine.chat_stream.return_value = iter([
-                "Here's code: ",
-                "[bold]",  # Could be interpreted as Rich markup
-                " and ",
-                "[/]",     # Could cause MarkupError
-                " brackets",
-            ])
+            mock_engine.chat_stream.return_value = iter(
+                [
+                    "Here's code: ",
+                    "[bold]",  # Could be interpreted as Rich markup
+                    " and ",
+                    "[/]",  # Could cause MarkupError
+                    " brackets",
+                ]
+            )
             mock_select.return_value = mock_engine
 
             result = runner.invoke(cli_app, ["run", "special-char-model"], input="test\n/exit\n")
@@ -470,21 +493,23 @@ class TestRunCommand:
 
     def test_run_streaming_complete_response(self, runner, cli_app, temp_config, temp_dir):
         """Run captures complete streaming response."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="stream-test-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="stream-test-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -499,21 +524,23 @@ class TestRunCommand:
 
     def test_run_empty_response(self, runner, cli_app, temp_config, temp_dir):
         """Run handles empty response correctly."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="empty-response-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="empty-response-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -527,21 +554,23 @@ class TestRunCommand:
 
     def test_run_multi_turn_conversation(self, runner, cli_app, temp_config, temp_dir):
         """Run handles multi-turn conversation."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="multi-turn-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="multi-turn-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -553,9 +582,7 @@ class TestRunCommand:
             mock_select.return_value = mock_engine
 
             result = runner.invoke(
-                cli_app,
-                ["run", "multi-turn-model"],
-                input="Hello\nHow are you?\n/exit\n"
+                cli_app, ["run", "multi-turn-model"], input="Hello\nHow are you?\n/exit\n"
             )
 
             assert result.exit_code == 0
@@ -564,8 +591,8 @@ class TestRunCommand:
 
     def test_run_quit_commands(self, runner, cli_app, temp_config, temp_dir):
         """Run recognizes various exit commands."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
@@ -573,14 +600,16 @@ class TestRunCommand:
         registry = ModelRegistry()
 
         for i, exit_cmd in enumerate(["/exit", "/quit", "/bye"]):
-            registry.add(ModelManifest(
-                name=f"quit-test-{i}",
-                repo_id="test-org/model",
-                local_path=str(model_path),
-                format="gguf",
-                size_bytes=100,
-                quantization="Q4_K_M",
-            ))
+            registry.add(
+                ModelManifest(
+                    name=f"quit-test-{i}",
+                    repo_id="test-org/model",
+                    local_path=str(model_path),
+                    format="gguf",
+                    size_bytes=100,
+                    quantization="Q4_K_M",
+                )
+            )
 
             with patch("hfl.engine.selector.select_engine") as mock_select:
                 mock_engine = MagicMock()
@@ -593,21 +622,23 @@ class TestRunCommand:
 
     def test_run_empty_input_ignored(self, runner, cli_app, temp_config, temp_dir):
         """Run ignores empty inputs."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="empty-input-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="empty-input-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -616,9 +647,7 @@ class TestRunCommand:
 
             # Send empty lines that should be ignored
             result = runner.invoke(
-                cli_app,
-                ["run", "empty-input-model"],
-                input="\n\n\nHello\n/exit\n"
+                cli_app, ["run", "empty-input-model"], input="\n\n\nHello\n/exit\n"
             )
 
             assert result.exit_code == 0
@@ -627,21 +656,23 @@ class TestRunCommand:
 
     def test_run_with_system_prompt(self, runner, cli_app, temp_config, temp_dir):
         """Run with system prompt."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="system-prompt-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="system-prompt-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
@@ -651,7 +682,7 @@ class TestRunCommand:
             result = runner.invoke(
                 cli_app,
                 ["run", "system-prompt-model", "--system", "Responde en español"],
-                input="Hello\n/exit\n"
+                input="Hello\n/exit\n",
             )
 
             assert result.exit_code == 0
@@ -662,28 +693,28 @@ class TestRunCommand:
 
     def test_run_unicode_response(self, runner, cli_app, temp_config, temp_dir):
         """Run handles Unicode responses correctly."""
-        from hfl.models.registry import ModelRegistry
         from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
 
         model_path = temp_dir / "test-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()
-        registry.add(ModelManifest(
-            name="unicode-model",
-            repo_id="test-org/model",
-            local_path=str(model_path),
-            format="gguf",
-            size_bytes=100,
-            quantization="Q4_K_M",
-        ))
+        registry.add(
+            ModelManifest(
+                name="unicode-model",
+                repo_id="test-org/model",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
 
         with patch("hfl.engine.selector.select_engine") as mock_select:
             mock_engine = MagicMock()
             # Response with emojis and special characters
-            mock_engine.chat_stream.return_value = iter([
-                "¡Hola! ", "こんにちは ", "🎉", " Привет"
-            ])
+            mock_engine.chat_stream.return_value = iter(["¡Hola! ", "こんにちは ", "🎉", " Привет"])
             mock_select.return_value = mock_engine
 
             result = runner.invoke(cli_app, ["run", "unicode-model"], input="Hi\n/exit\n")
@@ -698,6 +729,7 @@ class TestServeCommand:
     def test_serve_imports(self, cli_app):
         """Verifies that serve imports correctly."""
         from hfl.cli.main import serve
+
         assert callable(serve)
 
 
@@ -817,6 +849,7 @@ class TestCLIApp:
         """Verifies pull help."""
         # Import fresh app to avoid interference from mock_llama_cpp
         from hfl.cli.main import app
+
         result = runner.invoke(app, ["pull", "--help"])
 
         assert result.exit_code == 0
@@ -826,6 +859,7 @@ class TestCLIApp:
     def test_search_help(self, runner):
         """Verifies search help."""
         from hfl.cli.main import app
+
         result = runner.invoke(app, ["search", "--help"])
 
         assert result.exit_code == 0
@@ -837,6 +871,7 @@ class TestCLIApp:
     def test_run_help(self, runner):
         """Verifies run help."""
         from hfl.cli.main import app
+
         result = runner.invoke(app, ["run", "--help"])
 
         assert result.exit_code == 0
@@ -847,6 +882,7 @@ class TestCLIApp:
     def test_serve_help(self, runner):
         """Verifies serve help."""
         from hfl.cli.main import app
+
         result = runner.invoke(app, ["serve", "--help"])
 
         assert result.exit_code == 0

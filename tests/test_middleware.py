@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the api/middleware module."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -77,6 +77,7 @@ class TestRequestLogger:
         @app.get("/error")
         def error_endpoint():
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail="Not found")
 
         client = TestClient(app)
@@ -108,7 +109,7 @@ class TestRequestLogger:
         with patch("hfl.api.middleware.logger") as mock_logger:
             # Send sensitive data
             sensitive_data = {"prompt": "My secret is...", "api_key": "sk-123"}
-            response = client.post("/chat", json=sensitive_data)
+            client.post("/chat", json=sensitive_data)
 
             # Verify that the logger call does NOT contain sensitive data
             log_call = str(mock_logger.info.call_args)
@@ -119,8 +120,9 @@ class TestRequestLogger:
 
     def test_middleware_measures_duration(self):
         """Verifies that request duration is measured."""
-        from hfl.api.middleware import RequestLogger
         import time
+
+        from hfl.api.middleware import RequestLogger
 
         app = FastAPI()
         app.add_middleware(RequestLogger)
