@@ -15,6 +15,13 @@ from typing import Iterator
 
 from llama_cpp import Llama
 
+from hfl.engine.base import (
+    ChatMessage,
+    GenerationConfig,
+    GenerationResult,
+    InferenceEngine,
+)
+
 
 @contextmanager
 def _suppress_stderr():
@@ -38,14 +45,6 @@ def _suppress_stderr():
 def _nullcontext():
     """Context manager that does nothing (for when verbose=True)."""
     yield
-
-
-from hfl.engine.base import (
-    ChatMessage,
-    GenerationConfig,
-    GenerationResult,
-    InferenceEngine,
-)
 
 
 class LlamaCppEngine(InferenceEngine):

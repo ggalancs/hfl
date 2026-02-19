@@ -89,8 +89,7 @@ class ToolNotFoundError(ConversionError):
         super().__init__(
             "N/A",
             "N/A",
-            f"Tool not found: {tool_name}. "
-            "It will be installed automatically on the next attempt.",
+            f"Tool not found: {tool_name}. It will be installed automatically on the next attempt.",
         )
         self.tool_name = tool_name
 

@@ -128,13 +128,11 @@ def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
         if "adapter_config" in config_data or "_name_or_path" in str(config_data.get("base_model")):
             return (
                 False,
-                "This is a LoRA adapter. LoRA adapters require "
-                "a base model to function.",
+                "This is a LoRA adapter. LoRA adapters require a base model to function.",
             )
         return (
             False,
-            "config.json does not contain 'model_type'. "
-            "The model cannot be identified.",
+            "config.json does not contain 'model_type'. The model cannot be identified.",
         )
 
     # 3. Check if the model_type is in the unsupported list

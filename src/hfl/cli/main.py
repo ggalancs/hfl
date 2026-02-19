@@ -18,7 +18,6 @@ import sys
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 app = typer.Typer(
     name="hfl",
@@ -30,24 +29,24 @@ console = Console()
 
 @app.command()
 def pull(
-    model: str = typer.Argument(
-        help="HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct) | Modelo HF (ej.: meta-llama/Llama-3.3-70B-Instruct)"
-    ),
+    model: str = typer.Argument(help="HF model (e.g.: meta-llama/Llama-3.3-70B-Instruct)"),
     quantize: str = typer.Option(
-        "Q4_K_M", "--quantize", "-q",
-        help="Quantization level | Nivel de cuantización"
+        "Q4_K_M", "--quantize", "-q", help="Quantization level | Nivel de cuantización"
     ),
     format: str = typer.Option(
-        "auto", "--format", "-f",
-        help="Format: auto, gguf, safetensors | Formato: auto, gguf, safetensors"
+        "auto",
+        "--format",
+        "-f",
+        help="Format: auto, gguf, safetensors | Formato: auto, gguf, safetensors",
     ),
     alias: str = typer.Option(
-        None, "--alias", "-a",
-        help="Short alias for the model (e.g.: 'coder') | Alias corto para el modelo (ej.: 'coder')"
+        None,
+        "--alias",
+        "-a",
+        help="Short alias for the model (e.g.: 'coder')",
     ),
     skip_license: bool = typer.Option(
-        False, "--skip-license",
-        help="Skip license verification | Omitir verificación de licencia"
+        False, "--skip-license", help="Skip license verification | Omitir verificación de licencia"
     ),
 ):
     """Download a model from HuggingFace Hub. | Descarga un modelo de HuggingFace Hub."""
@@ -67,8 +66,8 @@ def pull(
     except (ValueError, Exception) as e:
         error_msg = str(e)
         if "Repo id must" in error_msg or "repo_name" in error_msg:
-            console.print(f"[red]Format error:[/] The model name is invalid.")
-            console.print(f"\n[yellow]Supported formats:[/]")
+            console.print("[red]Format error:[/] The model name is invalid.")
+            console.print("\n[yellow]Supported formats:[/]")
             console.print("  - org/model                  -> direct HuggingFace repo")
             console.print("  - org/model:Q4_K_M           -> repo with quantization")
             console.print("  - model-name                 -> search by name")
@@ -174,24 +173,17 @@ def pull(
 
 @app.command()
 def run(
-    model: str = typer.Argument(
-        help="Local model name | Nombre del modelo local"
-    ),
+    model: str = typer.Argument(help="Local model name | Nombre del modelo local"),
     backend: str = typer.Option(
-        "auto", "--backend", "-b",
-        help="Inference backend | Backend de inferencia"
+        "auto", "--backend", "-b", help="Inference backend | Backend de inferencia"
     ),
-    ctx: int = typer.Option(
-        4096, "--ctx", "-c",
-        help="Context size | Tamaño del contexto"
-    ),
-    system: str = typer.Option(
-        None, "--system", "-s",
-        help="System prompt | Prompt del sistema"
-    ),
+    ctx: int = typer.Option(4096, "--ctx", "-c", help="Context size | Tamaño del contexto"),
+    system: str = typer.Option(None, "--system", "-s", help="System prompt | Prompt del sistema"),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v",
-        help="Show backend logs (Metal, CUDA) | Mostrar logs del backend (Metal, CUDA)"
+        False,
+        "--verbose",
+        "-v",
+        help="Show backend logs (Metal, CUDA) | Mostrar logs del backend (Metal, CUDA)",
     ),
 ):
     """Start an interactive chat with a model. | Inicia un chat interactivo con un modelo."""
@@ -215,7 +207,7 @@ def run(
     except MissingDependencyError as e:
         console.print(f"[red]Missing dependency:[/]\n\n{e}")
         raise typer.Exit(1)
-    console.print(f"[green]Model loaded.[/] Type '/exit' to quit.\n")
+    console.print("[green]Model loaded.[/] Type '/exit' to quit.\n")
 
     # R9 - Legal disclaimer before starting chat
     console.print(
@@ -261,20 +253,11 @@ def run(
 
 @app.command()
 def serve(
-    host: str = typer.Option(
-        "127.0.0.1", "--host",
-        help="Host address | Dirección del host"
-    ),
-    port: int = typer.Option(
-        11434, "--port", "-p",
-        help="Port number | Número de puerto"
-    ),
-    model: str = typer.Option(
-        None, "--model", "-m",
-        help="Pre-load model | Pre-cargar modelo"
-    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host address | Dirección del host"),
+    port: int = typer.Option(11434, "--port", "-p", help="Port number | Número de puerto"),
+    model: str = typer.Option(None, "--model", "-m", help="Pre-load model | Pre-cargar modelo"),
 ):
-    """Start the API server (OpenAI + Ollama compatible). | Inicia el servidor API (compatible con OpenAI y Ollama)."""
+    """Start the API server (OpenAI + Ollama compatible)."""
     from hfl.api.server import start_server, state
 
     # R6 - Privacy warning when exposing to the network
@@ -450,8 +433,6 @@ def _display_model_row(model, index: int, show_index: bool = True) -> None:
     if siblings:
         has_gguf = any(s.rfilename.endswith(".gguf") for s in siblings)
 
-    # Format tags
-    tags = getattr(model, "tags", []) or []
     pipeline_tag = getattr(model, "pipeline_tag", None)
 
     # Format icon
@@ -499,29 +480,27 @@ def search(
     query: str = typer.Argument(
         help="Text to search (min 3 chars) | Texto a buscar (mín 3 caracteres)"
     ),
-    limit: int = typer.Option(
-        100, "--limit", "-l",
-        help="Maximum results | Máximo de resultados"
-    ),
+    limit: int = typer.Option(100, "--limit", "-l", help="Maximum results | Máximo de resultados"),
     page_size: int = typer.Option(
-        10, "--page-size", "-n",
-        help="Results per page | Resultados por página"
+        10, "--page-size", "-n", help="Results per page | Resultados por página"
     ),
     gguf_only: bool = typer.Option(
-        False, "--gguf", "-g",
-        help="Show only GGUF models | Mostrar solo modelos GGUF"
+        False, "--gguf", "-g", help="Show only GGUF models | Mostrar solo modelos GGUF"
     ),
     max_params: float = typer.Option(
-        None, "--max-params", "-p",
-        help="Max parameters in B (e.g.: 70) | Máx parámetros en B (ej.: 70)"
+        None,
+        "--max-params",
+        "-p",
+        help="Max parameters in B (e.g.: 70) | Máx parámetros en B (ej.: 70)",
     ),
     min_params: float = typer.Option(
-        None, "--min-params",
-        help="Min parameters in B (e.g.: 7) | Mín parámetros en B (ej.: 7)"
+        None, "--min-params", help="Min parameters in B (e.g.: 7) | Mín parámetros en B (ej.: 7)"
     ),
     sort: str = typer.Option(
-        "downloads", "--sort", "-s",
-        help="Sort: downloads, likes, created | Ordenar: downloads, likes, created"
+        "downloads",
+        "--sort",
+        "-s",
+        help="Sort: downloads, likes, created | Ordenar: downloads, likes, created",
     ),
 ):
     """
@@ -604,9 +583,7 @@ def search(
                 filter_desc.append(f"<{max_params}B")
             if min_params is not None:
                 filter_desc.append(f">{min_params}B")
-            console.print(
-                f"[yellow]No models {' and '.join(filter_desc)} found for:[/] '{query}'"
-            )
+            console.print(f"[yellow]No models {' and '.join(filter_desc)} found for:[/] '{query}'")
             return
 
     total = len(models)
@@ -637,7 +614,10 @@ def search(
 
         # Show pagination status
         console.print()
-        page_info = f"[dim]-- Page {current_page + 1}/{total_pages} ({start_idx + 1}-{end_idx} of {total}) --[/]"
+        page_info = (
+            f"[dim]-- Page {current_page + 1}/{total_pages} "
+            f"({start_idx + 1}-{end_idx} of {total}) --[/]"
+        )
 
         if current_page < total_pages - 1:
             console.print(f"{page_info}  [dim]SPACE[/] more  [dim]q[/] quit", end="")
@@ -657,9 +637,7 @@ def search(
             console.print("\r" + " " * 80 + "\r", end="")
 
             if key in ("q", "Q", "\x1b", "\x03"):  # q, Q, ESC, Ctrl+C
-                console.print(
-                    f"\n[dim]Search finished. Showing {end_idx} of {total} results.[/]"
-                )
+                console.print(f"\n[dim]Search finished. Showing {end_idx} of {total} results.[/]")
                 break
             elif key == "p" and current_page > 0:
                 current_page -= 1
@@ -679,9 +657,7 @@ def search(
 
 @app.command()
 def rm(
-    model: str = typer.Argument(
-        help="Name of the model to delete | Nombre del modelo a eliminar"
-    )
+    model: str = typer.Argument(help="Name of the model to delete | Nombre del modelo a eliminar"),
 ):
     """Delete a local model. | Elimina un modelo local."""
     import shutil
@@ -715,11 +691,7 @@ def rm(
 
 
 @app.command()
-def inspect(
-    model: str = typer.Argument(
-        help="Model name | Nombre del modelo"
-    )
-):
+def inspect(model: str = typer.Argument(help="Model name | Nombre del modelo")):
     """Show detailed information about a model. | Muestra información detallada de un modelo."""
     from rich.panel import Panel
     from rich.text import Text
@@ -766,12 +738,8 @@ def inspect(
 
 @app.command(name="alias")
 def set_alias(
-    model: str = typer.Argument(
-        help="Model name | Nombre del modelo"
-    ),
-    alias: str = typer.Argument(
-        help="Alias to assign | Alias a asignar"
-    ),
+    model: str = typer.Argument(help="Model name | Nombre del modelo"),
+    alias: str = typer.Argument(help="Alias to assign | Alias a asignar"),
 ):
     """
     Assign an alias to an existing model. | Asigna un alias a un modelo existente.
@@ -799,7 +767,7 @@ def set_alias(
         console.print(f"[green]Alias assigned:[/] {alias} -> {manifest.name}")
         console.print(f"[dim]You can now use:[/] hfl run {alias}")
     else:
-        console.print(f"[red]Error assigning alias[/]")
+        console.print("[red]Error assigning alias[/]")
         raise typer.Exit(1)
 
 
@@ -809,7 +777,7 @@ def login(
         None,
         "--token",
         "-t",
-        help="HuggingFace token (interactive if not provided) | Token de HuggingFace (interactivo si no se proporciona)",
+        help="HuggingFace token (interactive if not provided)",
     ),
 ):
     """
