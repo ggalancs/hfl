@@ -2,8 +2,7 @@
 
 [![License: HRUL v1.0](https://img.shields.io/badge/License-HRUL%20v1.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://github.com/ggalancs/hfl/actions/workflows/test.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/test.yml)
-[![Lint](https://github.com/ggalancs/hfl/actions/workflows/lint.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/lint.yml)
+[![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen.svg)](https://github.com/ggalancs/hfl)
 
 Run HuggingFace models locally like Ollama.
