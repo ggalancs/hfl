@@ -14,8 +14,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def set_english_language(monkeypatch):
-    """Ensure all tests run with English language."""
+    """Ensure all tests run with English language and no colors."""
     monkeypatch.setenv("HFL_LANG", "en")
+    # Disable Rich color output to avoid ANSI escape codes in tests
+    monkeypatch.setenv("NO_COLOR", "1")
     # Clear the language cache so it picks up the new env var
     from hfl.i18n import get_language
 
