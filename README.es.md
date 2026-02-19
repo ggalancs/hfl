@@ -3,7 +3,7 @@
 [![Licencia: HRUL v1.0](https://img.shields.io/badge/Licencia-HRUL%20v1.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
-[![Cobertura](https://img.shields.io/badge/cobertura-81%25-brightgreen.svg)](https://github.com/ggalancs/hfl)
+[![codecov](https://codecov.io/gh/ggalancs/hfl/branch/main/graph/badge.svg)](https://codecov.io/gh/ggalancs/hfl)
 
 Ejecuta modelos de HuggingFace localmente como Ollama.
 

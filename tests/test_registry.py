@@ -396,27 +396,19 @@ class TestModelRegistry:
 
         assert len(registry.list_all()) == 0
 
-    def test_load_missing_file(self, temp_dir):
-        """Handling of missing file."""
-        import hfl.config
-        from hfl.config import HFLConfig
+    def test_load_missing_file(self, temp_config):
+        """Handling of missing registry file - should start with empty registry."""
         from hfl.models.registry import ModelRegistry
 
-        # Config without ensure_dirs
-        test_config = HFLConfig(home_dir=temp_dir)
-        test_config.models_dir.mkdir(parents=True, exist_ok=True)
-        test_config.cache_dir.mkdir(parents=True, exist_ok=True)
-        # DO NOT create registry_path
+        # Remove the registry file if it exists (temp_config creates it)
+        if temp_config.registry_path.exists():
+            temp_config.registry_path.unlink()
 
-        # Temporarily patch
-        original_config = hfl.config.config
-        hfl.config.config = test_config
+        # Create a new registry - should handle missing file gracefully
+        registry = ModelRegistry()
 
-        try:
-            registry = ModelRegistry()
-            assert len(registry.list_all()) == 0
-        finally:
-            hfl.config.config = original_config
+        # Should be empty since file was missing
+        assert len(registry.list_all()) == 0
 
     def test_multiple_models(self, temp_config):
         """Multiple models in registry."""
