@@ -6,7 +6,15 @@ vLLM inference engine for production.
 vLLM is a high-performance inference engine optimized for NVIDIA GPUs.
 Supports PagedAttention, continuous batching, and other optimizations.
 
-This module is a placeholder for future implementation.
+WARNING: EXPERIMENTAL
+    This module is a basic/placeholder implementation. It lacks:
+    - True streaming support (yields complete response at once)
+    - Proper chat template handling (uses simple prompt building)
+    - Advanced error handling
+    - Full configuration options
+
+    For production use, consider using the llama.cpp or Transformers backends
+    until this implementation is completed.
 """
 
 from vllm import LLM, SamplingParams
