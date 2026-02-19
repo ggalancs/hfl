@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Extended tests for engine selector module."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hfl.engine.selector import (
-    _create_engine,
     MissingDependencyError,
+    _create_engine,
 )
 
 

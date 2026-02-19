@@ -2,11 +2,9 @@
 """Tests for hub downloader module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from hfl.hub.downloader import pull_model, _rate_limit
+from hfl.hub.downloader import _rate_limit, pull_model
 
 
 class TestRateLimit:
@@ -18,9 +16,8 @@ class TestRateLimit:
         import hfl.hub.downloader as dl
         dl._last_api_call = 0
 
-        with patch("hfl.hub.downloader.time.sleep") as mock_sleep:
+        with patch("hfl.hub.downloader.time.sleep"):
             _rate_limit()
-
             # First call should not sleep (elapsed time is large)
             # This depends on implementation but covers the function
 
@@ -75,7 +72,7 @@ class TestPullModel:
                 with patch("hfl.hub.downloader.config") as mock_config:
                     mock_config.models_dir = tmp_path
 
-                    result = pull_model(resolved)
+                    pull_model(resolved)
 
                     mock_download.assert_called_once()
                     # Should include allow_patterns for safetensors
@@ -103,6 +100,6 @@ class TestPullModel:
                 with patch("hfl.hub.downloader.config") as mock_config:
                     mock_config.models_dir = tmp_path
 
-                    result = pull_model(resolved)
+                    pull_model(resolved)
 
                     mock_download.assert_called_once()

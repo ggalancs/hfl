@@ -1,21 +1,18 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Tests for i18n fallback and edge cases."""
 
-import json
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from hfl.i18n import (
-    t,
+    DEFAULT_LANGUAGE,
+    _get_nested_value,
+    _load_translations,
+    _translations,
     get_language,
     set_language,
-    _load_translations,
-    _get_nested_value,
-    _translations,
-    DEFAULT_LANGUAGE,
+    t,
 )
 
 
@@ -151,7 +148,7 @@ class TestLoadTranslations:
         with patch("hfl.i18n.SUPPORTED_LANGUAGES", {"en", "zz"}):
             # This should fall back to English
             try:
-                translations = _load_translations("zz")
+                _load_translations("zz")
                 # If it doesn't raise, it should have fallen back
             except FileNotFoundError:
                 # Also acceptable if file not found

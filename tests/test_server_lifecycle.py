@@ -107,7 +107,7 @@ class TestStartServer:
 
     def test_start_server_no_api_key(self):
         """Test start_server without API key."""
-        with patch("hfl.api.server.uvicorn.run") as mock_run:
+        with patch("hfl.api.server.uvicorn.run"):
             start_server()
 
             assert state.api_key is None

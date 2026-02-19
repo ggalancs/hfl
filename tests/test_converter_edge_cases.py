@@ -2,14 +2,11 @@
 """Edge case tests for GGUF converter module."""
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from hfl.converter.gguf_converter import (
-    check_model_convertibility,
     _get_llama_cpp_version,
+    check_model_convertibility,
 )
 
 

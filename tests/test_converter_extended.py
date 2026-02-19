@@ -2,16 +2,11 @@
 """Extended tests for GGUF converter module."""
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from hfl.converter.gguf_converter import (
-    UnsupportedModelError,
-    check_model_convertibility,
-    UNSUPPORTED_MODEL_TYPES,
     UNSUPPORTED_FILE_PATTERNS,
+    UNSUPPORTED_MODEL_TYPES,
+    check_model_convertibility,
 )
 
 

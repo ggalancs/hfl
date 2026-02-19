@@ -2,7 +2,7 @@
 """Extended tests for the TransformersEngine backend."""
 
 import sys
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 

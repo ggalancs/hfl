@@ -4,7 +4,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.server import APIKeyMiddleware, DisclaimerMiddleware, app, state
+from hfl.api.server import app, state
 
 
 class TestAPIKeyMiddleware:

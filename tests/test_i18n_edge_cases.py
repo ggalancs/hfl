@@ -1,19 +1,18 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Edge case tests for i18n module."""
 
-from unittest.mock import patch, MagicMock
 
 import pytest
 
 from hfl.i18n import (
-    t,
-    get_language,
-    set_language,
-    _load_translations,
-    _get_nested_value,
-    _translations,
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
+    _get_nested_value,
+    _load_translations,
+    _translations,
+    get_language,
+    set_language,
+    t,
 )
 
 

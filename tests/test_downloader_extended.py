@@ -2,9 +2,7 @@
 """Extended tests for hub downloader module."""
 
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from hfl.hub.downloader import _rate_limit, pull_model
 
@@ -65,7 +63,7 @@ class TestPullModelExtended:
                 with patch("hfl.hub.downloader.config") as mock_config:
                     mock_config.models_dir = tmp_path
 
-                    result = pull_model(resolved)
+                    pull_model(resolved)
 
                     # Should have called hf_hub_download with correct params
                     call_kwargs = mock_download.call_args[1]
@@ -93,7 +91,7 @@ class TestPullModelExtended:
                 with patch("hfl.hub.downloader.config") as mock_config:
                     mock_config.models_dir = tmp_path
 
-                    result = pull_model(resolved)
+                    pull_model(resolved)
 
                     # Should have called snapshot_download with allow_patterns
                     call_kwargs = mock_download.call_args[1]
@@ -122,7 +120,6 @@ class TestVersionFallback:
         import os
 
         # After importing downloader, the user agent should be set
-        import hfl.hub.downloader
 
         user_agent = os.environ.get("HF_HUB_USER_AGENT", "")
         # It should contain 'hfl'

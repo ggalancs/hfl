@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from hfl.api.routes_openai import _ensure_model_loaded, _to_gen_config
 from hfl.api.server import app, state
-from hfl.api.routes_openai import _to_gen_config, _ensure_model_loaded
 
 
 class TestToGenConfigEdgeCases:

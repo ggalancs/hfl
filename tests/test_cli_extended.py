@@ -3,7 +3,6 @@
 
 from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from hfl.cli.main import _format_size, app

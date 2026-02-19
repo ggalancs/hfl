@@ -3,11 +3,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from hfl.cli.main import app
-
 
 runner = CliRunner()
 

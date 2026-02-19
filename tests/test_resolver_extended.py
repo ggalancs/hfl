@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from hfl.hub.resolver import (
-    resolve,
-    _select_gguf,
+    ResolvedModel,
     _detect_quant,
     _get_quant_levels,
     _is_quantization,
-    ResolvedModel,
+    _select_gguf,
+    resolve,
 )
 
 

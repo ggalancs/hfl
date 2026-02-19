@@ -3,8 +3,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from hfl.hub.license_checker import (
     LICENSE_CLASSIFICATION,
     LICENSE_RESTRICTIONS,
@@ -267,7 +265,7 @@ class TestRequireUserAcceptance:
         with patch("rich.console.Console") as mock_console_class:
             mock_console = MagicMock()
             mock_console_class.return_value = mock_console
-            with patch("rich.panel.Panel") as mock_panel:
+            with patch("rich.panel.Panel"):
                 with patch("typer.confirm") as mock_confirm:
                     mock_confirm.return_value = True
                     require_user_acceptance(license_info, "test/model")

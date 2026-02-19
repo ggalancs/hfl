@@ -2,8 +2,7 @@
 """Extended tests for i18n module to increase coverage."""
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -59,7 +58,8 @@ class TestGetSystemLanguage:
         with patch("locale.getlocale") as mock_locale:
             mock_locale.return_value = (None, None)
 
-            with patch.dict(os.environ, {"LC_ALL": "", "LC_MESSAGES": "", "LANG": "es.UTF-8"}, clear=False):
+            env_vars = {"LC_ALL": "", "LC_MESSAGES": "", "LANG": "es.UTF-8"}
+            with patch.dict(os.environ, env_vars, clear=False):
                 from hfl.i18n import _get_system_language
                 result = _get_system_language()
 
@@ -99,7 +99,7 @@ class TestGetLanguageExtended:
     def test_get_language_unsupported_with_prefix(self):
         """Test unsupported language with regional suffix falls back."""
         with patch.dict(os.environ, {"HFL_LANG": "fr_FR"}):
-            from hfl.i18n import _get_system_language, get_language
+            from hfl.i18n import get_language
             get_language.cache_clear()
 
             with patch("hfl.i18n._get_system_language") as mock_sys:
