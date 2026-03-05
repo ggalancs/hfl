@@ -753,7 +753,7 @@ def search(
     console.print(
         Panel(
             f"[bold]{t('messages.models_found', count=total)}[/]  |  "
-            f"[dim]1-9[/] {t('messages.select_to_pull')}  |  "
+            f"[dim]0-9[/] {t('messages.select_to_pull')}  |  "
             f"[dim]SPACE[/] {t('messages.next_page')}  |  "
             f"[dim]q[/] {t('messages.quit')}",
             title=f"[bold cyan]Search: {query}[/]",
@@ -767,9 +767,9 @@ def search(
         end_idx = min(start_idx + page_size, total)
         page_models = models[start_idx:end_idx]
 
-        # Show models of the current page
+        # Show models of the current page (0-9 index per page)
         for i, model in enumerate(page_models):
-            _display_model_row(model, start_idx + i + 1)
+            _display_model_row(model, i)
 
         # Show pagination status
         console.print()
@@ -808,11 +808,11 @@ def search(
             elif key == "p" and current_page > 0:
                 current_page -= 1
                 console.print()  # New line before previous page
-            elif key.isdigit() and key != "0":
-                # User selected a model by number (1-9)
+            elif key.isdigit():
+                # User selected a model by number (0-9)
                 selection = int(key)
-                if 1 <= selection <= len(page_models):
-                    selected_model = page_models[selection - 1]
+                if selection < len(page_models):
+                    selected_model = page_models[selection]
                     console.print()
                     _pull_selected_model(selected_model)
                     return
