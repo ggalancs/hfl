@@ -151,6 +151,11 @@
     "end_of_results": "End of results",
     "search_finished": "Search finished. Showing {shown} of {total} results.",
     "to_download": "To download a model use: hfl pull <model>",
+    "select_to_pull": "select",
+    "next_page": "next",
+    "quit": "quit",
+    "selected_model": "Selected",
+    "gguf_detected": "GGUF format detected, will download quantized version.",
     "tts_model_loaded": "TTS model loaded.",
     "synthesizing": "Synthesizing",
     "audio_saved": "Audio saved",
@@ -248,6 +253,7 @@
     "tokens": "tokens"
   },
   "confirm": {
-    "delete_model": "Delete {name} ({size})?"
+    "delete_model": "Delete {name} ({size})?",
+    "pull_model": "Download this model?"
   }
 }

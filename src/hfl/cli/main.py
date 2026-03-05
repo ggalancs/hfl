@@ -609,6 +609,46 @@ def _get_params_value(model_id: str) -> float | None:
         return None
 
 
+def _pull_selected_model(model) -> None:
+    """Pull a model selected from search results."""
+    model_id = model.id
+
+    # Check if model has GGUF files
+    has_gguf = False
+    siblings = getattr(model, "siblings", None)
+    if siblings:
+        has_gguf = any(s.rfilename.endswith(".gguf") for s in siblings)
+
+    # Show selection
+    console.print(f"\n[bold cyan]{t('messages.selected_model')}:[/] {model_id}")
+
+    # Confirm download
+    if not typer.confirm(t("confirm.pull_model"), default=True):
+        console.print(f"[dim]{t('warnings.download_cancelled')}[/]")
+        return
+
+    # Build pull arguments
+    quantize = "Q4_K_M"
+    if has_gguf:
+        # If model has GGUF, format will be auto-detected
+        console.print(f"[dim]{t('messages.gguf_detected')}[/]")
+
+    # Execute pull command
+    console.print()
+
+    # Call pull function directly
+    try:
+        pull(
+            model=model_id,
+            quantize=quantize,
+            format="auto",
+            alias=None,
+            skip_license=False,
+        )
+    except SystemExit:
+        pass  # pull raises Exit on completion
+
+
 @app.command()
 def search(
     query: str = typer.Argument(help=t("commands.search.args.query")),
@@ -713,9 +753,9 @@ def search(
     console.print(
         Panel(
             f"[bold]{t('messages.models_found', count=total)}[/]  |  "
-            f"[dim]SPACE/ENTER[/] continue  |  "
-            f"[dim]q[/] quit  |  "
-            f"[dim]p[/] previous",
+            f"[dim]1-9[/] {t('messages.select_to_pull')}  |  "
+            f"[dim]SPACE[/] {t('messages.next_page')}  |  "
+            f"[dim]q[/] {t('messages.quit')}",
             title=f"[bold cyan]Search: {query}[/]",
             border_style="cyan",
         )
@@ -768,6 +808,16 @@ def search(
             elif key == "p" and current_page > 0:
                 current_page -= 1
                 console.print()  # New line before previous page
+            elif key.isdigit() and key != "0":
+                # User selected a model by number (1-9)
+                selection = int(key)
+                if 1 <= selection <= len(page_models):
+                    selected_model = page_models[selection - 1]
+                    console.print()
+                    _pull_selected_model(selected_model)
+                    return
+                else:
+                    console.print()  # Invalid selection, continue
             else:
                 current_page += 1
                 console.print()  # New line before next page

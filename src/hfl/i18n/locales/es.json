@@ -151,6 +151,11 @@
     "end_of_results": "Fin de resultados",
     "search_finished": "Búsqueda finalizada. Mostrando {shown} de {total} resultados.",
     "to_download": "Para descargar un modelo usa: hfl pull <modelo>",
+    "select_to_pull": "seleccionar",
+    "next_page": "siguiente",
+    "quit": "salir",
+    "selected_model": "Seleccionado",
+    "gguf_detected": "Formato GGUF detectado, se descargará versión cuantizada.",
     "tts_model_loaded": "Modelo TTS cargado.",
     "synthesizing": "Sintetizando",
     "audio_saved": "Audio guardado",
@@ -248,6 +253,7 @@
     "tokens": "tokens"
   },
   "confirm": {
-    "delete_model": "¿Eliminar {name} ({size})?"
+    "delete_model": "¿Eliminar {name} ({size})?",
+    "pull_model": "¿Descargar este modelo?"
   }
 }
