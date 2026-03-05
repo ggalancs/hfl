@@ -26,10 +26,13 @@ jobs:
         run: pip install pip-audit
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          # Install only dependencies, not the package itself (to avoid editable issue)
+          pip install typer rich huggingface-hub fastapi uvicorn pydantic httpx sse-starlette pyyaml
+          pip install pytest pytest-asyncio ruff pytest-cov mypy numpy
 
       - name: Run pip-audit
-        run: pip-audit --strict --skip-editable
+        run: pip-audit --strict
 
   secrets-scan:
     name: Secrets Detection
