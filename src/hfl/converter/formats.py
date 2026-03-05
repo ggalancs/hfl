@@ -58,6 +58,20 @@ def is_model_type_supported(model_type: ModelType) -> bool:
     return model_type in SUPPORTED_MODEL_TYPES
 
 
+def model_type_from_pipeline_tag(pipeline_tag: str | None) -> ModelType | None:
+    """Convert a HuggingFace pipeline_tag to ModelType.
+
+    Args:
+        pipeline_tag: The pipeline_tag from HuggingFace model info
+
+    Returns:
+        ModelType if recognized, None otherwise
+    """
+    if not pipeline_tag:
+        return None
+    return PIPELINE_TAG_TO_TYPE.get(pipeline_tag)
+
+
 def get_model_type_display_name(model_type: ModelType) -> str:
     """Get human-readable name for a model type."""
     display_names = {
@@ -184,12 +198,6 @@ TTS_ARCHITECTURES = {
     "MmsModel",
     "MmsTtsModel",
     "ParlerTTSForConditionalGeneration",
-    "Qwen3TTSForConditionalGeneration",
-    "CoquiTTSModel",
-    "XttsModel",
-    "TortoiseModel",
-    "StyleTTSModel",
-    "MatchaTTSModel",
 }
 
 # STT architectures (speech-to-text / ASR)
@@ -487,16 +495,6 @@ MODEL_TYPE_FIELD_TO_TYPE = {
     "seamless_m4t": ModelType.TTS,
     "mms": ModelType.TTS,
     "parler_tts": ModelType.TTS,
-    "qwen3_tts": ModelType.TTS,
-    "coqui": ModelType.TTS,
-    "xtts": ModelType.TTS,
-    "xtts_v2": ModelType.TTS,
-    "tortoise": ModelType.TTS,
-    "styletts": ModelType.TTS,
-    "styletts2": ModelType.TTS,
-    "matcha_tts": ModelType.TTS,
-    "metavoice": ModelType.TTS,
-    "fish_speech": ModelType.TTS,
     # STT
     "whisper": ModelType.STT,
     "wav2vec2": ModelType.STT,
@@ -636,6 +634,19 @@ def detect_model_type(model_path: Path) -> ModelType:
         model_type_field = config.get("model_type", "").lower().replace("-", "_")
         if model_type_field in MODEL_TYPE_FIELD_TO_TYPE:
             return MODEL_TYPE_FIELD_TO_TYPE[model_type_field]
+
+        # 2b. Pattern matching for model_type field (catches brand-specific types)
+        if model_type_field:
+            # TTS patterns: *_tts, *tts, speech*, etc.
+            if model_type_field.endswith("_tts") or model_type_field.endswith("tts"):
+                return ModelType.TTS
+            if "speech" in model_type_field and "to_text" not in model_type_field:
+                return ModelType.TTS
+            # STT patterns: *_asr, *_stt, *speech_to_text*, whisper*, etc.
+            if model_type_field.endswith("_asr") or model_type_field.endswith("_stt"):
+                return ModelType.STT
+            if "speech_to_text" in model_type_field or "asr" in model_type_field:
+                return ModelType.STT
 
         # 3. Check pipeline_tag (if present, usually from model card)
         pipeline_tag = config.get("pipeline_tag", "")

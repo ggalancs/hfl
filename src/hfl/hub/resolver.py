@@ -21,6 +21,7 @@ class ResolvedModel:
     filename: str | None = None  # Specific file (for GGUF)
     format: str = "auto"  # auto, gguf, safetensors, pytorch
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
+    pipeline_tag: str | None = None  # text-generation, text-to-speech, etc.
 
 
 def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
@@ -65,9 +66,11 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
             raise ValueError(f"Model not found: {model_spec}")
         repo_id = results[0].id
 
-    # Detect available format
-    siblings = api.model_info(repo_id).siblings or []
+    # Detect available format and model type
+    model_info = api.model_info(repo_id)
+    siblings = model_info.siblings or []
     filenames = [s.rfilename for s in siblings]
+    pipeline_tag = model_info.pipeline_tag  # text-generation, text-to-speech, etc.
 
     gguf_files = [f for f in filenames if f.endswith(".gguf")]
     safetensor_files = [f for f in filenames if f.endswith(".safetensors")]
@@ -80,18 +83,21 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
             filename=target_file,
             format="gguf",
             quantization=_detect_quant(target_file),
+            pipeline_tag=pipeline_tag,
         )
     elif safetensor_files:
         return ResolvedModel(
             repo_id=repo_id,
             format="safetensors",
             quantization=quantization,
+            pipeline_tag=pipeline_tag,
         )
     else:
         return ResolvedModel(
             repo_id=repo_id,
             format="pytorch",
             quantization=quantization,
+            pipeline_tag=pipeline_tag,
         )
 
 

@@ -86,10 +86,22 @@ def pull(
             console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
         raise typer.Exit(1)
 
+    # Detect model type from pipeline_tag (before download)
+    from hfl.converter.formats import (
+        ModelType,
+        get_model_type_display_name,
+        model_type_from_pipeline_tag,
+    )
+
+    resolved_model_type = model_type_from_pipeline_tag(resolved.pipeline_tag)
+
     console.print(f"  {t('messages.repo')}: {resolved.repo_id}")
     console.print(f"  {t('messages.format')}: {resolved.format}")
     if resolved.filename:
         console.print(f"  {t('messages.file')}: {resolved.filename}")
+    if resolved_model_type:
+        type_name = get_model_type_display_name(resolved_model_type)
+        console.print(f"  {t('messages.type')}: {type_name}")
 
     # 2. Verify license (R1 - Legal Audit)
     license_info = None
@@ -114,17 +126,18 @@ def pull(
     fmt = detect_format(local_path)
     final_path = local_path
 
-    # Detect model type early to decide conversion strategy
-    from hfl.converter.formats import ModelType, detect_model_type, get_model_type_display_name
+    # Use pipeline_tag from resolver if available, fallback to local detection
+    from hfl.converter.formats import detect_model_type
 
-    detected_type = detect_model_type(local_path)
+    if resolved_model_type:
+        detected_type = resolved_model_type
+    else:
+        detected_type = detect_model_type(local_path)
 
     # Only attempt GGUF conversion for LLM models
     if fmt != ModelFormat.GGUF and format != "safetensors":
         # Non-LLM models (TTS, STT, etc.) don't need GGUF conversion
         if detected_type != ModelType.LLM:
-            type_name = get_model_type_display_name(detected_type)
-            console.print(f"\n[cyan]{t('messages.model_type_detected')}:[/] {type_name}")
             console.print(f"[dim]{t('messages.no_conversion_needed')}[/]")
             # Keep as safetensors - no conversion needed
         else:
@@ -158,11 +171,6 @@ def pull(
         short_name += f"-{resolved.quantization.lower()}"
     elif quantize:
         short_name += f"-{quantize.lower()}"
-
-    # Detect model type
-    from hfl.converter.formats import detect_model_type
-
-    detected_type = detect_model_type(final_path)
 
     manifest = ModelManifest(
         name=short_name,

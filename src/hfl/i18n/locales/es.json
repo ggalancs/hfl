@@ -124,6 +124,7 @@
     "repo": "Repo",
     "format": "Formato",
     "file": "Archivo",
+    "type": "Tipo",
     "downloaded_to": "Descargado en",
     "converting_to_gguf": "Convirtiendo a GGUF ({quantize})...",
     "model_ready": "Modelo listo",
