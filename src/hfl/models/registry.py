@@ -4,21 +4,32 @@
 Local registry for downloaded models.
 Persists to ~/.hfl/models.json.
 
-Optimizations:
+Features:
 - O(1) lookup by name, alias, and repo_id using dict indexes
-- Lazy index rebuilding only when needed
+- Thread-safe operations with RLock
+- File locking for multi-process safety
+- Atomic save operations
 """
 
+from __future__ import annotations
+
+import fcntl
 import json
+import os
+import threading
+from contextlib import contextmanager
+from typing import Iterator
 
 from hfl.config import config
 from hfl.models.manifest import ModelManifest
 
 
 class ModelRegistry:
-    """Manages the local model inventory.
+    """Manages the local model inventory with thread-safe operations.
 
     Uses dict indexes for O(1) lookups by name, alias, and repo_id.
+    All public methods are thread-safe using an RLock.
+    File operations use fcntl for multi-process safety.
     """
 
     def __init__(self) -> None:
@@ -28,7 +39,28 @@ class ModelRegistry:
         self._by_name: dict[str, ModelManifest] = {}
         self._by_alias: dict[str, ModelManifest] = {}
         self._by_repo_id: dict[str, ModelManifest] = {}
+        # Thread safety
+        self._lock = threading.RLock()
         self._load()
+
+    @contextmanager
+    def _file_lock(self, exclusive: bool = False) -> Iterator[None]:
+        """Acquire file lock for atomic operations.
+
+        Args:
+            exclusive: If True, acquire exclusive (write) lock.
+                      If False, acquire shared (read) lock.
+        """
+        lock_path = self.path.with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def _load(self) -> None:
         """Load models from disk and build indexes."""
@@ -51,84 +83,106 @@ class ModelRegistry:
         self.path.write_text(json.dumps(data, indent=2))
 
     def add(self, manifest: ModelManifest) -> None:
-        """Registers a new model.
+        """Registers a new model (thread-safe).
 
         If a model with the same name exists, it is replaced.
+        Uses file locking for multi-process safety.
         """
-        # Remove existing model with same name (if any)
-        if manifest.name in self._by_name:
-            self._models = [m for m in self._models if m.name != manifest.name]
-        self._models.append(manifest)
-        self._rebuild_indexes()
-        self._save()
+        with self._lock:
+            with self._file_lock(exclusive=True):
+                # Reload from disk to avoid stale data
+                self._load()
+
+                # Remove existing model with same name (if any)
+                if manifest.name in self._by_name:
+                    self._models = [m for m in self._models if m.name != manifest.name]
+                self._models.append(manifest)
+                self._rebuild_indexes()
+                self._save()
 
     def get(self, name: str) -> ModelManifest | None:
-        """Finds a model by name, alias, or repo_id.
+        """Finds a model by name, alias, or repo_id (thread-safe).
 
         Lookup is O(1) for all three identifiers.
         """
-        # Try name first (most common)
-        if name in self._by_name:
-            return self._by_name[name]
-        # Try alias
-        if name in self._by_alias:
-            return self._by_alias[name]
-        # Try repo_id
-        if name in self._by_repo_id:
-            return self._by_repo_id[name]
-        return None
+        with self._lock:
+            # Try name first (most common)
+            if name in self._by_name:
+                return self._by_name[name]
+            # Try alias
+            if name in self._by_alias:
+                return self._by_alias[name]
+            # Try repo_id
+            if name in self._by_repo_id:
+                return self._by_repo_id[name]
+            return None
 
     def set_alias(self, name: str, alias: str) -> bool:
-        """Sets an alias for an existing model.
+        """Sets an alias for an existing model (thread-safe).
 
         Returns False if:
         - The alias is already in use
         - The model doesn't exist
         """
-        # Verify the alias is not already in use (O(1) check)
-        if alias in self._by_alias or alias in self._by_name:
-            return False
+        with self._lock:
+            with self._file_lock(exclusive=True):
+                # Reload from disk to avoid stale data
+                self._load()
 
-        model = self._by_name.get(name)
-        if model is None:
-            return False
+                # Verify the alias is not already in use (O(1) check)
+                if alias in self._by_alias or alias in self._by_name:
+                    return False
 
-        model.alias = alias
-        self._rebuild_indexes()
-        self._save()
-        return True
+                model = self._by_name.get(name)
+                if model is None:
+                    return False
+
+                model.alias = alias
+                self._rebuild_indexes()
+                self._save()
+                return True
 
     def list_all(self) -> list[ModelManifest]:
-        """Lists all registered models, sorted by creation date (newest first)."""
-        return sorted(self._models, key=lambda m: m.created_at, reverse=True)
+        """Lists all registered models, sorted by creation date (thread-safe)."""
+        with self._lock:
+            return sorted(self._models, key=lambda m: m.created_at, reverse=True)
 
     def remove(self, name: str) -> bool:
-        """Removes a model from the registry (does not delete files).
+        """Removes a model from the registry (thread-safe).
 
+        Does not delete files, only registry entry.
         Returns True if a model was removed, False otherwise.
         """
-        if name not in self._by_name:
-            return False
+        with self._lock:
+            with self._file_lock(exclusive=True):
+                # Reload from disk to avoid stale data
+                self._load()
 
-        self._models = [m for m in self._models if m.name != name]
-        self._rebuild_indexes()
-        self._save()
-        return True
+                if name not in self._by_name:
+                    return False
+
+                self._models = [m for m in self._models if m.name != name]
+                self._rebuild_indexes()
+                self._save()
+                return True
 
     def __len__(self) -> int:
-        """Return the number of registered models."""
-        return len(self._models)
+        """Return the number of registered models (thread-safe)."""
+        with self._lock:
+            return len(self._models)
 
     def __contains__(self, name: str) -> bool:
-        """Check if a model exists (by name, alias, or repo_id)."""
+        """Check if a model exists by name, alias, or repo_id (thread-safe)."""
         return self.get(name) is not None
 
     def refresh(self) -> None:
-        """Reload the registry from disk.
+        """Reload the registry from disk (thread-safe).
 
         Useful when models may have been added/removed by external processes.
         """
-        self._load()
+        with self._lock:
+            with self._file_lock(exclusive=False):
+                self._load()
 
 
 # Singleton instance cache
