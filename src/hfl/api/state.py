@@ -5,17 +5,23 @@ Thread-safe server state management.
 
 Provides atomic access to shared server state using asyncio.Lock
 for safe concurrent access in async context.
+
+Features:
+- Model loading serialization (prevents concurrent loads of same model)
+- Per-model locks for fine-grained concurrency control
+- Timeout support for long-running operations
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
-    from hfl.models.registry import ModelManifest
+    from hfl.models.manifest import ModelManifest
 
 
 @dataclass
@@ -24,6 +30,10 @@ class ServerState:
 
     Uses asyncio.Lock for safe concurrent access to mutable state.
     All state modifications should be done through the provided methods.
+
+    Features:
+    - Per-model locks prevent concurrent loads of the same model
+    - Tracks loading state for API health checks
     """
 
     # LLM state
@@ -40,6 +50,14 @@ class ServerState:
     # Locks for thread-safe access
     _llm_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _tts_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    # Per-model locks to serialize loading of the same model
+    _model_locks: dict[str, asyncio.Lock] = field(
+        default_factory=lambda: defaultdict(asyncio.Lock)
+    )
+
+    # Track which models are currently loading
+    _loading_models: set[str] = field(default_factory=set)
 
     # Properties with setters for testing compatibility
     @property
@@ -123,6 +141,89 @@ class ServerState:
     def is_llm_loaded(self) -> bool:
         """Check if LLM engine is loaded."""
         return self._engine is not None and self._engine.is_loaded
+
+    @property
+    def is_loading(self) -> bool:
+        """Check if any model is currently loading."""
+        return len(self._loading_models) > 0
+
+    @property
+    def loading_models(self) -> set[str]:
+        """Get set of currently loading model names."""
+        return self._loading_models.copy()
+
+    async def ensure_llm_loaded(
+        self,
+        model_name: str,
+        loader: Callable[[], Awaitable[tuple["InferenceEngine", "ModelManifest"]]],
+        timeout: float = 300.0,
+    ) -> tuple["InferenceEngine", "ModelManifest"]:
+        """Ensure LLM model is loaded, with serialization per model.
+
+        If the requested model is already loaded, returns immediately.
+        If another request is loading the same model, waits for it.
+        Uses per-model locks to allow loading different models concurrently.
+
+        Args:
+            model_name: Name of the model to load
+            loader: Async function that loads the model and returns (engine, manifest)
+            timeout: Maximum time to wait for model loading (seconds)
+
+        Returns:
+            Tuple of (engine, manifest)
+
+        Raises:
+            asyncio.TimeoutError: If loading takes longer than timeout
+        """
+        # Fast path - already loaded
+        if self._current_model and self._current_model.name == model_name:
+            assert self._engine is not None
+            return self._engine, self._current_model
+
+        # Serialize loading per model
+        async with asyncio.timeout(timeout):
+            async with self._model_locks[model_name]:
+                # Double-check after acquiring lock
+                if self._current_model and self._current_model.name == model_name:
+                    assert self._engine is not None
+                    return self._engine, self._current_model
+
+                self._loading_models.add(model_name)
+                try:
+                    engine, manifest = await loader()
+                    await self.set_llm_engine(engine, manifest)
+                    return engine, manifest
+                finally:
+                    self._loading_models.discard(model_name)
+
+    async def ensure_tts_loaded(
+        self,
+        model_name: str,
+        loader: Callable[[], Awaitable[tuple["AudioEngine", "ModelManifest"]]],
+        timeout: float = 300.0,
+    ) -> tuple["AudioEngine", "ModelManifest"]:
+        """Ensure TTS model is loaded, with serialization per model.
+
+        Similar to ensure_llm_loaded but for TTS models.
+        """
+        # Fast path
+        if self._current_tts_model and self._current_tts_model.name == model_name:
+            assert self._tts_engine is not None
+            return self._tts_engine, self._current_tts_model
+
+        async with asyncio.timeout(timeout):
+            async with self._model_locks[f"tts:{model_name}"]:
+                if self._current_tts_model and self._current_tts_model.name == model_name:
+                    assert self._tts_engine is not None
+                    return self._tts_engine, self._current_tts_model
+
+                self._loading_models.add(f"tts:{model_name}")
+                try:
+                    engine, manifest = await loader()
+                    await self.set_tts_engine(engine, manifest)
+                    return engine, manifest
+                finally:
+                    self._loading_models.discard(f"tts:{model_name}")
 
     # Thread-safe TTS operations
     async def set_tts_engine(
