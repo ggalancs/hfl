@@ -24,6 +24,9 @@ Models supported for GGUF conversion:
 Unsupported models:
 - LoRA adapters (adapter_*.safetensors files without base model)
 - Image models (Stable Diffusion, FLUX, etc.)
+- Audio/TTS models (Whisper, Bark, Qwen-TTS, VITS, etc.)
+- Vision-only models (CLIP, ViT, DINO, etc.)
+- Multimodal models (LLaVA, BLIP, etc.)
 - Models without config.json
 """
 
@@ -58,11 +61,43 @@ UNSUPPORTED_MODEL_TYPES = {
     # LoRA adapters
     "lora",
     "adapter",
-    # Others
+    # Audio/TTS models
+    "whisper",
+    "wav2vec",
+    "wav2vec2",
+    "hubert",
+    "speecht5",
+    "bark",
+    "musicgen",
+    "encodec",
+    "seamless",
+    "mms",
+    # TTS specific
+    "tts",
+    "vits",
+    "fastspeech",
+    "tacotron",
+    "parler",
+    "parler-tts",
+    "qwen3_tts",
+    "qwen_tts",
+    "cosyvoice",
+    "f5-tts",
+    "xtts",
+    "coqui",
+    "tortoise",
+    "valle",
+    "vocos",
+    # Vision models
     "clip",
     "vit",
-    "audio",
-    "whisper",
+    "dino",
+    "siglip",
+    # Multimodal (non-text-only)
+    "llava",
+    "blip",
+    "git",
+    "pix2struct",
 }
 
 # File patterns that indicate non-convertible models
@@ -72,6 +107,23 @@ UNSUPPORTED_FILE_PATTERNS = {
     "diffusion_pytorch_model.safetensors",  # Diffusion
     "unet/",  # Stable Diffusion UNet
     "vae/",  # VAE
+}
+
+# Keywords in architecture names that indicate non-LLM models
+UNSUPPORTED_ARCHITECTURE_KEYWORDS = {
+    "tts",           # Text-to-Speech
+    "stt",           # Speech-to-Text
+    "asr",           # Automatic Speech Recognition
+    "speech",        # Speech models
+    "voice",         # Voice models
+    "audio",         # Audio models
+    "music",         # Music generation
+    "vocoder",       # Audio vocoders
+    "diffusion",     # Diffusion models
+    "vae",           # Variational autoencoders
+    "gan",           # GANs
+    "vision",        # Vision-only models
+    "image",         # Image models
 }
 
 
@@ -144,7 +196,29 @@ def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
                 "GGUF only supports text models (LLMs).",
             )
 
-    # 4. The model appears to be convertible
+    # 4. Check architectures field for unsupported patterns
+    architectures = config_data.get("architectures", [])
+    if architectures:
+        arch_str = " ".join(architectures).lower()
+        for keyword in UNSUPPORTED_ARCHITECTURE_KEYWORDS:
+            if keyword in arch_str:
+                return (
+                    False,
+                    f"The model architecture '{architectures[0]}' appears to be a {keyword.upper()} model. "
+                    "GGUF conversion only supports text-based LLMs.",
+                )
+
+    # 5. Check for audio/TTS specific config fields
+    audio_indicators = ["num_mel_bins", "vocoder", "speaker_embedding", "audio_encoder", "codec"]
+    for indicator in audio_indicators:
+        if indicator in config_data:
+            return (
+                False,
+                f"This model has audio-specific configuration ('{indicator}'). "
+                "It appears to be an audio/TTS model which cannot be converted to GGUF.",
+            )
+
+    # 6. The model appears to be convertible
     return (True, "")
 
 

@@ -146,6 +146,11 @@ def pull(
     elif quantize:
         short_name += f"-{quantize.lower()}"
 
+    # Detect model type
+    from hfl.converter.formats import detect_model_type
+
+    detected_type = detect_model_type(final_path)
+
     manifest = ModelManifest(
         name=short_name,
         repo_id=resolved.repo_id,
@@ -154,6 +159,7 @@ def pull(
         format=detect_format(final_path).value,
         size_bytes=size,
         quantization=resolved.quantization or quantize,
+        model_type=detected_type.value,
         # R1 - License information
         license=license_info.license_id if license_info else None,
         license_name=license_info.license_name if license_info else None,
@@ -192,6 +198,11 @@ def run(
     """Start an interactive chat with a model."""
     from pathlib import Path
 
+    from hfl.converter.formats import (
+        ModelType,
+        get_model_type_display_name,
+        is_model_type_supported,
+    )
     from hfl.engine.base import ChatMessage
     from hfl.engine.selector import MissingDependencyError, select_engine
     from hfl.models.registry import ModelRegistry
@@ -201,6 +212,23 @@ def run(
     if not manifest:
         console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         console.print(t("errors.use_list_to_see"))
+        raise typer.Exit(1)
+
+    # Check if model type is supported for chat
+    model_type = _get_model_type(manifest)
+    if model_type != ModelType.LLM:
+        type_name = get_model_type_display_name(model_type)
+        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
+        console.print(f"  {t('errors.detected_type')}: [yellow]{type_name}[/]")
+        console.print(f"  {t('errors.expected_type')}: [green]LLM (Text Generation)[/]")
+
+        if not is_model_type_supported(model_type):
+            console.print(f"\n[dim]{t('errors.unsupported_type_hint')}[/]")
+            raise typer.Exit(1)
+
+        # Model type is supported but not LLM (e.g., TTS)
+        if model_type == ModelType.TTS:
+            console.print(f"\n[dim]{t('errors.use_tts_command')}[/]")
         raise typer.Exit(1)
 
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
@@ -297,10 +325,18 @@ def serve(
 
 
 @app.command(name="list")
-def list_models():
+def list_models(
+    supported_only: bool = typer.Option(
+        False,
+        "--supported-only",
+        "-s",
+        help=t("commands.list.options.supported_only"),
+    ),
+):
     """List all downloaded models."""
     from rich.table import Table
 
+    from hfl.converter.formats import is_model_type_supported
     from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
@@ -310,15 +346,39 @@ def list_models():
         console.print(f"[dim]{t('table.no_models')}[/]")
         return
 
+    # Filter unsupported models if requested
+    if supported_only:
+        filtered_models = []
+        for m in models:
+            model_type = _get_model_type(m)
+            if is_model_type_supported(model_type):
+                filtered_models.append(m)
+        models = filtered_models
+
+        if not models:
+            console.print(f"[dim]{t('table.no_supported_models')}[/]")
+            return
+
     table = Table(title=t("table.local_models"))
     table.add_column(t("table.name"), style="cyan")
     table.add_column(t("table.alias"), style="green")
+    table.add_column(t("table.type"))
     table.add_column(t("table.format"))
     table.add_column(t("table.quantization"))
     table.add_column(t("table.license"))
     table.add_column(t("table.size"), justify="right")
 
     for m in models:
+        # Get model type
+        model_type = _get_model_type(m)
+        is_supported = is_model_type_supported(model_type)
+
+        # Format type display with color
+        if is_supported:
+            type_str = f"[green]{model_type.value.upper()}[/]"
+        else:
+            type_str = f"[red]{t('table.unsupported')}[/]"
+
         # R1 - Show license with risk indicator
         license_str = m.license or "?"
         if m.license:
@@ -334,6 +394,7 @@ def list_models():
         table.add_row(
             m.name,
             m.alias or "-",
+            type_str,
             m.format,
             m.quantization or "-",
             license_str,
@@ -341,6 +402,37 @@ def list_models():
         )
 
     console.print(table)
+
+    # Show tip about unsupported models if any
+    if not supported_only:
+        unsupported_count = sum(
+            1 for m in models if not is_model_type_supported(_get_model_type(m))
+        )
+        if unsupported_count > 0:
+            console.print(
+                f"\n[dim]{t('messages.unsupported_tip', count=unsupported_count)}[/]"
+            )
+
+
+def _get_model_type(manifest):
+    """Get model type from manifest or detect it.
+
+    Returns:
+        ModelType enum value
+    """
+    from pathlib import Path
+
+    from hfl.converter.formats import ModelType, detect_model_type
+
+    # Try to get from manifest first
+    if manifest.model_type:
+        try:
+            return ModelType(manifest.model_type)
+        except ValueError:
+            pass
+
+    # Detect from path
+    return detect_model_type(Path(manifest.local_path))
 
 
 def _format_size(size_bytes: int) -> str:
@@ -812,6 +904,241 @@ def version():
 
     console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")
     console.print("[dim]https://github.com/ggalancs/hfl[/]")
+
+
+# =============================================================================
+# TTS Commands
+# =============================================================================
+
+
+@app.command()
+def tts(
+    model: str = typer.Argument(help=t("commands.tts.args.model")),
+    text: str = typer.Argument(help=t("commands.tts.args.text")),
+    output: str = typer.Option(
+        "output.wav", "--output", "-o", help=t("commands.tts.options.output")
+    ),
+    language: str = typer.Option("en", "--lang", "-l", help=t("commands.tts.options.lang")),
+    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.tts.options.voice")),
+    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.tts.options.speed")),
+    sample_rate: int = typer.Option(22050, "--rate", "-r", help=t("commands.tts.options.rate")),
+    audio_format: str = typer.Option(
+        "wav", "--format", "-f", help=t("commands.tts.options.format")
+    ),
+):
+    """Synthesize text to an audio file."""
+    from pathlib import Path
+
+    from hfl.converter.formats import (
+        ModelType,
+        get_model_type_display_name,
+        is_model_type_supported,
+    )
+    from hfl.engine.base import TTSConfig
+    from hfl.engine.selector import MissingDependencyError, select_tts_engine
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    manifest = registry.get(model)
+
+    if not manifest:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+        console.print(t("errors.use_list_to_see"))
+        raise typer.Exit(1)
+
+    # Check model type
+    model_type = _get_model_type(manifest)
+
+    if model_type != ModelType.TTS:
+        type_name = get_model_type_display_name(model_type)
+        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
+        console.print(f"  {t('errors.detected_type')}: [yellow]{type_name}[/]")
+        console.print(f"  {t('errors.expected_type')}: [green]TTS (Text-to-Speech)[/]")
+
+        if not is_model_type_supported(model_type):
+            console.print(f"\n[dim]{t('errors.unsupported_type_hint')}[/]")
+        elif model_type == ModelType.LLM:
+            console.print(f"\n[dim]{t('errors.use_run_command')}[/]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
+
+
+    model_path = Path(manifest.local_path)
+
+    try:
+        engine = select_tts_engine(model_path)
+        engine.load(manifest.local_path)
+    except MissingDependencyError as e:
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
+
+    # Create TTS config
+    config = TTSConfig(
+        voice=voice,
+        speed=speed,
+        language=language,
+        sample_rate=sample_rate,
+        format=audio_format,
+    )
+
+    text_preview = text[:50] + "..." if len(text) > 50 else text
+    console.print(f"[cyan]{t('messages.synthesizing')}[/] \"{text_preview}\"")
+
+    # Synthesize
+    result = engine.synthesize(text, config)
+
+    # Save to file
+    output_path = Path(output)
+    output_path.write_bytes(result.audio)
+
+    engine.unload()
+
+    console.print(f"\n[bold green]{t('messages.audio_saved')}:[/] {output_path}")
+    console.print(f"  {t('messages.duration')}: {result.duration:.2f}s")
+    console.print(f"  {t('messages.sample_rate')}: {result.sample_rate} Hz")
+    console.print(f"  {t('messages.format')}: {result.format}")
+
+
+@app.command()
+def speak(
+    model: str = typer.Argument(help=t("commands.speak.args.model")),
+    text: str = typer.Argument(help=t("commands.speak.args.text")),
+    language: str = typer.Option("en", "--lang", "-l", help=t("commands.speak.options.lang")),
+    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.speak.options.voice")),
+    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.speak.options.speed")),
+):
+    """Synthesize text and play it directly."""
+    from pathlib import Path
+
+    from hfl.converter.formats import (
+        ModelType,
+        get_model_type_display_name,
+        is_model_type_supported,
+    )
+    from hfl.engine.base import TTSConfig
+    from hfl.engine.selector import MissingDependencyError, select_tts_engine
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    manifest = registry.get(model)
+
+    if not manifest:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+        console.print(t("errors.use_list_to_see"))
+        raise typer.Exit(1)
+
+    # Check model type
+    model_type = _get_model_type(manifest)
+
+    if model_type != ModelType.TTS:
+        type_name = get_model_type_display_name(model_type)
+        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
+        console.print(f"  {t('errors.detected_type')}: [yellow]{type_name}[/]")
+        console.print(f"  {t('errors.expected_type')}: [green]TTS (Text-to-Speech)[/]")
+
+        if not is_model_type_supported(model_type):
+            console.print(f"\n[dim]{t('errors.unsupported_type_hint')}[/]")
+        elif model_type == ModelType.LLM:
+            console.print(f"\n[dim]{t('errors.use_run_command')}[/]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
+
+
+    model_path = Path(manifest.local_path)
+
+    try:
+        engine = select_tts_engine(model_path)
+        engine.load(manifest.local_path)
+    except MissingDependencyError as e:
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
+
+    # Create TTS config (use WAV for playback)
+    config = TTSConfig(
+        voice=voice,
+        speed=speed,
+        language=language,
+        format="wav",
+    )
+
+    text_preview = text[:50] + "..." if len(text) > 50 else text
+    console.print(f"[cyan]{t('messages.synthesizing')}[/] \"{text_preview}\"")
+
+    # Synthesize
+    result = engine.synthesize(text, config)
+
+    engine.unload()
+
+    # Play audio
+    console.print(f"[cyan]{t('messages.playing')}[/]...")
+
+    try:
+        _play_audio(result.audio, result.sample_rate)
+        console.print(f"[green]{t('messages.playback_finished')}[/]")
+    except Exception as e:
+        console.print(f"[yellow]{t('warnings.playback_failed')}:[/] {e}")
+        # Save to temp file as fallback
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(result.audio)
+            console.print(f"[dim]{t('messages.audio_saved_to')}:[/] {f.name}")
+
+
+def _play_audio(audio_data: bytes, sample_rate: int) -> None:
+    """Play audio data using available audio library."""
+    try:
+        import io
+
+        import sounddevice as sd
+        import soundfile as sf
+
+        # Read WAV data
+        with io.BytesIO(audio_data) as f:
+            audio_array, sr = sf.read(f)
+
+        # Play
+        sd.play(audio_array, sr)
+        sd.wait()
+        return
+    except ImportError:
+        pass
+
+    # Fallback: try using system command
+    import platform
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        f.write(audio_data)
+        temp_path = f.name
+
+    try:
+        system = platform.system()
+        if system == "Darwin":  # macOS
+            subprocess.run(["afplay", temp_path], check=True)
+        elif system == "Linux":
+            # Try multiple players
+            for player in ["aplay", "paplay", "play"]:
+                try:
+                    subprocess.run([player, temp_path], check=True)
+                    break
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    continue
+        elif system == "Windows":
+            import winsound
+
+            winsound.PlaySound(temp_path, winsound.SND_FILENAME)
+    finally:
+        import os
+
+        os.unlink(temp_path)
 
 
 if __name__ == "__main__":

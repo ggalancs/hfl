@@ -33,13 +33,21 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
+from hfl.api.routes_tts import router as tts_router
 from hfl.config import config
 
 
 # Global server state
 class ServerState:
+    # LLM engine
     engine = None  # Active InferenceEngine
     current_model = None  # ModelManifest of loaded model
+
+    # TTS engine
+    tts_engine = None  # Active AudioEngine
+    current_tts_model = None  # ModelManifest of loaded TTS model
+
+    # Security
     api_key: str | None = None  # Optional API key for authentication
 
 
@@ -87,7 +95,16 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 class DisclaimerMiddleware(BaseHTTPMiddleware):
     """Middleware that adds disclaimer to AI endpoint responses."""
 
-    AI_ENDPOINTS = {"/v1/chat/completions", "/v1/completions", "/api/generate", "/api/chat"}
+    AI_ENDPOINTS = {
+        # LLM endpoints
+        "/v1/chat/completions",
+        "/v1/completions",
+        "/api/generate",
+        "/api/chat",
+        # TTS endpoints
+        "/v1/audio/speech",
+        "/api/tts",
+    }
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -107,6 +124,8 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown
     if state.engine and state.engine.is_loaded:
         state.engine.unload()
+    if state.tts_engine and state.tts_engine.is_loaded:
+        state.tts_engine.unload()
 
 
 app = FastAPI(
@@ -131,6 +150,7 @@ app.add_middleware(APIKeyMiddleware)
 
 app.include_router(openai_router)
 app.include_router(native_router)
+app.include_router(tts_router)
 
 
 @app.get("/")
@@ -144,6 +164,8 @@ async def health():
         "status": "healthy",
         "model_loaded": state.engine is not None and state.engine.is_loaded,
         "current_model": state.current_model.name if state.current_model else None,
+        "tts_model_loaded": state.tts_engine is not None and state.tts_engine.is_loaded,
+        "current_tts_model": state.current_tts_model.name if state.current_tts_model else None,
     }
 
 

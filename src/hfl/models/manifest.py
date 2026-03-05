@@ -30,6 +30,7 @@ class ModelManifest:
     architecture: str | None = None  # llama, mistral, gemma, etc.
     parameters: str | None = None  # "7B", "70B", etc.
     context_length: int = 4096  # Context length
+    model_type: str | None = None  # "llm", "tts", "stt", etc. (from ModelType enum)
 
     # Chat template
     chat_template: str | None = None  # Jinja2 template for chat

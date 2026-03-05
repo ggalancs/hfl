@@ -38,7 +38,10 @@
       }
     },
     "list": {
-      "description": "Lista todos los modelos descargados."
+      "description": "Lista todos los modelos descargados.",
+      "options": {
+        "supported_only": "Mostrar solo modelos soportados (LLM, TTS)"
+      }
     },
     "search": {
       "description": "Busca modelos en HuggingFace Hub con paginación interactiva.",
@@ -87,6 +90,33 @@
     },
     "version": {
       "description": "Muestra la versión de hfl."
+    },
+    "tts": {
+      "description": "Sintetiza texto a un archivo de audio.",
+      "args": {
+        "model": "Nombre del modelo TTS",
+        "text": "Texto a sintetizar"
+      },
+      "options": {
+        "output": "Ruta del archivo de audio de salida",
+        "lang": "Código de idioma (en, es, fr, etc.)",
+        "voice": "Voz/hablante a usar",
+        "speed": "Multiplicador de velocidad (0.25-4.0)",
+        "rate": "Frecuencia de muestreo en Hz",
+        "format": "Formato de audio (wav, mp3, ogg)"
+      }
+    },
+    "speak": {
+      "description": "Sintetiza texto y lo reproduce directamente.",
+      "args": {
+        "model": "Nombre del modelo TTS",
+        "text": "Texto a hablar"
+      },
+      "options": {
+        "lang": "Código de idioma (en, es, fr, etc.)",
+        "voice": "Voz/hablante a usar",
+        "speed": "Multiplicador de velocidad (0.25-4.0)"
+      }
     }
   },
   "messages": {
@@ -119,7 +149,16 @@
     "page_info": "Página {current}/{total} ({start}-{end} de {count})",
     "end_of_results": "Fin de resultados",
     "search_finished": "Búsqueda finalizada. Mostrando {shown} de {total} resultados.",
-    "to_download": "Para descargar un modelo usa: hfl pull <modelo>"
+    "to_download": "Para descargar un modelo usa: hfl pull <modelo>",
+    "tts_model_loaded": "Modelo TTS cargado.",
+    "synthesizing": "Sintetizando",
+    "audio_saved": "Audio guardado",
+    "duration": "Duración",
+    "sample_rate": "Frecuencia de muestreo",
+    "playing": "Reproduciendo",
+    "playback_finished": "Reproducción finalizada.",
+    "audio_saved_to": "Audio guardado en",
+    "unsupported_tip": "{count} modelo(s) tienen tipos no soportados. Usa --supported-only para ocultarlos."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",
@@ -144,7 +183,14 @@
     "no_models_params_found": "No se encontraron modelos {filter} para: '{query}'",
     "error_authenticating": "Error autenticando",
     "alias_in_use": "El alias '{alias}' ya está en uso por: {model}",
-    "error_assigning_alias": "Error asignando alias"
+    "error_assigning_alias": "Error asignando alias",
+    "not_tts_model": "No es un modelo TTS",
+    "detected_type": "Tipo detectado",
+    "expected_type": "Tipo esperado",
+    "wrong_model_type": "Tipo de modelo incorrecto",
+    "unsupported_type_hint": "Este tipo de modelo no está soportado por HFL. Solo se pueden ejecutar modelos LLM y TTS.",
+    "use_tts_command": "Para modelos TTS, usa: hfl tts <modelo> \"texto\" o hfl speak <modelo> \"texto\"",
+    "use_run_command": "Para modelos LLM, usa: hfl run <modelo>"
   },
   "warnings": {
     "download_cancelled": "Descarga cancelada.",
@@ -152,7 +198,8 @@
     "continue_without_license": "¿Continuar sin verificar licencia?",
     "network_exposure": "Exponiendo el servidor a la red. Los prompts enviados a la API serán accesibles desde cualquier dispositivo en la red.",
     "no_api_key": "No se ha establecido clave API. Cualquiera en la red puede acceder a la API.",
-    "continue_question": "¿Continuar?"
+    "continue_question": "¿Continuar?",
+    "playback_failed": "No se pudo reproducir el audio"
   },
   "legal": {
     "ai_disclaimer": "Los modelos de IA pueden generar información incorrecta, sesgada o inapropiada. El usuario es responsable del uso que haga de las respuestas generadas."
@@ -165,7 +212,10 @@
     "quantization": "Cuantización",
     "license": "Licencia",
     "size": "Tamaño",
-    "no_models": "No hay modelos descargados. Usa 'hfl pull' para descargar."
+    "no_models": "No hay modelos descargados. Usa 'hfl pull' para descargar.",
+    "no_supported_models": "No hay modelos soportados. Usa 'hfl list' para ver todos los modelos.",
+    "type": "Tipo",
+    "unsupported": "No soportado"
   },
   "inspect": {
     "name": "Nombre",

@@ -3,8 +3,12 @@
 """Abstract interface for inference engines."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterator
+
+# =============================================================================
+# LLM (Text Generation) Types
+# =============================================================================
 
 
 @dataclass
@@ -93,3 +97,99 @@ class InferenceEngine(ABC):
     def is_loaded(self) -> bool:
         """Whether a model is in memory."""
         ...
+
+
+# =============================================================================
+# TTS (Text-to-Speech) Types
+# =============================================================================
+
+
+@dataclass
+class TTSConfig:
+    """Configuration for text-to-speech synthesis."""
+
+    voice: str = "default"
+    speed: float = 1.0
+    language: str = "en"
+    sample_rate: int = 22050
+    format: str = "wav"  # wav, mp3, ogg
+
+
+@dataclass
+class AudioResult:
+    """Result of audio synthesis."""
+
+    audio: bytes
+    sample_rate: int
+    duration: float
+    format: str
+    metadata: dict = field(default_factory=dict)
+
+
+class AudioEngine(ABC):
+    """Abstract base class for audio synthesis engines (TTS)."""
+
+    @abstractmethod
+    def load(self, model_path: str, **kwargs) -> None:
+        """Loads the TTS model into memory.
+
+        Args:
+            model_path: Path to the model directory or file
+            **kwargs: Backend-specific options (device, dtype, etc.)
+        """
+        ...
+
+    @abstractmethod
+    def unload(self) -> None:
+        """Releases the model from memory."""
+        ...
+
+    @abstractmethod
+    def synthesize(self, text: str, config: TTSConfig | None = None) -> AudioResult:
+        """Synthesizes text to audio.
+
+        Args:
+            text: Text to synthesize
+            config: TTS configuration (voice, speed, language, etc.)
+
+        Returns:
+            AudioResult with audio bytes and metadata
+        """
+        ...
+
+    @abstractmethod
+    def synthesize_stream(
+        self, text: str, config: TTSConfig | None = None
+    ) -> Iterator[bytes]:
+        """Synthesizes text to audio in streaming chunks.
+
+        Args:
+            text: Text to synthesize
+            config: TTS configuration
+
+        Yields:
+            Audio data chunks (raw PCM or encoded)
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def is_loaded(self) -> bool:
+        """Whether a model is in memory."""
+        ...
+
+    @property
+    @abstractmethod
+    def model_name(self) -> str:
+        """Name of the loaded model."""
+        ...
+
+    @property
+    def supported_voices(self) -> list[str]:
+        """List of supported voice identifiers."""
+        return ["default"]
+
+    @property
+    def supported_languages(self) -> list[str]:
+        """List of supported language codes."""
+        return ["en"]

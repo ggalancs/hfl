@@ -38,10 +38,14 @@ class HFLConfig:
     host: str = "127.0.0.1"
     port: int = 11434  # Same port as Ollama for drop-in compatibility
 
-    # Inference
+    # LLM Inference
     default_ctx_size: int = 4096
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
     default_threads: int = 0  # 0 = auto-detect
+
+    # TTS defaults
+    default_tts_sample_rate: int = 22050
+    default_tts_format: str = "wav"  # wav, mp3, ogg
 
     # HuggingFace
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.

@@ -31,7 +31,27 @@ transformers = [
 ]
 vllm = ["vllm>=0.6.0"]
 convert = ["gguf>=0.10.0"]
-all = ["hfl[llama,transformers,vllm,convert]"]
+
+# TTS support
+tts = [
+    "transformers>=4.47.0",
+    "torch>=2.5.0",
+    "torchaudio>=2.2.0",
+    "soundfile>=0.12.1",
+]
+coqui = [
+    "coqui-tts>=0.24.0",
+    "torch>=2.5.0",
+    "torchaudio>=2.2.0",
+    "soundfile>=0.12.1",
+]
+# Audio playback (optional)
+audio = [
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+]
+
+all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0"]
 build = ["pyinstaller>=6.0"]
 

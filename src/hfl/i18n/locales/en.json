@@ -38,7 +38,10 @@
       }
     },
     "list": {
-      "description": "List all downloaded models."
+      "description": "List all downloaded models.",
+      "options": {
+        "supported_only": "Show only supported models (LLM, TTS)"
+      }
     },
     "search": {
       "description": "Search models on HuggingFace Hub with interactive pagination.",
@@ -87,6 +90,33 @@
     },
     "version": {
       "description": "Show the hfl version."
+    },
+    "tts": {
+      "description": "Synthesize text to an audio file.",
+      "args": {
+        "model": "TTS model name",
+        "text": "Text to synthesize"
+      },
+      "options": {
+        "output": "Output audio file path",
+        "lang": "Language code (en, es, fr, etc.)",
+        "voice": "Voice/speaker to use",
+        "speed": "Speed multiplier (0.25-4.0)",
+        "rate": "Output sample rate in Hz",
+        "format": "Audio format (wav, mp3, ogg)"
+      }
+    },
+    "speak": {
+      "description": "Synthesize text and play it directly.",
+      "args": {
+        "model": "TTS model name",
+        "text": "Text to speak"
+      },
+      "options": {
+        "lang": "Language code (en, es, fr, etc.)",
+        "voice": "Voice/speaker to use",
+        "speed": "Speed multiplier (0.25-4.0)"
+      }
     }
   },
   "messages": {
@@ -119,7 +149,16 @@
     "page_info": "Page {current}/{total} ({start}-{end} of {count})",
     "end_of_results": "End of results",
     "search_finished": "Search finished. Showing {shown} of {total} results.",
-    "to_download": "To download a model use: hfl pull <model>"
+    "to_download": "To download a model use: hfl pull <model>",
+    "tts_model_loaded": "TTS model loaded.",
+    "synthesizing": "Synthesizing",
+    "audio_saved": "Audio saved",
+    "duration": "Duration",
+    "sample_rate": "Sample rate",
+    "playing": "Playing",
+    "playback_finished": "Playback finished.",
+    "audio_saved_to": "Audio saved to",
+    "unsupported_tip": "{count} model(s) have unsupported types. Use --supported-only to hide them."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",
@@ -144,7 +183,14 @@
     "no_models_params_found": "No models {filter} found for: '{query}'",
     "error_authenticating": "Error authenticating",
     "alias_in_use": "The alias '{alias}' is already in use by: {model}",
-    "error_assigning_alias": "Error assigning alias"
+    "error_assigning_alias": "Error assigning alias",
+    "not_tts_model": "Not a TTS model",
+    "detected_type": "Detected type",
+    "expected_type": "Expected type",
+    "wrong_model_type": "Wrong model type",
+    "unsupported_type_hint": "This model type is not supported by HFL. Only LLM and TTS models can be run.",
+    "use_tts_command": "For TTS models, use: hfl tts <model> \"text\" or hfl speak <model> \"text\"",
+    "use_run_command": "For LLM models, use: hfl run <model>"
   },
   "warnings": {
     "download_cancelled": "Download cancelled.",
@@ -152,7 +198,8 @@
     "continue_without_license": "Continue without verifying license?",
     "network_exposure": "Exposing the server to the network. Prompts sent to the API will be accessible from any device on the network.",
     "no_api_key": "No API key set. Anyone on the network can access the API.",
-    "continue_question": "Continue?"
+    "continue_question": "Continue?",
+    "playback_failed": "Could not play audio"
   },
   "legal": {
     "ai_disclaimer": "AI models may generate incorrect, biased, or inappropriate information. The user is responsible for the use they make of the generated responses."
@@ -165,7 +212,10 @@
     "quantization": "Quantization",
     "license": "License",
     "size": "Size",
-    "no_models": "No downloaded models. Use 'hfl pull' to download."
+    "no_models": "No downloaded models. Use 'hfl pull' to download.",
+    "no_supported_models": "No supported models. Use 'hfl list' to see all models.",
+    "type": "Type",
+    "unsupported": "Unsupported"
   },
   "inspect": {
     "name": "Name",
