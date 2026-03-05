@@ -8,7 +8,7 @@ Drop-in replacement for applications using the OpenAI SDK.
 import json
 import time
 import uuid
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -16,6 +16,9 @@ from pydantic import BaseModel
 
 from hfl.engine.base import ChatMessage, GenerationConfig
 from hfl.models.registry import ModelRegistry
+
+if TYPE_CHECKING:
+    from hfl.api.state import ServerState
 
 router = APIRouter()
 
@@ -55,22 +58,21 @@ class CompletionRequest(BaseModel):
 # --- Helpers ---
 
 
-def _get_state():
-    """Import state lazily to avoid circular imports."""
-    from hfl.api.server import state
+def _get_state() -> "ServerState":
+    """Get the singleton server state."""
+    from hfl.api.state import get_state
 
-    return state
+    return get_state()
 
 
-def _ensure_model_loaded(model_name: str):
-    """Load the model if it is not already in memory."""
+async def _ensure_model_loaded(model_name: str) -> None:
+    """Load the model if it is not already in memory (thread-safe)."""
     state = _get_state()
 
-    if state.engine and state.engine.is_loaded:
+    # Fast path: model already loaded
+    if state.is_llm_loaded():
         if state.current_model and state.current_model.name == model_name:
             return
-        # Different model, unload the current one
-        state.engine.unload()
 
     registry = ModelRegistry()
     manifest = registry.get(model_name)
@@ -81,12 +83,14 @@ def _ensure_model_loaded(model_name: str):
 
     from hfl.engine.selector import select_engine
 
-    state.engine = select_engine(Path(manifest.local_path))
-    state.engine.load(manifest.local_path, n_ctx=manifest.context_length)
-    state.current_model = manifest
+    engine = select_engine(Path(manifest.local_path))
+    engine.load(manifest.local_path, n_ctx=manifest.context_length)
+
+    # Thread-safe state update
+    await state.set_llm_engine(engine, manifest)
 
 
-def _to_gen_config(req) -> GenerationConfig:
+def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> GenerationConfig:
     stop = req.stop if isinstance(req.stop, list) else ([req.stop] if req.stop else None)
     return GenerationConfig(
         temperature=req.temperature,
@@ -100,10 +104,11 @@ def _to_gen_config(req) -> GenerationConfig:
 # --- Endpoints ---
 
 
-@router.post("/v1/chat/completions")
-async def chat_completions(req: ChatCompletionRequest):
-    _ensure_model_loaded(req.model)
+@router.post("/v1/chat/completions", response_model=None)
+async def chat_completions(req: ChatCompletionRequest) -> dict[str, Any] | StreamingResponse:
+    await _ensure_model_loaded(req.model)
     state = _get_state()
+    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
 
     messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
     gen_config = _to_gen_config(req)
@@ -143,6 +148,7 @@ async def _stream_chat(
 ) -> AsyncIterator[str]:
     """Generate OpenAI-compatible SSE responses."""
     state = _get_state()
+    assert state.engine is not None  # Called only after model is loaded
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
     for token in state.engine.chat_stream(messages, config):
@@ -173,10 +179,11 @@ async def _stream_chat(
     yield "data: [DONE]\n\n"
 
 
-@router.post("/v1/completions")
-async def completions(req: CompletionRequest):
-    _ensure_model_loaded(req.model)
+@router.post("/v1/completions", response_model=None)
+async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse:
+    await _ensure_model_loaded(req.model)
     state = _get_state()
+    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
 
     prompt = req.prompt if isinstance(req.prompt, str) else req.prompt[0]
     gen_config = _to_gen_config(req)
@@ -215,6 +222,7 @@ async def _stream_completion(
     config: GenerationConfig,
 ) -> AsyncIterator[str]:
     state = _get_state()
+    assert state.engine is not None  # Called only after model is loaded
     for token in state.engine.generate_stream(prompt, config):
         chunk = {
             "id": f"cmpl-{uuid.uuid4().hex[:8]}",
@@ -228,7 +236,7 @@ async def _stream_completion(
 
 
 @router.get("/v1/models")
-async def list_models():
+async def list_models() -> dict[str, Any]:
     registry = ModelRegistry()
     models = registry.list_all()
     return {

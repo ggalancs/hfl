@@ -7,6 +7,7 @@ Allows using hfl as a drop-in replacement for Ollama.
 
 import json
 import time
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,9 @@ from pydantic import BaseModel
 
 from hfl.engine.base import ChatMessage, GenerationConfig
 from hfl.models.registry import ModelRegistry
+
+if TYPE_CHECKING:
+    from hfl.api.state import ServerState
 
 router = APIRouter()
 
@@ -32,11 +36,11 @@ class ChatRequest(BaseModel):
     options: dict | None = None
 
 
-def _get_state():
-    """Import state lazily to avoid circular imports."""
-    from hfl.api.server import state
+def _get_state() -> "ServerState":
+    """Get the singleton server state."""
+    from hfl.api.state import get_state
 
-    return state
+    return get_state()
 
 
 def _options_to_config(options: dict | None) -> GenerationConfig:
@@ -52,19 +56,21 @@ def _options_to_config(options: dict | None) -> GenerationConfig:
     )
 
 
-@router.post("/api/generate")
-async def api_generate(req: GenerateRequest):
+@router.post("/api/generate", response_model=None)
+async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse:
     from hfl.api.routes_openai import _ensure_model_loaded
 
-    _ensure_model_loaded(req.model)
+    await _ensure_model_loaded(req.model)
     state = _get_state()
+    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
+    engine = state.engine  # Capture for closure
 
     gen_config = _options_to_config(req.options)
 
     if req.stream:
 
-        async def stream():
-            for token in state.engine.generate_stream(req.prompt, gen_config):
+        async def stream() -> AsyncIterator[str]:
+            for token in engine.generate_stream(req.prompt, gen_config):
                 yield (
                     json.dumps(
                         {
@@ -91,7 +97,7 @@ async def api_generate(req: GenerateRequest):
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 
-    result = state.engine.generate(req.prompt, gen_config)
+    result = engine.generate(req.prompt, gen_config)
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -103,20 +109,22 @@ async def api_generate(req: GenerateRequest):
     }
 
 
-@router.post("/api/chat")
-async def api_chat(req: ChatRequest):
+@router.post("/api/chat", response_model=None)
+async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse:
     from hfl.api.routes_openai import _ensure_model_loaded
 
-    _ensure_model_loaded(req.model)
+    await _ensure_model_loaded(req.model)
     state = _get_state()
+    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
+    engine = state.engine  # Capture for closure
 
     messages = [ChatMessage(role=m["role"], content=m["content"]) for m in req.messages]
     gen_config = _options_to_config(req.options)
 
     if req.stream:
 
-        async def stream():
-            for token in state.engine.chat_stream(messages, gen_config):
+        async def stream() -> AsyncIterator[str]:
+            for token in engine.chat_stream(messages, gen_config):
                 yield (
                     json.dumps(
                         {
@@ -143,7 +151,7 @@ async def api_chat(req: ChatRequest):
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 
-    result = state.engine.chat(messages, gen_config)
+    result = engine.chat(messages, gen_config)
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -153,7 +161,7 @@ async def api_chat(req: ChatRequest):
 
 
 @router.get("/api/tags")
-async def api_tags():
+async def api_tags() -> dict[str, Any]:
     """List models (Ollama compatible)."""
     registry = ModelRegistry()
     return {
@@ -178,12 +186,12 @@ async def api_tags():
 
 
 @router.get("/api/version")
-async def api_version():
+async def api_version() -> dict[str, str]:
     """Server version (Ollama compatible)."""
     return {"version": "0.1.0"}
 
 
 @router.head("/")
-async def head_root():
+async def head_root() -> dict[str, Any]:
     """Health check for Ollama compatibility."""
     return {}

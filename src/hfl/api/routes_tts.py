@@ -8,7 +8,7 @@ Implements:
   - Native HFL: POST /api/tts
 """
 
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
@@ -16,6 +16,9 @@ from pydantic import BaseModel, Field
 
 from hfl.engine.base import TTSConfig
 from hfl.models.registry import ModelRegistry
+
+if TYPE_CHECKING:
+    from hfl.api.state import ServerState
 
 router = APIRouter()
 
@@ -64,23 +67,21 @@ class TTSModelInfo(BaseModel):
 # =============================================================================
 
 
-def _get_state():
-    """Import state lazily to avoid circular imports."""
-    from hfl.api.server import state
+def _get_state() -> "ServerState":
+    """Get the singleton server state."""
+    from hfl.api.state import get_state
 
-    return state
+    return get_state()
 
 
-def _ensure_tts_model_loaded(model_name: str):
-    """Load the TTS model if not already in memory."""
+async def _ensure_tts_model_loaded(model_name: str) -> None:
+    """Load the TTS model if not already in memory (thread-safe)."""
     state = _get_state()
 
-    # Check if the correct model is already loaded
-    if state.tts_engine and state.tts_engine.is_loaded:
+    # Fast path: model already loaded
+    if state.is_tts_loaded():
         if state.current_tts_model and state.current_tts_model.name == model_name:
             return
-        # Different model, unload current
-        state.tts_engine.unload()
 
     # Look up model in registry
     registry = ModelRegistry()
@@ -105,9 +106,11 @@ def _ensure_tts_model_loaded(model_name: str):
     # Select and load engine
     from hfl.engine.selector import select_tts_engine
 
-    state.tts_engine = select_tts_engine(model_path)
-    state.tts_engine.load(manifest.local_path)
-    state.current_tts_model = manifest
+    engine = select_tts_engine(model_path)
+    engine.load(manifest.local_path)
+
+    # Thread-safe state update
+    await state.set_tts_engine(engine, manifest)
 
 
 def _map_openai_format(fmt: str) -> str:
@@ -139,7 +142,7 @@ def _format_to_content_type(fmt: str) -> str:
 
 
 @router.post("/v1/audio/speech")
-async def openai_tts(req: OpenAITTSRequest):
+async def openai_tts(req: OpenAITTSRequest) -> Response:
     """
     OpenAI-compatible TTS endpoint.
 
@@ -154,8 +157,9 @@ async def openai_tts(req: OpenAITTSRequest):
 
     Returns: Audio binary data
     """
-    _ensure_tts_model_loaded(req.model)
+    await _ensure_tts_model_loaded(req.model)
     state = _get_state()
+    assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
 
     # Map OpenAI format to internal format
     audio_format = _map_openai_format(req.response_format)
@@ -186,8 +190,8 @@ async def openai_tts(req: OpenAITTSRequest):
 # =============================================================================
 
 
-@router.post("/api/tts")
-async def native_tts(req: NativeTTSRequest):
+@router.post("/api/tts", response_model=None)
+async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
     """
     Native HFL TTS endpoint.
 
@@ -205,8 +209,9 @@ async def native_tts(req: NativeTTSRequest):
         - If stream=false: Audio binary data
         - If stream=true: Streaming audio chunks
     """
-    _ensure_tts_model_loaded(req.model)
+    await _ensure_tts_model_loaded(req.model)
     state = _get_state()
+    assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
 
     config = TTSConfig(
         voice=req.voice,
@@ -239,7 +244,7 @@ async def native_tts(req: NativeTTSRequest):
 
 
 @router.get("/api/tts/voices")
-async def list_voices(model: str | None = None):
+async def list_voices(model: str | None = None) -> dict[str, Any]:
     """
     List available voices for a TTS model.
 
@@ -252,8 +257,9 @@ async def list_voices(model: str | None = None):
         }
     """
     if model:
-        _ensure_tts_model_loaded(model)
+        await _ensure_tts_model_loaded(model)
         state = _get_state()
+        assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
 
         return {
             "model": model,
@@ -269,7 +275,7 @@ async def list_voices(model: str | None = None):
 
 
 @router.get("/v1/audio/models")
-async def list_tts_models():
+async def list_tts_models() -> dict[str, Any]:
     """
     List available TTS models.
 

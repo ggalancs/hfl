@@ -23,35 +23,21 @@ Security:
 - Optional API key authentication via --api-key flag
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any, Callable
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_tts import router as tts_router
+from hfl.api.state import get_state
 from hfl.config import config
-
-
-# Global server state
-class ServerState:
-    # LLM engine
-    engine = None  # Active InferenceEngine
-    current_model = None  # ModelManifest of loaded model
-
-    # TTS engine
-    tts_engine = None  # Active AudioEngine
-    current_tts_model = None  # ModelManifest of loaded TTS model
-
-    # Security
-    api_key: str | None = None  # Optional API key for authentication
-
-
-state = ServerState()
 
 
 # API Key Authentication Middleware
@@ -61,26 +47,34 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     # Endpoints that don't require authentication
     PUBLIC_ENDPOINTS = {"/", "/health", "/api/version"}
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Any]
+    ) -> Response:
+        state = get_state()
+
         # Skip auth if no API key is configured
         if not state.api_key:
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         # Skip auth for public endpoints
         if request.url.path in self.PUBLIC_ENDPOINTS:
-            return await call_next(request)
+            response = await call_next(request)
+            return response
 
         # Check for API key in Authorization header (Bearer token)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             if token == state.api_key:
-                return await call_next(request)
+                response = await call_next(request)
+                return response
 
         # Check for API key in X-API-Key header
         api_key_header = request.headers.get("X-API-Key", "")
         if api_key_header == state.api_key:
-            return await call_next(request)
+            response = await call_next(request)
+            return response
 
         # Authentication failed
         return JSONResponse(
@@ -106,8 +100,10 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
         "/api/tts",
     }
 
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Any]
+    ) -> Response:
+        response: Response = await call_next(request)
         # Only add disclaimer to generation endpoints
         if request.url.path in self.AI_ENDPOINTS:
             response.headers["X-AI-Disclaimer"] = (
@@ -118,14 +114,11 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Server lifecycle."""
     yield
     # Cleanup on shutdown
-    if state.engine and state.engine.is_loaded:
-        state.engine.unload()
-    if state.tts_engine and state.tts_engine.is_loaded:
-        state.tts_engine.unload()
+    await get_state().cleanup()
 
 
 app = FastAPI(
@@ -135,11 +128,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS - Configurable via config.py
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=config.cors_origins,
+    allow_credentials=config.cors_allow_credentials,
+    allow_methods=config.cors_allow_methods,
+    allow_headers=config.cors_allow_headers,
 )
 
 # R9 - Add disclaimer middleware
@@ -148,28 +143,39 @@ app.add_middleware(DisclaimerMiddleware)
 # Add API key authentication middleware
 app.add_middleware(APIKeyMiddleware)
 
+# Optional rate limiting (disabled by default)
+if config.rate_limit_enabled:
+    from hfl.api.middleware import RateLimitMiddleware
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_window=config.rate_limit_requests,
+        window_seconds=config.rate_limit_window,
+    )
+
 app.include_router(openai_router)
 app.include_router(native_router)
 app.include_router(tts_router)
 
 
 @app.get("/")
-async def root():
+async def root() -> dict[str, str]:
     return {"status": "hfl is running"}
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, Any]:
+    state = get_state()
     return {
         "status": "healthy",
-        "model_loaded": state.engine is not None and state.engine.is_loaded,
+        "model_loaded": state.is_llm_loaded(),
         "current_model": state.current_model.name if state.current_model else None,
-        "tts_model_loaded": state.tts_engine is not None and state.tts_engine.is_loaded,
+        "tts_model_loaded": state.is_tts_loaded(),
         "current_tts_model": state.current_tts_model.name if state.current_tts_model else None,
     }
 
 
-def start_server(host: str | None = None, port: int | None = None, api_key: str | None = None):
+def start_server(host: str | None = None, port: int | None = None, api_key: str | None = None) -> None:
     """Start the API server.
 
     Args:
@@ -180,7 +186,7 @@ def start_server(host: str | None = None, port: int | None = None, api_key: str 
                  - Authorization: Bearer <api_key>
                  - X-API-Key: <api_key>
     """
-    state.api_key = api_key
+    get_state().api_key = api_key
     uvicorn.run(
         app,
         host=host or config.host,
