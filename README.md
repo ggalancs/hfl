@@ -36,6 +36,7 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 - **Multiple Backends**: llama.cpp (GGUF/CPU), Transformers (GPU native), vLLM (production)
 - **Automatic Conversion**: Downloads HuggingFace models and converts to GGUF automatically
 - **Smart Quantization**: Supports Q2_K through F16 quantization levels
+- **Text-to-Speech**: Native TTS support with Bark, SpeechT5, Coqui XTTS and more
 - **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
 - **Internationalized**: Full i18n support (English, Spanish) - set `HFL_LANG` to change language
 
@@ -111,6 +112,12 @@ pip install .
 # With GPU support (Transformers + bitsandbytes)
 pip install ".[transformers]"
 
+# With TTS support (Bark, SpeechT5)
+pip install ".[tts]"
+
+# With Coqui TTS (XTTS-v2, VITS)
+pip install ".[coqui]"
+
 # With vLLM for production
 pip install ".[vllm]"
 
@@ -157,6 +164,48 @@ hfl serve --model llama-3.3-70b-instruct-q4_k_m
 
 # Custom host/port
 hfl serve --host 0.0.0.0 --port 8080
+```
+
+### Text-to-Speech (TTS)
+
+HFL supports TTS models from HuggingFace like Bark, SpeechT5, and Coqui XTTS.
+
+```bash
+# Download a TTS model (no GGUF conversion needed)
+hfl pull suno/bark-small --alias bark
+
+# Synthesize text to audio file
+hfl tts bark "Hello, this is a test." -o output.wav
+
+# Synthesize and play directly (requires sounddevice)
+hfl speak bark "Hello, this is a test."
+
+# With options
+hfl tts bark "Hola mundo" --lang es --output spanish.wav --speed 0.9
+hfl speak bark "Fast speech" --speed 1.5
+```
+
+**TTS Options:**
+- `--output, -o`: Output file path (default: output.wav)
+- `--lang, -l`: Language code (en, es, fr, etc.)
+- `--voice, -v`: Voice/speaker to use
+- `--speed, -s`: Speed multiplier (0.25-4.0)
+- `--rate, -r`: Sample rate in Hz
+- `--format, -f`: Audio format (wav, mp3, ogg)
+
+**TTS API:**
+```bash
+# OpenAI-compatible endpoint
+curl -X POST http://localhost:11434/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "bark", "input": "Hello world", "voice": "alloy"}' \
+  --output speech.wav
+
+# Native HFL endpoint
+curl -X POST http://localhost:11434/api/tts \
+  -H "Content-Type: application/json" \
+  -d '{"model": "bark", "text": "Hello world", "language": "en"}' \
+  --output speech.wav
 ```
 
 ### Search Models on HuggingFace

@@ -158,7 +158,9 @@
     "playing": "Playing",
     "playback_finished": "Playback finished.",
     "audio_saved_to": "Audio saved to",
-    "unsupported_tip": "{count} model(s) have unsupported types. Use --supported-only to hide them."
+    "unsupported_tip": "{count} model(s) have unsupported types. Use --supported-only to hide them.",
+    "model_type_detected": "Model type detected",
+    "no_conversion_needed": "No GGUF conversion needed for this model type."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

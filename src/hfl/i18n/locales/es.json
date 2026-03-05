@@ -158,7 +158,9 @@
     "playing": "Reproduciendo",
     "playback_finished": "Reproducción finalizada.",
     "audio_saved_to": "Audio guardado en",
-    "unsupported_tip": "{count} modelo(s) tienen tipos no soportados. Usa --supported-only para ocultarlos."
+    "unsupported_tip": "{count} modelo(s) tienen tipos no soportados. Usa --supported-only para ocultarlos.",
+    "model_type_detected": "Tipo de modelo detectado",
+    "no_conversion_needed": "No se necesita conversión GGUF para este tipo de modelo."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",

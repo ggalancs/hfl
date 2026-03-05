@@ -110,28 +110,41 @@ def pull(
     local_path = pull_model(resolved)
     console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
 
-    # 3. Convert if necessary
+    # 4. Detect model type and convert if necessary
     fmt = detect_format(local_path)
     final_path = local_path
 
+    # Detect model type early to decide conversion strategy
+    from hfl.converter.formats import ModelType, detect_model_type, get_model_type_display_name
+
+    detected_type = detect_model_type(local_path)
+
+    # Only attempt GGUF conversion for LLM models
     if fmt != ModelFormat.GGUF and format != "safetensors":
-        # Check if the model can be converted to GGUF
-        from hfl.converter.gguf_converter import GGUFConverter, check_model_convertibility
+        # Non-LLM models (TTS, STT, etc.) don't need GGUF conversion
+        if detected_type != ModelType.LLM:
+            type_name = get_model_type_display_name(detected_type)
+            console.print(f"\n[cyan]{t('messages.model_type_detected')}:[/] {type_name}")
+            console.print(f"[dim]{t('messages.no_conversion_needed')}[/]")
+            # Keep as safetensors - no conversion needed
+        else:
+            # LLM model - attempt GGUF conversion
+            from hfl.converter.gguf_converter import GGUFConverter, check_model_convertibility
 
-        is_convertible, reason = check_model_convertibility(local_path)
+            is_convertible, reason = check_model_convertibility(local_path)
 
-        if not is_convertible:
-            console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
-            console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
-            console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
-            console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
-            raise typer.Exit(1)
+            if not is_convertible:
+                console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
+                console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
+                console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
+                console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
+                raise typer.Exit(1)
 
-        console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
-        converter = GGUFConverter()
-        output_name = resolved.repo_id.replace("/", "--")
-        output_path = local_path.parent / output_name
-        final_path = converter.convert(local_path, output_path, quantize)
+            console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
+            converter = GGUFConverter()
+            output_name = resolved.repo_id.replace("/", "--")
+            output_path = local_path.parent / output_name
+            final_path = converter.convert(local_path, output_path, quantize)
 
     # 4. Register
     size = sum(
