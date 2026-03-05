@@ -58,6 +58,18 @@ class HFLConfig:
     default_tts_sample_rate: int = 22050
     default_tts_format: str = "wav"  # wav, mp3, ogg
 
+    # Timeouts (seconds)
+    model_load_timeout: float = 300.0      # 5 minutes
+    generation_timeout: float = 600.0       # 10 minutes
+    download_timeout: float = 3600.0        # 1 hour
+    conversion_timeout: float = 7200.0      # 2 hours
+    api_request_timeout: float = 120.0      # 2 minutes
+
+    # Retry settings
+    max_retries: int = 3
+    retry_base_delay: float = 1.0
+    retry_max_delay: float = 60.0
+
     # HuggingFace
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.
     # It is NEVER persisted to disk, NEVER stored in models.json or any config file.
