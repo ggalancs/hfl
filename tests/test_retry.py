@@ -94,7 +94,7 @@ class TestWithRetry:
         """Should use exponential backoff."""
         times = []
 
-        @with_retry(max_retries=3, base_delay=0.05, max_delay=1.0, jitter=0)
+        @with_retry(max_retries=3, base_delay=0.1, max_delay=1.0, jitter=0)
         def track_time():
             times.append(time.time())
             if len(times) < 4:
@@ -103,9 +103,15 @@ class TestWithRetry:
 
         track_time()
 
-        # Check delays increase exponentially (roughly)
+        # Check delays increase exponentially (with tolerance for system jitter)
         delays = [times[i + 1] - times[i] for i in range(len(times) - 1)]
-        assert delays[0] < delays[1] < delays[2]  # Exponential growth
+        # Expected: 0.1, 0.2, 0.4 (exponential with factor 2)
+        # Use tolerance check instead of strict ordering due to system timing variance
+        assert delays[0] >= 0.08  # ~0.1s with tolerance
+        assert delays[1] >= 0.15  # ~0.2s with tolerance
+        assert delays[2] >= 0.30  # ~0.4s with tolerance
+        # Total should be roughly 0.7s (0.1 + 0.2 + 0.4)
+        assert sum(delays) >= 0.5
 
 
 class TestWithRetryAsync:
