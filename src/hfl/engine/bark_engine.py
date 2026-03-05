@@ -134,9 +134,7 @@ class BarkEngine(AudioEngine):
             metadata={"model": self._model_name},
         )
 
-    def synthesize_stream(
-        self, text: str, config: TTSConfig | None = None
-    ) -> Iterator[bytes]:
+    def synthesize_stream(self, text: str, config: TTSConfig | None = None) -> Iterator[bytes]:
         """Stream audio synthesis.
 
         Note: Bark doesn't natively support streaming, so this synthesizes
@@ -205,9 +203,7 @@ class BarkEngine(AudioEngine):
             pass
         return "cpu"
 
-    def _resample(
-        self, audio: np.ndarray, orig_sr: int, target_sr: int
-    ) -> np.ndarray:
+    def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
         """Resample audio to target sample rate."""
         try:
             import torch
@@ -235,9 +231,7 @@ class BarkEngine(AudioEngine):
         indices = np.linspace(0, len(audio) - 1, new_length)
         return np.interp(indices, np.arange(len(audio)), audio)
 
-    def _encode_audio(
-        self, audio: np.ndarray, sample_rate: int, fmt: str
-    ) -> bytes:
+    def _encode_audio(self, audio: np.ndarray, sample_rate: int, fmt: str) -> bytes:
         """Encode numpy audio array to bytes in the specified format."""
         import numpy as np
 
@@ -342,6 +336,5 @@ class BarkEngine(AudioEngine):
             return buffer.read()
         except ImportError:
             raise ImportError(
-                "OGG encoding requires soundfile.\n"
-                "Install with: pip install soundfile"
+                "OGG encoding requires soundfile.\nInstall with: pip install soundfile"
             )

@@ -47,9 +47,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     # Endpoints that don't require authentication
     PUBLIC_ENDPOINTS = {"/", "/health", "/api/version"}
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Any]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         state = get_state()
 
         # Skip auth if no API key is configured
@@ -100,9 +98,7 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
         "/api/tts",
     }
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Any]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         response: Response = await call_next(request)
         # Only add disclaimer to generation endpoints
         if request.url.path in self.AI_ENDPOINTS:
@@ -175,7 +171,11 @@ async def health() -> dict[str, Any]:
     }
 
 
-def start_server(host: str | None = None, port: int | None = None, api_key: str | None = None) -> None:
+def start_server(
+    host: str | None = None,
+    port: int | None = None,
+    api_key: str | None = None,
+) -> None:
     """Start the API server.
 
     Args:

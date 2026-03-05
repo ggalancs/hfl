@@ -4,8 +4,6 @@
 
 import json
 
-import pytest
-
 from hfl.api.helpers import (
     StreamingContext,
     format_ndjson_chunk,

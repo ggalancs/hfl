@@ -64,9 +64,9 @@ class CoquiEngine(AudioEngine):
             if hasattr(self._tts.synthesizer, "output_sample_rate"):
                 self._sample_rate = self._tts.synthesizer.output_sample_rate
             elif hasattr(self._tts.synthesizer, "tts_config"):
-                self._sample_rate = getattr(
-                    self._tts.synthesizer.tts_config, "audio", {}
-                ).get("sample_rate", 22050)
+                self._sample_rate = getattr(self._tts.synthesizer.tts_config, "audio", {}).get(
+                    "sample_rate", 22050
+                )
 
     def unload(self) -> None:
         """Release model from memory."""
@@ -148,9 +148,7 @@ class CoquiEngine(AudioEngine):
             },
         )
 
-    def synthesize_stream(
-        self, text: str, config: TTSConfig | None = None
-    ) -> Iterator[bytes]:
+    def synthesize_stream(self, text: str, config: TTSConfig | None = None) -> Iterator[bytes]:
         """Stream audio synthesis.
 
         Note: Most Coqui models don't support native streaming,
@@ -255,9 +253,7 @@ class CoquiEngine(AudioEngine):
         except ImportError:
             return False
 
-    def _resample(
-        self, audio: np.ndarray, orig_sr: int, target_sr: int
-    ) -> np.ndarray:
+    def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
         """Resample audio to target sample rate."""
         try:
             import torch
@@ -274,9 +270,7 @@ class CoquiEngine(AudioEngine):
             indices = np.linspace(0, len(audio) - 1, target_length)
             return np.interp(indices, np.arange(len(audio)), audio)
 
-    def _encode_audio(
-        self, audio: np.ndarray, sample_rate: int, fmt: str
-    ) -> bytes:
+    def _encode_audio(self, audio: np.ndarray, sample_rate: int, fmt: str) -> bytes:
         """Encode numpy audio array to bytes in the specified format."""
         # Ensure audio is float32 and in range [-1, 1]
         audio = np.clip(audio.astype(np.float32), -1.0, 1.0)
@@ -372,8 +366,7 @@ class CoquiEngine(AudioEngine):
             return buffer.read()
         except ImportError:
             raise ImportError(
-                "OGG encoding requires soundfile.\n"
-                "Install with: pip install soundfile"
+                "OGG encoding requires soundfile.\nInstall with: pip install soundfile"
             )
 
 

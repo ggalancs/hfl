@@ -2,9 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for retry utilities."""
 
-import asyncio
 import time
-from unittest.mock import Mock
 
 import pytest
 

@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for event system."""
 
-import time
-
 import pytest
 
 from hfl.events import (

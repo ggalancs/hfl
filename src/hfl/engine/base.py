@@ -158,9 +158,7 @@ class AudioEngine(ABC):
         ...
 
     @abstractmethod
-    def synthesize_stream(
-        self, text: str, config: TTSConfig | None = None
-    ) -> Iterator[bytes]:
+    def synthesize_stream(self, text: str, config: TTSConfig | None = None) -> Iterator[bytes]:
         """Synthesizes text to audio in streaming chunks.
 
         Args:

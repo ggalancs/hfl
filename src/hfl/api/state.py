@@ -32,6 +32,7 @@ else:
         """Compatibility wrapper for async_timeout (Python 3.10)."""
         yield  # No timeout enforcement in 3.10 fallback
 
+
 if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.models.manifest import ModelManifest
@@ -65,9 +66,7 @@ class ServerState:
     _tts_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Per-model locks to serialize loading of the same model
-    _model_locks: dict[str, asyncio.Lock] = field(
-        default_factory=lambda: defaultdict(asyncio.Lock)
-    )
+    _model_locks: dict[str, asyncio.Lock] = field(default_factory=lambda: defaultdict(asyncio.Lock))
 
     # Track which models are currently loading
     _loading_models: set[str] = field(default_factory=set)

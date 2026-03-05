@@ -205,6 +205,7 @@ def request_to_config(
 
 # Optimized streaming helpers
 
+
 class StreamingContext:
     """Context for optimized streaming responses.
 

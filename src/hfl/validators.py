@@ -69,22 +69,24 @@ class InputBounds:
 BOUNDS = InputBounds()
 
 # Valid quantization levels
-VALID_QUANTIZATIONS = frozenset({
-    "Q2_K",
-    "Q3_K_S",
-    "Q3_K_M",
-    "Q3_K_L",
-    "Q4_0",
-    "Q4_K_S",
-    "Q4_K_M",
-    "Q5_0",
-    "Q5_K_S",
-    "Q5_K_M",
-    "Q6_K",
-    "Q8_0",
-    "F16",
-    "F32",
-})
+VALID_QUANTIZATIONS = frozenset(
+    {
+        "Q2_K",
+        "Q3_K_S",
+        "Q3_K_M",
+        "Q3_K_L",
+        "Q4_0",
+        "Q4_K_S",
+        "Q4_K_M",
+        "Q5_0",
+        "Q5_K_S",
+        "Q5_K_M",
+        "Q6_K",
+        "Q8_0",
+        "F16",
+        "F32",
+    }
+)
 
 
 def validate_model_name(name: str) -> str:
@@ -136,7 +138,7 @@ def validate_model_name(name: str) -> str:
     if not MODEL_NAME_PATTERN.match(name):
         raise ValidationError(
             f"Invalid model name format: {name}. "
-            "Must start with alphanumeric and contain only alphanumeric, dash, dot, underscore, or slash.",
+            "Must start with alphanumeric, containing only alphanumeric/dash/dot/underscore/slash.",
             field="model",
         )
 
@@ -160,8 +162,7 @@ def validate_quantization(quant: str) -> str:
     if normalized not in VALID_QUANTIZATIONS:
         valid_list = ", ".join(sorted(VALID_QUANTIZATIONS))
         raise ValidationError(
-            f"Invalid quantization level: {quant}. "
-            f"Valid options: {valid_list}",
+            f"Invalid quantization level: {quant}. Valid options: {valid_list}",
             field="quantization",
         )
 
@@ -235,8 +236,8 @@ def validate_generation_params(
             )
         if not BOUNDS.TEMPERATURE_MIN <= temperature <= BOUNDS.TEMPERATURE_MAX:
             raise ValidationError(
-                f"temperature must be between {BOUNDS.TEMPERATURE_MIN} and {BOUNDS.TEMPERATURE_MAX}, "
-                f"got {temperature}",
+                f"temperature must be between {BOUNDS.TEMPERATURE_MIN} and "
+                f"{BOUNDS.TEMPERATURE_MAX}, got {temperature}",
                 field="temperature",
             )
 
@@ -272,8 +273,8 @@ def validate_generation_params(
             )
         if not BOUNDS.MIN_CONTEXT_SIZE <= ctx_size <= BOUNDS.MAX_CONTEXT_SIZE:
             raise ValidationError(
-                f"context_size must be between {BOUNDS.MIN_CONTEXT_SIZE} and {BOUNDS.MAX_CONTEXT_SIZE}, "
-                f"got {ctx_size}",
+                f"context_size must be between {BOUNDS.MIN_CONTEXT_SIZE} and "
+                f"{BOUNDS.MAX_CONTEXT_SIZE}, got {ctx_size}",
                 field="context_size",
             )
 
@@ -285,8 +286,8 @@ def validate_generation_params(
             )
         if not BOUNDS.REPEAT_PENALTY_MIN <= repeat_penalty <= BOUNDS.REPEAT_PENALTY_MAX:
             raise ValidationError(
-                f"repeat_penalty must be between {BOUNDS.REPEAT_PENALTY_MIN} and {BOUNDS.REPEAT_PENALTY_MAX}, "
-                f"got {repeat_penalty}",
+                f"repeat_penalty must be between {BOUNDS.REPEAT_PENALTY_MIN} and "
+                f"{BOUNDS.REPEAT_PENALTY_MAX}, got {repeat_penalty}",
                 field="repeat_penalty",
             )
 
@@ -410,8 +411,8 @@ def validate_tts_params(
             )
         if not BOUNDS.MIN_SAMPLE_RATE <= sample_rate <= BOUNDS.MAX_SAMPLE_RATE:
             raise ValidationError(
-                f"sample_rate must be between {BOUNDS.MIN_SAMPLE_RATE} and {BOUNDS.MAX_SAMPLE_RATE}, "
-                f"got {sample_rate}",
+                f"sample_rate must be between {BOUNDS.MIN_SAMPLE_RATE} and "
+                f"{BOUNDS.MAX_SAMPLE_RATE}, got {sample_rate}",
                 field="sample_rate",
             )
 

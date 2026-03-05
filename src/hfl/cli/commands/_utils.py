@@ -10,7 +10,6 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
 from rich.console import Console
-from rich.spinner import Spinner
 from rich.status import Status
 
 from hfl.i18n import t

@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for plugin system."""
 
-import pytest
-
 from hfl.plugins import (
     discover_engines,
     discover_tts_engines,

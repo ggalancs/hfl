@@ -4,9 +4,6 @@
 
 import json
 import logging
-from unittest.mock import patch
-
-import pytest
 
 from hfl.logging_config import (
     PrettyFormatter,

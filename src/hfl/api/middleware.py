@@ -40,9 +40,7 @@ class RequestLogger(BaseHTTPMiddleware):
     - Structured logging compatible
     """
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Any]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         # Set request ID from header or generate new one
         incoming_id = request.headers.get("X-Request-ID")
         request_id = set_request_id(incoming_id)
@@ -125,9 +123,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._request_counts[client_ip].append(now)
         return False, remaining - 1
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Any]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         client_ip = self._get_client_ip(request)
         is_limited, remaining = self._is_rate_limited(client_ip)
 

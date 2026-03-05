@@ -47,9 +47,7 @@ def sanitize_path(base_dir: Path, user_path: str) -> Path:
     try:
         target.relative_to(base_dir)
     except ValueError:
-        raise PathTraversalError(
-            f"Path '{user_path}' would escape base directory '{base_dir}'"
-        )
+        raise PathTraversalError(f"Path '{user_path}' would escape base directory '{base_dir}'")
 
     return target
 
@@ -101,9 +99,7 @@ def compute_file_hash(file_path: Path, algorithm: str = "sha256") -> str:
     return hash_obj.hexdigest()
 
 
-def verify_file_hash(
-    file_path: Path, expected_hash: str, algorithm: str = "sha256"
-) -> bool:
+def verify_file_hash(file_path: Path, expected_hash: str, algorithm: str = "sha256") -> bool:
     """
     Verify a file matches an expected hash.
 

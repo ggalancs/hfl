@@ -111,19 +111,19 @@ UNSUPPORTED_FILE_PATTERNS = {
 
 # Keywords in architecture names that indicate non-LLM models
 UNSUPPORTED_ARCHITECTURE_KEYWORDS = {
-    "tts",           # Text-to-Speech
-    "stt",           # Speech-to-Text
-    "asr",           # Automatic Speech Recognition
-    "speech",        # Speech models
-    "voice",         # Voice models
-    "audio",         # Audio models
-    "music",         # Music generation
-    "vocoder",       # Audio vocoders
-    "diffusion",     # Diffusion models
-    "vae",           # Variational autoencoders
-    "gan",           # GANs
-    "vision",        # Vision-only models
-    "image",         # Image models
+    "tts",  # Text-to-Speech
+    "stt",  # Speech-to-Text
+    "asr",  # Automatic Speech Recognition
+    "speech",  # Speech models
+    "voice",  # Voice models
+    "audio",  # Audio models
+    "music",  # Music generation
+    "vocoder",  # Audio vocoders
+    "diffusion",  # Diffusion models
+    "vae",  # Variational autoencoders
+    "gan",  # GANs
+    "vision",  # Vision-only models
+    "image",  # Image models
 }
 
 
@@ -204,7 +204,7 @@ def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
             if keyword in arch_str:
                 return (
                     False,
-                    f"The model architecture '{architectures[0]}' appears to be a {keyword.upper()} model. "
+                    f"Architecture '{architectures[0]}' appears to be {keyword.upper()}. "
                     "GGUF conversion only supports text-based LLMs.",
                 )
 

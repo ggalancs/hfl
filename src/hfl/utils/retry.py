@@ -13,7 +13,7 @@ import asyncio
 import functools
 import random
 import time
-from typing import Any, Callable, ParamSpec, Type, TypeVar
+from typing import Callable, ParamSpec, Type, TypeVar
 
 P = ParamSpec("P")
 T = TypeVar("T")

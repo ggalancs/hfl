@@ -72,9 +72,7 @@ class InMemoryRateLimiter(RateLimiter):
 
         with self._lock:
             # Clean old entries
-            self._counts[client_id] = [
-                t for t in self._counts[client_id] if t > window_start
-            ]
+            self._counts[client_id] = [t for t in self._counts[client_id] if t > window_start]
 
             current = len(self._counts[client_id])
             remaining = max(0, self._requests_per_window - current - 1)

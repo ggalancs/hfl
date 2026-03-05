@@ -3,7 +3,6 @@
 """Tests for rate limiting middleware."""
 
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -140,9 +139,7 @@ class TestClientIPDetection:
         client = TestClient(rate_limited_app)
 
         # Make requests with different forwarded IPs
-        response1 = client.get(
-            "/test", headers={"X-Forwarded-For": "10.0.0.1, 192.168.1.1"}
-        )
+        response1 = client.get("/test", headers={"X-Forwarded-For": "10.0.0.1, 192.168.1.1"})
         assert response1.status_code == 200
 
         # Different forwarded IP should have its own limit

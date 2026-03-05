@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for security utilities."""
 
-from pathlib import Path
-
 import pytest
 
 from hfl.security import (

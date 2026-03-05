@@ -45,9 +45,7 @@ def discover_engines() -> dict[str, Type["InferenceEngine"] | callable]:
 
     # Built-in engines (lazy imports)
     engines["llama-cpp"] = _lazy_import("hfl.engine.llama_cpp", "LlamaCppEngine")
-    engines["transformers"] = _lazy_import(
-        "hfl.engine.transformers_engine", "TransformersEngine"
-    )
+    engines["transformers"] = _lazy_import("hfl.engine.transformers_engine", "TransformersEngine")
     engines["vllm"] = _lazy_import("hfl.engine.vllm_engine", "VLLMEngine")
 
     # Plugin engines via entry points
@@ -140,9 +138,7 @@ def get_tts_engine_class(engine_name: str) -> Type["AudioEngine"]:
     engines = discover_tts_engines()
 
     if engine_name not in engines:
-        raise KeyError(
-            f"Unknown TTS engine: {engine_name}. Available: {list(engines.keys())}"
-        )
+        raise KeyError(f"Unknown TTS engine: {engine_name}. Available: {list(engines.keys())}")
 
     engine = engines[engine_name]
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
@@ -181,10 +181,7 @@ class ModelPool:
 
         # Evict by memory if configured
         if self._max_memory_mb is not None:
-            while (
-                len(self._models) > 0
-                and self._total_memory_mb > self._max_memory_mb
-            ):
+            while len(self._models) > 0 and self._total_memory_mb > self._max_memory_mb:
                 oldest_name = next(iter(self._models))
                 self._evict_locked(oldest_name)
 

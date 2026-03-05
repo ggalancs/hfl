@@ -2,9 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for model pooling and caching."""
 
-import asyncio
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -183,6 +181,7 @@ class TestModelPool:
     @pytest.mark.asyncio
     async def test_memory_tracking(self, pool):
         """Should track total memory usage."""
+
         async def loader(mem):
             return MockEngine(), MockManifest("test"), mem
 
@@ -194,6 +193,7 @@ class TestModelPool:
     @pytest.mark.asyncio
     async def test_get_stats(self, pool):
         """Should return cache statistics."""
+
         async def loader():
             return MockEngine(), MockManifest("test"), 500.0
 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.engine.base import AudioResult, TTSConfig
+from hfl.engine.base import AudioResult
 
 
 @pytest.fixture

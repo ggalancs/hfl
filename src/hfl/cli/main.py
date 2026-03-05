@@ -451,13 +451,9 @@ def list_models(
 
     # Show tip about unsupported models if any
     if not supported_only:
-        unsupported_count = sum(
-            1 for m in models if not is_model_type_supported(get_model_type(m))
-        )
+        unsupported_count = sum(1 for m in models if not is_model_type_supported(get_model_type(m)))
         if unsupported_count > 0:
-            console.print(
-                f"\n[dim]{t('messages.unsupported_tip', count=unsupported_count)}[/]"
-            )
+            console.print(f"\n[dim]{t('messages.unsupported_tip', count=unsupported_count)}[/]")
 
 
 def _pull_selected_model(model) -> None:
@@ -907,7 +903,6 @@ def tts(
 
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
 
-
     model_path = Path(manifest.local_path)
 
     try:
@@ -929,7 +924,7 @@ def tts(
     )
 
     text_preview = text[:50] + "..." if len(text) > 50 else text
-    console.print(f"[cyan]{t('messages.synthesizing')}[/] \"{text_preview}\"")
+    console.print(f'[cyan]{t("messages.synthesizing")}[/] "{text_preview}"')
 
     # Synthesize
     result = engine.synthesize(text, config)
@@ -995,7 +990,6 @@ def speak(
 
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
 
-
     model_path = Path(manifest.local_path)
 
     try:
@@ -1016,7 +1010,7 @@ def speak(
     )
 
     text_preview = text[:50] + "..." if len(text) > 50 else text
-    console.print(f"[cyan]{t('messages.synthesizing')}[/] \"{text_preview}\"")
+    console.print(f'[cyan]{t("messages.synthesizing")}[/] "{text_preview}"')
 
     # Synthesize
     result = engine.synthesize(text, config)

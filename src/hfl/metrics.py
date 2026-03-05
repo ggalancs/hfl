@@ -32,22 +32,14 @@ class Metrics:
 
     # Counters
     requests_total: int = 0
-    requests_by_endpoint: dict[str, int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
-    requests_by_status: dict[int, int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
-    requests_by_method: dict[str, int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
+    requests_by_endpoint: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    requests_by_status: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    requests_by_method: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     tokens_generated: int = 0
     tokens_input: int = 0
     model_loads: int = 0
     model_unloads: int = 0
-    errors_by_type: dict[str, int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
+    errors_by_type: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     # Histograms (simplified - store recent values)
     _generation_latencies_ms: list[float] = field(default_factory=list, repr=False)
@@ -84,9 +76,7 @@ class Metrics:
 
             self._request_latencies_ms.append(duration_ms)
             if len(self._request_latencies_ms) > self._max_histogram_size:
-                self._request_latencies_ms = self._request_latencies_ms[
-                    -self._max_histogram_size :
-                ]
+                self._request_latencies_ms = self._request_latencies_ms[-self._max_histogram_size :]
 
     def record_generation(
         self,
@@ -190,14 +180,10 @@ class Metrics:
             # Per-endpoint requests
             if self.requests_by_endpoint:
                 lines.append("")
-                lines.append(
-                    "# HELP hfl_requests_by_endpoint_total Requests by endpoint"
-                )
+                lines.append("# HELP hfl_requests_by_endpoint_total Requests by endpoint")
                 lines.append("# TYPE hfl_requests_by_endpoint_total counter")
                 for endpoint, count in self.requests_by_endpoint.items():
-                    lines.append(
-                        f'hfl_requests_by_endpoint_total{{endpoint="{endpoint}"}} {count}'
-                    )
+                    lines.append(f'hfl_requests_by_endpoint_total{{endpoint="{endpoint}"}} {count}')
 
             # Per-status requests
             if self.requests_by_status:
@@ -205,9 +191,7 @@ class Metrics:
                 lines.append("# HELP hfl_requests_by_status_total Requests by status")
                 lines.append("# TYPE hfl_requests_by_status_total counter")
                 for status, count in self.requests_by_status.items():
-                    lines.append(
-                        f'hfl_requests_by_status_total{{status="{status}"}} {count}'
-                    )
+                    lines.append(f'hfl_requests_by_status_total{{status="{status}"}} {count}')
 
             # Errors
             if self.errors_by_type:
@@ -215,42 +199,30 @@ class Metrics:
                 lines.append("# HELP hfl_errors_total Errors by type")
                 lines.append("# TYPE hfl_errors_total counter")
                 for error_type, count in self.errors_by_type.items():
-                    lines.append(
-                        f'hfl_errors_total{{type="{error_type}"}} {count}'
-                    )
+                    lines.append(f'hfl_errors_total{{type="{error_type}"}} {count}')
 
             # Latency summaries
             if self._request_latencies_ms:
                 lines.append("")
-                lines.append(
-                    "# HELP hfl_request_latency_ms Request latency in milliseconds"
-                )
+                lines.append("# HELP hfl_request_latency_ms Request latency in milliseconds")
                 lines.append("# TYPE hfl_request_latency_ms summary")
-                lines.append(
-                    f'hfl_request_latency_ms{{quantile="0.5"}} {self._percentile(self._request_latencies_ms, 0.5):.2f}'
-                )
-                lines.append(
-                    f'hfl_request_latency_ms{{quantile="0.95"}} {self._percentile(self._request_latencies_ms, 0.95):.2f}'
-                )
-                lines.append(
-                    f'hfl_request_latency_ms{{quantile="0.99"}} {self._percentile(self._request_latencies_ms, 0.99):.2f}'
-                )
+                p50 = self._percentile(self._request_latencies_ms, 0.5)
+                p95 = self._percentile(self._request_latencies_ms, 0.95)
+                p99 = self._percentile(self._request_latencies_ms, 0.99)
+                lines.append(f'hfl_request_latency_ms{{quantile="0.5"}} {p50:.2f}')
+                lines.append(f'hfl_request_latency_ms{{quantile="0.95"}} {p95:.2f}')
+                lines.append(f'hfl_request_latency_ms{{quantile="0.99"}} {p99:.2f}')
 
             if self._generation_latencies_ms:
                 lines.append("")
-                lines.append(
-                    "# HELP hfl_generation_latency_ms Generation latency in milliseconds"
-                )
+                lines.append("# HELP hfl_generation_latency_ms Generation latency in milliseconds")
                 lines.append("# TYPE hfl_generation_latency_ms summary")
-                lines.append(
-                    f'hfl_generation_latency_ms{{quantile="0.5"}} {self._percentile(self._generation_latencies_ms, 0.5):.2f}'
-                )
-                lines.append(
-                    f'hfl_generation_latency_ms{{quantile="0.95"}} {self._percentile(self._generation_latencies_ms, 0.95):.2f}'
-                )
-                lines.append(
-                    f'hfl_generation_latency_ms{{quantile="0.99"}} {self._percentile(self._generation_latencies_ms, 0.99):.2f}'
-                )
+                p50 = self._percentile(self._generation_latencies_ms, 0.5)
+                p95 = self._percentile(self._generation_latencies_ms, 0.95)
+                p99 = self._percentile(self._generation_latencies_ms, 0.99)
+                lines.append(f'hfl_generation_latency_ms{{quantile="0.5"}} {p50:.2f}')
+                lines.append(f'hfl_generation_latency_ms{{quantile="0.95"}} {p95:.2f}')
+                lines.append(f'hfl_generation_latency_ms{{quantile="0.99"}} {p99:.2f}')
 
             return "\n".join(lines)
 
@@ -274,18 +246,10 @@ class Metrics:
                 "errors_by_type": dict(self.errors_by_type),
                 "latencies": {
                     "request_p50_ms": self._percentile(self._request_latencies_ms, 0.5),
-                    "request_p95_ms": self._percentile(
-                        self._request_latencies_ms, 0.95
-                    ),
-                    "request_p99_ms": self._percentile(
-                        self._request_latencies_ms, 0.99
-                    ),
-                    "generation_p50_ms": self._percentile(
-                        self._generation_latencies_ms, 0.5
-                    ),
-                    "generation_p95_ms": self._percentile(
-                        self._generation_latencies_ms, 0.95
-                    ),
+                    "request_p95_ms": self._percentile(self._request_latencies_ms, 0.95),
+                    "request_p99_ms": self._percentile(self._request_latencies_ms, 0.99),
+                    "generation_p50_ms": self._percentile(self._generation_latencies_ms, 0.5),
+                    "generation_p95_ms": self._percentile(self._generation_latencies_ms, 0.95),
                 },
             }
 
