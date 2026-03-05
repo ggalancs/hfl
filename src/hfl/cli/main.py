@@ -17,12 +17,17 @@ Language:
   Default: en (English)
 """
 
-import sys
-
 import typer
-from rich.console import Console
 from rich.panel import Panel
 
+from hfl.cli.commands._utils import (
+    console,
+    display_model_row,
+    get_key,
+    get_model_type,
+    get_params_value,
+    progress_spinner,
+)
 from hfl.i18n import t
 
 app = typer.Typer(
@@ -30,7 +35,6 @@ app = typer.Typer(
     help=t("app.description"),
     no_args_is_help=True,
 )
-console = Console()
 
 
 @app.command()
@@ -45,7 +49,7 @@ def pull(
         "-f",
         help=t("commands.pull.options.format"),
     ),
-    alias: str = typer.Option(
+    alias: str | None = typer.Option(
         None,
         "--alias",
         "-a",
@@ -255,7 +259,7 @@ def run(
         raise typer.Exit(1)
 
     # Check if model type is supported for chat
-    model_type = _get_model_type(manifest)
+    model_type = get_model_type(manifest)
     if model_type != ModelType.LLM:
         type_name = get_model_type_display_name(model_type)
         console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
@@ -326,7 +330,8 @@ def serve(
     api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
-    from hfl.api.server import start_server, state
+    from hfl.api.server import start_server
+    from hfl.api.state import get_state
 
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
@@ -344,6 +349,7 @@ def serve(
         from hfl.engine.selector import MissingDependencyError, select_engine
         from hfl.models.registry import ModelRegistry
 
+        state = get_state()
         registry = ModelRegistry()
         manifest = registry.get(model)
         if manifest:
@@ -390,7 +396,7 @@ def list_models(
     if supported_only:
         filtered_models = []
         for m in models:
-            model_type = _get_model_type(m)
+            model_type = get_model_type(m)
             if is_model_type_supported(model_type):
                 filtered_models.append(m)
         models = filtered_models
@@ -410,7 +416,7 @@ def list_models(
 
     for m in models:
         # Get model type
-        model_type = _get_model_type(m)
+        model_type = get_model_type(m)
         is_supported = is_model_type_supported(model_type)
 
         # Format type display with color
@@ -446,167 +452,12 @@ def list_models(
     # Show tip about unsupported models if any
     if not supported_only:
         unsupported_count = sum(
-            1 for m in models if not is_model_type_supported(_get_model_type(m))
+            1 for m in models if not is_model_type_supported(get_model_type(m))
         )
         if unsupported_count > 0:
             console.print(
                 f"\n[dim]{t('messages.unsupported_tip', count=unsupported_count)}[/]"
             )
-
-
-def _get_model_type(manifest):
-    """Get model type from manifest or detect it.
-
-    Returns:
-        ModelType enum value
-    """
-    from pathlib import Path
-
-    from hfl.converter.formats import ModelType, detect_model_type
-
-    # Try to get from manifest first
-    if manifest.model_type:
-        try:
-            return ModelType(manifest.model_type)
-        except ValueError:
-            pass
-
-    # Detect from path
-    return detect_model_type(Path(manifest.local_path))
-
-
-def _format_size(size_bytes: int) -> str:
-    """Format size in bytes to human-readable format."""
-    if size_bytes == 0:
-        return t("inspect.na")
-    gb = size_bytes / (1024**3)
-    if gb >= 1:
-        return f"{gb:.1f} GB"
-    mb = size_bytes / (1024**2)
-    if mb >= 1:
-        return f"{mb:.0f} MB"
-    return f"{size_bytes} B"
-
-
-def _get_key() -> str:
-    """Read a key without requiring Enter to be pressed."""
-    import termios
-    import tty
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
-
-
-def _extract_params_from_name(model_id: str) -> str | None:
-    """Extract the number of parameters from the model name (e.g.: '70B', '7B')."""
-    import re
-
-    name = model_id.lower()
-    # Patterns: 70b, 7b, 1.5b, 0.5b, 405b, etc.
-    patterns = [
-        r"(\d+\.?\d*)b(?:[-_]|$)",  # 70b, 7b, 1.5b
-        r"(\d+)b-",  # 70b-instruct
-        r"-(\d+\.?\d*)b",  # model-7b
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, name)
-        if match:
-            return match.group(1) + "B"
-    return None
-
-
-def _estimate_model_size(params_str: str | None, quantization: str = "Q4") -> str:
-    """Estimate model size based on parameters and quantization."""
-    if not params_str:
-        return "?"
-
-    try:
-        # Parse params (e.g., "70B" -> 70, "1.5B" -> 1.5)
-        params = float(params_str.replace("B", "").replace("b", ""))
-
-        # Bytes per parameter depends on quantization
-        # Q4_K_M ~ 4.5 bits/param, Q8_0 ~ 8 bits/param, F16 ~ 16 bits
-        bits_per_param = {
-            "Q2": 2.5,
-            "Q3": 3.5,
-            "Q4": 4.5,
-            "Q5": 5.5,
-            "Q6": 6.5,
-            "Q8": 8.0,
-            "F1": 16.0,  # F16
-        }
-        bits = bits_per_param.get(quantization[:2].upper(), 4.5)
-        size_gb = (params * 1e9 * bits / 8) / (1024**3)
-
-        if size_gb >= 100:
-            return f"{size_gb:.0f}GB"
-        elif size_gb >= 10:
-            return f"{size_gb:.0f}GB"
-        else:
-            return f"{size_gb:.1f}GB"
-    except Exception:
-        return "?"
-
-
-def _display_model_row(model, index: int, show_index: bool = True) -> None:
-    """Display a formatted model row."""
-    # Get model information
-    model_id = model.id
-    downloads = getattr(model, "downloads", 0) or 0
-    likes = getattr(model, "likes", 0) or 0
-
-    # Detect if it has GGUF
-    has_gguf = False
-    siblings = getattr(model, "siblings", None)
-    if siblings:
-        has_gguf = any(s.rfilename.endswith(".gguf") for s in siblings)
-
-    pipeline_tag = getattr(model, "pipeline_tag", None)
-
-    # Format icon
-    format_icon = "[green]●[/] GGUF" if has_gguf else "[dim]○[/] HF"
-
-    # Format downloads
-    if downloads >= 1_000_000:
-        dl_str = f"{downloads / 1_000_000:.1f}M"
-    elif downloads >= 1_000:
-        dl_str = f"{downloads / 1_000:.1f}K"
-    else:
-        dl_str = str(downloads)
-
-    # Extract parameters and estimate size
-    params = _extract_params_from_name(model_id)
-    size_q4 = _estimate_model_size(params, "Q4")
-    size_str = f"[magenta]~{size_q4}[/]" if params else ""
-
-    # Index number
-    idx_str = f"[dim]{index:3}.[/] " if show_index else ""
-
-    console.print(
-        f"{idx_str}[bold cyan]{model_id}[/]  "
-        f"{format_icon}  "
-        f"[yellow]↓{dl_str}[/]  "
-        f"[red]♥{likes}[/]  "
-        f"{size_str}  "
-        f"[dim]{pipeline_tag or ''}[/]"
-    )
-
-
-def _get_params_value(model_id: str) -> float | None:
-    """Extract the numeric value of parameters from the name (e.g.: 70 for '70B')."""
-    params = _extract_params_from_name(model_id)
-    if not params:
-        return None
-    try:
-        return float(params.replace("B", "").replace("b", ""))
-    except ValueError:
-        return None
 
 
 def _pull_selected_model(model) -> None:
@@ -683,22 +534,21 @@ def search(
         console.print(f"[red]Error:[/] {t('errors.search_min_chars')}")
         raise typer.Exit(1)
 
-    console.print(f"[bold]{t('messages.searching', query=query)}[/]\n")
-
     api = HfApi()
 
     try:
-        # Search models
-        models = list(
-            api.list_models(
-                search=query,
-                sort=sort,
-                direction=-1,
-                limit=limit,
-                fetch_config=False,
-                full=True,  # To get siblings and detect GGUF
+        # Search models with progress spinner
+        with progress_spinner(t("messages.searching", query=query)):
+            models = list(
+                api.list_models(
+                    search=query,
+                    sort=sort,
+                    direction=-1,
+                    limit=limit,
+                    fetch_config=False,
+                    full=True,  # To get siblings and detect GGUF
+                )
             )
-        )
     except Exception as e:
         console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1)
@@ -724,7 +574,7 @@ def search(
     if max_params is not None or min_params is not None:
         filtered = []
         for m in models:
-            params = _get_params_value(m.id)
+            params = get_params_value(m.id)
             if params is None:
                 continue  # Exclude models without detectable parameters
             if max_params is not None and params > max_params:
@@ -769,7 +619,7 @@ def search(
 
         # Show models of the current page (0-9 index per page)
         for i, model in enumerate(page_models):
-            _display_model_row(model, i)
+            display_model_row(model, i)
 
         # Show pagination status
         console.print()
@@ -788,7 +638,7 @@ def search(
 
             # Wait for user input
             try:
-                key = _get_key()
+                key = get_key()
             except Exception:
                 # Fallback if no interactive terminal
                 try:
@@ -1041,7 +891,7 @@ def tts(
         raise typer.Exit(1)
 
     # Check model type
-    model_type = _get_model_type(manifest)
+    model_type = get_model_type(manifest)
 
     if model_type != ModelType.TTS:
         type_name = get_model_type_display_name(model_type)
@@ -1129,7 +979,7 @@ def speak(
         raise typer.Exit(1)
 
     # Check model type
-    model_type = _get_model_type(manifest)
+    model_type = get_model_type(manifest)
 
     if model_type != ModelType.TTS:
         type_name = get_model_type_display_name(model_type)
@@ -1230,9 +1080,9 @@ def _play_audio(audio_data: bytes, sample_rate: int) -> None:
                 except (FileNotFoundError, subprocess.CalledProcessError):
                     continue
         elif system == "Windows":
-            import winsound
+            import winsound  # noqa: PLC0415 (conditional import)
 
-            winsound.PlaySound(temp_path, winsound.SND_FILENAME)
+            winsound.PlaySound(temp_path, winsound.SND_FILENAME)  # type: ignore[attr-defined]
     finally:
         import os
 
