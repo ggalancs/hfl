@@ -665,3 +665,108 @@ class TestModelAlias:
         restored = ModelManifest.from_dict(d)
 
         assert restored.alias == "myalias"
+
+
+class TestRegistryOptimizations:
+    """Tests for registry performance optimizations."""
+
+    def test_len_method(self, temp_config, sample_manifest):
+        """Test __len__ method returns correct count."""
+        from hfl.models.registry import ModelRegistry
+
+        registry = ModelRegistry()
+        assert len(registry) == 0
+
+        registry.add(sample_manifest)
+        assert len(registry) == 1
+
+    def test_contains_method(self, temp_config, sample_manifest):
+        """Test __contains__ method for model lookup."""
+        from hfl.models.registry import ModelRegistry
+
+        registry = ModelRegistry()
+        registry.add(sample_manifest)
+
+        # Check by name
+        assert "test-model-q4_k_m" in registry
+        assert "nonexistent" not in registry
+
+        # Check by repo_id
+        assert "test-org/test-model" in registry
+
+    def test_o1_lookup_by_name(self, temp_config):
+        """Test O(1) lookup by name is fast with many models."""
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
+
+        registry = ModelRegistry()
+
+        # Add 100 models
+        for i in range(100):
+            manifest = ModelManifest(
+                name=f"model-{i:03d}",
+                repo_id=f"org/model-{i}",
+                local_path=f"/path/{i}",
+                format="gguf",
+            )
+            registry.add(manifest)
+
+        # Lookup should be O(1) using dict
+        assert registry.get("model-050") is not None
+        assert registry.get("model-099") is not None
+        assert registry.get("model-000") is not None
+
+    def test_get_registry_singleton(self, temp_config):
+        """Test get_registry returns singleton instance."""
+        from hfl.models.registry import get_registry
+
+        registry1 = get_registry()
+        registry2 = get_registry()
+
+        assert registry1 is registry2
+
+    def test_reset_registry(self, temp_config, sample_manifest):
+        """Test reset_registry clears singleton."""
+        from hfl.models.registry import get_registry, reset_registry
+
+        # Get initial singleton
+        registry1 = get_registry()
+        registry1.add(sample_manifest)
+
+        # Reset
+        reset_registry()
+
+        # New singleton should be different instance
+        registry2 = get_registry()
+        assert registry1 is not registry2
+
+    def test_refresh_reloads_from_disk(self, temp_config, sample_manifest):
+        """Test refresh() reloads from disk."""
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
+
+        registry = ModelRegistry()
+        registry.add(sample_manifest)
+        assert len(registry) == 1
+
+        # Manually modify the file to add another model
+        import json
+
+        data = json.loads(temp_config.registry_path.read_text())
+        data.append(
+            ModelManifest(
+                name="external-model",
+                repo_id="org/external",
+                local_path="/external/path",
+                format="gguf",
+            ).to_dict()
+        )
+        temp_config.registry_path.write_text(json.dumps(data))
+
+        # Registry doesn't see the change yet
+        assert len(registry) == 1
+
+        # After refresh, it should see both
+        registry.refresh()
+        assert len(registry) == 2
+        assert "external-model" in registry
