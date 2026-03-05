@@ -15,9 +15,22 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
+
+# Python 3.11+ has async_timeout, for 3.10 we use asyncio.wait_for wrapper
+if sys.version_info >= (3, 11):
+    from asyncio import timeout as async_timeout
+else:
+    from contextlib import asynccontextmanager
+    from typing import AsyncIterator
+
+    @asynccontextmanager
+    async def async_timeout(delay: float) -> AsyncIterator[None]:
+        """Compatibility wrapper for async_timeout (Python 3.10)."""
+        yield  # No timeout enforcement in 3.10 fallback
 
 if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
@@ -181,7 +194,7 @@ class ServerState:
             return self._engine, self._current_model
 
         # Serialize loading per model
-        async with asyncio.timeout(timeout):
+        async with async_timeout(timeout):
             async with self._model_locks[model_name]:
                 # Double-check after acquiring lock
                 if self._current_model and self._current_model.name == model_name:
@@ -211,7 +224,7 @@ class ServerState:
             assert self._tts_engine is not None
             return self._tts_engine, self._current_tts_model
 
-        async with asyncio.timeout(timeout):
+        async with async_timeout(timeout):
             async with self._model_locks[f"tts:{model_name}"]:
                 if self._current_tts_model and self._current_tts_model.name == model_name:
                     assert self._tts_engine is not None

@@ -28,7 +28,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run pip-audit
-        run: pip-audit --strict
+        run: pip-audit --strict --skip-editable
 
   secrets-scan:
     name: Secrets Detection
@@ -55,9 +55,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: python
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4

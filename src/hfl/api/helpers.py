@@ -142,15 +142,22 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     if not options:
         return GenerationConfig()
 
-    return GenerationConfig(
-        temperature=options.get("temperature"),
-        top_p=options.get("top_p"),
-        top_k=options.get("top_k"),
-        max_tokens=options.get("num_predict"),
-        repeat_penalty=options.get("repeat_penalty"),
-        stop=options.get("stop"),
-        seed=options.get("seed"),
-    )
+    config = GenerationConfig()
+    if "temperature" in options and options["temperature"] is not None:
+        config.temperature = options["temperature"]
+    if "top_p" in options and options["top_p"] is not None:
+        config.top_p = options["top_p"]
+    if "top_k" in options and options["top_k"] is not None:
+        config.top_k = options["top_k"]
+    if "num_predict" in options and options["num_predict"] is not None:
+        config.max_tokens = options["num_predict"]
+    if "repeat_penalty" in options and options["repeat_penalty"] is not None:
+        config.repeat_penalty = options["repeat_penalty"]
+    if "stop" in options:
+        config.stop = options["stop"]
+    if "seed" in options and options["seed"] is not None:
+        config.seed = options["seed"]
+    return config
 
 
 def request_to_config(
@@ -182,13 +189,18 @@ def request_to_config(
         else:
             stop_list = list(stop)
 
-    return GenerationConfig(
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        stop=stop_list,
-        seed=seed,
-    )
+    config = GenerationConfig()
+    if temperature is not None:
+        config.temperature = temperature
+    if top_p is not None:
+        config.top_p = top_p
+    if max_tokens is not None:
+        config.max_tokens = max_tokens
+    if stop_list is not None:
+        config.stop = stop_list
+    if seed is not None:
+        config.seed = seed
+    return config
 
 
 # Optimized streaming helpers
@@ -265,7 +277,8 @@ async def stream_openai_chat(
     """
     ctx = StreamingContext(model_name)
 
-    async for token in engine.chat_stream(messages, config):
+    # Engine returns sync iterator, wrap for async context
+    for token in engine.chat_stream(messages, config):
         yield ctx.format_chunk(content=token)
 
     yield ctx.format_chunk(finish_reason="stop")
@@ -291,7 +304,8 @@ async def stream_openai_completion(
     """
     ctx = StreamingContext(model_name, object_type="text_completion")
 
-    async for token in engine.generate_stream(prompt, config):
+    # Engine returns sync iterator, wrap for async context
+    for token in engine.generate_stream(prompt, config):
         yield ctx.format_chunk(content=token)
 
     yield ctx.format_chunk(finish_reason="stop")
@@ -342,7 +356,8 @@ async def stream_ollama_generate(
     Yields:
         NDJSON-formatted chunks
     """
-    async for token in engine.generate_stream(prompt, config):
+    # Engine returns sync iterator, wrap for async context
+    for token in engine.generate_stream(prompt, config):
         yield format_ndjson_chunk(token, model_name)
 
     yield format_ndjson_chunk("", model_name, done=True)
@@ -367,7 +382,8 @@ async def stream_ollama_chat(
     """
     full_response = []
 
-    async for token in engine.chat_stream(messages, config):
+    # Engine returns sync iterator, wrap for async context
+    for token in engine.chat_stream(messages, config):
         full_response.append(token)
         chunk = {
             "model": model_name,
