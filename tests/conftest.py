@@ -58,7 +58,15 @@ def temp_config(temp_dir, monkeypatch):
 
     monkeypatch.setattr(hfl.hub.downloader, "config", test_config)
 
+    # Reset registry singleton cache so it uses the new config
+    from hfl.models.registry import reset_registry
+
+    reset_registry()
+
     yield test_config
+
+    # Clean up: reset registry after test
+    reset_registry()
 
 
 @pytest.fixture

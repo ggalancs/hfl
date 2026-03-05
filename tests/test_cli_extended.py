@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from hfl.cli.main import _format_size, app
+from hfl.cli.commands._utils import format_size
+from hfl.cli.main import app
 
 runner = CliRunner()
 
@@ -15,12 +16,12 @@ class TestFormatSize:
 
     def test_format_size_gigabytes(self):
         """Test formatting gigabyte sizes."""
-        result = _format_size(2 * 1024 * 1024 * 1024)  # 2 GB
+        result = format_size(2 * 1024 * 1024 * 1024)  # 2 GB
         assert "GB" in result
 
     def test_format_size_megabytes(self):
         """Test formatting megabyte sizes."""
-        result = _format_size(500 * 1024 * 1024)  # 500 MB
+        result = format_size(500 * 1024 * 1024)  # 500 MB
         assert "MB" in result
 
 

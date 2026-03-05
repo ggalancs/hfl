@@ -157,9 +157,11 @@ class TestAPIIntegration:
         """Compatibility between OpenAI and Ollama endpoints."""
         from fastapi.testclient import TestClient
 
-        from hfl.api.server import app, state
+        from hfl.api.server import app
+        from hfl.api.state import get_state
         from hfl.models.registry import ModelRegistry
 
+        state = get_state()
         client = TestClient(app)
 
         # Register model

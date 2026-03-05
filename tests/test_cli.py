@@ -804,26 +804,26 @@ class TestHelperFunctions:
 
     def test_format_size_gb(self):
         """Size formatting in GB."""
-        from hfl.cli.main import _format_size
+        from hfl.cli.commands._utils import format_size
 
-        assert "5.0 GB" in _format_size(5 * 1024**3)
-        assert "1.5 GB" in _format_size(int(1.5 * 1024**3))
+        assert "5.0 GB" in format_size(5 * 1024**3)
+        assert "1.5 GB" in format_size(int(1.5 * 1024**3))
 
     def test_format_size_mb(self):
         """Size formatting in MB."""
-        from hfl.cli.main import _format_size
+        from hfl.cli.commands._utils import format_size
 
-        assert "500 MB" in _format_size(500 * 1024**2)
+        assert "500 MB" in format_size(500 * 1024**2)
 
     def test_format_size_zero(self):
         """Zero size formatting."""
-        from hfl.cli.main import _format_size
+        from hfl.cli.commands._utils import format_size
 
-        assert _format_size(0) == "N/A"
+        assert format_size(0) == "N/A"
 
-    def test_display_model_row(self, capsys):
+    def testdisplay_model_row(self, capsys):
         """Verifies model row format."""
-        from hfl.cli.main import _display_model_row
+        from hfl.cli.commands._utils import display_model_row
 
         mock_model = MagicMock()
         mock_model.id = "org/model"
@@ -832,7 +832,7 @@ class TestHelperFunctions:
         mock_model.siblings = [MagicMock(rfilename="model.gguf")]
         mock_model.pipeline_tag = "text-generation"
 
-        _display_model_row(mock_model, 1)
+        display_model_row(mock_model, 1)
         # No failure = test passes
 
 

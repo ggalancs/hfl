@@ -20,8 +20,11 @@ def client(temp_config):
 @pytest.fixture
 def client_with_model(temp_config, sample_manifest):
     """Client with pre-loaded model."""
-    from hfl.api.server import app, state
+    from hfl.api.server import app
+    from hfl.api.state import get_state
     from hfl.models.registry import ModelRegistry
+
+    state = get_state()
 
     # Register model
     registry = ModelRegistry()
@@ -444,7 +447,7 @@ class TestServerState:
 
     def test_initial_state(self):
         """Verifies initial state."""
-        from hfl.api.server import ServerState
+        from hfl.api.state import ServerState
 
         state = ServerState()
 

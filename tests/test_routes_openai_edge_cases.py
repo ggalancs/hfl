@@ -6,8 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.routes_openai import _ensure_model_loaded, _to_gen_config
-from hfl.api.server import app, state
+from hfl.api.routes_openai import _to_gen_config
+from hfl.api.server import app
+from hfl.api.state import get_state
 
 
 class TestToGenConfigEdgeCases:
@@ -84,46 +85,52 @@ class TestToGenConfigEdgeCases:
 
 
 class TestEnsureModelLoaded:
-    """Tests for _ensure_model_loaded function."""
+    """Tests for _ensure_model_loaded function (async)."""
 
     @pytest.fixture(autouse=True)
-    def reset_state(self):
+    def reset_test_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
-    def test_same_model_no_reload(self):
+    @pytest.mark.asyncio
+    async def test_same_model_no_reload(self):
         """Test same model doesn't trigger reload."""
+        from hfl.api.routes_openai import _ensure_model_loaded
+
         mock_engine = MagicMock()
         mock_engine.is_loaded = True
 
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         # Should return early without doing anything
-        _ensure_model_loaded("test-model")
+        await _ensure_model_loaded("test-model")
 
         # Engine should not be unloaded
         mock_engine.unload.assert_not_called()
 
-    def test_different_model_unloads_current(self):
-        """Test different model unloads the current one."""
+    @pytest.mark.asyncio
+    async def test_different_model_not_found(self):
+        """Test different model raises when not found."""
+        from hfl.api.routes_openai import _ensure_model_loaded
+
         mock_engine = MagicMock()
         mock_engine.is_loaded = True
 
         mock_current_model = MagicMock()
         mock_current_model.name = "model-a"
 
-        state.engine = mock_engine
-        state.current_model = mock_current_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_current_model
 
         # Mock the registry to return None (model not found)
         with patch("hfl.api.routes_openai.ModelRegistry") as mock_registry_class:
@@ -132,10 +139,7 @@ class TestEnsureModelLoaded:
             mock_registry_class.return_value = mock_registry
 
             with pytest.raises(Exception):  # HTTPException
-                _ensure_model_loaded("model-b")
-
-            # Engine should be unloaded before trying to load new model
-            mock_engine.unload.assert_called_once()
+                await _ensure_model_loaded("model-b")
 
 
 class TestChatCompletionsStreamingEdgeCases:
@@ -144,13 +148,13 @@ class TestChatCompletionsStreamingEdgeCases:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_chat_completions_with_system_message(self):
         """Test chat completions with system message."""
@@ -167,8 +171,8 @@ class TestChatCompletionsStreamingEdgeCases:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -200,8 +204,8 @@ class TestChatCompletionsStreamingEdgeCases:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 

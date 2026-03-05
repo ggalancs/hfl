@@ -469,10 +469,11 @@ class TestModelTypeFunctions:
         assert is_model_type_supported(ModelType.LLM) is True
 
     def test_is_model_type_supported_tts(self):
-        """Test that TTS is supported."""
+        """Test that TTS is temporarily disabled."""
         from hfl.converter.formats import ModelType, is_model_type_supported
 
-        assert is_model_type_supported(ModelType.TTS) is True
+        # TTS is temporarily disabled - only LLM is supported
+        assert is_model_type_supported(ModelType.TTS) is False
 
     def test_is_model_type_supported_stt(self):
         """Test that STT is not supported."""

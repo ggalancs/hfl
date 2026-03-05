@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.server import app, state
+from hfl.api.server import app
+from hfl.api.state import get_state
 
 
 class TestModelSwitching:
@@ -15,13 +16,13 @@ class TestModelSwitching:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_load_different_model_unloads_current(self):
         """Test that loading a different model unloads the current one."""
@@ -33,8 +34,8 @@ class TestModelSwitching:
         mock_current_model = MagicMock()
         mock_current_model.name = "model-a"
 
-        state.engine = mock_engine
-        state.current_model = mock_current_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_current_model
 
         client = TestClient(app)
 
@@ -63,8 +64,8 @@ class TestModelSwitching:
         mock_current_model = MagicMock()
         mock_current_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_current_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_current_model
 
         client = TestClient(app)
 
@@ -97,9 +98,9 @@ class TestModelNotFound:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
 
     def test_chat_completions_model_not_found(self):

@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.server import app, state
+from hfl.api.server import app
+from hfl.api.state import get_state
 
 
 class TestOllamaChat:
@@ -15,13 +16,13 @@ class TestOllamaChat:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_chat_success(self):
         """Test successful chat request."""
@@ -38,8 +39,8 @@ class TestOllamaChat:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -55,8 +56,8 @@ class TestOllamaChat:
 
     def test_chat_model_not_found(self):
         """Test chat with non-existent model."""
-        state.engine = None
-        state.current_model = None
+        get_state().engine = None
+        get_state().current_model = None
 
         client = TestClient(app)
 
@@ -82,13 +83,13 @@ class TestOllamaGenerate:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_generate_success(self):
         """Test successful generate request."""
@@ -105,8 +106,8 @@ class TestOllamaGenerate:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 

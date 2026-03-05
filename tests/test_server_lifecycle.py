@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hfl.api.server import lifespan, start_server, state
+from hfl.api.server import lifespan, start_server
+from hfl.api.state import ServerState, get_state
 
 
 class TestLifespan:
@@ -14,13 +15,13 @@ class TestLifespan:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     @pytest.mark.asyncio
     async def test_lifespan_cleanup_with_loaded_engine(self):
@@ -29,7 +30,7 @@ class TestLifespan:
         mock_engine.is_loaded = True
         mock_engine.unload = MagicMock()
 
-        state.engine = mock_engine
+        get_state().engine = mock_engine
 
         # Run the lifespan context manager
         async with lifespan(None):
@@ -41,7 +42,7 @@ class TestLifespan:
     @pytest.mark.asyncio
     async def test_lifespan_no_engine(self):
         """Test lifespan with no engine loaded."""
-        state.engine = None
+        get_state().engine = None
 
         # Should not raise any errors
         async with lifespan(None):
@@ -54,7 +55,7 @@ class TestLifespan:
         mock_engine.is_loaded = False
         mock_engine.unload = MagicMock()
 
-        state.engine = mock_engine
+        get_state().engine = mock_engine
 
         async with lifespan(None):
             pass
@@ -69,16 +70,16 @@ class TestStartServer:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
+        get_state().api_key = None
         yield
-        state.api_key = None
+        get_state().api_key = None
 
     def test_start_server_sets_api_key(self):
-        """Test that start_server sets the API key in state."""
+        """Test that start_server sets the API key in get_state()."""
         with patch("hfl.api.server.uvicorn.run") as mock_run:
             start_server(api_key="test-key")
 
-            assert state.api_key == "test-key"
+            assert get_state().api_key == "test-key"
             mock_run.assert_called_once()
 
     def test_start_server_default_values(self):
@@ -110,7 +111,7 @@ class TestStartServer:
         with patch("hfl.api.server.uvicorn.run"):
             start_server()
 
-            assert state.api_key is None
+            assert get_state().api_key is None
 
 
 class TestServerState:
@@ -118,8 +119,6 @@ class TestServerState:
 
     def test_server_state_attributes(self):
         """Test that ServerState has expected attributes."""
-        from hfl.api.server import ServerState
-
         server_state = ServerState()
 
         assert hasattr(server_state, "engine")
@@ -128,8 +127,6 @@ class TestServerState:
 
     def test_server_state_initial_values(self):
         """Test initial values of ServerState."""
-        from hfl.api.server import ServerState
-
         server_state = ServerState()
 
         assert server_state.engine is None

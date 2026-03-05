@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.server import app, state
+from hfl.api.server import app
+from hfl.api.state import get_state
 
 
 class TestChatCompletionsExtended:
@@ -15,13 +16,13 @@ class TestChatCompletionsExtended:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_chat_completions_with_stop_sequence_list(self):
         """Test chat completions with stop sequences as list."""
@@ -38,8 +39,8 @@ class TestChatCompletionsExtended:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -73,8 +74,8 @@ class TestChatCompletionsExtended:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -107,8 +108,8 @@ class TestChatCompletionsExtended:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -126,13 +127,13 @@ class TestCompletionsExtended:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
 
     def test_completions_with_temperature(self):
         """Test completions with custom temperature."""
@@ -149,8 +150,8 @@ class TestCompletionsExtended:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -180,8 +181,8 @@ class TestCompletionsExtended:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 

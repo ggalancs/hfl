@@ -4,7 +4,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from hfl.api.server import app, state
+from hfl.api.server import app
+from hfl.api.state import get_state
 
 
 class TestAPIKeyMiddleware:
@@ -13,15 +14,15 @@ class TestAPIKeyMiddleware:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
-        state.api_key = None
+        get_state().api_key = None
 
     def test_no_auth_required_when_no_key_configured(self):
         """Test that requests pass when no API key is configured."""
-        state.api_key = None
+        get_state().api_key = None
         client = TestClient(app)
 
         response = client.get("/v1/models")
@@ -30,7 +31,7 @@ class TestAPIKeyMiddleware:
 
     def test_public_endpoints_bypass_auth(self):
         """Test that public endpoints don't require authentication."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         # Root endpoint
@@ -43,7 +44,7 @@ class TestAPIKeyMiddleware:
 
     def test_auth_required_with_api_key_configured(self):
         """Test that authentication is required when API key is set."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models")
@@ -53,7 +54,7 @@ class TestAPIKeyMiddleware:
 
     def test_bearer_token_authentication(self):
         """Test authentication with Bearer token."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models", headers={"Authorization": "Bearer test-secret-key"})
@@ -62,7 +63,7 @@ class TestAPIKeyMiddleware:
 
     def test_x_api_key_header_authentication(self):
         """Test authentication with X-API-Key header."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models", headers={"X-API-Key": "test-secret-key"})
@@ -71,7 +72,7 @@ class TestAPIKeyMiddleware:
 
     def test_invalid_bearer_token_rejected(self):
         """Test that invalid Bearer token is rejected."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models", headers={"Authorization": "Bearer wrong-key"})
@@ -80,7 +81,7 @@ class TestAPIKeyMiddleware:
 
     def test_invalid_x_api_key_rejected(self):
         """Test that invalid X-API-Key is rejected."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models", headers={"X-API-Key": "wrong-key"})
@@ -89,7 +90,7 @@ class TestAPIKeyMiddleware:
 
     def test_www_authenticate_header_on_401(self):
         """Test that WWW-Authenticate header is set on 401."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models")
@@ -99,7 +100,7 @@ class TestAPIKeyMiddleware:
 
     def test_malformed_bearer_token_rejected(self):
         """Test that malformed Bearer token is rejected."""
-        state.api_key = "test-secret-key"
+        get_state().api_key = "test-secret-key"
         client = TestClient(app)
 
         response = client.get("/v1/models", headers={"Authorization": "NotBearer test-secret-key"})
@@ -113,9 +114,9 @@ class TestDisclaimerMiddleware:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
 
     def test_disclaimer_header_on_chat_completions(self):
@@ -184,21 +185,21 @@ class TestServerState:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
 
     def test_initial_state(self):
         """Test initial server state values."""
-        assert state.engine is None
-        assert state.current_model is None
-        assert state.api_key is None
+        assert get_state().engine is None
+        assert get_state().current_model is None
+        assert get_state().api_key is None
 
     def test_state_api_key_assignment(self):
         """Test that API key can be assigned."""
-        state.api_key = "new-key"
-        assert state.api_key == "new-key"
+        get_state().api_key = "new-key"
+        assert get_state().api_key == "new-key"
 
 
 class TestHealthEndpoint:
@@ -207,9 +208,9 @@ class TestHealthEndpoint:
     @pytest.fixture(autouse=True)
     def reset_state(self):
         """Reset server state before each test."""
-        state.api_key = None
-        state.engine = None
-        state.current_model = None
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
         yield
 
     def test_health_no_model(self):
@@ -234,8 +235,8 @@ class TestHealthEndpoint:
         mock_model = MagicMock()
         mock_model.name = "test-model"
 
-        state.engine = mock_engine
-        state.current_model = mock_model
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
 
         client = TestClient(app)
 
@@ -248,5 +249,5 @@ class TestHealthEndpoint:
         assert data["current_model"] == "test-model"
 
         # Cleanup
-        state.engine = None
-        state.current_model = None
+        get_state().engine = None
+        get_state().current_model = None
