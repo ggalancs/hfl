@@ -50,8 +50,7 @@ class ModelType(Enum):
 
 
 # Types that HFL can run
-# TODO: Re-enable TTS when engine support is more mature
-SUPPORTED_MODEL_TYPES = {ModelType.LLM}
+SUPPORTED_MODEL_TYPES = {ModelType.LLM, ModelType.TTS}
 
 
 def is_model_type_supported(model_type: ModelType) -> bool:

@@ -80,7 +80,8 @@ class BarkEngine(AudioEngine):
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except ImportError:
+            except Exception:
+                # Ignore any torch import/runtime errors
                 pass
 
     def synthesize(self, text: str, config: TTSConfig | None = None) -> AudioResult:
