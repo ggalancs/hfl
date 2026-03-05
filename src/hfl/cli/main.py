@@ -90,6 +90,7 @@ def pull(
     from hfl.converter.formats import (
         ModelType,
         get_model_type_display_name,
+        is_model_type_supported,
         model_type_from_pipeline_tag,
     )
 
@@ -102,6 +103,12 @@ def pull(
     if resolved_model_type:
         type_name = get_model_type_display_name(resolved_model_type)
         console.print(f"  {t('messages.type')}: {type_name}")
+
+        # Check if model type is supported
+        if not is_model_type_supported(resolved_model_type):
+            console.print(f"\n[red]{t('errors.unsupported_model_type')}[/]")
+            console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
+            raise typer.Exit(1)
 
     # 2. Verify license (R1 - Legal Audit)
     license_info = None
@@ -133,6 +140,18 @@ def pull(
         detected_type = resolved_model_type
     else:
         detected_type = detect_model_type(local_path)
+
+        # Check if model type is supported (only when detected locally after download)
+        if detected_type != ModelType.LLM and not is_model_type_supported(detected_type):
+            type_name = get_model_type_display_name(detected_type)
+            console.print(f"\n[red]{t('errors.unsupported_model_type')}:[/] {type_name}")
+            console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
+            # Clean up downloaded files
+            import shutil
+
+            if local_path.exists():
+                shutil.rmtree(local_path) if local_path.is_dir() else local_path.unlink()
+            raise typer.Exit(1)
 
     # Only attempt GGUF conversion for LLM models
     if fmt != ModelFormat.GGUF and format != "safetensors":
@@ -932,7 +951,7 @@ def version():
 # =============================================================================
 
 
-@app.command()
+@app.command(hidden=True)
 def tts(
     model: str = typer.Argument(help=t("commands.tts.args.model")),
     text: str = typer.Argument(help=t("commands.tts.args.text")),
@@ -948,6 +967,10 @@ def tts(
     ),
 ):
     """Synthesize text to an audio file."""
+    # TTS functionality temporarily disabled
+    console.print(f"[yellow]{t('errors.tts_disabled')}[/]")
+    raise typer.Exit(1)
+
     from pathlib import Path
 
     from hfl.converter.formats import (
@@ -1023,7 +1046,7 @@ def tts(
     console.print(f"  {t('messages.format')}: {result.format}")
 
 
-@app.command()
+@app.command(hidden=True)
 def speak(
     model: str = typer.Argument(help=t("commands.speak.args.model")),
     text: str = typer.Argument(help=t("commands.speak.args.text")),
@@ -1032,6 +1055,10 @@ def speak(
     speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.speak.options.speed")),
 ):
     """Synthesize text and play it directly."""
+    # TTS functionality temporarily disabled
+    console.print(f"[yellow]{t('errors.tts_disabled')}[/]")
+    raise typer.Exit(1)
+
     from pathlib import Path
 
     from hfl.converter.formats import (

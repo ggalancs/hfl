@@ -193,7 +193,10 @@
     "wrong_model_type": "Tipo de modelo incorrecto",
     "unsupported_type_hint": "Este tipo de modelo no está soportado por HFL. Solo se pueden ejecutar modelos LLM y TTS.",
     "use_tts_command": "Para modelos TTS, usa: hfl tts <modelo> \"texto\" o hfl speak <modelo> \"texto\"",
-    "use_run_command": "Para modelos LLM, usa: hfl run <modelo>"
+    "use_run_command": "Para modelos LLM, usa: hfl run <modelo>",
+    "unsupported_model_type": "Tipo de modelo no soportado",
+    "unsupported_model_type_hint": "HFL aún no soporta modelos {type}. Solo los modelos LLM (generación de texto) están soportados actualmente.",
+    "tts_disabled": "La funcionalidad TTS está temporalmente deshabilitada. Solo se soportan modelos LLM."
   },
   "warnings": {
     "download_cancelled": "Descarga cancelada.",
