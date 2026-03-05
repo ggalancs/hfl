@@ -184,6 +184,12 @@ TTS_ARCHITECTURES = {
     "MmsModel",
     "MmsTtsModel",
     "ParlerTTSForConditionalGeneration",
+    "Qwen3TTSForConditionalGeneration",
+    "CoquiTTSModel",
+    "XttsModel",
+    "TortoiseModel",
+    "StyleTTSModel",
+    "MatchaTTSModel",
 }
 
 # STT architectures (speech-to-text / ASR)
@@ -481,6 +487,16 @@ MODEL_TYPE_FIELD_TO_TYPE = {
     "seamless_m4t": ModelType.TTS,
     "mms": ModelType.TTS,
     "parler_tts": ModelType.TTS,
+    "qwen3_tts": ModelType.TTS,
+    "coqui": ModelType.TTS,
+    "xtts": ModelType.TTS,
+    "xtts_v2": ModelType.TTS,
+    "tortoise": ModelType.TTS,
+    "styletts": ModelType.TTS,
+    "styletts2": ModelType.TTS,
+    "matcha_tts": ModelType.TTS,
+    "metavoice": ModelType.TTS,
+    "fish_speech": ModelType.TTS,
     # STT
     "whisper": ModelType.STT,
     "wav2vec2": ModelType.STT,
