@@ -1,17 +1,19 @@
-# Continuous Integration workflow
 name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [main, develop]
   pull_request:
-    branches: ["main"]
+    branches: [main, develop]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -22,27 +24,52 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Lint with ruff
+      - name: Run tests
         run: |
-          ruff check src/ tests/
-          ruff format --check src/ tests/
-
-      - name: Run tests with coverage
-        run: |
-          pytest tests/ -v --tb=short --cov=hfl --cov-report=xml --cov-report=term-missing
+          pytest tests/ --cov=hfl --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check src/hfl tests/
+
+      - name: Run ruff format check
+        run: ruff format --check src/hfl tests/
+
   type-check:
+    name: Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +83,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install mypy types-requests
 
-      - name: Type check
+      - name: Run mypy
         run: |
-          mypy src/hfl --ignore-missing-imports || true
+          mypy src/hfl/api/ src/hfl/cli/ --ignore-missing-imports
