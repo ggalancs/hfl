@@ -38,6 +38,17 @@ class HFLConfig:
     host: str = "127.0.0.1"
     port: int = 11434  # Same port as Ollama for drop-in compatibility
 
+    # Security - CORS
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
+
+    # Security - Rate Limiting (requests per minute)
+    rate_limit_enabled: bool = False
+    rate_limit_requests: int = 60
+    rate_limit_window: int = 60  # seconds
+
     # LLM Inference
     default_ctx_size: int = 4096
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
