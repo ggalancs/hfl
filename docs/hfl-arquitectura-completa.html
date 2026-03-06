@@ -146,7 +146,7 @@
     <a href="#flujo-run">Flujo Completo: hfl run</a>
     <a href="#flujo-serve">Flujo Completo: hfl serve</a>
     <a href="#legal">Cumplimiento Legal y Auditoría</a>
-    <a href="#patrones">Patrones de Diseño</a>
+    <a href="#patrones">Patrones de Diseño y ADRs</a>
     <a href="#dependencias">Dependencias y Extras</a>
     <a href="#tests">Testing</a>
     <a href="#build">Build y Distribución</a>
@@ -234,31 +234,57 @@
 │   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.1.0)</span>
 │   ├── <span class="file">config.py</span>            <span class="desc">— HFLConfig dataclass — configuración global</span>
 │   ├── <span class="file">exceptions.py</span>        <span class="desc">— Jerarquía completa de excepciones</span>
+│   ├── <span class="file">events.py</span>            <span class="desc">— EventBus para pub/sub interno</span>
+│   ├── <span class="file">metrics.py</span>           <span class="desc">— Métricas de rendimiento</span>
+│   ├── <span class="file">plugins.py</span>           <span class="desc">— Sistema de plugins con entry_points</span>
+│   ├── <span class="file">security.py</span>          <span class="desc">— Sanitización y validación de seguridad</span>
+│   ├── <span class="file">validators.py</span>        <span class="desc">— Validadores de datos comunes</span>
+│   ├── <span class="file">logging_config.py</span>    <span class="desc">— Configuración centralizada de logging</span>
+│   │
+│   ├── <span class="dir">core/</span>                <span class="desc">— NÚCLEO DEL SISTEMA</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   └── <span class="file">container.py</span>     <span class="desc">— Contenedor DI con Singleton thread-safe</span>
 │   │
 │   ├── <span class="dir">cli/</span>                 <span class="desc">— INTERFAZ DE LÍNEA DE COMANDOS</span>
 │   │   ├── <span class="file">__init__.py</span>
-│   │   └── <span class="file">main.py</span>          <span class="desc">— 11 comandos: pull, run, serve, list, search, rm, inspect, alias, login, logout, version</span>
+│   │   ├── <span class="file">main.py</span>          <span class="desc">— 11 comandos: pull, run, serve, list, search, rm, inspect, alias, login, logout, version</span>
+│   │   └── <span class="dir">commands/</span>        <span class="desc">— Comandos modularizados</span>
+│   │       └── <span class="file">_utils.py</span>    <span class="desc">— Utilidades compartidas CLI</span>
 │   │
 │   ├── <span class="dir">api/</span>                 <span class="desc">— SERVIDOR REST API</span>
 │   │   ├── <span class="file">__init__.py</span>
 │   │   ├── <span class="file">server.py</span>        <span class="desc">— FastAPI app, CORS, disclaimer, lifespan</span>
-│   │   ├── <span class="file">middleware.py</span>     <span class="desc">— Logging privacy-safe</span>
+│   │   ├── <span class="file">state.py</span>         <span class="desc">— ServerState con async locks para LLM/TTS</span>
+│   │   ├── <span class="file">streaming.py</span>     <span class="desc">— SSE streaming helpers</span>
+│   │   ├── <span class="file">model_loader.py</span>  <span class="desc">— Carga dinámica de modelos</span>
+│   │   ├── <span class="file">helpers.py</span>       <span class="desc">— ensure_llm_loaded, ensure_tts_loaded</span>
+│   │   ├── <span class="file">errors.py</span>        <span class="desc">— Manejo centralizado de errores HTTP</span>
+│   │   ├── <span class="file">middleware.py</span>    <span class="desc">— Logging privacy-safe</span>
+│   │   ├── <span class="file">rate_limit.py</span>    <span class="desc">— Rate limiting por IP/token</span>
 │   │   ├── <span class="file">routes_openai.py</span> <span class="desc">— /v1/chat/completions, /v1/completions, /v1/models</span>
-│   │   └── <span class="file">routes_native.py</span> <span class="desc">— /api/generate, /api/chat, /api/tags, /api/version</span>
+│   │   ├── <span class="file">routes_native.py</span> <span class="desc">— /api/generate, /api/chat, /api/tags (Ollama-compatible)</span>
+│   │   ├── <span class="file">routes_tts.py</span>    <span class="desc">— /v1/audio/speech, /api/tts (TTS endpoints)</span>
+│   │   └── <span class="file">routes_health.py</span> <span class="desc">— /health, /ready, /live (healthchecks)</span>
 │   │
 │   ├── <span class="dir">engine/</span>              <span class="desc">— MOTORES DE INFERENCIA</span>
 │   │   ├── <span class="file">__init__.py</span>
-│   │   ├── <span class="file">base.py</span>          <span class="desc">— InferenceEngine ABC + dataclasses</span>
-│   │   ├── <span class="file">selector.py</span>      <span class="desc">— Selección automática de backend</span>
+│   │   ├── <span class="file">base.py</span>          <span class="desc">— InferenceEngine + AudioEngine ABCs + dataclasses</span>
+│   │   ├── <span class="file">selector.py</span>      <span class="desc">— Selección automática de backend LLM/TTS</span>
 │   │   ├── <span class="file">llama_cpp.py</span>     <span class="desc">— LlamaCppEngine (GGUF, CPU/GPU)</span>
 │   │   ├── <span class="file">transformers_engine.py</span> <span class="desc">— TransformersEngine (safetensors, GPU)</span>
-│   │   └── <span class="file">vllm_engine.py</span>   <span class="desc">— VLLMEngine (producción GPU)</span>
+│   │   ├── <span class="file">vllm_engine.py</span>   <span class="desc">— VLLMEngine (producción GPU)</span>
+│   │   ├── <span class="file">bark_engine.py</span>   <span class="desc">— BarkEngine (TTS via transformers)</span>
+│   │   ├── <span class="file">coqui_engine.py</span>  <span class="desc">— CoquiEngine (TTS XTTS-v2)</span>
+│   │   ├── <span class="file">async_wrapper.py</span> <span class="desc">— Wrapper sync→async para engines</span>
+│   │   ├── <span class="file">model_pool.py</span>    <span class="desc">— Pool de modelos con LRU eviction</span>
+│   │   └── <span class="file">dependency_check.py</span> <span class="desc">— Verificación de dependencias opcionales</span>
 │   │
 │   ├── <span class="dir">hub/</span>                 <span class="desc">— INTEGRACIÓN HUGGINGFACE</span>
 │   │   ├── <span class="file">__init__.py</span>
 │   │   ├── <span class="file">auth.py</span>          <span class="desc">— Autenticación y tokens</span>
+│   │   ├── <span class="file">client.py</span>        <span class="desc">— Cliente HTTP para HF Hub</span>
 │   │   ├── <span class="file">downloader.py</span>    <span class="desc">— Descarga con resume y rate limiting</span>
-│   │   ├── <span class="file">license_checker.py</span> <span class="desc">— Clasificación de licencias</span>
+│   │   ├── <span class="file">license_checker.py</span> <span class="desc">— Clasificación de licencias (5 niveles)</span>
 │   │   └── <span class="file">resolver.py</span>      <span class="desc">— Resolución inteligente de modelos</span>
 │   │
 │   ├── <span class="dir">models/</span>              <span class="desc">— MODELOS DE DATOS</span>
@@ -269,22 +295,38 @@
 │   │
 │   ├── <span class="dir">converter/</span>           <span class="desc">— CONVERSIÓN DE FORMATOS</span>
 │   │   ├── <span class="file">__init__.py</span>
-│   │   ├── <span class="file">formats.py</span>       <span class="desc">— ModelFormat enum + detect_format()</span>
+│   │   ├── <span class="file">formats.py</span>       <span class="desc">— ModelFormat + ModelType enums</span>
 │   │   └── <span class="file">gguf_converter.py</span> <span class="desc">— GGUFConverter — conversión + cuantización</span>
 │   │
-│   └── <span class="dir">i18n/</span>                — INTERNACIONALIZACIÓN
-│       ├── <span class="file">__init__.py</span>      <span class="desc">— t(), get_language(), set_language(), _load_translations()</span>
+│   ├── <span class="dir">utils/</span>               <span class="desc">— UTILIDADES TRANSVERSALES</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">circuit_breaker.py</span> <span class="desc">— Circuit breaker para resiliencia</span>
+│   │   └── <span class="file">retry.py</span>         <span class="desc">— Retry con exponential backoff</span>
+│   │
+│   └── <span class="dir">i18n/</span>                <span class="desc">— INTERNACIONALIZACIÓN</span>
+│       ├── <span class="file">__init__.py</span>      <span class="desc">— t(), get_language(), set_language()</span>
 │       └── <span class="dir">locales/</span>         <span class="desc">— Archivos de traducción</span>
 │           ├── <span class="file">en.json</span>      <span class="desc">— Traducciones en inglés</span>
 │           └── <span class="file">es.json</span>      <span class="desc">— Traducciones en español</span>
 │
-└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS</span>
-    ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures: tmp dirs, mock APIs, sample models</span>
-    ├── <span class="file">test_api.py</span>          <span class="file">test_cli.py</span>          <span class="file">test_config.py</span>
-    ├── <span class="file">test_converter.py</span>    <span class="file">test_engine.py</span>       <span class="file">test_exceptions.py</span>
-    ├── <span class="file">test_hub.py</span>          <span class="file">test_integration.py</span>  <span class="file">test_i18n.py</span>
-    ├── <span class="file">test_middleware.py</span>   <span class="file">test_provenance.py</span>   <span class="file">test_registry.py</span>
-    └── <span class="file">test_vllm_engine.py</span>
+├── <span class="dir">docs/</span>                    <span class="desc">— DOCUMENTACIÓN</span>
+│   ├── <span class="dir">adr/</span>                 <span class="desc">— Architecture Decision Records</span>
+│   │   ├── <span class="file">0001-singleton-pattern.md</span>
+│   │   ├── <span class="file">0002-async-api-sync-engines.md</span>
+│   │   ├── <span class="file">0003-gguf-default-format.md</span>
+│   │   ├── <span class="file">0004-ollama-compatibility.md</span>
+│   │   ├── <span class="file">0005-license-classification.md</span>
+│   │   └── <span class="file">0006-rate-limiting-strategy.md</span>
+│   └── <span class="file">*.html</span>               <span class="desc">— Documentación arquitectura</span>
+│
+└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS (66 archivos, 90%+ cobertura)</span>
+    ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures compartidas</span>
+    ├── <span class="file">test_api*.py</span>         <span class="desc">— Tests API (5 archivos)</span>
+    ├── <span class="file">test_cli*.py</span>         <span class="desc">— Tests CLI (4 archivos)</span>
+    ├── <span class="file">test_engine*.py</span>      <span class="desc">— Tests engines (8 archivos)</span>
+    ├── <span class="file">test_hub*.py</span>         <span class="desc">— Tests HF Hub (5 archivos)</span>
+    ├── <span class="file">test_i18n*.py</span>        <span class="desc">— Tests i18n (4 archivos)</span>
+    └── <span class="file">test_*.py</span>            <span class="desc">— Tests unitarios y de integración</span>
 │
 ├── <span class="dir">.github/</span>                   <span class="desc">— INFRAESTRUCTURA GITHUB</span>
 │   ├── <span class="dir">workflows/</span>
@@ -1010,8 +1052,8 @@
       <p>Todas las dependencias pesadas (torch, transformers, vllm, llama-cpp-python) se importan solo cuando se necesitan. Los imports dentro de funciones evitan que una instalación mínima falle por dependencias opcionales ausentes.</p>
     </div>
     <div class="card">
-      <h4>Singleton (Config + Registry)</h4>
-      <p><code>config = HFLConfig()</code> se instancia una vez al importar el módulo. <code>ModelRegistry</code> siempre lee del mismo <code>models.json</code>. <code>ProvenanceLog</code> tiene instancia global lazy con <code>get_provenance_log()</code>.</p>
+      <h4>Dependency Injection Container</h4>
+      <p><code>core/container.py</code> implementa un contenedor DI con singletons thread-safe (double-checked locking). Provee <code>get_config()</code>, <code>get_registry()</code>, <code>get_state()</code>, <code>get_event_bus()</code>, <code>get_metrics()</code>. Facilita testing con <code>reset_container()</code>.</p>
     </div>
     <div class="card">
       <h4>Dataclass como Value Objects</h4>
@@ -1025,7 +1067,27 @@
       <h4>Adapter Pattern (API dual)</h4>
       <p>Los mismos motores de inferencia se exponen a través de dos interfaces API diferentes (OpenAI y Ollama) mediante routers separados que adaptan los formatos de request/response al formato esperado por cada ecosistema.</p>
     </div>
+    <div class="card">
+      <h4>Circuit Breaker + Retry</h4>
+      <p><code>utils/circuit_breaker.py</code> implementa circuit breaker para llamadas externas. <code>utils/retry.py</code> provee retry con exponential backoff configurable. Ambos mejoran la resiliencia ante fallos de red o servicios externos.</p>
+    </div>
+    <div class="card">
+      <h4>Event Bus (Pub/Sub)</h4>
+      <p><code>events.py</code> implementa un EventBus interno para comunicación desacoplada entre componentes. Permite suscribirse a eventos como model_loaded, inference_complete, download_progress sin crear dependencias directas.</p>
+    </div>
   </div>
+
+  <h3>Architecture Decision Records (ADRs)</h3>
+  <p>Las decisiones arquitectónicas importantes están documentadas en <code>docs/adr/</code> siguiendo el formato estándar ADR:</p>
+  <table>
+    <tr><th>ADR</th><th>Título</th><th>Estado</th></tr>
+    <tr><td><code>0001</code></td><td>Singleton Pattern para Config y Registry</td><td><span class="badge badge-green">Accepted</span></td></tr>
+    <tr><td><code>0002</code></td><td>API Async con Engines Sync (sync_to_thread)</td><td><span class="badge badge-green">Accepted</span></td></tr>
+    <tr><td><code>0003</code></td><td>GGUF como Formato Default</td><td><span class="badge badge-green">Accepted</span></td></tr>
+    <tr><td><code>0004</code></td><td>Compatibilidad API Ollama</td><td><span class="badge badge-green">Accepted</span></td></tr>
+    <tr><td><code>0005</code></td><td>Clasificación de Licencias (5 niveles)</td><td><span class="badge badge-green">Accepted</span></td></tr>
+    <tr><td><code>0006</code></td><td>Estrategia de Rate Limiting</td><td><span class="badge badge-green">Accepted</span></td></tr>
+  </table>
 </section>
 
 <!-- ========== 19. DEPENDENCIAS ========== -->
@@ -1075,26 +1137,91 @@
 <!-- ========== 20. TESTING ========== -->
 <section id="tests">
   <h2>20. Testing</h2>
-  <p>Suite de tests con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 14 archivos de test con fixtures compartidas en <code>conftest.py</code>.</p>
+  <div class="highlight highlight-success">
+    <strong>Cobertura: 90%+ con 1278 tests</strong> — Suite exhaustiva con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 66 archivos de test con fixtures compartidas en <code>conftest.py</code>.
+  </div>
 
+  <h3>Categorías de Tests</h3>
+  <div class="grid-3">
+    <div class="card">
+      <h4>Core & Config</h4>
+      <table>
+        <tr><td><code>test_config.py</code></td><td>HFLConfig, paths, env vars</td></tr>
+        <tr><td><code>test_container.py</code></td><td>DI container, Singleton pattern</td></tr>
+        <tr><td><code>test_exceptions.py</code></td><td>Jerarquía de excepciones</td></tr>
+        <tr><td><code>test_events.py</code></td><td>EventBus, pub/sub</td></tr>
+        <tr><td><code>test_metrics.py</code></td><td>Métricas de rendimiento</td></tr>
+        <tr><td><code>test_validators.py</code></td><td>Validación de datos</td></tr>
+        <tr><td><code>test_security.py</code></td><td>Seguridad y sanitización</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>API Server</h4>
+      <table>
+        <tr><td><code>test_api*.py</code> (5)</td><td>Endpoints, auth, contracts</td></tr>
+        <tr><td><code>test_routes_*.py</code> (4)</td><td>OpenAI, Native, TTS</td></tr>
+        <tr><td><code>test_state.py</code></td><td>ServerState, async locks</td></tr>
+        <tr><td><code>test_streaming.py</code></td><td>SSE streaming</td></tr>
+        <tr><td><code>test_model_loader.py</code></td><td>Carga dinámica de modelos</td></tr>
+        <tr><td><code>test_helpers.py</code></td><td>ensure_llm/tts_loaded</td></tr>
+        <tr><td><code>test_middleware.py</code></td><td>Privacy logger, disclaimer</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>Engine & Inference</h4>
+      <table>
+        <tr><td><code>test_engine*.py</code> (2)</td><td>Base, LlamaCpp</td></tr>
+        <tr><td><code>test_selector*.py</code> (3)</td><td>Auto-selección backend</td></tr>
+        <tr><td><code>test_transformers*.py</code> (2)</td><td>TransformersEngine</td></tr>
+        <tr><td><code>test_vllm_engine.py</code></td><td>vLLM con mocks</td></tr>
+        <tr><td><code>test_tts_*.py</code> (2)</td><td>Bark, Coqui TTS</td></tr>
+        <tr><td><code>test_async_wrapper.py</code></td><td>Sync→Async wrapper</td></tr>
+        <tr><td><code>test_model_pool.py</code></td><td>Pool de modelos</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-top: 1rem;">
+    <div class="card">
+      <h4>Hub & Downloads</h4>
+      <table>
+        <tr><td><code>test_hub*.py</code> (2)</td><td>Integración HF Hub</td></tr>
+        <tr><td><code>test_downloader*.py</code> (2)</td><td>Descarga con resume</td></tr>
+        <tr><td><code>test_resolver*.py</code> (2)</td><td>Resolución de modelos</td></tr>
+        <tr><td><code>test_license_checker.py</code></td><td>Clasificación licencias</td></tr>
+        <tr><td><code>test_auth.py</code></td><td>Autenticación HF</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>CLI & Utils</h4>
+      <table>
+        <tr><td><code>test_cli*.py</code> (4)</td><td>Comandos Typer</td></tr>
+        <tr><td><code>test_converter*.py</code> (3)</td><td>GGUF conversion</td></tr>
+        <tr><td><code>test_i18n*.py</code> (4)</td><td>Internacionalización</td></tr>
+        <tr><td><code>test_circuit_breaker.py</code></td><td>Circuit breaker</td></tr>
+        <tr><td><code>test_retry.py</code></td><td>Retry con backoff</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>Tests de Integración y Edge Cases</h3>
   <table>
-    <tr><th>Archivo</th><th>Cobertura</th></tr>
-    <tr><td><code>test_api.py</code></td><td>Endpoints OpenAI y Ollama, streaming, schemas</td></tr>
-    <tr><td><code>test_cli.py</code></td><td>Todos los comandos CLI con typer.testing</td></tr>
-    <tr><td><code>test_config.py</code></td><td>HFLConfig, paths, dirs, env vars</td></tr>
-    <tr><td><code>test_converter.py</code></td><td>detect_format, check_convertibility, GGUFConverter</td></tr>
-    <tr><td><code>test_engine.py</code></td><td>LlamaCppEngine, selección automática</td></tr>
-    <tr><td><code>test_exceptions.py</code></td><td>Toda la jerarquía de excepciones</td></tr>
-    <tr><td><code>test_hub.py</code></td><td>Auth, resolver, downloader, license checker</td></tr>
-    <tr><td><code>test_integration.py</code></td><td>Flujos end-to-end (pull→run)</td></tr>
-    <tr><td><code>test_i18n.py</code></td><td>Sistema i18n: t(), get/set_language, completitud de traducciones</td></tr>
-    <tr><td><code>test_middleware.py</code></td><td>RequestLogger privacy, DisclaimerMiddleware</td></tr>
-    <tr><td><code>test_provenance.py</code></td><td>ProvenanceLog, ConversionRecord, persistencia</td></tr>
-    <tr><td><code>test_registry.py</code></td><td>ModelRegistry: add, get, alias, remove, list</td></tr>
-    <tr><td><code>test_vllm_engine.py</code></td><td>VLLMEngine con mocks</td></tr>
+    <tr><td><code>test_integration.py</code></td><td>Flujos end-to-end completos (pull→run→serve)</td></tr>
+    <tr><td><code>test_concurrency.py</code></td><td>Concurrencia, thread safety, race conditions</td></tr>
+    <tr><td><code>test_network_errors.py</code></td><td>Timeouts, disconnects, retry logic</td></tr>
+    <tr><td><code>test_edge_cases.py</code></td><td>Inputs malformados, estados límite</td></tr>
+    <tr><td><code>test_server_lifecycle.py</code></td><td>Startup, shutdown, cleanup</td></tr>
   </table>
 
-  <p><strong>Fixtures principales</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (directorio temporal con monkeypatch), <code>mock_hf_api</code> (mock de HfApi), <code>sample_manifest</code> (modelo de ejemplo), <code>populated_registry</code> (registro pre-populado).</p>
+  <p><strong>Fixtures principales</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (directorio temporal), <code>mock_hf_api</code> (mock HfApi), <code>sample_manifest</code> (modelo ejemplo), <code>populated_registry</code> (registro pre-populado), <code>mock_engine</code> (engine de inferencia mockeado), <code>test_client</code> (FastAPI TestClient).</p>
+
+  <pre><code><span class="comment"># Ejecutar tests con cobertura</span>
+pytest --cov=hfl --cov-report=html --cov-fail-under=80
+
+<span class="comment"># Tests por categoría</span>
+pytest tests/test_api*.py -v          <span class="comment"># Solo API</span>
+pytest tests/test_engine*.py -v       <span class="comment"># Solo engines</span>
+pytest -k "not slow" -v               <span class="comment"># Excluir tests lentos</span></code></pre>
 </section>
 
 <!-- ========== 21. BUILD ========== -->
@@ -1148,7 +1275,7 @@
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
   <p><strong>HFL v0.1.0</strong> — Documentación de Arquitectura Exhaustiva</p>
-  <p>Generado el 19 de febrero de 2026 — Todos los diagramas son SVG interactivos</p>
+  <p>Actualizado el 6 de marzo de 2026 — Todos los diagramas son SVG interactivos</p>
   <p>Licencia: HRUL v1.0 (source-available) — Copyright © 2026 Gabriel Galán Pelayo</p>
 </div>
 
