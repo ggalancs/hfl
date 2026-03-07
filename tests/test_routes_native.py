@@ -61,10 +61,10 @@ class TestOllamaChat:
 
         client = TestClient(app)
 
-        with patch("hfl.api.routes_native.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.helpers.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.post(
                 "/api/chat",
@@ -125,10 +125,10 @@ class TestOllamaTags:
         """Test tags with no models."""
         client = TestClient(app)
 
-        with patch("hfl.api.routes_native.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.routes_native.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.list_all.return_value = []
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.get("/api/tags")
 
@@ -147,10 +147,10 @@ class TestOllamaTags:
 
         client = TestClient(app)
 
-        with patch("hfl.api.routes_native.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.routes_native.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.list_all.return_value = [mock_model]
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.get("/api/tags")
 

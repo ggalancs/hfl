@@ -8,58 +8,20 @@ Implements:
   - Native HFL: POST /api/tts
 """
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
 
+from hfl.api.helpers import run_with_timeout
+from hfl.api.schemas import NativeTTSRequest, OpenAITTSRequest, TTSModelInfo
+from hfl.core.container import get_registry
 from hfl.engine.base import TTSConfig
-from hfl.models.registry import ModelRegistry
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
 
-router = APIRouter()
-
-
-# =============================================================================
-# Pydantic Schemas
-# =============================================================================
-
-
-class OpenAITTSRequest(BaseModel):
-    """OpenAI-compatible TTS request schema."""
-
-    model: str = Field(..., description="TTS model to use")
-    input: str = Field(..., description="Text to synthesize", max_length=4096)
-    voice: str = Field(default="alloy", description="Voice to use")
-    response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = Field(
-        default="mp3", description="Audio format"
-    )
-    speed: float = Field(default=1.0, ge=0.25, le=4.0, description="Speed multiplier")
-
-
-class NativeTTSRequest(BaseModel):
-    """Native HFL/Ollama-style TTS request schema."""
-
-    model: str = Field(..., description="TTS model to use")
-    text: str = Field(..., description="Text to synthesize", max_length=4096)
-    voice: str = Field(default="default", description="Voice/speaker to use")
-    language: str = Field(default="en", description="Language code")
-    speed: float = Field(default=1.0, ge=0.25, le=4.0, description="Speed multiplier")
-    sample_rate: int = Field(default=22050, description="Output sample rate")
-    format: Literal["wav", "mp3", "ogg"] = Field(default="wav", description="Audio format")
-    stream: bool = Field(default=False, description="Stream audio chunks")
-
-
-class TTSModelInfo(BaseModel):
-    """TTS model information."""
-
-    id: str
-    object: str = "model"
-    owned_by: str
-    capabilities: dict = Field(default_factory=dict)
+router = APIRouter(tags=["TTS"])
 
 
 # =============================================================================
@@ -84,7 +46,7 @@ async def _ensure_tts_model_loaded(model_name: str) -> None:
             return
 
     # Look up model in registry
-    registry = ModelRegistry()
+    registry = get_registry()
     manifest = registry.get(model_name)
     if not manifest:
         raise HTTPException(404, f"TTS model not found: {model_name}")
@@ -171,8 +133,10 @@ async def openai_tts(req: OpenAITTSRequest) -> Response:
         format=audio_format,
     )
 
-    # Synthesize
-    result = state.tts_engine.synthesize(req.input, config)
+    # Synthesize with timeout
+    result = await run_with_timeout(
+        state.tts_engine.synthesize, req.input, config, operation="tts_synthesize"
+    )
 
     return Response(
         content=result.audio,
@@ -230,7 +194,10 @@ async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
             },
         )
 
-    result = state.tts_engine.synthesize(req.text, config)
+    # Synthesize with timeout
+    result = await run_with_timeout(
+        state.tts_engine.synthesize, req.text, config, operation="tts_synthesize"
+    )
 
     return Response(
         content=result.audio,
@@ -287,7 +254,7 @@ async def list_tts_models() -> dict[str, Any]:
 
     from hfl.converter.formats import ModelType, detect_model_type
 
-    registry = ModelRegistry()
+    registry = get_registry()
     all_models = registry.list_all()
 
     tts_models = []

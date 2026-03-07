@@ -133,10 +133,10 @@ class TestEnsureModelLoaded:
         get_state().current_model = mock_current_model
 
         # Mock the registry to return None (model not found)
-        with patch("hfl.api.routes_openai.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.model_loader.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             with pytest.raises(Exception):  # HTTPException
                 await _ensure_model_loaded("model-b")

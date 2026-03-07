@@ -40,10 +40,10 @@ class TestModelSwitching:
         client = TestClient(app)
 
         # Try to use a different model - this will fail but should trigger unload
-        with patch("hfl.api.routes_openai.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.model_loader.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None  # Model not found
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.post(
                 "/v1/chat/completions",
@@ -107,10 +107,10 @@ class TestModelNotFound:
         """Test chat completions with non-existent model."""
         client = TestClient(app)
 
-        with patch("hfl.api.routes_openai.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.model_loader.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.post(
                 "/v1/chat/completions",
@@ -127,10 +127,10 @@ class TestModelNotFound:
         """Test completions with non-existent model."""
         client = TestClient(app)
 
-        with patch("hfl.api.routes_openai.ModelRegistry") as mock_registry_class:
+        with patch("hfl.api.model_loader.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None
-            mock_registry_class.return_value = mock_registry
+            mock_get_registry.return_value = mock_registry
 
             response = client.post(
                 "/v1/completions", json={"model": "nonexistent-model", "prompt": "Hello"}

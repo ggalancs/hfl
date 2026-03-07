@@ -10,49 +10,20 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
+from hfl.api.converters import openai_to_generation_config
+from hfl.api.errors import service_unavailable
+from hfl.api.helpers import run_with_timeout
+from hfl.api.schemas import ChatCompletionMessage, ChatCompletionRequest, CompletionRequest
+from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig
-from hfl.models.registry import ModelRegistry
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
 
-router = APIRouter()
-
-
-# --- Schemas Pydantic ---
-
-
-class ChatCompletionMessage(BaseModel):
-    role: str
-    content: str
-
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: list[ChatCompletionMessage]
-    temperature: float = 0.7
-    top_p: float = 0.9
-    max_tokens: int | None = None
-    stream: bool = False
-    stop: list[str] | str | None = None
-    frequency_penalty: float = 0.0
-    presence_penalty: float = 0.0
-    seed: int | None = None
-
-
-class CompletionRequest(BaseModel):
-    model: str
-    prompt: str | list[str]
-    max_tokens: int = 256
-    temperature: float = 0.7
-    top_p: float = 0.9
-    stream: bool = False
-    stop: list[str] | str | None = None
-    seed: int | None = None
+router = APIRouter(tags=["OpenAI API"])
 
 
 # --- Helpers ---
@@ -67,38 +38,14 @@ def _get_state() -> "ServerState":
 
 async def _ensure_model_loaded(model_name: str) -> None:
     """Load the model if it is not already in memory (thread-safe)."""
-    state = _get_state()
+    from hfl.api.model_loader import load_llm
 
-    # Fast path: model already loaded
-    if state.is_llm_loaded():
-        if state.current_model and state.current_model.name == model_name:
-            return
-
-    registry = ModelRegistry()
-    manifest = registry.get(model_name)
-    if not manifest:
-        raise HTTPException(404, f"Model not found: {model_name}")
-
-    from pathlib import Path
-
-    from hfl.engine.selector import select_engine
-
-    engine = select_engine(Path(manifest.local_path))
-    engine.load(manifest.local_path, n_ctx=manifest.context_length)
-
-    # Thread-safe state update
-    await state.set_llm_engine(engine, manifest)
+    await load_llm(model_name)
 
 
 def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> GenerationConfig:
-    stop = req.stop if isinstance(req.stop, list) else ([req.stop] if req.stop else None)
-    return GenerationConfig(
-        temperature=req.temperature,
-        top_p=req.top_p,
-        max_tokens=req.max_tokens or 2048,
-        stop=stop,
-        seed=req.seed or -1,
-    )
+    """Convert OpenAI request to GenerationConfig."""
+    return openai_to_generation_config(req)
 
 
 # --- Endpoints ---
@@ -108,7 +55,8 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
 async def chat_completions(req: ChatCompletionRequest) -> dict[str, Any] | StreamingResponse:
     await _ensure_model_loaded(req.model)
     state = _get_state()
-    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
+    if state.engine is None:
+        return service_unavailable(f"Model '{req.model}' failed to load")
 
     messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
     gen_config = _to_gen_config(req)
@@ -119,7 +67,10 @@ async def chat_completions(req: ChatCompletionRequest) -> dict[str, Any] | Strea
             media_type="text/event-stream",
         )
 
-    result = state.engine.chat(messages, gen_config)
+    # Run sync engine call in thread pool with timeout
+    result = await run_with_timeout(
+        state.engine.chat, messages, gen_config, operation="chat_completion"
+    )
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -146,44 +97,64 @@ async def _stream_chat(
     messages: list[ChatMessage],
     config: GenerationConfig,
 ) -> AsyncIterator[str]:
-    """Generate OpenAI-compatible SSE responses."""
-    state = _get_state()
-    assert state.engine is not None  # Called only after model is loaded
-    chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    """Generate OpenAI-compatible SSE responses with backpressure."""
+    from hfl.api.streaming import stream_with_backpressure
 
-    for token in state.engine.chat_stream(messages, config):
+    state = _get_state()
+    if state.engine is None:
+        yield f"data: {json.dumps({'error': 'Model not loaded', 'code': 'SERVICE_UNAVAILABLE'})}\n\n"
+        return
+
+    chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    created = int(time.time())  # Consistent timestamp across all chunks
+    first_chunk = True
+
+    def format_chunk(token: str) -> str:
+        nonlocal first_chunk
+        # OpenAI includes role in first chunk
+        delta: dict[str, str] = {"content": token}
+        if first_chunk:
+            delta["role"] = "assistant"
+            first_chunk = False
+
         chunk = {
             "id": chat_id,
             "object": "chat.completion.chunk",
-            "created": int(time.time()),
+            "created": created,
             "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": token},
-                    "finish_reason": None,
-                }
-            ],
+            "system_fingerprint": None,  # OpenAI compatibility
+            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
         }
-        yield f"data: {json.dumps(chunk)}\n\n"
+        return f"data: {json.dumps(chunk)}\n\n"
 
-    # Final chunk
-    final = {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-    }
-    yield f"data: {json.dumps(final)}\n\n"
-    yield "data: [DONE]\n\n"
+    def format_done() -> str:
+        final = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "system_fingerprint": None,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        return f"data: {json.dumps(final)}\n\ndata: [DONE]\n\n"
+
+    try:
+        async for chunk in stream_with_backpressure(
+            sync_iterator=state.engine.chat_stream(messages, config),
+            format_item=format_chunk,
+            format_done=format_done,
+        ):
+            yield chunk
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
 
 
 @router.post("/v1/completions", response_model=None)
 async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse:
     await _ensure_model_loaded(req.model)
     state = _get_state()
-    assert state.engine is not None  # Guaranteed by _ensure_model_loaded
+    if state.engine is None:
+        return service_unavailable(f"Model '{req.model}' failed to load")
 
     prompt = req.prompt if isinstance(req.prompt, str) else req.prompt[0]
     gen_config = _to_gen_config(req)
@@ -194,7 +165,10 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
             media_type="text/event-stream",
         )
 
-    result = state.engine.generate(prompt, gen_config)
+    # Run sync engine call in thread pool with timeout
+    result = await run_with_timeout(
+        state.engine.generate, prompt, gen_config, operation="text_completion"
+    )
 
     return {
         "id": f"cmpl-{uuid.uuid4().hex[:8]}",
@@ -221,23 +195,45 @@ async def _stream_completion(
     prompt: str,
     config: GenerationConfig,
 ) -> AsyncIterator[str]:
+    """Generate text completion SSE responses with backpressure."""
+    from hfl.api.streaming import stream_with_backpressure
+
     state = _get_state()
-    assert state.engine is not None  # Called only after model is loaded
-    for token in state.engine.generate_stream(prompt, config):
+    if state.engine is None:
+        yield f"data: {json.dumps({'error': 'Model not loaded', 'code': 'SERVICE_UNAVAILABLE'})}\n\n"
+        return
+
+    completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+    created = int(time.time())  # Consistent timestamp across all chunks
+
+    def format_chunk(token: str) -> str:
         chunk = {
-            "id": f"cmpl-{uuid.uuid4().hex[:8]}",
+            "id": completion_id,
             "object": "text_completion",
-            "created": int(time.time()),
+            "created": created,
             "model": model,
+            "system_fingerprint": None,  # OpenAI compatibility
             "choices": [{"text": token, "index": 0, "finish_reason": None}],
         }
-        yield f"data: {json.dumps(chunk)}\n\n"
-    yield "data: [DONE]\n\n"
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    def format_done() -> str:
+        return "data: [DONE]\n\n"
+
+    try:
+        async for chunk in stream_with_backpressure(
+            sync_iterator=state.engine.generate_stream(prompt, config),
+            format_item=format_chunk,
+            format_done=format_done,
+        ):
+            yield chunk
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
 
 
 @router.get("/v1/models")
 async def list_models() -> dict[str, Any]:
-    registry = ModelRegistry()
+    registry = get_registry()
     models = registry.list_all()
     return {
         "object": "list",
