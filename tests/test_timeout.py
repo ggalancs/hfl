@@ -13,7 +13,6 @@ import pytest
 from hfl.api.errors import HFLHTTPException
 from hfl.api.timeout import run_with_timeout, with_timeout
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

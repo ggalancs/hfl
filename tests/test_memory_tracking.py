@@ -264,7 +264,7 @@ class TestMemoryTracker:
         """Should track memory as context manager."""
         with MemoryTracker() as tracker:
             # Simulate some memory allocation
-            data = [0] * 1000000
+            _data = [0] * 1000000  # noqa: F841
 
         assert tracker.before is not None
         assert tracker.after is not None

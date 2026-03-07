@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -406,8 +407,6 @@ class ModelPool:
 
 
 # Singleton instance with thread-safe initialization
-import threading
-
 _pool: ModelPool | None = None
 _pool_lock = threading.Lock()
 

@@ -2,11 +2,11 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for async engine wrapper."""
 
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from hfl.engine.async_wrapper import AsyncEngineWrapper
-from hfl.engine.base import GenerationConfig, GenerationResult, ChatMessage
+from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 
 
 class MockEngine:

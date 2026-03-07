@@ -303,7 +303,7 @@ class TestStreamOpenAIChat:
         # The finish part is the first "data:" line in the combined chunk
         last_chunk = chunks[-1]
         # Extract the first data: line (finish chunk)
-        lines = [l for l in last_chunk.split("\n") if l.startswith("data: {")]
+        lines = [line for line in last_chunk.split("\n") if line.startswith("data: {")]
         data = json.loads(lines[0][6:])
         assert data["choices"][0]["finish_reason"] == "stop"
 
@@ -528,7 +528,9 @@ class TestEnsureLLMLoaded:
     @patch("hfl.api.helpers.get_state")
     @patch("hfl.api.helpers.get_registry")
     @patch("hfl.api.helpers.detect_model_type")
-    async def test_wrong_model_type_raises_400(self, mock_detect, mock_get_registry, mock_get_state):
+    async def test_wrong_model_type_raises_400(
+        self, mock_detect, mock_get_registry, mock_get_state,
+    ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
         mock_state.current_model = None
@@ -639,7 +641,9 @@ class TestEnsureTTSLoaded:
     @patch("hfl.api.helpers.get_state")
     @patch("hfl.api.helpers.get_registry")
     @patch("hfl.api.helpers.detect_model_type")
-    async def test_wrong_model_type_raises_400(self, mock_detect, mock_get_registry, mock_get_state):
+    async def test_wrong_model_type_raises_400(
+        self, mock_detect, mock_get_registry, mock_get_state,
+    ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
         mock_state.current_tts_model = None

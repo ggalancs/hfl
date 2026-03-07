@@ -3,9 +3,7 @@
 """Tests for dependency injection container."""
 
 import threading
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from hfl.core.container import (
     Container,

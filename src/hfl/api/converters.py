@@ -79,8 +79,8 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
     return GenerationConfig(
         temperature=temperature,
         top_p=top_p,
-        top_k=top_k,
-        max_tokens=max_tokens,
+        top_k=int(top_k),
+        max_tokens=int(max_tokens),
         repeat_penalty=repeat_penalty,
         seed=seed,
         stop=opts.get("stop"),

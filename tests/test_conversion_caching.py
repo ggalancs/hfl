@@ -4,16 +4,14 @@
 
 import threading
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hfl.converter.gguf_converter import (
     GGUFConverter,
-    convert_with_cache,
     _conversion_locks,
-    _conversion_locks_guard,
+    convert_with_cache,
 )
 
 

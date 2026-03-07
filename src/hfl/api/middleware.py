@@ -243,7 +243,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        response: Response = await call_next(request)
+        response = await call_next(request)
 
         # Add rate limit headers
         response.headers["X-RateLimit-Limit"] = str(self.requests_per_window)

@@ -8,8 +8,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
-
 from hfl.api.rate_limit import PerModelRateLimiter, create_rate_limiter
 
 

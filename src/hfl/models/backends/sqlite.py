@@ -73,7 +73,7 @@ class SQLiteBackend(RegistryBackend):
         try:
             yield cursor
             self._conn.commit()
-        except (sqlite3.Error, json.JSONDecodeError, ValueError, TypeError) as e:
+        except (sqlite3.Error, json.JSONDecodeError, ValueError, TypeError):
             self._conn.rollback()
             raise
 

@@ -277,7 +277,8 @@ class GenerationTimeoutError(APIError):
     def __init__(self, timeout_seconds: float):
         super().__init__(
             "Generation timed out",
-            f"Request exceeded {timeout_seconds}s timeout. Try a shorter prompt or lower max_tokens.",
+            f"Request exceeded {timeout_seconds}s timeout."
+            " Try a shorter prompt or lower max_tokens.",
         )
         self.timeout_seconds = timeout_seconds
 

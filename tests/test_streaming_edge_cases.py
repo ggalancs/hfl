@@ -5,9 +5,7 @@
 Tests for client disconnect, timeout, and backpressure scenarios.
 """
 
-import asyncio
-from typing import AsyncIterator, Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

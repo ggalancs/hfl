@@ -2,9 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for CLI signal handling during streaming."""
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 
 class TestStreamingInterrupt:

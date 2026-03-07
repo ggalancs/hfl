@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download, snapshot_download
-from huggingface_hub.utils import HfHubHTTPError
 from requests.exceptions import ConnectionError, Timeout
 from rich.console import Console
 

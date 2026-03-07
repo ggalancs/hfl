@@ -3,14 +3,14 @@
 """Tests for engine dependency checking."""
 
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hfl.engine.dependency_check import (
     check_engine_availability,
-    log_available_backends,
     get_recommended_backend,
+    log_available_backends,
 )
 
 
@@ -189,7 +189,7 @@ class TestGetRecommendedBackend:
 
     def test_safetensors_with_transformers(self):
         """get_recommended_backend handles safetensors with available backends."""
-        result = check_engine_availability()
+        check_engine_availability()
         backend = get_recommended_backend("safetensors")
 
         # Should return a valid backend or None

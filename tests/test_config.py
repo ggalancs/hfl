@@ -4,8 +4,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from hfl.config import SLOConfig
 
 

@@ -18,6 +18,7 @@ Language:
 """
 
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.panel import Panel
@@ -333,7 +334,10 @@ def serve(
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
-    log_level: str = typer.Option("INFO", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR)"),
+    log_level: str = typer.Option(
+        "INFO", "--log-level",
+        help="Log level (DEBUG, INFO, WARNING, ERROR)",
+    ),
     json_logs: bool = typer.Option(False, "--json-logs", help="Output logs in JSON format"),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
@@ -909,7 +913,7 @@ def config():
 @app.command()
 def check():
     """Run diagnostic checks (dependencies, backends, GPU)."""
-    from hfl.engine.dependency_check import check_engine_availability, log_available_backends
+    from hfl.engine.dependency_check import check_engine_availability
 
     console.print("[bold]Running HFL Diagnostics[/]\n")
 
@@ -935,7 +939,7 @@ def check():
         else:
             console.print("  [yellow]○[/] CPU only")
     else:
-        console.print(f"  [red]✗[/] PyTorch not installed")
+        console.print("  [red]✗[/] PyTorch not installed")
 
     # TTS check
     console.print("\n[bold cyan]TTS Support[/]")
@@ -970,7 +974,7 @@ def check():
     if cfg.models_dir.exists():
         console.print(f"  [green]✓[/] Models dir: {cfg.models_dir}")
     else:
-        console.print(f"  [yellow]○[/] Models dir: not created")
+        console.print("  [yellow]○[/] Models dir: not created")
 
     console.print("\n[green]Diagnostics complete.[/]")
 
@@ -1081,7 +1085,7 @@ def compliance_report(
     registry = get_registry()
     models = registry.list_all()
 
-    report = {
+    report: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(),
         "hfl_version": "0.1.0",
         "total_models": len(models),

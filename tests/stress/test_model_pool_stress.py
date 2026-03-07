@@ -5,9 +5,9 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from hfl.engine.model_pool import ModelPool
 

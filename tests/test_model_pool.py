@@ -298,7 +298,6 @@ class TestBackgroundEviction:
     async def test_eviction_loop_recovers_from_single_error(self):
         """Background eviction should recover from single errors."""
         import asyncio
-        from unittest.mock import patch, AsyncMock
 
         pool = ModelPool(
             idle_timeout_seconds=0.1,
@@ -339,7 +338,6 @@ class TestBackgroundEviction:
     async def test_eviction_loop_logs_errors_correctly(self):
         """Background eviction should log consecutive errors."""
         import asyncio
-        import logging
 
         pool = ModelPool(
             idle_timeout_seconds=0.01,
@@ -519,7 +517,7 @@ class TestEngineCleanupOnFailure:
     async def test_cleanup_engine_on_loader_failure(self):
         """Should cleanup engine if loader fails after creating engine."""
         pool = ModelPool(max_models=3, idle_timeout_seconds=3600)
-        engine = MockEngine("failing")
+        _engine = MockEngine("failing")  # noqa: F841
 
         async def failing_loader():
             # Simulate engine creation then failure

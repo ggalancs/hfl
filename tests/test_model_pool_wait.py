@@ -3,7 +3,7 @@
 """Tests for model pool non-recursive waiting."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

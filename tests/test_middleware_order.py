@@ -7,13 +7,11 @@ This test verifies that APIKey auth runs BEFORE RateLimit,
 so unauthenticated requests don't consume rate limit tokens.
 """
 
-import secrets
 from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.middleware import RateLimitMiddleware, reset_rate_limiter
 from hfl.api.server import APIKeyMiddleware
@@ -127,7 +125,6 @@ class TestMiddlewareExecutionOrder:
 
     def test_server_middleware_add_order(self):
         """Verify server.py adds APIKey AFTER RateLimit (so APIKey runs first)."""
-        import ast
         from pathlib import Path
 
         server_path = Path(__file__).parent.parent / "src" / "hfl" / "api" / "server.py"

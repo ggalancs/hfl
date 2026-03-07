@@ -6,7 +6,6 @@ Validates that our API responses match the OpenAI API specification.
 """
 
 import json
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -101,7 +100,9 @@ class TestChatCompletionsFormat:
     def test_chat_completion_streaming_format(self, client, mock_loaded_state):
         """Streaming response should match OpenAI SSE format."""
         mock_state, mock_engine = mock_loaded_state
-        mock_engine.chat_stream.return_value = iter(["Hello", "!", " How", " can", " I", " help", "?"])
+        mock_engine.chat_stream.return_value = iter(
+            ["Hello", "!", " How", " can", " I", " help", "?"]
+        )
 
         with patch("hfl.api.routes_openai._get_state", return_value=mock_state):
             with patch("hfl.api.routes_openai._ensure_model_loaded"):

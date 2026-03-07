@@ -266,10 +266,10 @@ class TestRateLimitMiddleware:
 
     def test_is_excluded_method(self):
         """Test _is_excluded helper method."""
-        from hfl.api.middleware import RateLimitMiddleware
-
         # Create middleware instance to test the method
         from starlette.applications import Starlette
+
+        from hfl.api.middleware import RateLimitMiddleware
 
         dummy_app = Starlette()
         middleware = RateLimitMiddleware(dummy_app)

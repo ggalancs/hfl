@@ -15,6 +15,7 @@ import hashlib
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -340,8 +341,6 @@ def verify_file_hash(file_path: Path, expected_hash: str, algorithm: str = "sha2
 # =============================================================================
 # Audit Logging
 # =============================================================================
-
-from dataclasses import dataclass, field
 
 audit_logger = logging.getLogger("hfl.audit")
 

@@ -3,7 +3,6 @@
 """Tests for engine base classes."""
 
 from typing import Iterator
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -40,10 +39,20 @@ class ConcreteInferenceEngine(InferenceEngine):
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:
         yield "token"
 
-    def chat(self, messages: list[ChatMessage], config: GenerationConfig | None = None) -> GenerationResult:
-        return GenerationResult(text="chat response", tokens_generated=5)
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+    ) -> GenerationResult:
+        return GenerationResult(
+            text="chat response", tokens_generated=5,
+        )
 
-    def chat_stream(self, messages: list[ChatMessage], config: GenerationConfig | None = None) -> Iterator[str]:
+    def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+    ) -> Iterator[str]:
         yield "chat"
 
     @property

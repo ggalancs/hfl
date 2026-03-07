@@ -5,7 +5,7 @@
 import pytest
 
 from hfl.core.observability_setup import reset_event_listeners, setup_event_listeners
-from hfl.events import Event, EventType, emit, get_event_bus
+from hfl.events import EventType, emit, get_event_bus
 from hfl.metrics import get_metrics
 
 
@@ -71,7 +71,12 @@ class TestSetupEventListeners:
 
         initial_tokens = metrics.tokens_generated
 
-        emit(EventType.GENERATION_COMPLETED, duration_ms=1000, tokens_prompt=50, tokens_generated=100)
+        emit(
+            EventType.GENERATION_COMPLETED,
+            duration_ms=1000,
+            tokens_prompt=50,
+            tokens_generated=100,
+        )
 
         assert metrics.tokens_generated == initial_tokens + 100
         assert metrics.tokens_input >= 50

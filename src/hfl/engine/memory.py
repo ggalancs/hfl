@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +190,9 @@ def format_memory_info() -> str:
     if snapshot.gpu_total_gb is not None:
         gpu_pct = snapshot.gpu_percent or 0
         lines.append(
-            f"GPU {snapshot.gpu_id} VRAM: {snapshot.gpu_used_gb:.1f}/{snapshot.gpu_total_gb:.1f} GB "
+            f"GPU {snapshot.gpu_id} VRAM: "
+            f"{snapshot.gpu_used_gb:.1f}/"
+            f"{snapshot.gpu_total_gb:.1f} GB "
             f"({gpu_pct:.1f}% used)"
         )
     else:

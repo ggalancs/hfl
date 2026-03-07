@@ -3,9 +3,7 @@
 """Tests for registry corruption recovery."""
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -270,7 +268,7 @@ class TestCorruptionEvent:
         mock_config.registry_path.write_text("not valid json")
 
         with patch("hfl.models.registry.config", mock_config):
-            registry = ModelRegistry()
+            ModelRegistry()
 
         mock_emit.assert_called()
         # Check that ERROR event was emitted
@@ -288,7 +286,7 @@ class TestCorruptionEvent:
         mock_config.registry_path.write_text("corrupt")
 
         with patch("hfl.models.registry.config", mock_config):
-            registry = ModelRegistry()
+            ModelRegistry()
 
         mock_emit.assert_called()
         calls = [str(c) for c in mock_emit.call_args_list]

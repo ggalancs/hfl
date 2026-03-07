@@ -5,12 +5,12 @@
 import pytest
 
 from hfl.hub.client import (
+    DEFAULT_TIMEOUT,
+    HF_BASE_URL,
+    MAX_CONNECTIONS,
+    close_hf_client,
     get_hf_client,
     reset_hf_clients,
-    close_hf_client,
-    HF_BASE_URL,
-    DEFAULT_TIMEOUT,
-    MAX_CONNECTIONS,
 )
 
 
@@ -82,7 +82,7 @@ class TestAsyncClient:
     @pytest.mark.asyncio
     async def test_get_async_hf_client_creates_client(self):
         """get_async_hf_client should create a new async client."""
-        from hfl.hub.client import get_async_hf_client, close_async_hf_client
+        from hfl.hub.client import close_async_hf_client, get_async_hf_client
 
         client = await get_async_hf_client()
         assert client is not None
@@ -92,7 +92,7 @@ class TestAsyncClient:
     @pytest.mark.asyncio
     async def test_get_async_hf_client_returns_singleton(self):
         """get_async_hf_client should return the same instance."""
-        from hfl.hub.client import get_async_hf_client, close_async_hf_client
+        from hfl.hub.client import close_async_hf_client, get_async_hf_client
 
         client1 = await get_async_hf_client()
         client2 = await get_async_hf_client()
@@ -102,7 +102,7 @@ class TestAsyncClient:
     @pytest.mark.asyncio
     async def test_get_async_hf_client_with_token(self):
         """get_async_hf_client adds authorization header when token provided."""
-        from hfl.hub.client import get_async_hf_client, close_async_hf_client
+        from hfl.hub.client import close_async_hf_client, get_async_hf_client
 
         client = await get_async_hf_client(token="async_test_token")
         assert "Authorization" in client.headers
@@ -112,7 +112,7 @@ class TestAsyncClient:
     @pytest.mark.asyncio
     async def test_close_async_hf_client(self):
         """close_async_hf_client closes the client."""
-        from hfl.hub.client import get_async_hf_client, close_async_hf_client
+        from hfl.hub.client import close_async_hf_client, get_async_hf_client
 
         client = await get_async_hf_client()
         await close_async_hf_client()

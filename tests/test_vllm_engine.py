@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the engine/vllm_engine module with true streaming support."""
 
-import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 

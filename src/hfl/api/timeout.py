@@ -47,7 +47,11 @@ def with_timeout(timeout_seconds: float | None = None) -> Callable:
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             from hfl.config import config
 
-            effective_timeout = timeout_seconds if timeout_seconds is not None else config.generation_timeout
+            effective_timeout = (
+                timeout_seconds
+                if timeout_seconds is not None
+                else config.generation_timeout
+            )
             try:
                 return await asyncio.wait_for(
                     func(*args, **kwargs),
@@ -91,7 +95,11 @@ async def run_with_timeout(
     """
     from hfl.config import config
 
-    effective_timeout = timeout_seconds if timeout_seconds is not None else config.generation_timeout
+    effective_timeout = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else config.generation_timeout
+    )
     try:
         return await asyncio.wait_for(coro, timeout=effective_timeout)
     except asyncio.TimeoutError:

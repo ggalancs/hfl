@@ -30,7 +30,6 @@ Unsupported models:
 - Models without config.json
 """
 
-import asyncio
 import json
 import shutil
 import subprocess

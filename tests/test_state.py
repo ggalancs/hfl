@@ -478,7 +478,7 @@ class TestEnsureLLMLoaded:
             return MockEngine(), MockManifest("test-model")
 
         # Start two concurrent loads for same model
-        results = await asyncio.gather(
+        await asyncio.gather(
             state.ensure_llm_loaded("test-model", counting_loader),
             state.ensure_llm_loaded("test-model", counting_loader),
         )

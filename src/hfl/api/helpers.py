@@ -237,10 +237,10 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     ) -> float:
         if not isinstance(val, (int, float)):
             raise HTTPException(400, detail=f"'{key}' must be a number, got {type(val).__name__}")
-        val = float(val)
-        if not min_val <= val <= max_val:
+        fval = float(val)
+        if not min_val <= fval <= max_val:
             raise HTTPException(400, detail=f"'{key}' must be between {min_val} and {max_val}")
-        return val
+        return fval
 
     def _validate_int(key: str, val: Any, min_val: int = 0) -> int:
         if not isinstance(val, int):

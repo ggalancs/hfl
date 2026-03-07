@@ -34,6 +34,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from hfl.api.exception_handlers import register_exception_handlers
+from hfl.api.middleware import RequestLogger
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
@@ -82,7 +84,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Check for API key in X-API-Key header
         api_key_header = request.headers.get("X-API-Key", "")
-        if api_key_header and secrets.compare_digest(api_key_header.encode(), state.api_key.encode()):
+        if api_key_header and secrets.compare_digest(
+            api_key_header.encode(), state.api_key.encode()
+        ):
             response = await call_next(request)
             return response
 
@@ -135,7 +139,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 _openapi_tags = [
-    {"name": "OpenAI", "description": "OpenAI-compatible endpoints (chat completions, completions, models)"},
+    {
+        "name": "OpenAI",
+        "description": (
+            "OpenAI-compatible endpoints"
+            " (chat completions, completions, models)"
+        ),
+    },
     {"name": "Ollama", "description": "Ollama-compatible endpoints (generate, chat, tags)"},
     {"name": "TTS", "description": "Text-to-speech endpoints"},
     {"name": "Health", "description": "Health check and readiness probes"},
@@ -183,13 +193,9 @@ if config.rate_limit_enabled:
 app.add_middleware(APIKeyMiddleware)
 
 # Request logging and metrics recording (outermost - runs first)
-from hfl.api.middleware import RequestLogger
-
 app.add_middleware(RequestLogger)
 
 # Register global exception handlers for HFLError hierarchy
-from hfl.api.exception_handlers import register_exception_handlers
-
 register_exception_handlers(app)
 
 app.include_router(openai_router)

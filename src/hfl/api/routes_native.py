@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
@@ -62,7 +62,7 @@ def _options_to_config(options: dict | None) -> GenerationConfig:
         504: {"description": "Generation timeout"},
     },
 )
-async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse:
+async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse | Response:
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -149,7 +149,7 @@ async def _stream_generate(
         504: {"description": "Generation timeout"},
     },
 )
-async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse:
+async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Response:
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:

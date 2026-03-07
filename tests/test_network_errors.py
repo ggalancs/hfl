@@ -5,7 +5,6 @@
 Tests for download failures, timeouts, and network error recovery.
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -162,8 +161,9 @@ class TestDownloaderRateLimiting:
 
     def test_rate_limit_between_requests(self, temp_config):
         """Downloads should have rate limiting between requests."""
-        from hfl.hub.downloader import _rate_limit
         import time
+
+        from hfl.hub.downloader import _rate_limit
 
         # Multiple rapid calls should be delayed
         start = time.time()
@@ -194,8 +194,9 @@ class TestGitOperationErrors:
 
     def test_git_clone_timeout(self, temp_config):
         """Git clone should handle timeouts."""
-        from hfl.converter.gguf_converter import GGUFConverter
         import subprocess
+
+        from hfl.converter.gguf_converter import GGUFConverter
 
         converter = GGUFConverter()
 

@@ -9,21 +9,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hfl.converter.formats import ModelFormat, ModelType
 from hfl.engine.selector import (
     MissingDependencyError,
     _create_engine,
+    _get_bark_engine,
+    _get_coqui_engine,
     _get_llama_cpp_engine,
     _get_transformers_engine,
     _get_vllm_engine,
-    _get_bark_engine,
-    _get_coqui_engine,
     _has_cuda,
     _is_bark_model,
     _is_coqui_model,
     select_engine,
     select_tts_engine,
 )
-from hfl.converter.formats import ModelFormat, ModelType
 
 
 class TestMissingDependencyError:
@@ -55,7 +55,6 @@ class TestHasCuda:
         mock_torch.cuda.is_available.return_value = True
 
         # Test the function with mocked torch
-        import importlib
         import sys
 
         # Store original if present
@@ -86,7 +85,11 @@ class TestGetEngines:
         mock_engine = MagicMock()
         mock_engine_cls.return_value = mock_engine
 
-        with patch.dict("sys.modules", {"hfl.engine.llama_cpp": MagicMock(LlamaCppEngine=mock_engine_cls)}):
+        with patch.dict("sys.modules", {
+            "hfl.engine.llama_cpp": MagicMock(
+                LlamaCppEngine=mock_engine_cls,
+            ),
+        }):
             with patch("hfl.engine.llama_cpp.LlamaCppEngine", mock_engine_cls, create=True):
                 # The actual test depends on import behavior
                 pass

@@ -11,12 +11,12 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import openai_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import run_with_timeout
-from hfl.api.schemas import ChatCompletionMessage, ChatCompletionRequest, CompletionRequest
+from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig
 
@@ -63,7 +63,9 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
         504: {"description": "Generation timeout"},
     },
 )
-async def chat_completions(req: ChatCompletionRequest) -> dict[str, Any] | StreamingResponse:
+async def chat_completions(
+    req: ChatCompletionRequest,
+) -> dict[str, Any] | StreamingResponse | Response:
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -113,7 +115,11 @@ async def _stream_chat(
 
     state = _get_state()
     if state.engine is None:
-        yield f"data: {json.dumps({'error': 'Model not loaded', 'code': 'SERVICE_UNAVAILABLE'})}\n\n"
+        err = json.dumps({
+            'error': 'Model not loaded',
+            'code': 'SERVICE_UNAVAILABLE',
+        })
+        yield f"data: {err}\n\n"
         return
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -172,7 +178,7 @@ async def _stream_chat(
         504: {"description": "Generation timeout"},
     },
 )
-async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse:
+async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse | Response:
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -222,7 +228,11 @@ async def _stream_completion(
 
     state = _get_state()
     if state.engine is None:
-        yield f"data: {json.dumps({'error': 'Model not loaded', 'code': 'SERVICE_UNAVAILABLE'})}\n\n"
+        err = json.dumps({
+            'error': 'Model not loaded',
+            'code': 'SERVICE_UNAVAILABLE',
+        })
+        yield f"data: {err}\n\n"
         return
 
     completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"

@@ -3,7 +3,6 @@
 """Tests for model integrity verification."""
 
 import hashlib
-import tempfile
 from pathlib import Path
 
 import pytest

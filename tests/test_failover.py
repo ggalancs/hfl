@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from typing import Iterator
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +15,6 @@ from hfl.engine.base import (
     InferenceEngine,
 )
 from hfl.engine.failover import FailoverEngine
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,12 +46,20 @@ class DummyEngine(InferenceEngine):
         yield f"{self._name}:stream1"
         yield f"{self._name}:stream2"
 
-    def chat(self, messages: list[ChatMessage], config: GenerationConfig | None = None) -> GenerationResult:
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+    ) -> GenerationResult:
         if self._fail:
             raise RuntimeError(f"{self._name} chat failed")
         return GenerationResult(text=f"{self._name}:chat")
 
-    def chat_stream(self, messages: list[ChatMessage], config: GenerationConfig | None = None) -> Iterator[str]:
+    def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+    ) -> Iterator[str]:
         if self._fail:
             raise RuntimeError(f"{self._name} chat_stream failed")
         yield f"{self._name}:cs1"

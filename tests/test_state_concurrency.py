@@ -6,11 +6,11 @@ Tests for race conditions, concurrent model loading, and cleanup under load.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from hfl.api.state import ServerState, get_state, reset_state
+from hfl.api.state import get_state, reset_state
 
 
 @pytest.fixture
@@ -88,8 +88,6 @@ class TestConcurrentModelLoading:
 
         loader_a = await create_loader("model-a", 0.1)
         loader_b = await create_loader("model-b", 0.1)
-
-        start_time = asyncio.get_event_loop().time()
 
         # Load two different models concurrently
         task_a = asyncio.create_task(

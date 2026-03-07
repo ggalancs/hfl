@@ -2,13 +2,21 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for rate limiting middleware."""
 
+import tempfile
+import threading
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hfl.api.middleware import RateLimitMiddleware
+from hfl.api.rate_limit import (
+    InMemoryRateLimiter,
+    SQLiteRateLimiter,
+    create_rate_limiter,
+)
 
 
 @pytest.fixture
@@ -156,18 +164,6 @@ class TestClientIPDetection:
 # =============================================================================
 # Tests for rate_limit.py rate limiter implementations
 # =============================================================================
-
-import tempfile
-import threading
-from pathlib import Path
-
-from hfl.api.rate_limit import (
-    InMemoryRateLimiter,
-    SQLiteRateLimiter,
-    create_rate_limiter,
-    RateLimiter,
-)
-
 
 class TestInMemoryRateLimiter:
     """Tests for InMemoryRateLimiter."""

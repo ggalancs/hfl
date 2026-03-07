@@ -9,14 +9,14 @@ organized by API compatibility layer:
 - TTS schemas
 """
 
+from hfl.api.schemas.ollama import (
+    ChatRequest,
+    GenerateRequest,
+)
 from hfl.api.schemas.openai import (
     ChatCompletionMessage,
     ChatCompletionRequest,
     CompletionRequest,
-)
-from hfl.api.schemas.ollama import (
-    GenerateRequest,
-    ChatRequest,
 )
 from hfl.api.schemas.tts import (
     AudioFormat,

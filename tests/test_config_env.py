@@ -5,8 +5,6 @@
 import os
 from unittest.mock import patch
 
-import pytest
-
 from hfl.config import HFLConfig, SLOConfig
 
 

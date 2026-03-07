@@ -143,7 +143,7 @@ class EngineObserver:
             if emit_events and self._enabled:
                 self._emit_generation_failed(operation, str(e))
             logger.error(
-                f"Inference failed",
+                "Inference failed",
                 extra={
                     "model": self.model_name,
                     "operation": operation,
@@ -161,7 +161,7 @@ class EngineObserver:
             if emit_events and self._enabled:
                 self._emit_generation_completed(metrics)
             logger.info(
-                f"Inference completed",
+                "Inference completed",
                 extra=metrics.to_dict(),
             )
 
@@ -218,7 +218,13 @@ class EngineObserver:
                 extra={
                     "model_path": model_path,
                     "duration_ms": round(load_info["duration_ms"], 2),
-                    **{k: v for k, v in load_info.items() if k not in ["start_time", "end_time", "model_path"]},
+                    **{
+                        k: v for k, v in load_info.items()
+                        if k not in [
+                            "start_time", "end_time",
+                            "model_path",
+                        ]
+                    },
                 },
             )
 

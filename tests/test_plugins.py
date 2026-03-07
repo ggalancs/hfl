@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for plugin system."""
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest

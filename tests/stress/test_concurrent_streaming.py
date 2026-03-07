@@ -5,9 +5,9 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from hfl.engine.async_wrapper import AsyncEngineWrapper
 from hfl.engine.base import ChatMessage

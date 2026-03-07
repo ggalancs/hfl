@@ -3,7 +3,6 @@
 """Tests for model loader module."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -141,7 +140,9 @@ class TestLoadLLM:
     @patch("hfl.api.model_loader.get_state")
     @patch("hfl.api.model_loader.get_registry")
     @patch("hfl.api.model_loader.detect_model_type")
-    async def test_wrong_model_type_raises_400(self, mock_detect, mock_get_registry, mock_get_state):
+    async def test_wrong_model_type_raises_400(
+        self, mock_detect, mock_get_registry, mock_get_state,
+    ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
         mock_state.current_model = None
@@ -272,7 +273,9 @@ class TestLoadTTS:
     @patch("hfl.api.model_loader.get_state")
     @patch("hfl.api.model_loader.get_registry")
     @patch("hfl.api.model_loader.detect_model_type")
-    async def test_wrong_model_type_raises_400(self, mock_detect, mock_get_registry, mock_get_state):
+    async def test_wrong_model_type_raises_400(
+        self, mock_detect, mock_get_registry, mock_get_state,
+    ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
         mock_state.current_tts_model = None
