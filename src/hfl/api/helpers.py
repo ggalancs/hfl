@@ -8,15 +8,17 @@ Consolidates common patterns used across OpenAI, Native, and TTS routes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar
 from uuid import uuid4
 
 from fastapi import HTTPException
 
 from hfl.api.state import get_state
+from hfl.config import config
 from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.base import GenerationConfig
 from hfl.engine.selector import select_engine, select_tts_engine
@@ -26,6 +28,91 @@ from hfl.validators import ValidationError, validate_model_name
 if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.models.manifest import ModelManifest
+
+T = TypeVar("T")
+
+
+# =============================================================================
+# Timeout Utilities
+# =============================================================================
+
+
+async def run_with_timeout(
+    func: Callable[..., T],
+    *args: Any,
+    timeout: float | None = None,
+    operation: str = "operation",
+    **kwargs: Any,
+) -> T:
+    """Run a sync function in thread pool with configurable timeout.
+
+    Uses config.generation_timeout as default, providing consistent
+    timeout handling across all API endpoints.
+
+    Args:
+        func: Synchronous function to call
+        *args: Positional arguments for the function
+        timeout: Timeout in seconds (None = use config.generation_timeout)
+        operation: Operation name for error messages
+        **kwargs: Keyword arguments for the function
+
+    Returns:
+        Result of the function call
+
+    Raises:
+        HTTPException: 504 Gateway Timeout if the operation times out
+    """
+    effective_timeout = timeout if timeout is not None else config.generation_timeout
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=effective_timeout,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": f"{operation} timed out",
+                "code": "TIMEOUT",
+                "timeout_seconds": effective_timeout,
+                "operation": operation,
+            },
+        )
+
+
+async def run_async_with_timeout(
+    coro: Any,
+    timeout: float | None = None,
+    operation: str = "operation",
+) -> Any:
+    """Run an async coroutine with configurable timeout.
+
+    Args:
+        coro: Async coroutine to await
+        timeout: Timeout in seconds (None = use config.generation_timeout)
+        operation: Operation name for error messages
+
+    Returns:
+        Result of the coroutine
+
+    Raises:
+        HTTPException: 504 Gateway Timeout if the operation times out
+    """
+    effective_timeout = timeout if timeout is not None else config.generation_timeout
+
+    try:
+        return await asyncio.wait_for(coro, timeout=effective_timeout)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": f"{operation} timed out",
+                "code": "TIMEOUT",
+                "timeout_seconds": effective_timeout,
+                "operation": operation,
+            },
+        )
 
 
 async def ensure_llm_loaded(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:

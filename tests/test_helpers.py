@@ -16,6 +16,8 @@ from hfl.api.helpers import (
     format_ndjson_chunk,
     options_to_config,
     request_to_config,
+    run_async_with_timeout,
+    run_with_timeout,
     stream_ollama_chat,
     stream_ollama_generate,
     stream_openai_chat,
@@ -687,3 +689,136 @@ class TestEnsureTTSLoaded:
         assert engine is mock_engine
         assert manifest is mock_manifest
         mock_state.set_tts_engine.assert_called_once_with(mock_engine, mock_manifest)
+
+
+class TestRunWithTimeout:
+    """Tests for run_with_timeout function."""
+
+    @pytest.mark.asyncio
+    async def test_successful_execution(self):
+        """Successful function execution returns result."""
+
+        def simple_func(x, y):
+            return x + y
+
+        result = await run_with_timeout(simple_func, 2, 3, operation="test_add")
+        assert result == 5
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises_http_exception(self):
+        """Timeout raises HTTPException 504."""
+        import time
+
+        def slow_func():
+            time.sleep(5)
+            return "done"
+
+        with pytest.raises(HTTPException) as exc_info:
+            await run_with_timeout(slow_func, timeout=0.1, operation="slow_op")
+
+        assert exc_info.value.status_code == 504
+        assert exc_info.value.detail["code"] == "TIMEOUT"
+        assert exc_info.value.detail["operation"] == "slow_op"
+        assert exc_info.value.detail["timeout_seconds"] == 0.1
+
+    @pytest.mark.asyncio
+    async def test_kwargs_passed_correctly(self):
+        """Keyword arguments are passed to function."""
+
+        def func_with_kwargs(a, b=10, c=20):
+            return a + b + c
+
+        result = await run_with_timeout(func_with_kwargs, 1, b=5, c=10, operation="test")
+        assert result == 16
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.helpers.config")
+    async def test_uses_config_timeout_by_default(self, mock_config):
+        """Uses config.generation_timeout when timeout not specified."""
+        mock_config.generation_timeout = 300.0
+
+        def fast_func():
+            return "done"
+
+        result = await run_with_timeout(fast_func, operation="test")
+        assert result == "done"
+
+    @pytest.mark.asyncio
+    async def test_explicit_timeout_overrides_config(self):
+        """Explicit timeout parameter overrides config default."""
+        import time
+
+        def medium_func():
+            time.sleep(0.2)
+            return "done"
+
+        # Should succeed with longer timeout
+        result = await run_with_timeout(medium_func, timeout=1.0, operation="test")
+        assert result == "done"
+
+        # Should fail with shorter timeout
+        with pytest.raises(HTTPException) as exc_info:
+            await run_with_timeout(medium_func, timeout=0.05, operation="test")
+        assert exc_info.value.status_code == 504
+
+
+class TestRunAsyncWithTimeout:
+    """Tests for run_async_with_timeout function."""
+
+    @pytest.mark.asyncio
+    async def test_successful_async_execution(self):
+        """Successful async execution returns result."""
+        import asyncio
+
+        async def async_func():
+            await asyncio.sleep(0.01)
+            return "async_done"
+
+        result = await run_async_with_timeout(async_func(), operation="test_async")
+        assert result == "async_done"
+
+    @pytest.mark.asyncio
+    async def test_async_timeout_raises_http_exception(self):
+        """Async timeout raises HTTPException 504."""
+        import asyncio
+
+        async def slow_async():
+            await asyncio.sleep(5)
+            return "done"
+
+        with pytest.raises(HTTPException) as exc_info:
+            await run_async_with_timeout(slow_async(), timeout=0.1, operation="slow_async")
+
+        assert exc_info.value.status_code == 504
+        assert exc_info.value.detail["code"] == "TIMEOUT"
+        assert exc_info.value.detail["operation"] == "slow_async"
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.helpers.config")
+    async def test_async_uses_config_timeout_by_default(self, mock_config):
+        """Uses config.generation_timeout for async when timeout not specified."""
+        mock_config.generation_timeout = 300.0
+
+        async def fast_async():
+            return "fast"
+
+        result = await run_async_with_timeout(fast_async(), operation="test")
+        assert result == "fast"
+
+    @pytest.mark.asyncio
+    async def test_async_explicit_timeout_overrides_config(self):
+        """Explicit timeout parameter overrides config for async."""
+        import asyncio
+
+        async def medium_async():
+            await asyncio.sleep(0.2)
+            return "done"
+
+        # Should succeed with longer timeout
+        result = await run_async_with_timeout(medium_async(), timeout=1.0, operation="test")
+        assert result == "done"
+
+        # Should fail with shorter timeout
+        with pytest.raises(HTTPException) as exc_info:
+            await run_async_with_timeout(medium_async(), timeout=0.05, operation="test")
+        assert exc_info.value.status_code == 504
