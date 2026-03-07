@@ -10,6 +10,7 @@ and smart eviction based on memory and idle time.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 if TYPE_CHECKING:
     from hfl.engine.base import InferenceEngine
     from hfl.models.manifest import ModelManifest
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,6 +56,7 @@ class ModelPool:
         max_models: int = 3,
         idle_timeout_seconds: float = 3600.0,  # 1 hour
         max_memory_mb: float | None = None,
+        background_eviction_interval: float = 60.0,  # Check every minute
     ):
         """Initialize model pool.
 
@@ -60,6 +64,7 @@ class ModelPool:
             max_models: Maximum number of models to keep loaded
             idle_timeout_seconds: Evict models idle longer than this
             max_memory_mb: Maximum total memory for cached models (estimate)
+            background_eviction_interval: Seconds between background eviction checks
         """
         self._models: OrderedDict[str, CachedModel] = OrderedDict()
         self._max_models = max_models
@@ -67,6 +72,11 @@ class ModelPool:
         self._max_memory_mb = max_memory_mb
         self._lock = asyncio.Lock()
         self._total_memory_mb = 0.0
+        self._background_eviction_interval = background_eviction_interval
+        self._shutdown = False
+        self._background_task: asyncio.Task | None = None
+        # Set of model names currently being loaded (to prevent duplicate loads)
+        self._loading: set[str] = set()
 
     async def get(self, model_name: str) -> CachedModel | None:
         """Get a cached model by name.
@@ -93,6 +103,9 @@ class ModelPool:
     ) -> CachedModel:
         """Get cached model or load it.
 
+        This method is designed to avoid deadlocks by not holding the lock
+        during the potentially long-running loader operation.
+
         Args:
             model_name: Model name
             loader: Async function returning (engine, manifest, memory_mb)
@@ -100,11 +113,13 @@ class ModelPool:
         Returns:
             CachedModel (cached or newly loaded)
         """
-        # Check cache first
+        # Check cache first (fast path without lock contention)
         cached = await self.get(model_name)
         if cached is not None:
             return cached
 
+        # Check if we should load (with lock) but don't load yet
+        should_load = False
         async with self._lock:
             # Double-check after acquiring lock
             if model_name in self._models:
@@ -113,10 +128,27 @@ class ModelPool:
                 self._models.move_to_end(model_name)
                 return cached
 
-            # Evict if necessary before loading
-            await self._evict_if_needed_locked()
+            # Check if another coroutine is already loading this model
+            if model_name in self._loading:
+                # Wait for the other coroutine to finish loading
+                pass
+            else:
+                # Mark that we're loading this model
+                self._loading.add(model_name)
+                should_load = True
 
-            # Load new model
+                # Evict if necessary before loading
+                await self._evict_if_needed_locked()
+
+        # If another coroutine is loading, wait and retry
+        if not should_load:
+            # Small delay to avoid busy-waiting
+            await asyncio.sleep(0.1)
+            return await self.get_or_load(model_name, loader)
+
+        # Load model OUTSIDE the lock to prevent deadlock
+        engine = None
+        try:
             start_time = time.time()
             engine, manifest, memory_mb = await loader()
             load_time_ms = (time.time() - start_time) * 1000
@@ -129,10 +161,37 @@ class ModelPool:
                 memory_estimate_mb=memory_mb,
             )
 
-            self._models[model_name] = cached
-            self._total_memory_mb += memory_mb
+            # Update cache with lock
+            async with self._lock:
+                # Check again in case of race (another coroutine loaded it)
+                if model_name in self._models:
+                    # Another coroutine loaded it while we were loading
+                    # Unload our engine and return the cached one
+                    if engine.is_loaded:
+                        engine.unload()
+                    existing = self._models[model_name]
+                    existing.touch()
+                    self._models.move_to_end(model_name)
+                    return existing
+
+                self._models[model_name] = cached
+                self._total_memory_mb += memory_mb
 
             return cached
+
+        except Exception:
+            # Cleanup engine on failure
+            if engine is not None and engine.is_loaded:
+                try:
+                    engine.unload()
+                except Exception as e:
+                    logger.error(f"Failed to unload engine after load error: {e}")
+            raise
+
+        finally:
+            # Always remove from loading set
+            async with self._lock:
+                self._loading.discard(model_name)
 
     async def evict(self, model_name: str) -> bool:
         """Evict a specific model from the cache.
@@ -219,6 +278,8 @@ class ModelPool:
             "max_models": self._max_models,
             "total_memory_mb": self._total_memory_mb,
             "max_memory_mb": self._max_memory_mb,
+            "background_eviction_active": self._background_task is not None
+            and not self._background_task.done(),
             "models": [
                 {
                     "name": name,
@@ -230,9 +291,112 @@ class ModelPool:
             ],
         }
 
+    def start_background_eviction(self) -> None:
+        """Start the background eviction loop.
 
-# Singleton instance
+        Should be called once when the event loop is running.
+        The loop checks for idle models periodically and evicts them.
+        """
+        if self._background_task is not None and not self._background_task.done():
+            return  # Already running
+
+        self._shutdown = False
+        self._background_task = asyncio.create_task(self._background_eviction_loop())
+        logger.info(
+            f"Background eviction started (interval: {self._background_eviction_interval}s)"
+        )
+
+    async def stop_background_eviction(self) -> None:
+        """Stop the background eviction loop."""
+        self._shutdown = True
+        if self._background_task is not None:
+            self._background_task.cancel()
+            try:
+                await self._background_task
+            except asyncio.CancelledError:
+                pass
+            self._background_task = None
+            logger.info("Background eviction stopped")
+
+    async def _background_eviction_loop(self) -> None:
+        """Background task for periodic idle model eviction.
+
+        Features:
+        - Exponential backoff on errors
+        - Maximum consecutive error limit
+        - Graceful degradation instead of infinite retry
+        """
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        backoff_seconds = 1.0
+        max_backoff = 60.0
+
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(self._background_eviction_interval)
+
+                # Find and evict idle models
+                async with self._lock:
+                    now = time.time()
+                    to_evict = [
+                        name
+                        for name, cached in self._models.items()
+                        if now - cached.last_used > self._idle_timeout
+                    ]
+
+                    for name in to_evict:
+                        self._evict_locked(name)
+                        logger.info(f"Background eviction: evicted idle model '{name}'")
+
+                # Reset error tracking on success
+                consecutive_errors = 0
+                backoff_seconds = 1.0
+
+            except asyncio.CancelledError:
+                logger.info("Background eviction loop cancelled")
+                break
+
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(
+                    f"Error in background eviction loop "
+                    f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                )
+
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(
+                        f"Background eviction loop stopping after {max_consecutive_errors} "
+                        f"consecutive errors. Manual restart required."
+                    )
+                    # Emit event for monitoring if available
+                    try:
+                        from hfl.events import EventType, emit
+                        emit(
+                            EventType.ERROR,
+                            source="model_pool",
+                            error="eviction_loop_failed",
+                            consecutive_errors=consecutive_errors,
+                        )
+                    except ImportError:
+                        pass
+                    break
+
+                # Exponential backoff
+                logger.warning(f"Retrying eviction loop in {backoff_seconds:.1f}s")
+                await asyncio.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, max_backoff)
+
+    async def shutdown(self) -> None:
+        """Shutdown the pool, stopping background tasks and clearing models."""
+        await self.stop_background_eviction()
+        await self.clear()
+
+
+# Singleton instance with thread-safe initialization
+import threading
+
 _pool: ModelPool | None = None
+_pool_lock = threading.Lock()
 
 
 def get_model_pool(
@@ -240,6 +404,8 @@ def get_model_pool(
     idle_timeout_seconds: float = 3600.0,
 ) -> ModelPool:
     """Get or create the singleton model pool.
+
+    Thread-safe singleton pattern using double-checked locking.
 
     Args:
         max_models: Maximum cached models (only used on creation)
@@ -249,15 +415,23 @@ def get_model_pool(
         ModelPool instance
     """
     global _pool
-    if _pool is None:
-        _pool = ModelPool(
-            max_models=max_models,
-            idle_timeout_seconds=idle_timeout_seconds,
-        )
-    return _pool
+    # Fast path: return existing instance without locking
+    if _pool is not None:
+        return _pool
+
+    # Slow path: acquire lock and create if needed
+    with _pool_lock:
+        # Double-check after acquiring lock
+        if _pool is None:
+            _pool = ModelPool(
+                max_models=max_models,
+                idle_timeout_seconds=idle_timeout_seconds,
+            )
+        return _pool
 
 
 def reset_model_pool() -> None:
     """Reset the model pool (for testing)."""
     global _pool
-    _pool = None
+    with _pool_lock:
+        _pool = None
