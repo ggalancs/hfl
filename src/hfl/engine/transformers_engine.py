@@ -7,6 +7,7 @@ Uses the model in its native format (safetensors) with GPU.
 Supports dynamic quantization via bitsandbytes.
 """
 
+import logging
 import time
 from typing import Iterator
 
@@ -16,6 +17,8 @@ from hfl.engine.base import (
     GenerationResult,
     InferenceEngine,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TransformersEngine(InferenceEngine):
@@ -65,9 +68,35 @@ class TransformersEngine(InferenceEngine):
                 load_in_8bit=True,
             )
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self._model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
-        self._model_id = model_path
+        # Load with partial failure cleanup to prevent resource leaks
+        logger.info(f"Loading transformers model: {model_path}")
+        logger.debug(f"Load config: quant={quant}, device_map={load_kwargs.get('device_map')}")
+
+        start_time = time.perf_counter()
+        tokenizer = None
+        model = None
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_path)
+            model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
+            # Only assign to instance after both succeed
+            self._tokenizer = tokenizer
+            self._model = model
+            self._model_id = model_path
+            elapsed = time.perf_counter() - start_time
+            logger.info(f"Model loaded in {elapsed:.2f}s: {model_path}")
+        except Exception as e:
+            logger.error(f"Failed to load model {model_path}: {e}")
+            # Cleanup partial state on failure
+            if model is not None:
+                del model
+            if tokenizer is not None:
+                del tokenizer
+            import gc
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            raise
 
     def unload(self) -> None:
         if self._model:
@@ -75,10 +104,20 @@ class TransformersEngine(InferenceEngine):
             del self._tokenizer
             self._model = None
             self._tokenizer = None
-            import torch
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # Force garbage collection and GPU memory cleanup
+            import gc
+
+            gc.collect()
+
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except Exception:
+                pass  # Ignore if torch not available or CUDA errors
 
     def _build_prompt(self, messages: list[ChatMessage]) -> str:
         """Builds the prompt using the tokenizer's chat template."""

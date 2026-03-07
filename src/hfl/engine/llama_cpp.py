@@ -7,6 +7,7 @@ This is the main backend for GGUF models.
 Supports CPU, CUDA, Metal, and Vulkan.
 """
 
+import logging
 import os
 import sys
 import time
@@ -21,6 +22,8 @@ from hfl.engine.base import (
     GenerationResult,
     InferenceEngine,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -67,27 +70,67 @@ class LlamaCppEngine(InferenceEngine):
                 verbose: Show llama.cpp logs
                 flash_attn: Use Flash Attention (default True)
                 chat_format: Chat format (auto-detected)
-        """
-        verbose = kwargs.get("verbose", False)
 
-        # Suppress Metal/CUDA initialization messages if verbose=False
-        context = _suppress_stderr if not verbose else _nullcontext
-        with context():
-            self._model = Llama(
-                model_path=model_path,
-                n_ctx=kwargs.get("n_ctx", 4096),
-                n_gpu_layers=kwargs.get("n_gpu_layers", -1),
-                n_threads=kwargs.get("n_threads", 0) or None,
-                verbose=verbose,
-                flash_attn=kwargs.get("flash_attn", True),
-                chat_format=kwargs.get("chat_format", None),  # auto-detect
-            )
-        self._model_path = model_path
+        Raises:
+            FileNotFoundError: If the model file does not exist.
+            ValueError: If the path is invalid or not a GGUF file.
+        """
+        from pathlib import Path
+
+        # Validate model path for security and correctness
+        path = Path(model_path).resolve()
+
+        if not path.exists():
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        if not path.is_file():
+            raise ValueError(f"Model path is not a file: {model_path}")
+
+        if not path.suffix.lower() == ".gguf":
+            raise ValueError(f"Model file must be a .gguf file, got: {path.suffix}")
+
+        # Use resolved path to prevent path traversal issues
+        model_path = str(path)
+
+        verbose = kwargs.get("verbose", False)
+        n_ctx = kwargs.get("n_ctx", 4096)
+        n_gpu_layers = kwargs.get("n_gpu_layers", -1)
+
+        logger.info(f"Loading GGUF model: {path.name}")
+        logger.debug(f"Model path: {model_path}, n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}")
+
+        start_time = time.perf_counter()
+        try:
+            # Suppress Metal/CUDA initialization messages if verbose=False
+            context = _suppress_stderr if not verbose else _nullcontext
+            with context():
+                self._model = Llama(
+                    model_path=model_path,
+                    n_ctx=n_ctx,
+                    n_gpu_layers=n_gpu_layers,
+                    n_threads=kwargs.get("n_threads", 0) or None,
+                    verbose=verbose,
+                    flash_attn=kwargs.get("flash_attn", True),
+                    chat_format=kwargs.get("chat_format", None),  # auto-detect
+                )
+            self._model_path = model_path
+            elapsed = time.perf_counter() - start_time
+            logger.info(f"Model loaded in {elapsed:.2f}s: {path.name}")
+        except Exception as e:
+            logger.error(f"Failed to load model {path.name}: {e}")
+            raise
 
     def unload(self) -> None:
         if self._model:
+            model_name = self.model_name
+            logger.info(f"Unloading model: {model_name}")
             del self._model
             self._model = None
+            # Force garbage collection to free GPU memory
+            import gc
+
+            gc.collect()
+            logger.debug(f"Model unloaded: {model_name}")
 
     def generate(
         self,
@@ -95,6 +138,7 @@ class LlamaCppEngine(InferenceEngine):
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
         cfg = config or GenerationConfig()
+        logger.debug(f"Generating with max_tokens={cfg.max_tokens}, temp={cfg.temperature}")
 
         t0 = time.perf_counter()
         output = self._model(
@@ -112,6 +156,8 @@ class LlamaCppEngine(InferenceEngine):
         text = output["choices"][0]["text"]
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
+
+        logger.debug(f"Generated {n_gen} tokens in {elapsed:.2f}s ({n_gen/elapsed:.1f} tok/s)")
 
         return GenerationResult(
             text=text,

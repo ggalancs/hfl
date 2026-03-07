@@ -12,11 +12,15 @@ Supported models:
 """
 
 import io
+import logging
+import time
 from typing import Iterator
 
 import numpy as np
 
 from hfl.engine.base import AudioEngine, AudioResult, TTSConfig
+
+logger = logging.getLogger(__name__)
 
 
 class BarkEngine(AudioEngine):
@@ -58,14 +62,24 @@ class BarkEngine(AudioEngine):
 
             torch_dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
 
-        self._pipeline = pipeline(
-            "text-to-audio",
-            model=model_path,
-            device=device if device != "cpu" else -1,
-            torch_dtype=torch_dtype,
-        )
-        self._model_name = model_path
-        self._sample_rate = 24000  # Bark native sample rate
+        logger.info(f"Loading Bark TTS model: {model_path}")
+        logger.debug(f"Device: {device}, dtype: {torch_dtype}")
+
+        start_time = time.time()
+        try:
+            self._pipeline = pipeline(
+                "text-to-audio",
+                model=model_path,
+                device=device if device != "cpu" else -1,
+                torch_dtype=torch_dtype,
+            )
+            self._model_name = model_path
+            self._sample_rate = 24000  # Bark native sample rate
+            elapsed = time.time() - start_time
+            logger.info(f"Bark model loaded in {elapsed:.2f}s")
+        except Exception as e:
+            logger.error(f"Failed to load Bark model: {e}")
+            raise
 
     def unload(self) -> None:
         """Release model from memory."""

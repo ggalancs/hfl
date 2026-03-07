@@ -3,6 +3,8 @@
 """Tests for the engine module (base, llama_cpp, transformers, selector)."""
 
 import sys
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +18,20 @@ def mock_llama_cpp_module():
     mock_llama.Llama = MagicMock()
     with patch.dict(sys.modules, {"llama_cpp": mock_llama}):
         yield mock_llama
+
+
+@pytest.fixture
+def temp_gguf_file():
+    """Create a temporary .gguf file for engine tests."""
+    with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as f:
+        # Write minimal GGUF header
+        f.write(b"GGUF")
+        f.flush()
+        path = Path(f.name)
+        yield path
+        # Cleanup
+        if path.exists():
+            path.unlink()
 
 
 class TestChatMessage:
@@ -136,23 +152,23 @@ class TestLlamaCppEngine:
         assert not engine.is_loaded
         assert engine.model_name == ""
 
-    def test_load_model(self, mock_llama_cpp_module):
+    def test_load_model(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies model loading."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
-        engine.load("/path/to/model.gguf", n_ctx=2048)
+        engine.load(str(temp_gguf_file), n_ctx=2048)
 
         assert engine.is_loaded
-        assert engine.model_name == "model.gguf"
+        assert engine.model_name == temp_gguf_file.name
 
-    def test_load_with_kwargs(self, mock_llama_cpp_module):
+    def test_load_with_kwargs(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies loading with additional parameters."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
         engine.load(
-            "/path/to/model.gguf",
+            str(temp_gguf_file),
             n_ctx=4096,
             n_gpu_layers=32,
             n_threads=8,
@@ -161,18 +177,18 @@ class TestLlamaCppEngine:
 
         assert engine.is_loaded
 
-    def test_unload_model(self, mock_llama_cpp_module):
+    def test_unload_model(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies model unloading."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
         engine = LlamaCppEngine()
-        engine.load("/path/to/model.gguf")
+        engine.load(str(temp_gguf_file))
         assert engine.is_loaded
 
         engine.unload()
         assert not engine.is_loaded
 
-    def test_generate(self, mock_llama_cpp_module):
+    def test_generate(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies text generation."""
         from hfl.engine.base import GenerationConfig
         from hfl.engine.llama_cpp import LlamaCppEngine
@@ -187,7 +203,7 @@ class TestLlamaCppEngine:
         }
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
-            engine.load("/path/to/model.gguf")
+            engine.load(str(temp_gguf_file))
             result = engine.generate("Prompt", GenerationConfig(max_tokens=100))
 
             assert result.text == "Generated text"
@@ -195,7 +211,7 @@ class TestLlamaCppEngine:
             assert result.tokens_generated == 5
             assert result.stop_reason == "stop"
 
-    def test_generate_stream(self, mock_llama_cpp_module):
+    def test_generate_stream(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies streaming generation."""
         from hfl.engine.llama_cpp import LlamaCppEngine
 
@@ -211,12 +227,12 @@ class TestLlamaCppEngine:
         )
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
-            engine.load("/path/to/model.gguf")
+            engine.load(str(temp_gguf_file))
             tokens = list(engine.generate_stream("Prompt"))
 
             assert tokens == ["Hello", " world", "!"]
 
-    def test_chat(self, mock_llama_cpp_module):
+    def test_chat(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies chat completion."""
         from hfl.engine.base import ChatMessage
         from hfl.engine.llama_cpp import LlamaCppEngine
@@ -230,7 +246,7 @@ class TestLlamaCppEngine:
         }
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
-            engine.load("/path/to/model.gguf")
+            engine.load(str(temp_gguf_file))
 
             messages = [ChatMessage(role="user", content="Hi")]
             result = engine.chat(messages)
@@ -238,7 +254,7 @@ class TestLlamaCppEngine:
             assert result.text == "Hello!"
             mock_model.create_chat_completion.assert_called_once()
 
-    def test_chat_stream(self, mock_llama_cpp_module):
+    def test_chat_stream(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies streaming chat completion."""
         from hfl.engine.base import ChatMessage
         from hfl.engine.llama_cpp import LlamaCppEngine
@@ -254,7 +270,7 @@ class TestLlamaCppEngine:
         )
 
         with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
-            engine.load("/path/to/model.gguf")
+            engine.load(str(temp_gguf_file))
 
             messages = [ChatMessage(role="user", content="Hello")]
             tokens = list(engine.chat_stream(messages))

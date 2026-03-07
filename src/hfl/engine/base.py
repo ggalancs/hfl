@@ -2,9 +2,15 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Abstract interface for inference engines."""
 
+from __future__ import annotations
+
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 # =============================================================================
 # LLM (Text Generation) Types
@@ -97,6 +103,35 @@ class InferenceEngine(ABC):
     def is_loaded(self) -> bool:
         """Whether a model is in memory."""
         ...
+
+    # Context manager support for automatic resource cleanup
+    def __enter__(self) -> "InferenceEngine":
+        """Enter context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: "TracebackType | None",
+    ) -> None:
+        """Exit context manager - automatically unload model."""
+        if self.is_loaded:
+            self.unload()
+
+    async def __aenter__(self) -> "InferenceEngine":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: "TracebackType | None",
+    ) -> None:
+        """Exit async context manager - automatically unload model."""
+        if self.is_loaded:
+            await asyncio.to_thread(self.unload)
 
 
 # =============================================================================
@@ -191,3 +226,32 @@ class AudioEngine(ABC):
     def supported_languages(self) -> list[str]:
         """List of supported language codes."""
         return ["en"]
+
+    # Context manager support for automatic resource cleanup
+    def __enter__(self) -> "AudioEngine":
+        """Enter context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: "TracebackType | None",
+    ) -> None:
+        """Exit context manager - automatically unload model."""
+        if self.is_loaded:
+            self.unload()
+
+    async def __aenter__(self) -> "AudioEngine":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: "TracebackType | None",
+    ) -> None:
+        """Exit async context manager - automatically unload model."""
+        if self.is_loaded:
+            await asyncio.to_thread(self.unload)
