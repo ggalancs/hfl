@@ -70,14 +70,18 @@ class TestGetMemorySnapshot:
 
     def test_with_psutil(self):
         """Should populate system memory when psutil available."""
+        import hfl.engine.memory as mem_module
+
         mock_mem = MagicMock()
         mock_mem.used = 8 * (1024**3)  # 8 GB
         mock_mem.available = 8 * (1024**3)
         mock_mem.total = 16 * (1024**3)
 
-        with patch("hfl.engine.memory.HAS_PSUTIL", True):
-            with patch("hfl.engine.memory.psutil") as mock_psutil:
-                mock_psutil.virtual_memory.return_value = mock_mem
+        mock_psutil = MagicMock()
+        mock_psutil.virtual_memory.return_value = mock_mem
+
+        with patch.object(mem_module, "HAS_PSUTIL", True):
+            with patch.object(mem_module, "psutil", mock_psutil, create=True):
                 snapshot = get_memory_snapshot()
 
         assert snapshot.system_used_gb == pytest.approx(8.0, rel=0.01)
