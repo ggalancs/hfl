@@ -123,9 +123,9 @@ class TestGetLlamaCppVersion:
             assert result == "unknown"
 
     def test_get_version_exception(self, tmp_path):
-        """Test getting version when exception occurs."""
+        """Test getting version when FileNotFoundError occurs."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = Exception("Git not found")
+            mock_run.side_effect = FileNotFoundError("Git not found")
 
             result = _get_llama_cpp_version(tmp_path)
 

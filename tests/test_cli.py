@@ -900,3 +900,144 @@ class TestCLIApp:
         assert "--host" in output
         assert "--port" in output
         assert "--model" in output
+
+
+class TestConfigCommand:
+    """Tests for config command."""
+
+    @pytest.fixture
+    def runner(self):
+        """Runner for CLI tests."""
+        return CliRunner()
+
+    def test_config_shows_directories(self, runner, temp_config):
+        """Config command shows directory paths."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert "Directories" in result.stdout
+        assert "Home" in result.stdout
+        assert "Models" in result.stdout
+
+    def test_config_shows_server_settings(self, runner, temp_config):
+        """Config command shows server settings."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert "Server" in result.stdout
+        assert "11434" in result.stdout  # Default port
+
+    def test_config_shows_slo(self, runner, temp_config):
+        """Config command shows SLO targets."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert "SLO" in result.stdout
+        assert "Availability" in result.stdout
+        assert "Latency" in result.stdout
+
+
+class TestCheckCommand:
+    """Tests for check command."""
+
+    @pytest.fixture
+    def runner(self):
+        """Runner for CLI tests."""
+        return CliRunner()
+
+    def test_check_runs(self, runner, temp_config):
+        """Check command runs without error."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["check"])
+
+        assert result.exit_code == 0
+        assert "Diagnostics" in result.stdout
+
+    def test_check_shows_backends(self, runner, temp_config):
+        """Check command shows backend availability."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["check"])
+
+        assert result.exit_code == 0
+        assert "Backend" in result.stdout
+        # Should mention llama-cpp, transformers, or vllm
+        assert any(
+            backend in result.stdout for backend in ["llama-cpp", "transformers", "vllm"]
+        )
+
+    def test_check_shows_gpu(self, runner, temp_config):
+        """Check command shows GPU status."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["check"])
+
+        assert result.exit_code == 0
+        assert "GPU" in result.stdout
+
+    def test_check_shows_storage(self, runner, temp_config):
+        """Check command shows storage status."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["check"])
+
+        assert result.exit_code == 0
+        assert "Storage" in result.stdout
+        assert "Registry" in result.stdout
+
+
+class TestDebugCommand:
+    """Tests for debug command."""
+
+    @pytest.fixture
+    def runner(self):
+        """Runner for CLI tests."""
+        return CliRunner()
+
+    def test_debug_runs(self, runner, temp_config):
+        """Debug command runs without error."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["debug"])
+
+        assert result.exit_code == 0
+        assert "Debug" in result.stdout
+
+    def test_debug_shows_system(self, runner, temp_config):
+        """Debug command shows system info."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["debug"])
+
+        assert result.exit_code == 0
+        assert "System" in result.stdout
+        assert "Python" in result.stdout
+        assert "Platform" in result.stdout
+
+    def test_debug_shows_hfl_version(self, runner, temp_config):
+        """Debug command shows HFL version."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["debug"])
+
+        assert result.exit_code == 0
+        assert "HFL" in result.stdout
+        assert "0.1.0" in result.stdout
+
+    def test_debug_shows_dependencies(self, runner, temp_config):
+        """Debug command shows dependencies."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, ["debug"])
+
+        assert result.exit_code == 0
+        assert "Dependencies" in result.stdout
+        assert "typer" in result.stdout
+        assert "fastapi" in result.stdout

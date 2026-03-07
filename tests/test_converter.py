@@ -356,13 +356,16 @@ class TestGGUFConverter:
         )
         assert "convert_hf_to_gguf.py" in first_cmd[1]
 
-    def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config):
+    def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config, monkeypatch):
         """
         Verifies that pip is invoked with sys.executable -m pip.
 
         This ensures that the pip from the correct environment is used.
         """
         from hfl.converter.gguf_converter import GGUFConverter
+
+        # Patch config in the converter module to use temp_config
+        monkeypatch.setattr("hfl.converter.gguf_converter.config", temp_config)
 
         converter = GGUFConverter()
 
@@ -376,12 +379,12 @@ class TestGGUFConverter:
             captured_commands.append(cmd)
             return MagicMock(returncode=0, stdout="abc123")
 
-        with patch("subprocess.run", side_effect=capture_run):
-            with patch("shutil.which", return_value=None):  # No CUDA
+        with patch("hfl.converter.gguf_converter.subprocess.run", side_effect=capture_run):
+            with patch("hfl.converter.gguf_converter.shutil.which", return_value=None):  # No CUDA
                 try:
                     converter.ensure_tools()
                 except Exception:
-                    pass  # May fail, we only care about capturing commands
+                    pass  # May fail after pip, we only care about capturing commands
 
         # Find the pip call
         pip_calls = [c for c in captured_commands if "-m" in c and "pip" in c]
@@ -464,10 +467,10 @@ class TestGetLlamaCppVersion:
             assert result == "unknown"
 
     def test_get_version_exception(self, temp_config):
-        """Returns 'unknown' on exception."""
+        """Returns 'unknown' on FileNotFoundError or OSError."""
         from hfl.converter.gguf_converter import _get_llama_cpp_version
 
-        with patch("subprocess.run", side_effect=Exception("Git not found")):
+        with patch("subprocess.run", side_effect=FileNotFoundError("Git not found")):
             result = _get_llama_cpp_version(temp_config.llama_cpp_dir)
 
             assert result == "unknown"

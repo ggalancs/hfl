@@ -328,10 +328,20 @@ def serve(
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
+    log_level: str = typer.Option("INFO", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR)"),
+    json_logs: bool = typer.Option(False, "--json-logs", help="Output logs in JSON format"),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
     from hfl.api.server import start_server
     from hfl.api.state import get_state
+    from hfl.core.observability_setup import setup_event_listeners
+    from hfl.logging_config import configure_logging
+
+    # Initialize structured logging
+    configure_logging(level=log_level, json_format=json_logs)
+
+    # Connect events to metrics
+    setup_event_listeners()
 
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
@@ -842,245 +852,213 @@ def version():
     console.print("[dim]https://github.com/ggalancs/hfl[/]")
 
 
-# =============================================================================
-# TTS Commands
-# =============================================================================
+@app.command()
+def config():
+    """Show current configuration."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from hfl.config import config as cfg
+
+    info = Text()
+    info.append("[bold]Directories[/]\n")
+    info.append(f"  Home:     {cfg.home_dir}\n")
+    info.append(f"  Models:   {cfg.models_dir}\n")
+    info.append(f"  Cache:    {cfg.cache_dir}\n")
+    info.append(f"  Registry: {cfg.registry_path}\n")
+
+    info.append("\n[bold]Server[/]\n")
+    info.append(f"  Host: {cfg.host}\n")
+    info.append(f"  Port: {cfg.port}\n")
+
+    info.append("\n[bold]Rate Limiting[/]\n")
+    info.append(f"  Enabled:  {cfg.rate_limit_enabled}\n")
+    info.append(f"  Requests: {cfg.rate_limit_requests}/min\n")
+
+    info.append("\n[bold]Inference Defaults[/]\n")
+    info.append(f"  Context Size: {cfg.default_ctx_size}\n")
+    info.append(f"  GPU Layers:   {cfg.default_n_gpu_layers} (-1 = all)\n")
+    info.append(f"  Threads:      {cfg.default_threads} (0 = auto)\n")
+
+    info.append("\n[bold]Timeouts (seconds)[/]\n")
+    info.append(f"  Model Load:   {cfg.model_load_timeout}\n")
+    info.append(f"  Generation:   {cfg.generation_timeout}\n")
+    info.append(f"  API Request:  {cfg.api_request_timeout}\n")
+
+    info.append("\n[bold]SLO Targets[/]\n")
+    info.append(f"  Availability: {cfg.slo.availability_target * 100:.1f}%\n")
+    info.append(f"  Latency P50:  {cfg.slo.latency_p50_ms}ms\n")
+    info.append(f"  Latency P95:  {cfg.slo.latency_p95_ms}ms\n")
+    info.append(f"  Latency P99:  {cfg.slo.latency_p99_ms}ms\n")
+    info.append(f"  Error Rate:   {cfg.slo.error_rate_target * 100:.1f}%\n")
+
+    info.append("\n[bold]HuggingFace[/]\n")
+    if cfg.hf_token:
+        info.append("  Token: [green]Configured[/]\n")
+    else:
+        info.append("  Token: [dim]Not set[/] (use HF_TOKEN env var)\n")
+
+    console.print(Panel(info, title="[bold]HFL Configuration[/]", border_style="cyan"))
 
 
-@app.command(hidden=True)
-def tts(
-    model: str = typer.Argument(help=t("commands.tts.args.model")),
-    text: str = typer.Argument(help=t("commands.tts.args.text")),
-    output: str = typer.Option(
-        "output.wav", "--output", "-o", help=t("commands.tts.options.output")
-    ),
-    language: str = typer.Option("en", "--lang", "-l", help=t("commands.tts.options.lang")),
-    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.tts.options.voice")),
-    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.tts.options.speed")),
-    sample_rate: int = typer.Option(22050, "--rate", "-r", help=t("commands.tts.options.rate")),
-    audio_format: str = typer.Option(
-        "wav", "--format", "-f", help=t("commands.tts.options.format")
-    ),
-):
-    """Synthesize text to an audio file."""
-    # TTS functionality temporarily disabled
-    console.print(f"[yellow]{t('errors.tts_disabled')}[/]")
-    raise typer.Exit(1)
+@app.command()
+def check():
+    """Run diagnostic checks (dependencies, backends, GPU)."""
+    from hfl.engine.dependency_check import check_engine_availability, log_available_backends
 
-    from pathlib import Path
+    console.print("[bold]Running HFL Diagnostics[/]\n")
 
-    from hfl.converter.formats import (
-        ModelType,
-        get_model_type_display_name,
-        is_model_type_supported,
-    )
-    from hfl.engine.base import TTSConfig
-    from hfl.engine.selector import MissingDependencyError, select_tts_engine
+    # Check dependencies
+    console.print("[bold cyan]Backend Availability[/]")
+    availability = check_engine_availability()
+
+    for backend in ["llama-cpp", "transformers", "vllm"]:
+        status = availability.get(backend, "unknown")
+        if status is True:
+            console.print(f"  [green]✓[/] {backend}")
+        else:
+            console.print(f"  [red]✗[/] {backend}: {status}")
+
+    # GPU check
+    console.print("\n[bold cyan]GPU Support[/]")
+    if availability.get("torch") is True:
+        if availability.get("torch_cuda"):
+            device = availability.get("cuda_device", "unknown")
+            console.print(f"  [green]✓[/] CUDA: {device}")
+        elif availability.get("torch_mps"):
+            console.print("  [green]✓[/] MPS (Apple Silicon)")
+        else:
+            console.print("  [yellow]○[/] CPU only")
+    else:
+        console.print(f"  [red]✗[/] PyTorch not installed")
+
+    # TTS check
+    console.print("\n[bold cyan]TTS Support[/]")
+    if availability.get("transformers") is True:
+        console.print("  [green]✓[/] Bark (via transformers)")
+    else:
+        console.print("  [red]✗[/] Bark: requires transformers")
+
+    if availability.get("soundfile"):
+        console.print("  [green]✓[/] soundfile")
+    else:
+        console.print("  [dim]○[/] soundfile: not installed")
+
+    if availability.get("torchaudio"):
+        console.print("  [green]✓[/] torchaudio")
+    else:
+        console.print("  [dim]○[/] torchaudio: not installed")
+
+    # Registry check
+    console.print("\n[bold cyan]Storage[/]")
     from hfl.models.registry import ModelRegistry
 
-    registry = ModelRegistry()
-    manifest = registry.get(model)
-
-    if not manifest:
-        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
-        console.print(t("errors.use_list_to_see"))
-        raise typer.Exit(1)
-
-    # Check model type
-    model_type = get_model_type(manifest)
-
-    if model_type != ModelType.TTS:
-        type_name = get_model_type_display_name(model_type)
-        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
-        console.print(f"  {t('errors.detected_type')}: [yellow]{type_name}[/]")
-        console.print(f"  {t('errors.expected_type')}: [green]TTS (Text-to-Speech)[/]")
-
-        if not is_model_type_supported(model_type):
-            console.print(f"\n[dim]{t('errors.unsupported_type_hint')}[/]")
-        elif model_type == ModelType.LLM:
-            console.print(f"\n[dim]{t('errors.use_run_command')}[/]")
-        raise typer.Exit(1)
-
-    console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
-
-    model_path = Path(manifest.local_path)
-
     try:
-        engine = select_tts_engine(model_path)
-        engine.load(manifest.local_path)
-    except MissingDependencyError as e:
-        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
-        raise typer.Exit(1)
-
-    console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
-
-    # Create TTS config
-    config = TTSConfig(
-        voice=voice,
-        speed=speed,
-        language=language,
-        sample_rate=sample_rate,
-        format=audio_format,
-    )
-
-    text_preview = text[:50] + "..." if len(text) > 50 else text
-    console.print(f'[cyan]{t("messages.synthesizing")}[/] "{text_preview}"')
-
-    # Synthesize
-    result = engine.synthesize(text, config)
-
-    # Save to file
-    output_path = Path(output)
-    output_path.write_bytes(result.audio)
-
-    engine.unload()
-
-    console.print(f"\n[bold green]{t('messages.audio_saved')}:[/] {output_path}")
-    console.print(f"  {t('messages.duration')}: {result.duration:.2f}s")
-    console.print(f"  {t('messages.sample_rate')}: {result.sample_rate} Hz")
-    console.print(f"  {t('messages.format')}: {result.format}")
-
-
-@app.command(hidden=True)
-def speak(
-    model: str = typer.Argument(help=t("commands.speak.args.model")),
-    text: str = typer.Argument(help=t("commands.speak.args.text")),
-    language: str = typer.Option("en", "--lang", "-l", help=t("commands.speak.options.lang")),
-    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.speak.options.voice")),
-    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.speak.options.speed")),
-):
-    """Synthesize text and play it directly."""
-    # TTS functionality temporarily disabled
-    console.print(f"[yellow]{t('errors.tts_disabled')}[/]")
-    raise typer.Exit(1)
-
-    from pathlib import Path
-
-    from hfl.converter.formats import (
-        ModelType,
-        get_model_type_display_name,
-        is_model_type_supported,
-    )
-    from hfl.engine.base import TTSConfig
-    from hfl.engine.selector import MissingDependencyError, select_tts_engine
-    from hfl.models.registry import ModelRegistry
-
-    registry = ModelRegistry()
-    manifest = registry.get(model)
-
-    if not manifest:
-        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
-        console.print(t("errors.use_list_to_see"))
-        raise typer.Exit(1)
-
-    # Check model type
-    model_type = get_model_type(manifest)
-
-    if model_type != ModelType.TTS:
-        type_name = get_model_type_display_name(model_type)
-        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {model}")
-        console.print(f"  {t('errors.detected_type')}: [yellow]{type_name}[/]")
-        console.print(f"  {t('errors.expected_type')}: [green]TTS (Text-to-Speech)[/]")
-
-        if not is_model_type_supported(model_type):
-            console.print(f"\n[dim]{t('errors.unsupported_type_hint')}[/]")
-        elif model_type == ModelType.LLM:
-            console.print(f"\n[dim]{t('errors.use_run_command')}[/]")
-        raise typer.Exit(1)
-
-    console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
-
-    model_path = Path(manifest.local_path)
-
-    try:
-        engine = select_tts_engine(model_path)
-        engine.load(manifest.local_path)
-    except MissingDependencyError as e:
-        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
-        raise typer.Exit(1)
-
-    console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
-
-    # Create TTS config (use WAV for playback)
-    config = TTSConfig(
-        voice=voice,
-        speed=speed,
-        language=language,
-        format="wav",
-    )
-
-    text_preview = text[:50] + "..." if len(text) > 50 else text
-    console.print(f'[cyan]{t("messages.synthesizing")}[/] "{text_preview}"')
-
-    # Synthesize
-    result = engine.synthesize(text, config)
-
-    engine.unload()
-
-    # Play audio
-    console.print(f"[cyan]{t('messages.playing')}[/]...")
-
-    try:
-        _play_audio(result.audio, result.sample_rate)
-        console.print(f"[green]{t('messages.playback_finished')}[/]")
+        registry = ModelRegistry()
+        models = registry.list_all()
+        console.print(f"  [green]✓[/] Registry: {len(models)} models")
     except Exception as e:
-        console.print(f"[yellow]{t('warnings.playback_failed')}:[/] {e}")
-        # Save to temp file as fallback
-        import tempfile
+        console.print(f"  [red]✗[/] Registry: {e}")
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(result.audio)
-            console.print(f"[dim]{t('messages.audio_saved_to')}:[/] {f.name}")
+    from hfl.config import config as cfg
+
+    if cfg.models_dir.exists():
+        console.print(f"  [green]✓[/] Models dir: {cfg.models_dir}")
+    else:
+        console.print(f"  [yellow]○[/] Models dir: not created")
+
+    console.print("\n[green]Diagnostics complete.[/]")
 
 
-def _play_audio(audio_data: bytes, sample_rate: int) -> None:
-    """Play audio data using available audio library."""
+@app.command()
+def debug():
+    """Show debug information for troubleshooting."""
+    import platform
+    import sys
+
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from hfl import __version__
+    from hfl.config import config as cfg
+    from hfl.engine.dependency_check import check_engine_availability
+
+    info = Text()
+
+    # System info
+    info.append("[bold]System[/]\n")
+    info.append(f"  Python:   {sys.version.split()[0]}\n")
+    info.append(f"  Platform: {platform.system()} {platform.release()}\n")
+    info.append(f"  Machine:  {platform.machine()}\n")
+
+    # HFL info
+    info.append("\n[bold]HFL[/]\n")
+    info.append(f"  Version:  {__version__}\n")
+    info.append(f"  Home:     {cfg.home_dir}\n")
+
+    # Dependency versions
+    info.append("\n[bold]Dependencies[/]\n")
+
+    def get_version(module_name: str) -> str:
+        try:
+            import importlib.metadata
+
+            return importlib.metadata.version(module_name)
+        except Exception:
+            return "not installed"
+
+    info.append(f"  typer:            {get_version('typer')}\n")
+    info.append(f"  rich:             {get_version('rich')}\n")
+    info.append(f"  huggingface-hub:  {get_version('huggingface-hub')}\n")
+    info.append(f"  fastapi:          {get_version('fastapi')}\n")
+    info.append(f"  uvicorn:          {get_version('uvicorn')}\n")
+    info.append(f"  pydantic:         {get_version('pydantic')}\n")
+
+    # Optional deps
+    info.append("\n[bold]Optional Dependencies[/]\n")
+    availability = check_engine_availability()
+
+    for dep in ["llama-cpp-python", "transformers", "torch", "vllm", "soundfile", "torchaudio"]:
+        version = get_version(dep)
+        if version != "not installed":
+            info.append(f"  {dep}: {version}\n")
+        else:
+            info.append(f"  {dep}: [dim]not installed[/]\n")
+
+    # GPU info
+    info.append("\n[bold]GPU[/]\n")
+    if availability.get("torch") is True:
+        if availability.get("torch_cuda"):
+            device = availability.get("cuda_device", "unknown")
+            info.append(f"  CUDA: {device}\n")
+            try:
+                import torch
+
+                info.append(f"  CUDA Version: {torch.version.cuda}\n")
+                info.append(f"  cuDNN: {torch.backends.cudnn.version()}\n")
+            except Exception:
+                pass
+        elif availability.get("torch_mps"):
+            info.append("  MPS: Apple Silicon\n")
+        else:
+            info.append("  GPU: [dim]none available[/]\n")
+    else:
+        info.append("  GPU: [dim]torch not installed[/]\n")
+
+    # Memory info
     try:
-        import io
+        import psutil
 
-        import sounddevice as sd
-        import soundfile as sf
-
-        # Read WAV data
-        with io.BytesIO(audio_data) as f:
-            audio_array, sr = sf.read(f)
-
-        # Play
-        sd.play(audio_array, sr)
-        sd.wait()
-        return
+        mem = psutil.virtual_memory()
+        info.append("\n[bold]Memory[/]\n")
+        info.append(f"  Total:     {mem.total / 1024**3:.1f} GB\n")
+        info.append(f"  Available: {mem.available / 1024**3:.1f} GB\n")
+        info.append(f"  Used:      {mem.percent}%\n")
     except ImportError:
         pass
 
-    # Fallback: try using system command
-    import platform
-    import subprocess
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(audio_data)
-        temp_path = f.name
-
-    try:
-        system = platform.system()
-        if system == "Darwin":  # macOS
-            subprocess.run(["afplay", temp_path], check=True)
-        elif system == "Linux":
-            # Try multiple players
-            for player in ["aplay", "paplay", "play"]:
-                try:
-                    subprocess.run([player, temp_path], check=True)
-                    break
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    continue
-        elif system == "Windows":
-            import winsound  # noqa: PLC0415 (conditional import)
-
-            winsound.PlaySound(temp_path, winsound.SND_FILENAME)  # type: ignore[attr-defined]
-    finally:
-        import os
-
-        os.unlink(temp_path)
+    console.print(Panel(info, title="[bold]HFL Debug Info[/]", border_style="yellow"))
+    console.print("\n[dim]For support: https://github.com/ggalancs/hfl/issues[/]")
 
 
 if __name__ == "__main__":

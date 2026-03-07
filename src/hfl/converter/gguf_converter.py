@@ -222,6 +222,12 @@ def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
     return (True, "")
 
 
+# Pinned llama.cpp version for reproducibility and security
+# Update this when testing a new version
+LLAMA_CPP_REPO = "https://github.com/ggml-org/llama.cpp.git"
+LLAMA_CPP_BRANCH = "master"  # Can be changed to a specific tag or commit
+
+
 def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
     """Gets the version/commit of the installed llama.cpp."""
     try:
@@ -232,8 +238,26 @@ def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
             text=True,
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
+    except (FileNotFoundError, OSError):
         return "unknown"
+
+
+def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
+    """Verify git clone integrity by checking remote URL."""
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+        actual_url = result.stdout.strip()
+        # Normalize URLs for comparison (handle .git suffix)
+        return actual_url.rstrip(".git") == expected_repo.rstrip(".git")
+    except (FileNotFoundError, OSError):
+        return False
 
 
 class GGUFConverter:
@@ -243,6 +267,52 @@ class GGUFConverter:
         self.llama_cpp_dir = config.llama_cpp_dir
         self.convert_script = self.llama_cpp_dir / "convert_hf_to_gguf.py"
         self.quantize_bin = self.llama_cpp_dir / "build" / "bin" / "llama-quantize"
+
+    def _verify_output(self, output_path: Path, source_path: Path) -> None:
+        """Verify conversion output integrity.
+
+        Args:
+            output_path: Path to the converted GGUF file
+            source_path: Path to the source model directory
+
+        Raises:
+            RuntimeError: If verification fails
+        """
+        # Check file exists
+        if not output_path.exists():
+            raise RuntimeError(f"Conversion failed: {output_path} not created")
+
+        # Check file is not empty
+        file_size = output_path.stat().st_size
+        if file_size == 0:
+            output_path.unlink()
+            raise RuntimeError("Conversion produced empty file")
+
+        # Sanity check: GGUF should have a reasonable size
+        # Minimum expected size: ~100MB for smallest quantized models
+        min_size = 50 * 1024 * 1024  # 50MB minimum
+        if file_size < min_size:
+            console.print(
+                f"[yellow]Warning:[/] Output file unusually small: "
+                f"{file_size / 1024 / 1024:.1f}MB"
+            )
+
+        # Check input size for comparison (if safetensors available)
+        try:
+            input_files = list(source_path.glob("*.safetensors"))
+            if input_files:
+                input_size = sum(f.stat().st_size for f in input_files)
+                if file_size > input_size * 1.1:  # Allow 10% overhead
+                    console.print(
+                        f"[yellow]Warning:[/] Output larger than input: "
+                        f"{file_size / 1e9:.2f}GB > {input_size / 1e9:.2f}GB"
+                    )
+        except OSError:
+            pass  # Skip size comparison if input files not available
+
+        console.print(
+            f"[green]✓[/] Output verified: {output_path.name} ({file_size / 1e9:.2f}GB)"
+        )
 
     def ensure_tools(self):
         """
@@ -261,11 +331,20 @@ class GGUFConverter:
                     "git",
                     "clone",
                     "--depth=1",
-                    "https://github.com/ggml-org/llama.cpp.git",
+                    "--branch",
+                    LLAMA_CPP_BRANCH,
+                    LLAMA_CPP_REPO,
                     str(self.llama_cpp_dir),
                 ],
                 check=True,
             )
+            # Verify clone integrity
+            if not _verify_git_clone(self.llama_cpp_dir, LLAMA_CPP_REPO):
+                shutil.rmtree(self.llama_cpp_dir)
+                raise RuntimeError(
+                    "Git clone integrity verification failed. "
+                    "The cloned repository does not match expected source."
+                )
 
         # Compile llama.cpp
         build_dir = self.llama_cpp_dir / "build"
@@ -349,6 +428,8 @@ class GGUFConverter:
             # If FP16 is requested, we're done
             final_path = output_path.with_suffix(".f16.gguf")
             fp16_path.rename(final_path)
+            # Verify output
+            self._verify_output(final_path, model_path)
             return final_path
 
         # Step 2: Quantize to the requested level
@@ -369,6 +450,9 @@ class GGUFConverter:
 
         # Clean up intermediate FP16
         fp16_path.unlink(missing_ok=True)
+
+        # Verify output integrity
+        self._verify_output(final_path, model_path)
 
         # R3 - Record conversion provenance
         if source_repo:
