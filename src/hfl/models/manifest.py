@@ -2,8 +2,14 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Data model for local model metadata."""
 
+from __future__ import annotations
+
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,6 +54,11 @@ class ModelManifest:
     gpai_classification: str | None = None  # "gpai", "gpai-systemic", "exempt"
     training_flops: str | None = None  # If available in model card
 
+    # Integrity verification
+    file_hash: str | None = None  # SHA-256 hash of the model file
+    hash_algorithm: str = "sha256"  # Algorithm used for hash
+    verified_at: str | None = None  # Last verification timestamp
+
     # Timestamps
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     last_used: str | None = None
@@ -67,3 +78,79 @@ class ModelManifest:
             return f"{gb:.1f} GB"
         mb = self.size_bytes / (1024**2)
         return f"{mb:.0f} MB"
+
+    @property
+    def path(self) -> Path:
+        """Return local_path as Path object."""
+        return Path(self.local_path)
+
+    def file_exists(self) -> bool:
+        """Check if the model file exists on disk."""
+        return self.path.exists()
+
+    def compute_hash(self) -> str | None:
+        """Compute the hash of the model file.
+
+        Returns:
+            The hex-encoded hash, or None if file doesn't exist.
+        """
+        if not self.file_exists():
+            logger.warning(f"Cannot compute hash: file not found at {self.local_path}")
+            return None
+
+        from hfl.security import compute_file_hash
+
+        return compute_file_hash(self.path, self.hash_algorithm)
+
+    def verify_integrity(self) -> tuple[bool, str]:
+        """Verify the integrity of the model file.
+
+        Returns:
+            Tuple of (is_valid, message).
+            is_valid is True if the file exists and hash matches (or no hash stored).
+        """
+        # Check if file exists
+        if not self.file_exists():
+            return False, f"Model file not found: {self.local_path}"
+
+        # Check file size
+        actual_size = self.path.stat().st_size
+        if self.size_bytes > 0 and actual_size != self.size_bytes:
+            return False, (
+                f"Size mismatch: expected {self.size_bytes} bytes, "
+                f"found {actual_size} bytes"
+            )
+
+        # If no hash stored, file exists with correct size is good enough
+        if not self.file_hash:
+            return True, "File exists (no hash to verify)"
+
+        # Compute and compare hash
+        actual_hash = self.compute_hash()
+        if actual_hash is None:
+            return False, "Failed to compute file hash"
+
+        if actual_hash.lower() != self.file_hash.lower():
+            return False, (
+                f"Hash mismatch: expected {self.file_hash[:16]}..., "
+                f"got {actual_hash[:16]}..."
+            )
+
+        # Update verification timestamp
+        self.verified_at = datetime.now().isoformat()
+        return True, "Integrity verified"
+
+    def update_hash(self) -> bool:
+        """Compute and store the hash of the model file.
+
+        Returns:
+            True if hash was computed successfully, False otherwise.
+        """
+        computed = self.compute_hash()
+        if computed is None:
+            return False
+
+        self.file_hash = computed
+        self.verified_at = datetime.now().isoformat()
+        logger.info(f"Updated hash for {self.name}: {computed[:16]}...")
+        return True
