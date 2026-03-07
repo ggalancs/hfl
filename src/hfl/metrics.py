@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,11 +41,16 @@ class Metrics:
     model_unloads: int = 0
     errors_by_type: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
-    # Histograms (simplified - store recent values)
-    _generation_latencies_ms: list[float] = field(default_factory=list, repr=False)
-    _model_load_latencies_ms: list[float] = field(default_factory=list, repr=False)
-    _request_latencies_ms: list[float] = field(default_factory=list, repr=False)
-    _max_histogram_size: int = 1000
+    # Histograms using deque for O(1) FIFO eviction (circular buffer)
+    _generation_latencies_ms: deque[float] = field(
+        default_factory=lambda: deque(maxlen=1000), repr=False
+    )
+    _model_load_latencies_ms: deque[float] = field(
+        default_factory=lambda: deque(maxlen=1000), repr=False
+    )
+    _request_latencies_ms: deque[float] = field(
+        default_factory=lambda: deque(maxlen=1000), repr=False
+    )
 
     def record_request(
         self,
@@ -74,9 +79,8 @@ class Metrics:
             self.tokens_input += tokens_in
             self.tokens_generated += tokens_out
 
+            # deque handles FIFO eviction automatically via maxlen
             self._request_latencies_ms.append(duration_ms)
-            if len(self._request_latencies_ms) > self._max_histogram_size:
-                self._request_latencies_ms = self._request_latencies_ms[-self._max_histogram_size :]
 
     def record_generation(
         self,
@@ -95,11 +99,8 @@ class Metrics:
             self.tokens_input += tokens_in
             self.tokens_generated += tokens_out
 
+            # deque handles FIFO eviction automatically via maxlen
             self._generation_latencies_ms.append(duration_ms)
-            if len(self._generation_latencies_ms) > self._max_histogram_size:
-                self._generation_latencies_ms = self._generation_latencies_ms[
-                    -self._max_histogram_size :
-                ]
 
     def record_model_load(self, model_name: str, duration_ms: float) -> None:
         """Record a model load.
@@ -111,11 +112,8 @@ class Metrics:
         with self._lock:
             self.model_loads += 1
 
+            # deque handles FIFO eviction automatically via maxlen
             self._model_load_latencies_ms.append(duration_ms)
-            if len(self._model_load_latencies_ms) > self._max_histogram_size:
-                self._model_load_latencies_ms = self._model_load_latencies_ms[
-                    -self._max_histogram_size :
-                ]
 
     def record_model_unload(self) -> None:
         """Record a model unload."""
@@ -131,13 +129,35 @@ class Metrics:
         with self._lock:
             self.errors_by_type[error_type] += 1
 
-    def _percentile(self, values: list[float], p: float) -> float:
-        """Calculate percentile of a sorted list."""
+    def _percentile(self, values: deque[float] | list[float], p: float) -> float:
+        """Calculate percentile using linear interpolation.
+
+        Uses the standard linear interpolation method for accurate percentiles.
+
+        Args:
+            values: Collection of values
+            p: Percentile as decimal (0.0 to 1.0)
+
+        Returns:
+            Interpolated percentile value
+        """
         if not values:
             return 0.0
         sorted_values = sorted(values)
-        idx = int(len(sorted_values) * p)
-        return sorted_values[min(idx, len(sorted_values) - 1)]
+        n = len(sorted_values)
+        if n == 1:
+            return sorted_values[0]
+
+        # Calculate the index with linear interpolation
+        k = (n - 1) * p
+        f = int(k)  # Floor
+        c = f + 1 if f < n - 1 else f  # Ceiling (capped)
+
+        if f == c:
+            return sorted_values[f]
+
+        # Linear interpolation between floor and ceiling values
+        return sorted_values[f] * (c - k) + sorted_values[c] * (k - f)
 
     def export_prometheus(self) -> str:
         """Export metrics in Prometheus format.
@@ -253,6 +273,53 @@ class Metrics:
                 },
             }
 
+    def get_sli(self) -> dict[str, Any]:
+        """Calculate Service Level Indicators from current metrics.
+
+        Returns:
+            Dictionary with SLI values:
+            - latency_p50_ms: 50th percentile request latency
+            - latency_p95_ms: 95th percentile request latency
+            - latency_p99_ms: 99th percentile request latency
+            - error_rate: Ratio of 5xx responses to total requests
+            - availability: Estimated availability based on error rate
+            - throughput_rps: Requests per second since start
+            - sample_count: Number of latency samples
+        """
+        with self._lock:
+            total_requests = self.requests_total
+
+            # Calculate error rate (5xx responses / total)
+            error_count = sum(
+                count for status, count in self.requests_by_status.items() if status >= 500
+            )
+            error_rate = error_count / total_requests if total_requests > 0 else 0.0
+
+            # Calculate throughput
+            uptime = time.time() - self._start_time
+            throughput_rps = total_requests / uptime if uptime > 0 else 0.0
+
+            # Latency percentiles
+            latency_p50 = self._percentile(self._request_latencies_ms, 0.5)
+            latency_p95 = self._percentile(self._request_latencies_ms, 0.95)
+            latency_p99 = self._percentile(self._request_latencies_ms, 0.99)
+
+            # Availability = 1 - error_rate (simplified)
+            availability = 1.0 - error_rate
+
+            return {
+                "latency_p50_ms": latency_p50,
+                "latency_p95_ms": latency_p95,
+                "latency_p99_ms": latency_p99,
+                "error_rate": error_rate,
+                "availability": availability,
+                "throughput_rps": throughput_rps,
+                "total_requests": total_requests,
+                "error_count": error_count,
+                "sample_count": len(self._request_latencies_ms),
+                "uptime_seconds": uptime,
+            }
+
     def reset(self) -> None:
         """Reset all metrics."""
         with self._lock:
@@ -271,8 +338,7 @@ class Metrics:
             self._start_time = time.time()
 
 
-# Singleton instance
-_metrics: Metrics | None = None
+# Singleton access delegated to container for unified management
 
 
 def get_metrics() -> Metrics:
@@ -281,13 +347,13 @@ def get_metrics() -> Metrics:
     Returns:
         Metrics instance
     """
-    global _metrics
-    if _metrics is None:
-        _metrics = Metrics()
-    return _metrics
+    from hfl.core.container import get_metrics as _get_metrics
+
+    return _get_metrics()
 
 
 def reset_metrics() -> None:
     """Reset the metrics singleton (for testing)."""
-    global _metrics
-    _metrics = None
+    from hfl.core.container import get_container
+
+    get_container().metrics.reset()

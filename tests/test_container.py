@@ -14,6 +14,7 @@ from hfl.core.container import (
     get_container,
     get_event_bus,
     get_metrics,
+    get_rate_limiter,
     get_registry,
     get_state,
     reset_container,
@@ -141,6 +142,7 @@ class TestContainer:
         assert hasattr(container, "event_bus")
         assert hasattr(container, "state")
         assert hasattr(container, "metrics")
+        assert hasattr(container, "rate_limiter")
 
     def test_singletons_are_lazy(self):
         """Container singletons are not initialized until accessed."""
@@ -369,3 +371,75 @@ class TestFactoryFunctions:
         from hfl.metrics import Metrics
 
         assert isinstance(metrics, Metrics)
+
+    def test_rate_limiter_factory_creates_rate_limiter(self):
+        """_create_rate_limiter creates RateLimiter."""
+        from hfl.core.container import _create_rate_limiter
+
+        limiter = _create_rate_limiter()
+
+        from hfl.api.rate_limit import RateLimiter
+
+        assert isinstance(limiter, RateLimiter)
+
+
+class TestRateLimiterSingleton:
+    """Tests for rate limiter singleton."""
+
+    def test_get_rate_limiter_returns_limiter(self):
+        """get_rate_limiter returns RateLimiter instance."""
+        reset_container()
+        limiter = get_rate_limiter()
+
+        from hfl.api.rate_limit import RateLimiter
+
+        assert isinstance(limiter, RateLimiter)
+
+    def test_get_rate_limiter_returns_same_instance(self):
+        """get_rate_limiter returns same instance."""
+        reset_container()
+
+        limiter1 = get_rate_limiter()
+        limiter2 = get_rate_limiter()
+
+        assert limiter1 is limiter2
+
+
+class TestConfigCentralization:
+    """Tests for config centralization."""
+
+    def test_container_config_is_global_config(self):
+        """Container config should be the same as global config."""
+        reset_container()
+
+        from hfl.config import config as global_config
+
+        container_config = get_config()
+
+        # Should be the exact same instance
+        assert container_config is global_config
+
+    def test_config_singleton_returns_global_instance(self):
+        """Config singleton should return global instance."""
+        reset_container()
+
+        from hfl.config import config
+
+        container = get_container()
+        container_config = container.config.get()
+
+        assert container_config is config
+
+    def test_config_changes_reflected_in_container(self):
+        """Changes to global config should be reflected in container."""
+        reset_container()
+
+        from hfl.config import config
+
+        original_port = config.port
+        try:
+            config.port = 9999
+            container_config = get_config()
+            assert container_config.port == 9999
+        finally:
+            config.port = original_port

@@ -8,6 +8,77 @@ from pathlib import Path
 
 
 @dataclass
+class SLOConfig:
+    """Service Level Objective configuration.
+
+    Defines performance targets for monitoring and alerting.
+    These values are used by health checks to determine service status.
+    """
+
+    # Availability: target uptime percentage (0.0 - 1.0)
+    availability_target: float = 0.999  # 99.9%
+
+    # Latency targets in milliseconds for API endpoints
+    # P50 = median, P95 = 95th percentile, P99 = 99th percentile
+    latency_p50_ms: float = 100.0  # 100ms
+    latency_p95_ms: float = 500.0  # 500ms
+    latency_p99_ms: float = 1000.0  # 1s
+
+    # Health check latency (should be very fast)
+    health_latency_ms: float = 50.0  # 50ms
+
+    # Error rate: maximum acceptable error rate (0.0 - 1.0)
+    error_rate_target: float = 0.01  # 1%
+
+    # Throughput: minimum requests per second (0 = no minimum)
+    min_throughput_rps: float = 0.0
+
+    # Model loading time limit in seconds
+    model_load_time_limit: float = 60.0  # 1 minute
+
+    # Memory usage threshold (0.0 - 1.0) for warnings
+    memory_warning_threshold: float = 0.8  # 80%
+    memory_critical_threshold: float = 0.95  # 95%
+
+    # Time window for SLI calculations (seconds)
+    sli_window_seconds: int = 300  # 5 minutes
+
+    def validate(self) -> list[str]:
+        """Validate SLO configuration.
+
+        Returns:
+            List of validation errors (empty if valid).
+        """
+        errors = []
+
+        if not 0.0 <= self.availability_target <= 1.0:
+            errors.append("availability_target must be between 0.0 and 1.0")
+
+        if not 0.0 <= self.error_rate_target <= 1.0:
+            errors.append("error_rate_target must be between 0.0 and 1.0")
+
+        if self.latency_p50_ms < 0:
+            errors.append("latency_p50_ms must be non-negative")
+
+        if self.latency_p95_ms < self.latency_p50_ms:
+            errors.append("latency_p95_ms should be >= latency_p50_ms")
+
+        if self.latency_p99_ms < self.latency_p95_ms:
+            errors.append("latency_p99_ms should be >= latency_p95_ms")
+
+        if not 0.0 <= self.memory_warning_threshold <= 1.0:
+            errors.append("memory_warning_threshold must be between 0.0 and 1.0")
+
+        if not 0.0 <= self.memory_critical_threshold <= 1.0:
+            errors.append("memory_critical_threshold must be between 0.0 and 1.0")
+
+        if self.memory_warning_threshold >= self.memory_critical_threshold:
+            errors.append("memory_warning_threshold should be < memory_critical_threshold")
+
+        return errors
+
+
+@dataclass
 class HFLConfig:
     """Global application configuration."""
 
@@ -39,13 +110,19 @@ class HFLConfig:
     port: int = 11434  # Same port as Ollama for drop-in compatibility
 
     # Security - CORS
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
-    cors_allow_credentials: bool = True
-    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
-    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
+    # By default, CORS is restrictive (same-origin only).
+    # Set cors_allow_all=True for development or use explicit origins.
+    # NOTE: allow_credentials must be False when cors_allow_all=True
+    cors_origins: list[str] = field(default_factory=list)  # Empty = same-origin only
+    cors_allow_all: bool = False  # Explicit opt-in for "*" (all origins)
+    cors_allow_credentials: bool = False  # Must be False with wildcard origin
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["GET", "POST", "OPTIONS"])
+    cors_allow_headers: list[str] = field(
+        default_factory=lambda: ["Content-Type", "Authorization", "X-Request-ID"]
+    )
 
     # Security - Rate Limiting (requests per minute)
-    rate_limit_enabled: bool = False
+    rate_limit_enabled: bool = True  # Enabled by default for security
     rate_limit_requests: int = 60
     rate_limit_window: int = 60  # seconds
 
@@ -69,6 +146,9 @@ class HFLConfig:
     max_retries: int = 3
     retry_base_delay: float = 1.0
     retry_max_delay: float = 60.0
+
+    # Service Level Objectives (SLOs)
+    slo: SLOConfig = field(default_factory=SLOConfig)
 
     # HuggingFace
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.

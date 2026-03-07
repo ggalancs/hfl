@@ -9,6 +9,7 @@ Allows dynamic discovery and loading of engine plugins via entry points.
 from __future__ import annotations
 
 import importlib
+import time
 from typing import TYPE_CHECKING, Type
 
 from hfl.logging_config import get_logger
@@ -17,6 +18,13 @@ if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
 
 logger = get_logger()
+
+# Engine discovery cache
+_engine_cache: dict[str, Type["InferenceEngine"] | callable] | None = None
+_engine_cache_timestamp: float = 0
+_tts_cache: dict[str, Type["AudioEngine"] | callable] | None = None
+_tts_cache_timestamp: float = 0
+_CACHE_TTL: float = 300.0  # 5 minutes
 
 
 def _lazy_import(module: str, name: str) -> type:
@@ -32,15 +40,27 @@ def _lazy_import(module: str, name: str) -> type:
     return loader
 
 
-def discover_engines() -> dict[str, Type["InferenceEngine"] | callable]:
+def discover_engines(force_refresh: bool = False) -> dict[str, Type["InferenceEngine"] | callable]:
     """Discover available inference engine plugins.
 
     Includes built-in engines and any plugins registered via entry points.
     Built-in engines are lazily imported to avoid loading unused dependencies.
 
+    Results are cached for 5 minutes to avoid repeated discovery overhead.
+
+    Args:
+        force_refresh: If True, bypass cache and rediscover engines
+
     Returns:
         Dictionary mapping engine name to class or lazy loader
     """
+    global _engine_cache, _engine_cache_timestamp
+
+    # Return cached result if valid
+    if not force_refresh and _engine_cache is not None:
+        if (time.time() - _engine_cache_timestamp) < _CACHE_TTL:
+            return _engine_cache
+
     engines: dict[str, Type["InferenceEngine"] | callable] = {}
 
     # Built-in engines (lazy imports)
@@ -58,20 +78,36 @@ def discover_engines() -> dict[str, Type["InferenceEngine"] | callable]:
                 engine_class = ep.load()
                 engines[ep.name] = engine_class
                 logger.info(f"Loaded engine plugin: {ep.name}")
-            except Exception as e:
+            except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to load engine plugin {ep.name}: {e}")
-    except Exception:
-        pass  # entry_points not available or error
+    except ImportError:
+        logger.debug("importlib.metadata not available, skipping plugin discovery")
+
+    # Update cache
+    _engine_cache = engines
+    _engine_cache_timestamp = time.time()
 
     return engines
 
 
-def discover_tts_engines() -> dict[str, Type["AudioEngine"] | callable]:
+def discover_tts_engines(force_refresh: bool = False) -> dict[str, Type["AudioEngine"] | callable]:
     """Discover available TTS engine plugins.
+
+    Results are cached for 5 minutes to avoid repeated discovery overhead.
+
+    Args:
+        force_refresh: If True, bypass cache and rediscover engines
 
     Returns:
         Dictionary mapping engine name to class or lazy loader
     """
+    global _tts_cache, _tts_cache_timestamp
+
+    # Return cached result if valid
+    if not force_refresh and _tts_cache is not None:
+        if (time.time() - _tts_cache_timestamp) < _CACHE_TTL:
+            return _tts_cache
+
     engines: dict[str, Type["AudioEngine"] | callable] = {}
 
     # Built-in TTS engines
@@ -87,12 +123,25 @@ def discover_tts_engines() -> dict[str, Type["AudioEngine"] | callable]:
             try:
                 engines[ep.name] = ep.load()
                 logger.info(f"Loaded TTS plugin: {ep.name}")
-            except Exception as e:
+            except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to load TTS plugin {ep.name}: {e}")
-    except Exception:
-        pass
+    except ImportError:
+        logger.debug("importlib.metadata not available for TTS plugin discovery")
+
+    # Update cache
+    _tts_cache = engines
+    _tts_cache_timestamp = time.time()
 
     return engines
+
+
+def clear_engine_cache() -> None:
+    """Clear all engine discovery caches (for testing)."""
+    global _engine_cache, _engine_cache_timestamp, _tts_cache, _tts_cache_timestamp
+    _engine_cache = None
+    _engine_cache_timestamp = 0
+    _tts_cache = None
+    _tts_cache_timestamp = 0
 
 
 def get_engine_class(engine_name: str) -> Type["InferenceEngine"]:

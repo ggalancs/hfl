@@ -156,8 +156,7 @@ class EventBus:
             return count
 
 
-# Singleton instance
-_event_bus: EventBus | None = None
+# Singleton access delegated to container for unified management
 
 
 def get_event_bus() -> EventBus:
@@ -166,16 +165,16 @@ def get_event_bus() -> EventBus:
     Returns:
         EventBus instance
     """
-    global _event_bus
-    if _event_bus is None:
-        _event_bus = EventBus()
-    return _event_bus
+    from hfl.core.container import get_event_bus as _get_event_bus
+
+    return _get_event_bus()
 
 
 def reset_event_bus() -> None:
     """Reset the event bus singleton (for testing)."""
-    global _event_bus
-    _event_bus = None
+    from hfl.core.container import get_container
+
+    get_container().event_bus.reset()
 
 
 # Convenience functions

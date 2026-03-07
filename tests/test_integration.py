@@ -127,7 +127,7 @@ class TestAPIIntegration:
         from fastapi.testclient import TestClient
 
         from hfl.api.server import app
-        from hfl.models.registry import ModelRegistry
+        from hfl.core.container import get_registry
 
         client = TestClient(app)
 
@@ -136,8 +136,8 @@ class TestAPIIntegration:
         assert response.status_code == 200
         assert len(response.json()["data"]) == 0
 
-        # Register model
-        registry = ModelRegistry()
+        # Register model (use singleton registry)
+        registry = get_registry()
         registry.add(sample_manifest)
 
         # Now there is a model

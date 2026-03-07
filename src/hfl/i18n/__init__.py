@@ -54,7 +54,8 @@ def _get_system_language() -> str:
                 lang_code = lang.split("_")[0].split(".")[0].lower()
                 if lang_code in SUPPORTED_LANGUAGES:
                     return lang_code
-    except Exception:
+    except (ValueError, TypeError, AttributeError, Exception):
+        # locale.getlocale() can fail with invalid locale settings
         pass
     return DEFAULT_LANGUAGE
 

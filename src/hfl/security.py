@@ -5,17 +5,239 @@ Security utilities for HFL.
 
 Provides:
 - Path sanitization to prevent path traversal attacks
+- Prompt sanitization to clean user input
 - File checksum validation
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
+import re
+import unicodedata
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class PathTraversalError(Exception):
     """Raised when a path traversal attack is detected."""
+
+
+# =============================================================================
+# Prompt Sanitization
+# =============================================================================
+
+# Control characters to remove (except common whitespace)
+_CONTROL_CHARS_PATTERN = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
+)
+
+# Excessive whitespace (3+ consecutive spaces/newlines)
+_EXCESSIVE_WHITESPACE_PATTERN = re.compile(r"[ ]{3,}")
+_EXCESSIVE_NEWLINES_PATTERN = re.compile(r"\n{4,}")
+
+# Potential injection patterns (informational only)
+_INJECTION_PATTERNS = [
+    r"(?i)ignore\s+(all\s+)?(previous|prior)\s+(instructions?|prompts?)",
+    r"(?i)disregard\s+(all\s+)?(previous|prior)\s+(instructions?|prompts?)",
+    r"(?i)forget\s+(all\s+)?(previous|prior)\s+(instructions?|prompts?)",
+    r"(?i)you\s+are\s+now\s+(a|an)\s+\w+\s+(named|called)",
+    r"(?i)system:\s*",
+    r"(?i)\[system\]",
+    r"(?i)<\|system\|>",
+    r"(?i)### system",
+]
+
+
+def sanitize_prompt(
+    text: str,
+    *,
+    max_length: int | None = None,
+    normalize_unicode: bool = True,
+    remove_control_chars: bool = True,
+    collapse_whitespace: bool = True,
+    strip: bool = True,
+) -> str:
+    """Sanitize prompt text for safe processing.
+
+    Cleans user input by removing or normalizing potentially problematic
+    characters while preserving the semantic content.
+
+    Args:
+        text: Raw prompt text to sanitize
+        max_length: Maximum allowed length (truncates if exceeded)
+        normalize_unicode: Normalize Unicode to NFC form
+        remove_control_chars: Remove control characters
+        collapse_whitespace: Collapse excessive whitespace
+        strip: Strip leading/trailing whitespace
+
+    Returns:
+        Sanitized prompt text
+    """
+    if not text:
+        return ""
+
+    result = text
+
+    # Normalize Unicode (NFC form - composed characters)
+    if normalize_unicode:
+        result = unicodedata.normalize("NFC", result)
+
+    # Remove control characters (except tabs, newlines, spaces)
+    if remove_control_chars:
+        result = _CONTROL_CHARS_PATTERN.sub("", result)
+
+    # Collapse excessive whitespace
+    if collapse_whitespace:
+        result = _EXCESSIVE_WHITESPACE_PATTERN.sub("  ", result)
+        result = _EXCESSIVE_NEWLINES_PATTERN.sub("\n\n\n", result)
+
+    # Strip leading/trailing whitespace
+    if strip:
+        result = result.strip()
+
+    # Truncate if needed
+    if max_length is not None and len(result) > max_length:
+        result = result[:max_length]
+        logger.debug(f"Prompt truncated from {len(text)} to {max_length} chars")
+
+    return result
+
+
+def sanitize_messages(
+    messages: list[dict],
+    *,
+    max_message_length: int | None = None,
+    max_total_length: int | None = None,
+) -> list[dict]:
+    """Sanitize a list of chat messages.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        max_message_length: Maximum length per message
+        max_total_length: Maximum total content length
+
+    Returns:
+        Sanitized messages
+    """
+    sanitized = []
+    total_length = 0
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+
+        # Sanitize content
+        if isinstance(content, str):
+            content = sanitize_prompt(content, max_length=max_message_length)
+        else:
+            content = ""
+
+        # Sanitize role (only allow known roles)
+        role = sanitize_role(role)
+
+        # Track total length
+        if max_total_length is not None:
+            remaining = max_total_length - total_length
+            if remaining <= 0:
+                logger.debug("Max total length reached, truncating messages")
+                break
+            if len(content) > remaining:
+                content = content[:remaining]
+            total_length += len(content)
+
+        sanitized.append({"role": role, "content": content})
+
+    return sanitized
+
+
+def sanitize_role(role: str) -> str:
+    """Sanitize a message role.
+
+    Args:
+        role: Raw role string
+
+    Returns:
+        Sanitized role (one of: user, assistant, system)
+    """
+    if not isinstance(role, str):
+        return "user"
+
+    role = role.lower().strip()
+
+    # Map to standard roles
+    if role in ("user", "human"):
+        return "user"
+    if role in ("assistant", "ai", "bot", "model"):
+        return "assistant"
+    if role == "system":
+        return "system"
+
+    # Default to user for unknown roles
+    return "user"
+
+
+def detect_injection_attempt(text: str) -> list[str]:
+    """Detect potential prompt injection patterns.
+
+    This is informational only - it doesn't block the request,
+    but logs and returns detected patterns for monitoring.
+
+    Args:
+        text: Text to analyze
+
+    Returns:
+        List of detected pattern descriptions (empty if none)
+    """
+    if not text:
+        return []
+
+    detected = []
+    for pattern in _INJECTION_PATTERNS:
+        if re.search(pattern, text):
+            detected.append(pattern)
+
+    if detected:
+        logger.warning(
+            f"Potential injection patterns detected: {len(detected)} matches"
+        )
+
+    return detected
+
+
+def is_safe_filename(name: str) -> bool:
+    """Check if a filename is safe (no path components).
+
+    Args:
+        name: Filename to check
+
+    Returns:
+        True if safe, False otherwise
+    """
+    if not name:
+        return False
+
+    # Check for path separators
+    if "/" in name or "\\" in name:
+        return False
+
+    # Check for parent directory reference
+    if ".." in name:
+        return False
+
+    # Check for starting with dot (hidden files)
+    if name.startswith("."):
+        return False
+
+    # Check for control characters
+    if _CONTROL_CHARS_PATTERN.search(name):
+        return False
+
+    return True
 
 
 def sanitize_path(base_dir: Path, user_path: str) -> Path:

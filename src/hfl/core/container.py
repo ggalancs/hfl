@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 if TYPE_CHECKING:
+    from hfl.api.rate_limit import RateLimiter
     from hfl.api.state import ServerState
     from hfl.config import HFLConfig
     from hfl.events import EventBus
@@ -88,10 +89,14 @@ class Singleton(Generic[T]):
 
 
 def _create_config() -> "HFLConfig":
-    """Factory for HFLConfig."""
-    from hfl.config import HFLConfig
+    """Factory for HFLConfig.
 
-    return HFLConfig()
+    Returns the global config instance from hfl.config module
+    to ensure consistency across the application.
+    """
+    from hfl.config import config
+
+    return config
 
 
 def _create_registry() -> "ModelRegistry":
@@ -120,6 +125,21 @@ def _create_metrics() -> "Metrics":
     from hfl.metrics import Metrics
 
     return Metrics()
+
+
+def _create_rate_limiter() -> "RateLimiter":
+    """Factory for RateLimiter.
+
+    Creates appropriate rate limiter based on config.
+    Uses in-memory by default, SQLite for distributed deployments.
+    """
+    from hfl.api.rate_limit import InMemoryRateLimiter
+    from hfl.config import config
+
+    return InMemoryRateLimiter(
+        requests_per_window=config.rate_limit_requests,
+        window_seconds=config.rate_limit_window,
+    )
 
 
 @dataclass
@@ -153,6 +173,9 @@ class Container:
     metrics: Singleton["Metrics"] = field(
         default_factory=lambda: Singleton(_create_metrics)
     )
+    rate_limiter: Singleton["RateLimiter"] = field(
+        default_factory=lambda: Singleton(_create_rate_limiter)
+    )
 
     def reset_all(self) -> None:
         """Reset all singletons.
@@ -164,6 +187,7 @@ class Container:
         self.event_bus.reset()
         self.state.reset()
         self.metrics.reset()
+        self.rate_limiter.reset()
 
 
 # Global container instance
@@ -243,3 +267,12 @@ def get_metrics() -> "Metrics":
         The global Metrics instance.
     """
     return get_container().metrics.get()
+
+
+def get_rate_limiter() -> "RateLimiter":
+    """Get the global rate limiter instance.
+
+    Returns:
+        The global RateLimiter instance.
+    """
+    return get_container().rate_limiter.get()

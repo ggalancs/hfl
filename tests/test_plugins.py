@@ -2,12 +2,16 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for plugin system."""
 
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import hfl.plugins as plugins_module
 from hfl.plugins import (
+    _CACHE_TTL,
     _lazy_import,
+    clear_engine_cache,
     discover_engines,
     discover_tts_engines,
     get_engine_class,
@@ -15,6 +19,14 @@ from hfl.plugins import (
     list_available_engines,
     list_available_tts_engines,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """Clear engine cache before each test."""
+    clear_engine_cache()
+    yield
+    clear_engine_cache()
 
 
 class TestLazyImport:
@@ -104,8 +116,8 @@ class TestDiscoverEngines:
 
     @patch("importlib.metadata.entry_points")
     def test_handles_entry_points_exception(self, mock_entry_points):
-        """discover_engines handles entry_points exception."""
-        mock_entry_points.side_effect = Exception("entry_points error")
+        """discover_engines handles ImportError from entry_points."""
+        mock_entry_points.side_effect = ImportError("entry_points error")
 
         # Should not raise
         engines = discover_engines()
@@ -292,3 +304,93 @@ class TestListAvailableTTSEngines:
         engines = list_available_tts_engines()
 
         assert set(engines) == {"tts-a", "tts-b"}
+
+
+class TestEngineDiscoveryCache:
+    """Tests for engine discovery caching."""
+
+    def test_cache_ttl_is_5_minutes(self):
+        """Cache TTL should be 5 minutes (300 seconds)."""
+        assert _CACHE_TTL == 300.0
+
+    def test_returns_cached_result(self):
+        """discover_engines returns cached result on second call."""
+        engines1 = discover_engines()
+        engines2 = discover_engines()
+
+        # Should return same object (cached)
+        assert engines1 is engines2
+
+    def test_force_refresh_bypasses_cache(self):
+        """force_refresh=True bypasses the cache."""
+        engines1 = discover_engines()
+        engines2 = discover_engines(force_refresh=True)
+
+        # Should return new dict (not cached)
+        assert engines1 is not engines2
+        # But should have same content
+        assert engines1.keys() == engines2.keys()
+
+    def test_cache_expires_after_ttl(self):
+        """Cache expires after TTL."""
+        engines1 = discover_engines()
+
+        # Simulate time passing beyond TTL
+        original_time = plugins_module._engine_cache_timestamp
+        plugins_module._engine_cache_timestamp = original_time - _CACHE_TTL - 1
+
+        engines2 = discover_engines()
+
+        # Should return new dict (cache expired)
+        assert engines1 is not engines2
+
+    def test_clear_cache_resets_state(self):
+        """clear_engine_cache resets all cache state."""
+        # Populate caches
+        discover_engines()
+        discover_tts_engines()
+
+        assert plugins_module._engine_cache is not None
+        assert plugins_module._tts_cache is not None
+
+        clear_engine_cache()
+
+        assert plugins_module._engine_cache is None
+        assert plugins_module._engine_cache_timestamp == 0
+        assert plugins_module._tts_cache is None
+        assert plugins_module._tts_cache_timestamp == 0
+
+
+class TestTTSEngineDiscoveryCache:
+    """Tests for TTS engine discovery caching."""
+
+    def test_returns_cached_result(self):
+        """discover_tts_engines returns cached result on second call."""
+        engines1 = discover_tts_engines()
+        engines2 = discover_tts_engines()
+
+        # Should return same object (cached)
+        assert engines1 is engines2
+
+    def test_force_refresh_bypasses_cache(self):
+        """force_refresh=True bypasses the cache."""
+        engines1 = discover_tts_engines()
+        engines2 = discover_tts_engines(force_refresh=True)
+
+        # Should return new dict (not cached)
+        assert engines1 is not engines2
+        # But should have same content
+        assert engines1.keys() == engines2.keys()
+
+    def test_cache_expires_after_ttl(self):
+        """TTS cache expires after TTL."""
+        engines1 = discover_tts_engines()
+
+        # Simulate time passing beyond TTL
+        original_time = plugins_module._tts_cache_timestamp
+        plugins_module._tts_cache_timestamp = original_time - _CACHE_TTL - 1
+
+        engines2 = discover_tts_engines()
+
+        # Should return new dict (cache expired)
+        assert engines1 is not engines2

@@ -222,3 +222,82 @@ class InvalidConfigError(ConfigurationError):
         super().__init__("Configuration error", details)
         self.key = key
         self.value = value
+
+
+# --- API Errors ---
+
+
+class APIError(HFLError):
+    """Base for API-related errors with HTTP status code."""
+
+    status_code: int = 500
+
+    def __init__(self, message: str, details: str | None = None, status_code: int | None = None):
+        super().__init__(message, details)
+        if status_code is not None:
+            self.status_code = status_code
+
+
+class ValidationError(APIError):
+    """Request validation failed."""
+
+    status_code = 400
+
+
+class RateLimitError(APIError):
+    """Rate limit exceeded."""
+
+    status_code = 429
+
+    def __init__(self, retry_after: int = 60):
+        super().__init__(
+            "Rate limit exceeded",
+            f"Please try again in {retry_after} seconds.",
+        )
+        self.retry_after = retry_after
+
+
+class ModelNotReadyError(APIError):
+    """Model is not loaded and ready."""
+
+    status_code = 503
+
+    def __init__(self, model_name: str | None = None):
+        msg = "Model not loaded"
+        if model_name:
+            msg = f"Model '{model_name}' not loaded"
+        super().__init__(msg, "Load a model first using the API or CLI.")
+
+
+class GenerationTimeoutError(APIError):
+    """Generation request timed out."""
+
+    status_code = 504
+
+    def __init__(self, timeout_seconds: float):
+        super().__init__(
+            "Generation timed out",
+            f"Request exceeded {timeout_seconds}s timeout. Try a shorter prompt or lower max_tokens.",
+        )
+        self.timeout_seconds = timeout_seconds
+
+
+# --- Engine-specific Errors ---
+
+
+class ModelLoadError(EngineError):
+    """Failed to load model."""
+
+    def __init__(self, model_path: str, reason: str):
+        super().__init__(
+            f"Failed to load model: {model_path}",
+            reason,
+        )
+        self.model_path = model_path
+
+
+class GenerationError(EngineError):
+    """Error during text/audio generation."""
+
+    def __init__(self, reason: str):
+        super().__init__("Generation failed", reason)
