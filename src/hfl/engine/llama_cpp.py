@@ -96,8 +96,8 @@ class LlamaCppEngine(InferenceEngine):
         n_ctx = kwargs.get("n_ctx", 4096)
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)
 
-        logger.info(f"Loading GGUF model: {path.name}")
-        logger.debug(f"Model path: {model_path}, n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}")
+        logger.info("Loading GGUF model: %s", path.name)
+        logger.debug("Model path: %s, n_ctx=%s, n_gpu_layers=%s", model_path, n_ctx, n_gpu_layers)
 
         start_time = time.perf_counter()
         try:
@@ -115,22 +115,22 @@ class LlamaCppEngine(InferenceEngine):
                 )
             self._model_path = model_path
             elapsed = time.perf_counter() - start_time
-            logger.info(f"Model loaded in {elapsed:.2f}s: {path.name}")
+            logger.info("Model loaded in %.2fs: %s", elapsed, path.name)
         except Exception as e:
-            logger.error(f"Failed to load model {path.name}: {e}")
+            logger.error("Failed to load model %s: %s", path.name, e)
             raise
 
     def unload(self) -> None:
         if self._model:
             model_name = self.model_name
-            logger.info(f"Unloading model: {model_name}")
+            logger.info("Unloading model: %s", model_name)
             del self._model
             self._model = None
             # Force garbage collection to free GPU memory
             import gc
 
             gc.collect()
-            logger.debug(f"Model unloaded: {model_name}")
+            logger.debug("Model unloaded: %s", model_name)
 
     def generate(
         self,
@@ -138,7 +138,7 @@ class LlamaCppEngine(InferenceEngine):
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
         cfg = config or GenerationConfig()
-        logger.debug(f"Generating with max_tokens={cfg.max_tokens}, temp={cfg.temperature}")
+        logger.debug("Generating with max_tokens=%s, temp=%s", cfg.max_tokens, cfg.temperature)
 
         t0 = time.perf_counter()
         output = self._model(
@@ -157,7 +157,7 @@ class LlamaCppEngine(InferenceEngine):
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
 
-        logger.debug(f"Generated {n_gen} tokens in {elapsed:.2f}s ({n_gen/elapsed:.1f} tok/s)")
+        logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen/elapsed)
 
         return GenerationResult(
             text=text,

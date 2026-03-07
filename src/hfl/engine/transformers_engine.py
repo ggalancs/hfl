@@ -69,8 +69,8 @@ class TransformersEngine(InferenceEngine):
             )
 
         # Load with partial failure cleanup to prevent resource leaks
-        logger.info(f"Loading transformers model: {model_path}")
-        logger.debug(f"Load config: quant={quant}, device_map={load_kwargs.get('device_map')}")
+        logger.info("Loading transformers model: %s", model_path)
+        logger.debug("Load config: quant=%s, device_map=%s", quant, load_kwargs.get('device_map'))
 
         start_time = time.perf_counter()
         tokenizer = None
@@ -83,9 +83,9 @@ class TransformersEngine(InferenceEngine):
             self._model = model
             self._model_id = model_path
             elapsed = time.perf_counter() - start_time
-            logger.info(f"Model loaded in {elapsed:.2f}s: {model_path}")
+            logger.info("Model loaded in %.2fs: %s", elapsed, model_path)
         except Exception as e:
-            logger.error(f"Failed to load model {model_path}: {e}")
+            logger.error("Failed to load model %s: %s", model_path, e)
             # Cleanup partial state on failure
             if model is not None:
                 del model

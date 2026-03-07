@@ -85,7 +85,7 @@ async def stream_with_backpressure(
                 future.result(timeout=60)  # Wait for queue space with timeout
         except Exception as e:
             if not cancelled.is_set():
-                logger.error(f"Error in stream producer: {e}")
+                logger.error("Error in stream producer: %s", e)
                 loop.call_soon_threadsafe(queue.put_nowait, e)
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -98,7 +98,7 @@ async def stream_with_backpressure(
             # Check total timeout
             elapsed = time.monotonic() - start_time
             if elapsed > timeout:
-                logger.warning(f"Stream timed out after {elapsed:.1f}s")
+                logger.warning("Stream timed out after %.1fs", elapsed)
                 raise StreamTimeoutError(f"Stream exceeded {timeout}s timeout")
 
             # Check client disconnect
@@ -169,7 +169,7 @@ async def simple_stream_async(
             for item in sync_iterator:
                 loop.call_soon_threadsafe(queue.put_nowait, item)
         except Exception as e:
-            logger.error(f"Error in stream producer: {e}")
+            logger.error("Error in stream producer: %s", e)
             loop.call_soon_threadsafe(queue.put_nowait, e)
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)

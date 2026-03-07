@@ -227,7 +227,7 @@ class EngineObserver:
         if self._enabled:
             self._emit_model_unloaded()
             self._record_model_unload()
-        logger.info(f"Model unloaded: {self.model_name}")
+        logger.info("Model unloaded: %s", self.model_name)
 
     def _emit_generation_started(self, operation: str) -> None:
         """Emit generation started event."""

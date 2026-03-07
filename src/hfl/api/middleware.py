@@ -122,6 +122,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
         self._request_counts: dict[str, list[float]] = defaultdict(list)
+        self._request_counter = 0
+        self._cleanup_interval = 1000  # Clean up stale IPs every N requests
         # Store global reference for testing
         global _rate_limiter_instance
         _rate_limiter_instance = self
@@ -163,7 +165,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     try:
                         ipaddress.ip_address(ip_str)
                     except ValueError:
-                        logger.warning(f"Invalid IP in X-Forwarded-For: {ip_str}")
+                        logger.warning("Invalid IP in X-Forwarded-For: %s", ip_str)
                         continue
 
                     # Find rightmost IP that is NOT a trusted proxy
@@ -204,6 +206,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Record this request
         self._request_counts[client_ip].append(now)
+
+        # Periodic cleanup of stale IPs
+        self._request_counter += 1
+        if self._request_counter >= self._cleanup_interval:
+            self._request_counter = 0
+            stale_ips = [
+                ip for ip, timestamps in self._request_counts.items()
+                if not timestamps or timestamps[-1] < window_start
+            ]
+            for ip in stale_ips:
+                del self._request_counts[ip]
+
         return False, remaining - 1
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:

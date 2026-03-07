@@ -129,27 +129,37 @@ class AsyncEngineWrapper:
         Raises:
             Exception: Re-raises any exception from the producer thread.
         """
-        queue: asyncio.Queue[str | None | Exception] = asyncio.Queue()
+        queue: asyncio.Queue[str | None | Exception] = asyncio.Queue(maxsize=100)
         loop = asyncio.get_event_loop()
 
         def producer() -> None:
             """Run sync generator and put tokens in queue."""
             try:
                 for token in self._engine.generate_stream(prompt, config):
-                    loop.call_soon_threadsafe(queue.put_nowait, token)
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(token), loop
+                    ).result(timeout=60)
             except Exception as e:
-                logger.error(f"Error in stream producer: {e}")
+                logger.error("Error in stream producer: %s", e)
                 # Send exception to consumer instead of swallowing it
-                loop.call_soon_threadsafe(queue.put_nowait, e)
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(e), loop
+                ).result(timeout=60)
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(None), loop
+                ).result(timeout=60)
 
         # Start producer in thread pool
         producer_task = asyncio.create_task(asyncio.to_thread(producer))
 
         try:
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    producer_task.cancel()
+                    raise TimeoutError("Token stream timed out")
                 if item is None:
                     break
                 if isinstance(item, Exception):
@@ -157,7 +167,13 @@ class AsyncEngineWrapper:
                 yield item
         finally:
             # Ensure producer task completes
-            await producer_task
+            if not producer_task.done():
+                try:
+                    await producer_task
+                except asyncio.CancelledError:
+                    pass
+            else:
+                await producer_task
 
     async def chat_stream(
         self, messages: list["ChatMessage"], config: "GenerationConfig | None" = None
@@ -177,27 +193,37 @@ class AsyncEngineWrapper:
         Raises:
             Exception: Re-raises any exception from the producer thread.
         """
-        queue: asyncio.Queue[str | None | Exception] = asyncio.Queue()
+        queue: asyncio.Queue[str | None | Exception] = asyncio.Queue(maxsize=100)
         loop = asyncio.get_event_loop()
 
         def producer() -> None:
             """Run sync generator and put tokens in queue."""
             try:
                 for token in self._engine.chat_stream(messages, config):
-                    loop.call_soon_threadsafe(queue.put_nowait, token)
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(token), loop
+                    ).result(timeout=60)
             except Exception as e:
-                logger.error(f"Error in chat stream producer: {e}")
+                logger.error("Error in chat stream producer: %s", e)
                 # Send exception to consumer instead of swallowing it
-                loop.call_soon_threadsafe(queue.put_nowait, e)
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(e), loop
+                ).result(timeout=60)
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(None), loop
+                ).result(timeout=60)
 
         # Start producer in thread pool
         producer_task = asyncio.create_task(asyncio.to_thread(producer))
 
         try:
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    producer_task.cancel()
+                    raise TimeoutError("Token stream timed out")
                 if item is None:
                     break
                 if isinstance(item, Exception):
@@ -205,4 +231,10 @@ class AsyncEngineWrapper:
                 yield item
         finally:
             # Ensure producer task completes
-            await producer_task
+            if not producer_task.done():
+                try:
+                    await producer_task
+                except asyncio.CancelledError:
+                    pass
+            else:
+                await producer_task

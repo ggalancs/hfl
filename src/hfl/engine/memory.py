@@ -113,7 +113,7 @@ def get_memory_snapshot(gpu_id: int = 0) -> MemorySnapshot:
                 actual_gpu_id = gpu_id
         except (OSError, ValueError, RuntimeError, IndexError) as e:
             # GPUtil can fail on some systems (no GPU, driver issues, etc.)
-            logger.debug(f"GPU memory query failed: {e}")
+            logger.debug("GPU memory query failed: %s", e)
 
     return MemorySnapshot(
         system_used_gb=system_used,

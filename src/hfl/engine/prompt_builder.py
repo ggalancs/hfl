@@ -33,6 +33,31 @@ class PromptBuilder:
     """
 
     @staticmethod
+    def _escape_content(content: str, format: PromptFormat) -> str:
+        """Escape format-specific delimiters in user content.
+
+        Prevents prompt injection via format delimiter manipulation.
+        """
+        if format == PromptFormat.CHATML:
+            content = content.replace("<|im_start|>", r"\<|im_start|\>")
+            content = content.replace("<|im_end|>", r"\<|im_end|\>")
+        elif format == PromptFormat.LLAMA3:
+            content = content.replace("<|begin_of_text|>", "")
+            content = content.replace("<|start_header_id|>", "")
+            content = content.replace("<|end_header_id|>", "")
+            content = content.replace("<|eot_id|>", "")
+        elif format == PromptFormat.LLAMA2:
+            content = content.replace("[INST]", "")
+            content = content.replace("[/INST]", "")
+            content = content.replace("<<SYS>>", "")
+            content = content.replace("<</SYS>>", "")
+        elif format == PromptFormat.ALPACA:
+            content = content.replace("### Instruction:", "")
+            content = content.replace("### Response:", "")
+            content = content.replace("### System:", "")
+        return content
+
+    @staticmethod
     def messages_to_dicts(messages: list["ChatMessage"]) -> list[dict[str, str]]:
         """Convert ChatMessage objects to dictionaries.
 
@@ -62,7 +87,8 @@ class PromptBuilder:
         """
         parts = []
         for msg in messages:
-            parts.append(f"<|im_start|>{msg.role}\n{msg.content}<|im_end|>")
+            escaped = PromptBuilder._escape_content(msg.content, PromptFormat.CHATML)
+            parts.append(f"<|im_start|>{msg.role}\n{escaped}<|im_end|>")
 
         if add_generation_prompt:
             parts.append("<|im_start|>assistant\n")
@@ -89,16 +115,17 @@ class PromptBuilder:
         system_content = ""
 
         for msg in messages:
+            escaped = PromptBuilder._escape_content(msg.content, PromptFormat.LLAMA2)
             if msg.role == "system":
-                system_content = msg.content
+                system_content = escaped
             elif msg.role == "user":
                 if system_content:
-                    parts.append(f"[INST] <<SYS>>\n{system_content}\n<</SYS>>\n\n{msg.content} [/INST]")
+                    parts.append(f"[INST] <<SYS>>\n{system_content}\n<</SYS>>\n\n{escaped} [/INST]")
                     system_content = ""
                 else:
-                    parts.append(f"[INST] {msg.content} [/INST]")
+                    parts.append(f"[INST] {escaped} [/INST]")
             elif msg.role == "assistant":
-                parts.append(msg.content)
+                parts.append(escaped)
 
         return " ".join(parts)
 
@@ -121,7 +148,8 @@ class PromptBuilder:
         parts = ["<|begin_of_text|>"]
 
         for msg in messages:
-            parts.append(f"<|start_header_id|>{msg.role}<|end_header_id|>\n\n{msg.content}<|eot_id|>")
+            escaped = PromptBuilder._escape_content(msg.content, PromptFormat.LLAMA3)
+            parts.append(f"<|start_header_id|>{msg.role}<|end_header_id|>\n\n{escaped}<|eot_id|>")
 
         if add_generation_prompt:
             parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
@@ -147,12 +175,13 @@ class PromptBuilder:
         parts = []
 
         for msg in messages:
+            escaped = PromptBuilder._escape_content(msg.content, PromptFormat.ALPACA)
             if msg.role == "system":
-                parts.append(f"### System:\n{msg.content}\n")
+                parts.append(f"### System:\n{escaped}\n")
             elif msg.role == "user":
-                parts.append(f"### Instruction:\n{msg.content}\n")
+                parts.append(f"### Instruction:\n{escaped}\n")
             elif msg.role == "assistant":
-                parts.append(f"### Response:\n{msg.content}\n")
+                parts.append(f"### Response:\n{escaped}\n")
 
         if add_generation_prompt:
             parts.append("### Response:\n")

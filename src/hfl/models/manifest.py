@@ -95,7 +95,7 @@ class ModelManifest:
             The hex-encoded hash, or None if file doesn't exist.
         """
         if not self.file_exists():
-            logger.warning(f"Cannot compute hash: file not found at {self.local_path}")
+            logger.warning("Cannot compute hash: file not found at %s", self.local_path)
             return None
 
         from hfl.security import compute_file_hash
@@ -152,5 +152,5 @@ class ModelManifest:
 
         self.file_hash = computed
         self.verified_at = datetime.now().isoformat()
-        logger.info(f"Updated hash for {self.name}: {computed[:16]}...")
+        logger.info("Updated hash for %s: %s...", self.name, computed[:16])
         return True

@@ -14,7 +14,7 @@ Usage:
     rid = set_request_id("custom-id")  # Use provided ID
 
     # Anywhere in the request context
-    logger.info(f"[{get_request_id()}] Processing request...")
+    logger.info("[%s] Processing request...", get_request_id())
 
 Features:
     - Thread-safe via contextvars

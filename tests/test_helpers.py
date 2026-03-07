@@ -283,8 +283,8 @@ class TestStreamOpenAIChat:
         async for chunk in stream_openai_chat(mock_engine, [], config, "test-model"):
             chunks.append(chunk)
 
-        # Should have 3 content chunks + 1 finish chunk + 1 done
-        assert len(chunks) == 5
+        # Should have 3 content chunks + 1 finish+done chunk (combined)
+        assert len(chunks) == 4
         assert "Hello" in chunks[0]
         assert "[DONE]" in chunks[-1]
 
@@ -299,9 +299,12 @@ class TestStreamOpenAIChat:
         async for chunk in stream_openai_chat(mock_engine, [], config, "model"):
             chunks.append(chunk)
 
-        # Second to last chunk should have finish_reason
-        finish_chunk = chunks[-2]
-        data = json.loads(finish_chunk[6:-2])
+        # Last chunk contains both finish_reason and [DONE]
+        # The finish part is the first "data:" line in the combined chunk
+        last_chunk = chunks[-1]
+        # Extract the first data: line (finish chunk)
+        lines = [l for l in last_chunk.split("\n") if l.startswith("data: {")]
+        data = json.loads(lines[0][6:])
         assert data["choices"][0]["finish_reason"] == "stop"
 
 
@@ -319,7 +322,7 @@ class TestStreamOpenAICompletion:
         async for chunk in stream_openai_completion(mock_engine, "prompt", config, "model"):
             chunks.append(chunk)
 
-        assert len(chunks) == 3  # 1 content + 1 finish + 1 done
+        assert len(chunks) == 2  # 1 content + 1 finish+done (combined)
 
     @pytest.mark.asyncio
     async def test_uses_text_completion_object_type(self):
@@ -408,8 +411,8 @@ class TestStreamOllamaChat:
         assert data["message"]["content"] == "Hello"
 
     @pytest.mark.asyncio
-    async def test_final_has_full_message(self):
-        """stream_ollama_chat final chunk has full message."""
+    async def test_final_has_done_marker(self):
+        """stream_ollama_chat final chunk has done=True."""
         mock_engine = MagicMock()
         mock_engine.chat_stream.return_value = ["Hello", " ", "world"]
         config = GenerationConfig()
@@ -420,7 +423,7 @@ class TestStreamOllamaChat:
 
         final = json.loads(chunks[-1])
         assert final["done"] is True
-        assert final["message"]["content"] == "Hello world"
+        assert final["message"]["role"] == "assistant"
 
 
 @dataclass

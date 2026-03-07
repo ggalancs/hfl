@@ -32,11 +32,11 @@ def _check_registry() -> bool:
         get_registry()
         return True
     except (OSError, ValueError, KeyError, AttributeError) as e:
-        logger.debug(f"Registry check failed: {e}")
+        logger.debug("Registry check failed: %s", e)
         return False
 
 
-@router.get("/health")
+@router.get("/health", tags=["Health"], summary="Basic health check")
 async def health_basic() -> dict[str, Any]:
     """Basic health check - maintains backwards compatibility."""
     state = get_state()
@@ -49,7 +49,7 @@ async def health_basic() -> dict[str, Any]:
     }
 
 
-@router.get("/health/ready")
+@router.get("/health/ready", tags=["Health"], summary="Readiness probe")
 async def health_ready() -> dict[str, Any]:
     """Readiness check - can accept requests.
 
@@ -74,7 +74,7 @@ async def health_ready() -> dict[str, Any]:
     }
 
 
-@router.get("/health/live")
+@router.get("/health/live", tags=["Health"], summary="Liveness probe")
 async def health_live() -> dict[str, Any]:
     """Liveness check - process is alive."""
     uptime = (datetime.now() - _startup_time).total_seconds()
@@ -95,9 +95,13 @@ async def health_live() -> dict[str, Any]:
     return result
 
 
-@router.get("/health/deep")
-async def health_deep() -> dict[str, Any]:
-    """Deep health check - all systems."""
+@router.get("/health/deep", tags=["Health"], summary="Deep health check")
+async def health_deep(probe: bool = False) -> dict[str, Any]:
+    """Deep health check - all systems.
+
+    Args:
+        probe: If True, run a minimal inference test to verify model health.
+    """
     state = get_state()
     uptime = (datetime.now() - _startup_time).total_seconds()
 
@@ -115,6 +119,22 @@ async def health_deep() -> dict[str, Any]:
         },
     }
 
+    # Optional inference probe
+    if probe and state.is_llm_loaded() and state.engine is not None:
+        try:
+            import asyncio
+
+            from hfl.engine.base import GenerationConfig
+
+            probe_config = GenerationConfig(max_tokens=1)
+            probe_result = await asyncio.to_thread(
+                state.engine.generate, "test", probe_config
+            )
+            result["llm"]["probe"] = "ok" if probe_result.text else "empty"
+        except Exception as e:
+            result["llm"]["probe"] = f"failed: {type(e).__name__}"
+            result["status"] = "degraded"
+
     # System metrics if psutil is available
     try:
         import psutil
@@ -131,7 +151,7 @@ async def health_deep() -> dict[str, Any]:
     return result
 
 
-@router.get("/health/sli")
+@router.get("/health/sli", tags=["Health"], summary="Service level indicators")
 async def health_sli() -> dict[str, Any]:
     """Service Level Indicator report with SLO compliance.
 
@@ -215,7 +235,9 @@ async def health_sli() -> dict[str, Any]:
         "availability": {
             "current": sli["availability"],
             "target": slo.availability_target,
-            "status": check_rate(sli["availability"], slo.availability_target, lower_is_better=False),
+            "status": check_rate(
+                sli["availability"], slo.availability_target, lower_is_better=False,
+            ),
         },
         "memory": {
             "current": memory_usage,

@@ -140,10 +140,22 @@ class ModelPool:
                 # Evict if necessary before loading
                 await self._evict_if_needed_locked()
 
-        # If another coroutine is loading, wait and retry
+        # If another coroutine is loading, poll until ready (non-recursive)
         if not should_load:
-            # Small delay to avoid busy-waiting
-            await asyncio.sleep(0.1)
+            for _ in range(3000):  # Max ~5 minutes (3000 * 0.1s)
+                await asyncio.sleep(0.1)
+                cached = await self.get(model_name)
+                if cached is not None:
+                    return cached
+                # Check if still loading
+                async with self._lock:
+                    if model_name not in self._loading:
+                        break
+            # If we get here, either it finished loading or timed out
+            cached = await self.get(model_name)
+            if cached is not None:
+                return cached
+            # Retry loading ourselves
             return await self.get_or_load(model_name, loader)
 
         # Load model OUTSIDE the lock to prevent deadlock
@@ -185,7 +197,7 @@ class ModelPool:
                 try:
                     engine.unload()
                 except Exception as e:
-                    logger.error(f"Failed to unload engine after load error: {e}")
+                    logger.error("Failed to unload engine after load error: %s", e)
             raise
 
         finally:
@@ -346,7 +358,7 @@ class ModelPool:
 
                     for name in to_evict:
                         self._evict_locked(name)
-                        logger.info(f"Background eviction: evicted idle model '{name}'")
+                        logger.info("Background eviction: evicted idle model '%s'", name)
 
                 # Reset error tracking on success
                 consecutive_errors = 0
@@ -359,14 +371,15 @@ class ModelPool:
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(
-                    f"Error in background eviction loop "
-                    f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    "Error in background eviction loop (%s/%s): %s",
+                    consecutive_errors, max_consecutive_errors, e
                 )
 
                 if consecutive_errors >= max_consecutive_errors:
                     logger.critical(
-                        f"Background eviction loop stopping after {max_consecutive_errors} "
-                        f"consecutive errors. Manual restart required."
+                        "Background eviction loop stopping after %s "
+                        "consecutive errors. Manual restart required.",
+                        max_consecutive_errors
                     )
                     # Emit event for monitoring if available
                     try:
@@ -382,7 +395,7 @@ class ModelPool:
                     break
 
                 # Exponential backoff
-                logger.warning(f"Retrying eviction loop in {backoff_seconds:.1f}s")
+                logger.warning("Retrying eviction loop in %.1fs", backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, max_backoff)
 

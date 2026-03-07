@@ -62,8 +62,8 @@ class BarkEngine(AudioEngine):
 
             torch_dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
 
-        logger.info(f"Loading Bark TTS model: {model_path}")
-        logger.debug(f"Device: {device}, dtype: {torch_dtype}")
+        logger.info("Loading Bark TTS model: %s", model_path)
+        logger.debug("Device: %s, dtype: %s", device, torch_dtype)
 
         start_time = time.time()
         try:
@@ -76,9 +76,9 @@ class BarkEngine(AudioEngine):
             self._model_name = model_path
             self._sample_rate = 24000  # Bark native sample rate
             elapsed = time.time() - start_time
-            logger.info(f"Bark model loaded in {elapsed:.2f}s")
+            logger.info("Bark model loaded in %.2fs", elapsed)
         except Exception as e:
-            logger.error(f"Failed to load Bark model: {e}")
+            logger.error("Failed to load Bark model: %s", e)
             raise
 
     def unload(self) -> None:

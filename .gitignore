@@ -56,3 +56,8 @@ Thumbs.db
 
 # ruff
 .ruff_cache/
+
+# Internal planning docs
+IMPROVEMENT_PLAN*.md
+ARCHITECTURE_IMPROVEMENT_PLAN*.md
+coverage.json

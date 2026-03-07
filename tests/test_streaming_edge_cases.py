@@ -161,8 +161,8 @@ class TestStreamingBackpressure:
         async for _ in stream_openai_chat(mock_engine, messages, config, "test"):
             chunk_count += 1
 
-        # Should have 1000 content chunks + finish chunk + done marker
-        assert chunk_count == 1002
+        # Should have 1000 content chunks + 1 finish+done chunk (combined)
+        assert chunk_count == 1001
 
     @pytest.mark.asyncio
     async def test_unicode_in_stream(self):
@@ -213,10 +213,10 @@ class TestOllamaChatStreaming:
             chunks.append(chunk)
 
         import json
-        # Last chunk should have done=True and full message
+        # Last chunk should have done=True
         last_chunk = json.loads(chunks[-1].strip())
         assert last_chunk["done"] is True
-        assert last_chunk["message"]["content"] == "Hello world!"
+        assert last_chunk["message"]["role"] == "assistant"
 
 
 class TestStreamingCancellation:

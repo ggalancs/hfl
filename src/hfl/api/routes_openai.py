@@ -51,7 +51,18 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
 # --- Endpoints ---
 
 
-@router.post("/v1/chat/completions", response_model=None)
+@router.post(
+    "/v1/chat/completions",
+    response_model=None,
+    tags=["OpenAI"],
+    summary="Create chat completion",
+    responses={
+        400: {"description": "Invalid request parameters"},
+        404: {"description": "Model not found"},
+        429: {"description": "Rate limit exceeded"},
+        504: {"description": "Generation timeout"},
+    },
+)
 async def chat_completions(req: ChatCompletionRequest) -> dict[str, Any] | StreamingResponse:
     await _ensure_model_loaded(req.model)
     state = _get_state()
@@ -149,7 +160,18 @@ async def _stream_chat(
         yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
 
 
-@router.post("/v1/completions", response_model=None)
+@router.post(
+    "/v1/completions",
+    response_model=None,
+    tags=["OpenAI"],
+    summary="Create text completion",
+    responses={
+        400: {"description": "Invalid request parameters"},
+        404: {"description": "Model not found"},
+        429: {"description": "Rate limit exceeded"},
+        504: {"description": "Generation timeout"},
+    },
+)
 async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse:
     await _ensure_model_loaded(req.model)
     state = _get_state()
@@ -231,7 +253,7 @@ async def _stream_completion(
         yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
 
 
-@router.get("/v1/models")
+@router.get("/v1/models", tags=["OpenAI"], summary="List available models")
 async def list_models() -> dict[str, Any]:
     registry = get_registry()
     models = registry.list_all()

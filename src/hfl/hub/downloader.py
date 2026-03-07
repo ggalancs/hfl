@@ -62,7 +62,7 @@ _RETRYABLE_EXCEPTIONS = (ConnectionError, Timeout, OSError)
 
 def _on_download_retry(exception: Exception, attempt: int) -> None:
     """Log retry attempts for downloads."""
-    logger.warning(f"Download attempt {attempt} failed: {exception}. Retrying...")
+    logger.warning("Download attempt %s failed: %s. Retrying...", attempt, exception)
     console.print(f"[yellow]Retry {attempt}:[/] {type(exception).__name__} - Retrying...")
 
 

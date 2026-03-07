@@ -16,7 +16,12 @@ from hfl.metrics import get_metrics
 router = APIRouter(tags=["metrics"])
 
 
-@router.get("/metrics", response_class=PlainTextResponse)
+@router.get(
+    "/metrics",
+    response_class=PlainTextResponse,
+    tags=["Metrics"],
+    summary="Prometheus metrics",
+)
 async def prometheus_metrics() -> str:
     """Export metrics in Prometheus format.
 
@@ -30,7 +35,7 @@ async def prometheus_metrics() -> str:
     return get_metrics().export_prometheus()
 
 
-@router.get("/metrics/json")
+@router.get("/metrics/json", tags=["Metrics"], summary="JSON metrics")
 async def json_metrics() -> dict[str, Any]:
     """Export metrics as JSON.
 

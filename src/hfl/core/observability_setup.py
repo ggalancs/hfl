@@ -39,7 +39,7 @@ def setup_event_listeners() -> None:
         model_name = event.data.get("model", "unknown")
         duration_ms = event.data.get("duration_ms", 0)
         metrics.record_model_load(model_name, duration_ms)
-        logger.debug(f"Recorded model load: {model_name} ({duration_ms:.0f}ms)")
+        logger.debug("Recorded model load: %s (%.0fms)", model_name, duration_ms)
 
     @on(EventType.MODEL_UNLOADED)
     def on_model_unloaded(event: Any) -> None:
@@ -54,7 +54,7 @@ def setup_event_listeners() -> None:
         tokens_in = event.data.get("tokens_prompt", 0)
         tokens_out = event.data.get("tokens_generated", 0)
         metrics.record_generation(duration_ms, tokens_in, tokens_out)
-        logger.debug(f"Recorded generation: {tokens_out} tokens in {duration_ms:.0f}ms")
+        logger.debug("Recorded generation: %s tokens in %.0fms", tokens_out, duration_ms)
 
     @on(EventType.GENERATION_FAILED)
     def on_generation_failed(event: Any) -> None:
@@ -62,7 +62,7 @@ def setup_event_listeners() -> None:
         error = event.data.get("error")
         error_type = type(error).__name__ if error else "Unknown"
         metrics.record_error(error_type)
-        logger.debug(f"Recorded generation error: {error_type}")
+        logger.debug("Recorded generation error: %s", error_type)
 
     _listeners_registered = True
     logger.info("Event listeners registered for metrics")

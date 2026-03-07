@@ -40,6 +40,7 @@ MAX_KEEPALIVE_CONNECTIONS = 5
 _sync_client: httpx.Client | None = None
 _async_client: httpx.AsyncClient | None = None
 _sync_lock = threading.Lock()
+_async_lock = threading.Lock()
 
 
 def get_hf_client(
@@ -83,7 +84,7 @@ def get_hf_client(
                 headers=headers,
                 # HTTP/2 disabled by default - requires optional h2 package
             )
-            logger.debug(f"Created sync HF client with base_url={base_url}")
+            logger.debug("Created sync HF client with base_url=%s", base_url)
 
         return _sync_client
 
@@ -110,23 +111,26 @@ async def get_async_hf_client(
     if _async_client is not None:
         return _async_client
 
-    headers = {
-        "User-Agent": "hfl/0.1.0",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    with _async_lock:
+        if _async_client is not None:
+            return _async_client
 
-    _async_client = httpx.AsyncClient(
-        base_url=base_url,
-        timeout=timeout,
-        limits=httpx.Limits(
-            max_connections=MAX_CONNECTIONS,
-            max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
-        ),
-        headers=headers,
-        # HTTP/2 disabled by default - requires optional h2 package
-    )
-    logger.debug(f"Created async HF client with base_url={base_url}")
+        headers = {
+            "User-Agent": "hfl/0.1.0",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        _async_client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout,
+            limits=httpx.Limits(
+                max_connections=MAX_CONNECTIONS,
+                max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
+            ),
+            headers=headers,
+        )
+        logger.debug("Created async HF client with base_url=%s", base_url)
 
     return _async_client
 
@@ -170,6 +174,16 @@ def reset_hf_clients() -> None:
             _sync_client.close()
             _sync_client = None
 
-    # Note: async client should be closed with await
-    # For testing, we just reset the reference
-    _async_client = None
+    with _async_lock:
+        if _async_client is not None:
+            # Best-effort sync close to avoid connection leak
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(_async_client.aclose())
+                else:
+                    loop.run_until_complete(_async_client.aclose())
+            except Exception:
+                pass  # In testing, leak is acceptable
+            _async_client = None

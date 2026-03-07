@@ -278,8 +278,9 @@ class TestGGUFConverter:
                     except Exception:
                         pass  # May fail due to mock
 
-                # Verify that it's called at least once (conversion, not quantization)
-                assert mock_run.call_count >= 1
+                # With resume support, FP16 already exists so conversion is skipped.
+                # No subprocess.run calls expected (step 1 skipped, F16 just renames).
+                assert mock_run.call_count == 0
 
     def test_convert_quantization_levels(self, temp_config):
         """Verifies supported quantization levels."""

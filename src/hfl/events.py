@@ -129,7 +129,7 @@ class EventBus:
             try:
                 handler(event)
             except Exception as e:
-                logger.error(f"Event handler failed for {event.type}: {e}")
+                logger.error("Event handler failed for %s: %s", event.type, e)
 
     def publish_async(self, event: Event) -> None:
         """Publish event asynchronously in a background thread.

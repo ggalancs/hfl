@@ -35,8 +35,12 @@ if sys.platform == "win32":
     import msvcrt
 
     def _lock_file(fd: int, exclusive: bool) -> None:
-        """Lock file on Windows."""
-        msvcrt.locking(fd, msvcrt.LK_NBLCK if exclusive else msvcrt.LK_NBRLCK, 1)
+        """Lock file on Windows.
+
+        Note: Windows msvcrt only supports exclusive locks via LK_NBLCK.
+        Shared (read) locks are not available through this API.
+        """
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
 
     def _unlock_file(fd: int) -> None:
         """Unlock file on Windows."""
@@ -73,6 +77,7 @@ class ModelRegistry:
         self._by_repo_id: dict[str, ModelManifest] = {}
         # Thread safety
         self._lock = threading.RLock()
+        self._indexes_dirty = False
         self._load()
 
     @contextmanager
@@ -118,12 +123,12 @@ class ModelRegistry:
         try:
             data = json.loads(self.path.read_text())
             self._models = self._parse_manifests(data)
-            logger.debug(f"Loaded {len(self._models)} models from registry")
+            logger.debug("Loaded %s models from registry", len(self._models))
         except json.JSONDecodeError as e:
-            logger.warning(f"Registry file corrupt: {e}")
+            logger.warning("Registry file corrupt: %s", e)
             self._models = self._recover_from_backup()
         except Exception as e:
-            logger.error(f"Failed to load registry: {e}")
+            logger.error("Failed to load registry: %s", e)
             self._models = self._recover_from_backup()
 
         self._rebuild_indexes()
@@ -142,7 +147,7 @@ class ModelRegistry:
                 manifest = ModelManifest.from_dict(entry)
                 manifests.append(manifest)
             except Exception as e:
-                logger.warning(f"Skipping invalid manifest entry {i}: {e}")
+                logger.warning("Skipping invalid manifest entry %s: %s", i, e)
         return manifests
 
     def _recover_from_backup(self) -> list[ModelManifest]:
@@ -160,14 +165,14 @@ class ModelRegistry:
         try:
             data = json.loads(backup_path.read_text())
             models = self._parse_manifests(data)
-            logger.info(f"Recovered {len(models)} models from backup")
+            logger.info("Recovered %s models from backup", len(models))
             self._emit_corruption_event("recovered", len(models))
 
             # Restore backup as main file
             shutil.copy2(backup_path, self.path)
             return models
         except Exception as e:
-            logger.error(f"Backup recovery failed: {e}")
+            logger.error("Backup recovery failed: %s", e)
             self._emit_corruption_event("recovery_failed", error=str(e))
             return []
 
@@ -183,7 +188,7 @@ class ModelRegistry:
                 shutil.copy2(self.path, self._backup_path)
                 logger.debug("Created registry backup")
             except Exception as e:
-                logger.warning(f"Failed to create backup: {e}")
+                logger.warning("Failed to create backup: %s", e)
 
     def _emit_corruption_event(
         self,
@@ -205,6 +210,12 @@ class ModelRegistry:
             )
         except ImportError:
             pass
+
+    def _ensure_indexes(self) -> None:
+        """Rebuild indexes if dirty (lazy rebuilding)."""
+        if self._indexes_dirty:
+            self._rebuild_indexes()
+            self._indexes_dirty = False
 
     def _rebuild_indexes(self) -> None:
         """Rebuild all lookup indexes from the model list."""
@@ -229,9 +240,9 @@ class ModelRegistry:
         try:
             temp_path.write_text(json.dumps(data, indent=2))
             temp_path.replace(self.path)  # Atomic on POSIX
-            logger.debug(f"Saved registry with {len(self._models)} models")
+            logger.debug("Saved registry with %s models", len(self._models))
         except Exception as e:
-            logger.error(f"Failed to save registry: {e}")
+            logger.error("Failed to save registry: %s", e)
             # Clean up temp file
             if temp_path.exists():
                 temp_path.unlink()
@@ -243,6 +254,7 @@ class ModelRegistry:
         Returns:
             Tuple of (is_valid, list of error messages)
         """
+        self._ensure_indexes()
         errors = []
 
         # Check for duplicate names
@@ -281,7 +293,7 @@ class ModelRegistry:
                 if model.local_path and Path(model.local_path).exists():
                     valid_models.append(model)
                 else:
-                    logger.warning(f"Removing invalid model: {model.name}")
+                    logger.warning("Removing invalid model: %s", model.name)
 
             # Remove duplicates (keep first occurrence)
             seen_names = set()
@@ -291,7 +303,7 @@ class ModelRegistry:
                     seen_names.add(model.name)
                     unique_models.append(model)
                 else:
-                    logger.warning(f"Removing duplicate model: {model.name}")
+                    logger.warning("Removing duplicate model: %s", model.name)
 
             self._models = unique_models
             self._rebuild_indexes()
@@ -300,7 +312,7 @@ class ModelRegistry:
             if removed > 0:
                 with self._file_lock(exclusive=True):
                     self._save()
-                logger.info(f"Registry repair: removed {removed} invalid entries")
+                logger.info("Registry repair: removed %s invalid entries", removed)
 
             return removed
 
@@ -319,7 +331,7 @@ class ModelRegistry:
                 if manifest.name in self._by_name:
                     self._models = [m for m in self._models if m.name != manifest.name]
                 self._models.append(manifest)
-                self._rebuild_indexes()
+                self._indexes_dirty = True
                 self._save()
 
     def get(self, name: str) -> ModelManifest | None:
@@ -328,6 +340,7 @@ class ModelRegistry:
         Lookup is O(1) for all three identifiers.
         """
         with self._lock:
+            self._ensure_indexes()
             # Try name first (most common)
             if name in self._by_name:
                 return self._by_name[name]
@@ -369,13 +382,14 @@ class ModelRegistry:
                     return False
 
                 model.alias = alias
-                self._rebuild_indexes()
+                self._indexes_dirty = True
                 self._save()
                 return True
 
     def list_all(self) -> list[ModelManifest]:
         """Lists all registered models, sorted by creation date (thread-safe)."""
         with self._lock:
+            self._ensure_indexes()
             return sorted(self._models, key=lambda m: m.created_at, reverse=True)
 
     def remove(self, name: str) -> bool:
@@ -393,7 +407,7 @@ class ModelRegistry:
                     return False
 
                 self._models = [m for m in self._models if m.name != name]
-                self._rebuild_indexes()
+                self._indexes_dirty = True
                 self._save()
                 return True
 

@@ -30,10 +30,12 @@ Unsupported models:
 - Models without config.json
 """
 
+import asyncio
 import json
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from rich.console import Console
@@ -41,6 +43,9 @@ from rich.console import Console
 from hfl.config import config
 
 console = Console()
+
+_conversion_locks: dict[str, threading.Lock] = {}
+_conversion_locks_guard = threading.Lock()
 
 
 class UnsupportedModelError(Exception):
@@ -260,6 +265,46 @@ def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
         return False
 
 
+def convert_with_cache(
+    converter: "GGUFConverter",
+    model_path: Path,
+    output_path: Path,
+    quantization: str = "Q4_K_M",
+    **kwargs,
+) -> Path:
+    """Convert with caching to avoid duplicate conversions.
+
+    Uses file-based locking to prevent concurrent conversions of the same model.
+    """
+    cache_key = f"{model_path}:{quantization}"
+
+    # Check if already converted (fast path)
+    quant = quantization.upper()
+    if quant == "F16":
+        expected_output = output_path.with_suffix(".f16.gguf")
+    else:
+        expected_output = output_path.with_suffix(f".{quant}.gguf")
+
+    if expected_output.exists():
+        console.print(f"[green]Using cached conversion:[/] {expected_output}")
+        return expected_output
+
+    # Get or create lock for this conversion
+    with _conversion_locks_guard:
+        if cache_key not in _conversion_locks:
+            _conversion_locks[cache_key] = threading.Lock()
+        lock = _conversion_locks[cache_key]
+
+    with lock:
+        # Double-check after acquiring lock
+        if expected_output.exists():
+            console.print(f"[green]Using cached conversion:[/] {expected_output}")
+            return expected_output
+
+        # Actually convert
+        return converter.convert(model_path, output_path, quantization, **kwargs)
+
+
 class GGUFConverter:
     """Manages the conversion of models to GGUF format."""
 
@@ -409,20 +454,24 @@ class GGUFConverter:
         # Step 1: Convert to GGUF FP16 (intermediate format)
         fp16_path = output_path.with_suffix(".fp16.gguf")
 
-        console.print("[cyan]Step 1/2:[/] Converting to GGUF FP16...")
+        # Resume support: skip FP16 conversion if already exists
+        if fp16_path.exists() and fp16_path.stat().st_size > 0:
+            console.print("[green]Resuming:[/] FP16 intermediate already exists, skipping step 1")
+        else:
+            console.print("[cyan]Step 1/2:[/] Converting to GGUF FP16...")
 
-        subprocess.run(
-            [
-                sys.executable,
-                str(self.convert_script),
-                str(model_path),
-                "--outtype",
-                "f16",
-                "--outfile",
-                str(fp16_path),
-            ],
-            check=True,
-        )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(self.convert_script),
+                    str(model_path),
+                    "--outtype",
+                    "f16",
+                    "--outfile",
+                    str(fp16_path),
+                ],
+                check=True,
+            )
 
         if quantization.upper() == "F16":
             # If FP16 is requested, we're done

@@ -103,7 +103,17 @@ def _format_to_content_type(fmt: str) -> str:
 # =============================================================================
 
 
-@router.post("/v1/audio/speech")
+@router.post(
+    "/v1/audio/speech",
+    tags=["TTS"],
+    summary="Generate speech audio",
+    responses={
+        400: {"description": "Invalid request parameters"},
+        404: {"description": "Model not found"},
+        429: {"description": "Rate limit exceeded"},
+        504: {"description": "Generation timeout"},
+    },
+)
 async def openai_tts(req: OpenAITTSRequest) -> Response:
     """
     OpenAI-compatible TTS endpoint.
@@ -121,7 +131,8 @@ async def openai_tts(req: OpenAITTSRequest) -> Response:
     """
     await _ensure_tts_model_loaded(req.model)
     state = _get_state()
-    assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
+    if state.tts_engine is None:
+        raise HTTPException(503, detail="TTS engine not available")
 
     # Map OpenAI format to internal format
     audio_format = _map_openai_format(req.response_format)
@@ -154,7 +165,18 @@ async def openai_tts(req: OpenAITTSRequest) -> Response:
 # =============================================================================
 
 
-@router.post("/api/tts", response_model=None)
+@router.post(
+    "/api/tts",
+    response_model=None,
+    tags=["TTS"],
+    summary="Generate speech (Ollama-style)",
+    responses={
+        400: {"description": "Invalid request parameters"},
+        404: {"description": "Model not found"},
+        429: {"description": "Rate limit exceeded"},
+        504: {"description": "Generation timeout"},
+    },
+)
 async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
     """
     Native HFL TTS endpoint.
@@ -175,7 +197,8 @@ async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
     """
     await _ensure_tts_model_loaded(req.model)
     state = _get_state()
-    assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
+    if state.tts_engine is None:
+        raise HTTPException(503, detail="TTS engine not available")
 
     config = TTSConfig(
         voice=req.voice,
@@ -210,7 +233,7 @@ async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
     )
 
 
-@router.get("/api/tts/voices")
+@router.get("/api/tts/voices", tags=["TTS"], summary="List available voices")
 async def list_voices(model: str | None = None) -> dict[str, Any]:
     """
     List available voices for a TTS model.
@@ -226,7 +249,8 @@ async def list_voices(model: str | None = None) -> dict[str, Any]:
     if model:
         await _ensure_tts_model_loaded(model)
         state = _get_state()
-        assert state.tts_engine is not None  # Guaranteed by _ensure_tts_model_loaded
+        if state.tts_engine is None:
+            raise HTTPException(503, detail="TTS engine not available")
 
         return {
             "model": model,
@@ -241,7 +265,7 @@ async def list_voices(model: str | None = None) -> dict[str, Any]:
     }
 
 
-@router.get("/v1/audio/models")
+@router.get("/v1/audio/models", tags=["TTS"], summary="List TTS models")
 async def list_tts_models() -> dict[str, Any]:
     """
     List available TTS models.

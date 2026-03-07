@@ -127,13 +127,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     # Cleanup on shutdown
     await get_state().cleanup()
+    # Close HTTP clients
+    from hfl.hub.client import close_async_hf_client, close_hf_client
 
+    await close_async_hf_client()
+    close_hf_client()
+
+
+_openapi_tags = [
+    {"name": "OpenAI", "description": "OpenAI-compatible endpoints (chat completions, completions, models)"},
+    {"name": "Ollama", "description": "Ollama-compatible endpoints (generate, chat, tags)"},
+    {"name": "TTS", "description": "Text-to-speech endpoints"},
+    {"name": "Health", "description": "Health check and readiness probes"},
+    {"name": "Metrics", "description": "Prometheus and JSON metrics"},
+]
 
 app = FastAPI(
     title="hfl API",
     description="OpenAI and Ollama compatible API for HuggingFace models",
     version="0.1.0",
     lifespan=lifespan,
+    openapi_tags=_openapi_tags,
 )
 
 # CORS - Configurable via config.py
@@ -150,10 +164,12 @@ app.add_middleware(
 # R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)
 
-# Add API key authentication middleware
-app.add_middleware(APIKeyMiddleware)
+# Middleware execution order (Starlette runs in reverse add order):
+# RequestLogger → APIKey → RateLimit → Disclaimer → CORS
+# This ensures: auth checked before rate limit tokens consumed,
+# and all requests are logged regardless of auth/rate-limit outcome.
 
-# Optional rate limiting (disabled by default)
+# Optional rate limiting (after auth in execution order)
 if config.rate_limit_enabled:
     from hfl.api.middleware import RateLimitMiddleware
 
@@ -163,10 +179,18 @@ if config.rate_limit_enabled:
         window_seconds=config.rate_limit_window,
     )
 
-# Request logging and metrics recording
+# API key authentication (runs before rate limiting)
+app.add_middleware(APIKeyMiddleware)
+
+# Request logging and metrics recording (outermost - runs first)
 from hfl.api.middleware import RequestLogger
 
 app.add_middleware(RequestLogger)
+
+# Register global exception handlers for HFLError hierarchy
+from hfl.api.exception_handlers import register_exception_handlers
+
+register_exception_handlers(app)
 
 app.include_router(openai_router)
 app.include_router(native_router)
@@ -201,4 +225,5 @@ def start_server(
         host=host or config.host,
         port=port or config.port,
         log_level="info",
+        timeout_graceful_shutdown=30,
     )

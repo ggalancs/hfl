@@ -89,7 +89,7 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
             try:
                 await asyncio.to_thread(engine.unload)
             except Exception as cleanup_error:
-                logger.error(f"Failed to cleanup engine after load error: {cleanup_error}")
+                logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
         raise
 
 
@@ -147,7 +147,7 @@ async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
             try:
                 await asyncio.to_thread(engine.unload)
             except Exception as cleanup_error:
-                logger.error(f"Failed to cleanup TTS engine after load error: {cleanup_error}")
+                logger.error("Failed to cleanup TTS engine after load error: %s", cleanup_error)
         raise
 
 

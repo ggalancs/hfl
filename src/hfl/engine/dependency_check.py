@@ -86,15 +86,15 @@ def log_available_backends() -> None:
     for backend in ["llama-cpp", "transformers", "vllm"]:
         status = availability.get(backend, "unknown")
         if status is True:
-            logger.info(f"  ✓ {backend}: available")
+            logger.info("  ✓ %s: available", backend)
         else:
-            logger.info(f"  ✗ {backend}: {status}")
+            logger.info("  ✗ %s: %s", backend, status)
 
     # GPU support
     if availability.get("torch") is True:
         if availability.get("torch_cuda"):
             device = availability.get("cuda_device", "unknown")
-            logger.info(f"  ✓ CUDA: available ({device})")
+            logger.info("  ✓ CUDA: available (%s)", device)
         elif availability.get("torch_mps"):
             logger.info("  ✓ MPS (Apple Silicon): available")
         else:

@@ -140,7 +140,8 @@ async def ensure_llm_loaded(model_name: str) -> tuple["InferenceEngine", "ModelM
 
     # Fast path - already loaded
     if state.current_model and state.current_model.name == model_name:
-        assert state.engine is not None
+        if state.engine is None:
+            raise HTTPException(503, detail="Model engine not available")
         return state.engine, state.current_model
 
     # Lookup in registry
@@ -190,7 +191,8 @@ async def ensure_tts_loaded(model_name: str) -> tuple["AudioEngine", "ModelManif
     state = get_state()
 
     if state.current_tts_model and state.current_tts_model.name == model_name:
-        assert state.tts_engine is not None
+        if state.tts_engine is None:
+            raise HTTPException(503, detail="TTS engine not available")
         return state.tts_engine, state.current_tts_model
 
     manifest = get_registry().get(model_name)
@@ -229,17 +231,37 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     if not options:
         return GenerationConfig()
 
+    # Validate types at API boundary
+    def _validate_float(
+        key: str, val: Any, min_val: float = 0.0, max_val: float = float("inf"),
+    ) -> float:
+        if not isinstance(val, (int, float)):
+            raise HTTPException(400, detail=f"'{key}' must be a number, got {type(val).__name__}")
+        val = float(val)
+        if not min_val <= val <= max_val:
+            raise HTTPException(400, detail=f"'{key}' must be between {min_val} and {max_val}")
+        return val
+
+    def _validate_int(key: str, val: Any, min_val: int = 0) -> int:
+        if not isinstance(val, int):
+            raise HTTPException(400, detail=f"'{key}' must be an integer, got {type(val).__name__}")
+        if val < min_val:
+            raise HTTPException(400, detail=f"'{key}' must be >= {min_val}")
+        return val
+
     config = GenerationConfig()
     if "temperature" in options and options["temperature"] is not None:
-        config.temperature = options["temperature"]
+        config.temperature = _validate_float("temperature", options["temperature"], 0.0, 2.0)
     if "top_p" in options and options["top_p"] is not None:
-        config.top_p = options["top_p"]
+        config.top_p = _validate_float("top_p", options["top_p"], 0.0, 1.0)
     if "top_k" in options and options["top_k"] is not None:
-        config.top_k = options["top_k"]
+        config.top_k = _validate_int("top_k", options["top_k"], 0)
     if "num_predict" in options and options["num_predict"] is not None:
-        config.max_tokens = options["num_predict"]
+        config.max_tokens = _validate_int("num_predict", options["num_predict"], 1)
     if "repeat_penalty" in options and options["repeat_penalty"] is not None:
-        config.repeat_penalty = options["repeat_penalty"]
+        config.repeat_penalty = _validate_float(
+            "repeat_penalty", options["repeat_penalty"], 0.0, 10.0,
+        )
     if "stop" in options:
         config.stop = options["stop"]
     if "seed" in options and options["seed"] is not None:
@@ -278,10 +300,16 @@ def request_to_config(
 
     config = GenerationConfig()
     if temperature is not None:
-        config.temperature = temperature
+        if not isinstance(temperature, (int, float)) or not 0.0 <= temperature <= 2.0:
+            raise HTTPException(400, detail="temperature must be between 0.0 and 2.0")
+        config.temperature = float(temperature)
     if top_p is not None:
-        config.top_p = top_p
+        if not isinstance(top_p, (int, float)) or not 0.0 <= top_p <= 1.0:
+            raise HTTPException(400, detail="top_p must be between 0.0 and 1.0")
+        config.top_p = float(top_p)
     if max_tokens is not None:
+        if not isinstance(max_tokens, int) or max_tokens < 1:
+            raise HTTPException(400, detail="max_tokens must be a positive integer")
         config.max_tokens = max_tokens
     if stop_list is not None:
         config.stop = stop_list
@@ -353,6 +381,7 @@ async def stream_openai_chat(
     """Stream chat completion in OpenAI format.
 
     Optimized to generate IDs and timestamps once at start.
+    Uses simple_stream_async for async-safe iteration.
 
     Args:
         engine: Loaded inference engine
@@ -363,14 +392,16 @@ async def stream_openai_chat(
     Yields:
         SSE-formatted chunks
     """
+    from hfl.api.streaming import simple_stream_async
+
     ctx = StreamingContext(model_name)
 
-    # Engine returns sync iterator, wrap for async context
-    for token in engine.chat_stream(messages, config):
-        yield ctx.format_chunk(content=token)
-
-    yield ctx.format_chunk(finish_reason="stop")
-    yield ctx.format_done()
+    async for chunk in simple_stream_async(
+        sync_iterator=engine.chat_stream(messages, config),
+        format_item=lambda token: ctx.format_chunk(content=token),
+        format_done=lambda: ctx.format_chunk(finish_reason="stop") + ctx.format_done(),
+    ):
+        yield chunk
 
 
 async def stream_openai_completion(
@@ -381,6 +412,8 @@ async def stream_openai_completion(
 ) -> AsyncIterator[str]:
     """Stream text completion in OpenAI format.
 
+    Uses simple_stream_async for async-safe iteration.
+
     Args:
         engine: Loaded inference engine
         prompt: Text prompt
@@ -390,20 +423,23 @@ async def stream_openai_completion(
     Yields:
         SSE-formatted chunks
     """
+    from hfl.api.streaming import simple_stream_async
+
     ctx = StreamingContext(model_name, object_type="text_completion")
 
-    # Engine returns sync iterator, wrap for async context
-    for token in engine.generate_stream(prompt, config):
-        yield ctx.format_chunk(content=token)
-
-    yield ctx.format_chunk(finish_reason="stop")
-    yield ctx.format_done()
+    async for chunk in simple_stream_async(
+        sync_iterator=engine.generate_stream(prompt, config),
+        format_item=lambda token: ctx.format_chunk(content=token),
+        format_done=lambda: ctx.format_chunk(finish_reason="stop") + ctx.format_done(),
+    ):
+        yield chunk
 
 
 def format_ndjson_chunk(
     content: str,
     model: str,
     done: bool = False,
+    created_at: str | None = None,
     **extra: Any,
 ) -> str:
     """Format a chunk in NDJSON format (Ollama style).
@@ -412,6 +448,7 @@ def format_ndjson_chunk(
         content: Response content
         model: Model name
         done: Whether this is the final chunk
+        created_at: Pre-computed timestamp (optional, avoids repeated time calls)
         **extra: Additional fields
 
     Returns:
@@ -419,7 +456,7 @@ def format_ndjson_chunk(
     """
     chunk = {
         "model": model,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": created_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "response": content,
         "done": done,
         **extra,
@@ -435,6 +472,8 @@ async def stream_ollama_generate(
 ) -> AsyncIterator[str]:
     """Stream text generation in Ollama format.
 
+    Uses simple_stream_async for async-safe iteration.
+
     Args:
         engine: Loaded inference engine
         prompt: Text prompt
@@ -444,11 +483,16 @@ async def stream_ollama_generate(
     Yields:
         NDJSON-formatted chunks
     """
-    # Engine returns sync iterator, wrap for async context
-    for token in engine.generate_stream(prompt, config):
-        yield format_ndjson_chunk(token, model_name)
+    from hfl.api.streaming import simple_stream_async
 
-    yield format_ndjson_chunk("", model_name, done=True)
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    async for chunk in simple_stream_async(
+        sync_iterator=engine.generate_stream(prompt, config),
+        format_item=lambda token: format_ndjson_chunk(token, model_name, created_at=created_at),
+        format_done=lambda: format_ndjson_chunk("", model_name, done=True),
+    ):
+        yield chunk
 
 
 async def stream_ollama_chat(
@@ -459,6 +503,8 @@ async def stream_ollama_chat(
 ) -> AsyncIterator[str]:
     """Stream chat in Ollama format.
 
+    Uses simple_stream_async for async-safe iteration.
+
     Args:
         engine: Loaded inference engine
         messages: List of ChatMessage objects
@@ -468,24 +514,31 @@ async def stream_ollama_chat(
     Yields:
         NDJSON-formatted chunks
     """
-    full_response = []
+    from hfl.api.streaming import simple_stream_async
 
-    # Engine returns sync iterator, wrap for async context
-    for token in engine.chat_stream(messages, config):
-        full_response.append(token)
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def format_chat_chunk(token: str) -> str:
         chunk = {
             "model": model_name,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "created_at": created_at,
             "message": {"role": "assistant", "content": token},
             "done": False,
         }
-        yield json.dumps(chunk) + "\n"
+        return json.dumps(chunk) + "\n"
 
-    # Final chunk with full message
-    final = {
-        "model": model_name,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "message": {"role": "assistant", "content": "".join(full_response)},
-        "done": True,
-    }
-    yield json.dumps(final) + "\n"
+    def format_chat_done() -> str:
+        final = {
+            "model": model_name,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+        }
+        return json.dumps(final) + "\n"
+
+    async for chunk in simple_stream_async(
+        sync_iterator=engine.chat_stream(messages, config),
+        format_item=format_chat_chunk,
+        format_done=format_chat_done,
+    ):
+        yield chunk

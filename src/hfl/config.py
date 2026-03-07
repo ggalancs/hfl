@@ -105,9 +105,11 @@ class HFLConfig:
         """Directory where llama.cpp is cloned/compiled for conversion."""
         return self.home_dir / "tools" / "llama.cpp"
 
-    # Server
-    host: str = "127.0.0.1"
-    port: int = 11434  # Same port as Ollama for drop-in compatibility
+    # Server (configurable via HFL_HOST / HFL_PORT env vars)
+    host: str = field(default_factory=lambda: os.environ.get("HFL_HOST", "127.0.0.1"))
+    port: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_PORT", "11434"))
+    )
 
     # Security - CORS
     # By default, CORS is restrictive (same-origin only).
@@ -121,10 +123,16 @@ class HFLConfig:
         default_factory=lambda: ["Content-Type", "Authorization", "X-Request-ID"]
     )
 
-    # Security - Rate Limiting (requests per minute)
-    rate_limit_enabled: bool = True  # Enabled by default for security
-    rate_limit_requests: int = 60
-    rate_limit_window: int = 60  # seconds
+    # Security - Rate Limiting (configurable via HFL_RATE_LIMIT_* env vars)
+    rate_limit_enabled: bool = field(
+        default_factory=lambda: os.environ.get("HFL_RATE_LIMIT_ENABLED", "true").lower() == "true"
+    )
+    rate_limit_requests: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_REQUESTS", "60"))
+    )
+    rate_limit_window: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_WINDOW", "60"))
+    )
 
     # LLM Inference
     default_ctx_size: int = 4096
@@ -156,6 +164,16 @@ class HFLConfig:
     # Token is held in memory only for the duration of the process.
     hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        errors = self.slo.validate()
+        if errors:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Invalid SLO configuration: %s", "; ".join(errors)
+            )
+
     def ensure_dirs(self):
         """Creates the necessary directories."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
@@ -167,4 +185,14 @@ class HFLConfig:
 
 # Global instance
 config = HFLConfig()
-config.ensure_dirs()
+
+
+def _safe_ensure_dirs() -> None:
+    """Ensure directories exist, ignoring errors in read-only environments."""
+    try:
+        config.ensure_dirs()
+    except OSError:
+        pass  # Read-only filesystem or test environment
+
+
+_safe_ensure_dirs()

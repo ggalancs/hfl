@@ -311,12 +311,89 @@ class SQLiteRateLimiter(RateLimiter):
         return self._window_seconds
 
 
+class PerModelRateLimiter:
+    """Rate limiter with per-model limits and concurrency control.
+
+    Combines global rate limiting with per-model limits to prevent
+    GPU saturation from a single model.
+    """
+
+    def __init__(
+        self,
+        global_rpm: int = 60,
+        per_model_rpm: int = 20,
+        concurrent_per_model: int = 3,
+        window_seconds: int = 60,
+    ):
+        self._global = InMemoryRateLimiter(global_rpm, window_seconds)
+        self._per_model: dict[str, InMemoryRateLimiter] = {}
+        self._concurrent: dict[str, threading.Semaphore] = {}
+        self._per_model_rpm = per_model_rpm
+        self._concurrent_limit = concurrent_per_model
+        self._window_seconds = window_seconds
+        self._lock = threading.Lock()
+
+    def _get_model_limiter(self, model_name: str) -> InMemoryRateLimiter:
+        with self._lock:
+            if model_name not in self._per_model:
+                self._per_model[model_name] = InMemoryRateLimiter(
+                    self._per_model_rpm, self._window_seconds
+                )
+            return self._per_model[model_name]
+
+    def _get_model_semaphore(self, model_name: str) -> threading.Semaphore:
+        with self._lock:
+            if model_name not in self._concurrent:
+                self._concurrent[model_name] = threading.Semaphore(self._concurrent_limit)
+            return self._concurrent[model_name]
+
+    def is_allowed(self, client_id: str, model_name: str) -> tuple[bool, int]:
+        """Check if request is allowed for client + model combination."""
+        # Check global limit first
+        global_allowed, global_remaining = self._global.is_allowed(client_id)
+        if not global_allowed:
+            return False, 0
+
+        # Check per-model limit
+        model_limiter = self._get_model_limiter(model_name)
+        model_allowed, model_remaining = model_limiter.is_allowed(client_id)
+        if not model_allowed:
+            return False, 0
+
+        return True, min(global_remaining, model_remaining)
+
+    def acquire_concurrent(self, model_name: str) -> bool:
+        """Try to acquire a concurrent request slot for a model."""
+        sem = self._get_model_semaphore(model_name)
+        return sem.acquire(blocking=False)
+
+    def release_concurrent(self, model_name: str) -> None:
+        """Release a concurrent request slot for a model."""
+        sem = self._get_model_semaphore(model_name)
+        sem.release()
+
+    def reset(self, client_id: str | None = None) -> None:
+        """Reset all rate limits."""
+        self._global.reset(client_id)
+        with self._lock:
+            for limiter in self._per_model.values():
+                limiter.reset(client_id)
+
+    @property
+    def global_limiter(self) -> InMemoryRateLimiter:
+        return self._global
+
+
 def create_rate_limiter(
     distributed: bool = False,
     db_path: Path | None = None,
     requests_per_window: int = 60,
     window_seconds: int = 60,
-) -> RateLimiter:
+    *,
+    per_model: bool = False,
+    per_model_rpm: int = 20,
+    concurrent_per_model: int = 3,
+) -> RateLimiter | PerModelRateLimiter:
     """Factory function to create appropriate rate limiter.
 
     Args:
@@ -324,10 +401,20 @@ def create_rate_limiter(
         db_path: Path to SQLite database (required if distributed=True)
         requests_per_window: Maximum requests per window
         window_seconds: Size of the sliding window
+        per_model: Use per-model rate limiter with concurrency control
+        per_model_rpm: Requests per minute per model (only if per_model=True)
+        concurrent_per_model: Max concurrent requests per model (only if per_model=True)
 
     Returns:
-        RateLimiter instance
+        RateLimiter or PerModelRateLimiter instance
     """
+    if per_model:
+        return PerModelRateLimiter(
+            global_rpm=requests_per_window,
+            per_model_rpm=per_model_rpm,
+            concurrent_per_model=concurrent_per_model,
+            window_seconds=window_seconds,
+        )
     if distributed:
         if db_path is None:
             from hfl.config import config

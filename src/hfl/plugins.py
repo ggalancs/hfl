@@ -77,9 +77,9 @@ def discover_engines(force_refresh: bool = False) -> dict[str, Type["InferenceEn
             try:
                 engine_class = ep.load()
                 engines[ep.name] = engine_class
-                logger.info(f"Loaded engine plugin: {ep.name}")
+                logger.info("Loaded engine plugin: %s", ep.name)
             except (ImportError, AttributeError) as e:
-                logger.warning(f"Failed to load engine plugin {ep.name}: {e}")
+                logger.warning("Failed to load engine plugin %s: %s", ep.name, e)
     except ImportError:
         logger.debug("importlib.metadata not available, skipping plugin discovery")
 
@@ -122,9 +122,9 @@ def discover_tts_engines(force_refresh: bool = False) -> dict[str, Type["AudioEn
         for ep in eps:
             try:
                 engines[ep.name] = ep.load()
-                logger.info(f"Loaded TTS plugin: {ep.name}")
+                logger.info("Loaded TTS plugin: %s", ep.name)
             except (ImportError, AttributeError) as e:
-                logger.warning(f"Failed to load TTS plugin {ep.name}: {e}")
+                logger.warning("Failed to load TTS plugin %s: %s", ep.name, e)
     except ImportError:
         logger.debug("importlib.metadata not available for TTS plugin discovery")
 

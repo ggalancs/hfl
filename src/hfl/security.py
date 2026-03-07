@@ -100,7 +100,7 @@ def sanitize_prompt(
     # Truncate if needed
     if max_length is not None and len(result) > max_length:
         result = result[:max_length]
-        logger.debug(f"Prompt truncated from {len(text)} to {max_length} chars")
+        logger.debug("Prompt truncated from %s to %s chars", len(text), max_length)
 
     return result
 
@@ -335,3 +335,49 @@ def verify_file_hash(file_path: Path, expected_hash: str, algorithm: str = "sha2
     """
     actual_hash = compute_file_hash(file_path, algorithm)
     return actual_hash.lower() == expected_hash.lower()
+
+
+# =============================================================================
+# Audit Logging
+# =============================================================================
+
+from dataclasses import dataclass, field
+
+audit_logger = logging.getLogger("hfl.audit")
+
+
+@dataclass
+class AuditEvent:
+    """Structured audit event for compliance tracking."""
+
+    event_type: str  # MODEL_ACCESS, MODEL_LOAD, MODEL_DELETE, AUTH_FAILURE, etc.
+    action: str  # chat_completion, generate, pull, rm, etc.
+    timestamp: str = ""
+    client_ip: str = ""
+    user_id: str | None = None
+    model: str | None = None
+    details: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.timestamp:
+            from datetime import datetime, timezone
+
+            self.timestamp = datetime.now(timezone.utc).isoformat()
+
+
+def audit(event: AuditEvent) -> None:
+    """Log an audit event for compliance tracking."""
+    audit_logger.info(
+        "%s: %s",
+        event.event_type,
+        event.action,
+        extra={
+            "timestamp": event.timestamp,
+            "event_type": event.event_type,
+            "user_id": event.user_id,
+            "client_ip": event.client_ip,
+            "model": event.model,
+            "action": event.action,
+            "details": event.details,
+        },
+    )

@@ -17,6 +17,8 @@ Language:
   Default: en (English)
 """
 
+from pathlib import Path
+
 import typer
 from rich.panel import Panel
 
@@ -311,9 +313,12 @@ def run(
         green_style = Style(color="green")
 
         full_response = []
-        for token in engine.chat_stream(messages):
-            console.print(token, end="", highlight=False, markup=False, style=green_style)
-            full_response.append(token)
+        try:
+            for token in engine.chat_stream(messages):
+                console.print(token, end="", highlight=False, markup=False, style=green_style)
+                full_response.append(token)
+        except KeyboardInterrupt:
+            pass  # Stop streaming gracefully on Ctrl+C
         console.print()  # New line at the end
 
         messages.append(ChatMessage(role="assistant", content="".join(full_response)))
@@ -1059,6 +1064,65 @@ def debug():
 
     console.print(Panel(info, title="[bold]HFL Debug Info[/]", border_style="yellow"))
     console.print("\n[dim]For support: https://github.com/ggalancs/hfl/issues[/]")
+
+
+@app.command("compliance-report")
+def compliance_report(
+    output: Path = typer.Option(Path("compliance_report.json"), help="Output file path"),
+    format: str = typer.Option("json", help="Output format: json or markdown"),
+):
+    """Generate compliance report for all downloaded models."""
+    import json
+    from datetime import datetime
+    from pathlib import Path as PathClass
+
+    from hfl.models.registry import get_registry
+
+    registry = get_registry()
+    models = registry.list_all()
+
+    report = {
+        "generated_at": datetime.now().isoformat(),
+        "hfl_version": "0.1.0",
+        "total_models": len(models),
+        "models": [],
+    }
+
+    for model in models:
+        entry = {
+            "name": model.name,
+            "repo_id": model.repo_id,
+            "license": getattr(model, "license", "unknown"),
+            "local_path": model.local_path,
+            "created_at": model.created_at,
+        }
+        # Add alias info if available
+        if hasattr(model, "alias") and model.alias:
+            entry["alias"] = model.alias
+        report["models"].append(entry)
+
+    output_path = PathClass(str(output))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if format == "json":
+        output_path.write_text(json.dumps(report, indent=2, default=str))
+    elif format == "markdown":
+        lines = [
+            "# HFL Compliance Report",
+            "",
+            f"Generated: {report['generated_at']}",
+            f"Total models: {report['total_models']}",
+            "",
+        ]
+        for m in report["models"]:
+            lines.append(f"## {m['name']}")
+            lines.append(f"- Repository: {m['repo_id']}")
+            lines.append(f"- License: {m.get('license', 'unknown')}")
+            lines.append(f"- Path: {m['local_path']}")
+            lines.append("")
+        output_path.write_text("\n".join(lines))
+
+    console.print(f"[green]Report saved to {output_path}[/green]")
 
 
 if __name__ == "__main__":
