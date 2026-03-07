@@ -4,6 +4,7 @@
 
 from unittest.mock import patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -165,3 +166,121 @@ class TestRequestLogger:
         response = client.get("/test", headers={"X-Request-ID": "custom-id"})
 
         assert response.headers["X-Request-ID"] == "custom-id"
+
+
+class TestRateLimitMiddleware:
+    """Tests for RateLimitMiddleware."""
+
+    @pytest.fixture
+    def rate_limited_app(self):
+        """Create app with rate limiting enabled."""
+        from hfl.api.middleware import RateLimitMiddleware, reset_rate_limiter
+
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, requests_per_window=5, window_seconds=60)
+
+        @app.get("/api/test")
+        def api_endpoint():
+            return {"status": "ok"}
+
+        @app.get("/health")
+        def health_endpoint():
+            return {"status": "healthy"}
+
+        @app.get("/health/ready")
+        def health_ready():
+            return {"status": "ready"}
+
+        @app.get("/health/live")
+        def health_live():
+            return {"status": "alive"}
+
+        yield app
+        reset_rate_limiter()
+
+    def test_rate_limit_applies_to_normal_endpoints(self, rate_limited_app):
+        """Normal endpoints should be rate limited."""
+        client = TestClient(rate_limited_app)
+
+        # Make requests up to the limit
+        for i in range(5):
+            response = client.get("/api/test")
+            assert response.status_code == 200
+
+        # Next request should be rate limited
+        response = client.get("/api/test")
+        assert response.status_code == 429
+        assert "Rate limit exceeded" in response.json()["message"]
+
+    def test_health_endpoint_bypasses_rate_limit(self, rate_limited_app):
+        """Health endpoints should bypass rate limiting."""
+        client = TestClient(rate_limited_app)
+
+        # First exhaust rate limit
+        for _ in range(5):
+            client.get("/api/test")
+
+        # Verify rate limit is active
+        response = client.get("/api/test")
+        assert response.status_code == 429
+
+        # Health endpoints should still work
+        response = client.get("/health")
+        assert response.status_code == 200
+
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+
+        response = client.get("/health/live")
+        assert response.status_code == 200
+
+    def test_health_endpoints_never_rate_limited(self, rate_limited_app):
+        """Health endpoints should never be rate limited even with many requests."""
+        client = TestClient(rate_limited_app)
+
+        # Make many requests to health endpoints - should never fail
+        for _ in range(100):
+            response = client.get("/health")
+            assert response.status_code == 200
+
+            response = client.get("/health/ready")
+            assert response.status_code == 200
+
+    def test_rate_limit_headers_not_added_to_health(self, rate_limited_app):
+        """Rate limit headers should not be added to health endpoints."""
+        client = TestClient(rate_limited_app)
+
+        response = client.get("/health")
+        assert response.status_code == 200
+        # Health endpoints bypass rate limiting entirely, so no rate limit headers
+        assert "X-RateLimit-Limit" not in response.headers
+
+    def test_rate_limit_headers_added_to_normal_endpoints(self, rate_limited_app):
+        """Rate limit headers should be added to normal endpoints."""
+        client = TestClient(rate_limited_app)
+
+        response = client.get("/api/test")
+        assert response.status_code == 200
+        assert "X-RateLimit-Limit" in response.headers
+        assert response.headers["X-RateLimit-Limit"] == "5"
+
+    def test_is_excluded_method(self):
+        """Test _is_excluded helper method."""
+        from hfl.api.middleware import RateLimitMiddleware
+
+        # Create middleware instance to test the method
+        from starlette.applications import Starlette
+
+        dummy_app = Starlette()
+        middleware = RateLimitMiddleware(dummy_app)
+
+        # Health paths should be excluded
+        assert middleware._is_excluded("/health") is True
+        assert middleware._is_excluded("/health/ready") is True
+        assert middleware._is_excluded("/health/live") is True
+        assert middleware._is_excluded("/health/deep") is True
+
+        # Normal paths should not be excluded
+        assert middleware._is_excluded("/api/test") is False
+        assert middleware._is_excluded("/v1/chat/completions") is False
+        assert middleware._is_excluded("/") is False

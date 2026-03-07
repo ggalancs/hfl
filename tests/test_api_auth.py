@@ -42,6 +42,31 @@ class TestAPIKeyMiddleware:
         response = client.get("/health")
         assert response.status_code == 200
 
+    def test_health_subpaths_bypass_auth(self):
+        """Test that all health subpaths bypass authentication."""
+        get_state().api_key = "test-secret-key"
+        client = TestClient(app)
+
+        # All health endpoints should work without auth
+        health_paths = ["/health", "/health/ready", "/health/live", "/health/deep"]
+
+        for path in health_paths:
+            response = client.get(path)
+            assert response.status_code == 200, f"{path} should bypass auth"
+
+    def test_health_endpoints_bypass_auth_with_any_prefix(self):
+        """Test that health prefix matching works correctly."""
+        get_state().api_key = "test-secret-key"
+        client = TestClient(app)
+
+        # This should work (health prefix)
+        response = client.get("/health")
+        assert response.status_code == 200
+
+        # Non-health paths should still require auth
+        response = client.get("/v1/models")
+        assert response.status_code == 401
+
     def test_auth_required_with_api_key_configured(self):
         """Test that authentication is required when API key is set."""
         get_state().api_key = "test-secret-key"

@@ -151,3 +151,286 @@ class TestClientIPDetection:
         client = TestClient(rate_limited_app)
         response = client.get("/test")
         assert response.status_code == 200
+
+
+# =============================================================================
+# Tests for rate_limit.py rate limiter implementations
+# =============================================================================
+
+import tempfile
+import threading
+from pathlib import Path
+
+from hfl.api.rate_limit import (
+    InMemoryRateLimiter,
+    SQLiteRateLimiter,
+    create_rate_limiter,
+    RateLimiter,
+)
+
+
+class TestInMemoryRateLimiter:
+    """Tests for InMemoryRateLimiter."""
+
+    def test_allows_requests_under_limit(self):
+        """Should allow requests under the limit."""
+        limiter = InMemoryRateLimiter(requests_per_window=5, window_seconds=60)
+
+        for i in range(5):
+            allowed, remaining = limiter.is_allowed("client1")
+            assert allowed is True
+            assert remaining == 5 - i - 1
+
+    def test_blocks_requests_over_limit(self):
+        """Should block requests over the limit."""
+        limiter = InMemoryRateLimiter(requests_per_window=3, window_seconds=60)
+
+        for _ in range(3):
+            limiter.is_allowed("client1")
+
+        allowed, remaining = limiter.is_allowed("client1")
+        assert allowed is False
+        assert remaining == 0
+
+    def test_different_clients_have_separate_limits(self):
+        """Different clients should have separate limits."""
+        limiter = InMemoryRateLimiter(requests_per_window=2, window_seconds=60)
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client1")
+
+        allowed, _ = limiter.is_allowed("client2")
+        assert allowed is True
+
+    def test_window_slides(self):
+        """Old requests should fall out of the window."""
+        limiter = InMemoryRateLimiter(requests_per_window=2, window_seconds=1)
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client1")
+
+        allowed, _ = limiter.is_allowed("client1")
+        assert allowed is False
+
+        time.sleep(1.1)
+
+        allowed, _ = limiter.is_allowed("client1")
+        assert allowed is True
+
+    def test_reset_specific_client(self):
+        """reset() should clear limit for specific client."""
+        limiter = InMemoryRateLimiter(requests_per_window=2, window_seconds=60)
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client2")
+
+        limiter.reset("client1")
+
+        allowed1, _ = limiter.is_allowed("client1")
+        assert allowed1 is True
+
+    def test_reset_all_clients(self):
+        """reset() with None should clear all limits."""
+        limiter = InMemoryRateLimiter(requests_per_window=1, window_seconds=60)
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client2")
+
+        allowed1, _ = limiter.is_allowed("client1")
+        allowed2, _ = limiter.is_allowed("client2")
+        assert allowed1 is False
+        assert allowed2 is False
+
+        limiter.reset()
+
+        allowed1, _ = limiter.is_allowed("client1")
+        allowed2, _ = limiter.is_allowed("client2")
+        assert allowed1 is True
+        assert allowed2 is True
+
+    def test_properties(self):
+        """Properties should return configuration values."""
+        limiter = InMemoryRateLimiter(requests_per_window=100, window_seconds=120)
+
+        assert limiter.requests_per_window == 100
+        assert limiter.window_seconds == 120
+
+    def test_thread_safety(self):
+        """Rate limiter should be thread-safe."""
+        limiter = InMemoryRateLimiter(requests_per_window=100, window_seconds=60)
+        results = []
+
+        def make_requests():
+            for _ in range(20):
+                allowed, _ = limiter.is_allowed("client1")
+                results.append(allowed)
+
+        threads = [threading.Thread(target=make_requests) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sum(results) == 100
+
+    def test_reset_nonexistent_client(self):
+        """reset() for nonexistent client should not raise."""
+        limiter = InMemoryRateLimiter()
+        limiter.reset("nonexistent")
+
+
+class TestSQLiteRateLimiter:
+    """Tests for SQLiteRateLimiter."""
+
+    @pytest.fixture
+    def db_path(self):
+        """Create temporary database path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir) / "test_rate_limit.db"
+
+    def test_allows_requests_under_limit(self, db_path):
+        """Should allow requests under the limit."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=5,
+            window_seconds=60,
+        )
+
+        for i in range(5):
+            allowed, remaining = limiter.is_allowed("client1")
+            assert allowed is True
+            assert remaining == 5 - i - 1
+
+    def test_blocks_requests_over_limit(self, db_path):
+        """Should block requests over the limit."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=3,
+            window_seconds=60,
+        )
+
+        for _ in range(3):
+            limiter.is_allowed("client1")
+
+        allowed, remaining = limiter.is_allowed("client1")
+        assert allowed is False
+        assert remaining == 0
+
+    def test_different_clients_have_separate_limits(self, db_path):
+        """Different clients should have separate limits."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=2,
+            window_seconds=60,
+        )
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client1")
+
+        allowed, _ = limiter.is_allowed("client2")
+        assert allowed is True
+
+    def test_reset_specific_client(self, db_path):
+        """reset() should clear limit for specific client."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=1,
+            window_seconds=60,
+        )
+
+        limiter.is_allowed("client1")
+        limiter.reset("client1")
+
+        allowed, _ = limiter.is_allowed("client1")
+        assert allowed is True
+
+    def test_reset_all_clients(self, db_path):
+        """reset() with None should clear all limits."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=1,
+            window_seconds=60,
+        )
+
+        limiter.is_allowed("client1")
+        limiter.is_allowed("client2")
+        limiter.reset()
+
+        allowed1, _ = limiter.is_allowed("client1")
+        allowed2, _ = limiter.is_allowed("client2")
+        assert allowed1 is True
+        assert allowed2 is True
+
+    def test_properties(self, db_path):
+        """Properties should return configuration values."""
+        limiter = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=100,
+            window_seconds=120,
+        )
+
+        assert limiter.requests_per_window == 100
+        assert limiter.window_seconds == 120
+
+    def test_creates_parent_directories(self):
+        """Should create parent directories for database."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "nested" / "dir" / "rate.db"
+            limiter = SQLiteRateLimiter(db_path=db_path)
+
+            assert db_path.parent.exists()
+            limiter.is_allowed("test")
+
+    def test_persists_across_instances(self, db_path):
+        """Rate limits should persist across limiter instances."""
+        limiter1 = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=2,
+            window_seconds=60,
+        )
+        limiter1.is_allowed("client1")
+        limiter1.is_allowed("client1")
+
+        limiter2 = SQLiteRateLimiter(
+            db_path=db_path,
+            requests_per_window=2,
+            window_seconds=60,
+        )
+
+        allowed, _ = limiter2.is_allowed("client1")
+        assert allowed is False
+
+
+class TestCreateRateLimiter:
+    """Tests for create_rate_limiter factory function."""
+
+    def test_creates_in_memory_by_default(self):
+        """Should create InMemoryRateLimiter by default."""
+        limiter = create_rate_limiter()
+        assert isinstance(limiter, InMemoryRateLimiter)
+
+    def test_creates_in_memory_with_params(self):
+        """Should pass parameters to InMemoryRateLimiter."""
+        limiter = create_rate_limiter(
+            distributed=False,
+            requests_per_window=100,
+            window_seconds=120,
+        )
+
+        assert isinstance(limiter, InMemoryRateLimiter)
+        assert limiter.requests_per_window == 100
+        assert limiter.window_seconds == 120
+
+    def test_creates_sqlite_when_distributed(self):
+        """Should create SQLiteRateLimiter when distributed=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "rate.db"
+            limiter = create_rate_limiter(distributed=True, db_path=db_path)
+
+            assert isinstance(limiter, SQLiteRateLimiter)
+
+    def test_sqlite_uses_default_path_when_not_provided(self):
+        """Should use default path when distributed=True and no path given."""
+        limiter = create_rate_limiter(distributed=True)
+        assert isinstance(limiter, SQLiteRateLimiter)

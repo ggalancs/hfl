@@ -11,6 +11,7 @@ This middleware implements privacy-safe logging that:
 - Only logs metadata: method, path, status, duration
 """
 
+import ipaddress
 import time
 from collections import defaultdict
 from typing import Any, Callable
@@ -20,8 +21,29 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.logging_config import get_logger, log_request, set_request_id
+from hfl.metrics import get_metrics
 
 logger = get_logger()
+
+# Trusted proxy networks (RFC 1918 private ranges + localhost)
+# Only trust X-Forwarded-For from these networks
+TRUSTED_PROXY_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),  # Localhost
+    ipaddress.ip_network("10.0.0.0/8"),  # Private Class A
+    ipaddress.ip_network("172.16.0.0/12"),  # Private Class B
+    ipaddress.ip_network("192.168.0.0/16"),  # Private Class C
+    ipaddress.ip_network("::1/128"),  # IPv6 localhost
+    ipaddress.ip_network("fc00::/7"),  # IPv6 private
+]
+
+
+def _is_trusted_proxy(ip: str) -> bool:
+    """Check if IP is from a trusted proxy network."""
+    try:
+        addr = ipaddress.ip_address(ip)
+        return any(addr in network for network in TRUSTED_PROXY_NETWORKS)
+    except ValueError:
+        return False
 
 
 class RequestLogger(BaseHTTPMiddleware):
@@ -61,7 +83,19 @@ class RequestLogger(BaseHTTPMiddleware):
             duration_ms=duration_ms,
         )
 
+        # Record metrics for monitoring
+        get_metrics().record_request(
+            endpoint=request.url.path,
+            method=request.method,
+            status=response.status_code,
+            duration_ms=duration_ms,
+        )
+
         return response
+
+
+# Global reference for testing - set when middleware is created
+_rate_limiter_instance: "RateLimitMiddleware | None" = None
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -70,7 +104,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     Tracks requests per client IP and rejects requests that exceed
     the configured limit within the time window.
+
+    Health check endpoints (/health/*) are excluded from rate limiting
+    to ensure load balancers and orchestrators can always check status.
     """
+
+    # Paths excluded from rate limiting (used by health checks, monitoring)
+    EXCLUDED_PREFIXES = ("/health",)
 
     def __init__(
         self,
@@ -82,21 +122,64 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
         self._request_counts: dict[str, list[float]] = defaultdict(list)
+        # Store global reference for testing
+        global _rate_limiter_instance
+        _rate_limiter_instance = self
+
+    def _is_excluded(self, path: str) -> bool:
+        """Check if path is excluded from rate limiting."""
+        return path.startswith(self.EXCLUDED_PREFIXES)
+
+    def reset(self) -> None:
+        """Clear all rate limit tracking. Used for testing."""
+        self._request_counts.clear()
 
     def _get_client_ip(self, request: Request) -> str:
         """Get client IP from request headers or connection.
 
-        Respects X-Forwarded-For for proxy scenarios but falls back
-        to connection IP for direct connections.
+        Only trusts X-Forwarded-For header if the request comes from
+        a trusted proxy network (private IP ranges). This prevents
+        attackers from spoofing their IP via the header.
+
+        For trusted proxies, takes the rightmost untrusted IP from
+        the X-Forwarded-For chain (the actual client).
+
+        Invalid IP addresses in X-Forwarded-For are logged and skipped.
         """
-        # Check X-Forwarded-For header (first IP in the chain)
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        # Fall back to connection IP
-        if request.client:
-            return request.client.host
-        return "unknown"
+        # Get direct connection IP
+        connection_ip = request.client.host if request.client else "unknown"
+
+        # Only trust X-Forwarded-For if request came from trusted proxy
+        if connection_ip != "unknown" and _is_trusted_proxy(connection_ip):
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                # Parse all IPs in the chain
+                for ip_str in reversed(forwarded.split(",")):
+                    ip_str = ip_str.strip()
+                    if not ip_str:
+                        continue
+
+                    # Validate IP format before using
+                    try:
+                        ipaddress.ip_address(ip_str)
+                    except ValueError:
+                        logger.warning(f"Invalid IP in X-Forwarded-For: {ip_str}")
+                        continue
+
+                    # Find rightmost IP that is NOT a trusted proxy
+                    if not _is_trusted_proxy(ip_str):
+                        return ip_str
+
+                # If all IPs are trusted, use the first valid one
+                for ip_str in forwarded.split(","):
+                    ip_str = ip_str.strip()
+                    try:
+                        ipaddress.ip_address(ip_str)
+                        return ip_str
+                    except ValueError:
+                        continue
+
+        return connection_ip
 
     def _is_rate_limited(self, client_ip: str) -> tuple[bool, int]:
         """Check if client is rate limited.
@@ -124,6 +207,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return False, remaining - 1
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
+        # Skip rate limiting for excluded paths (health checks, etc.)
+        if self._is_excluded(request.url.path):
+            response: Response = await call_next(request)
+            return response
+
         client_ip = self._get_client_ip(request)
         is_limited, remaining = self._is_rate_limited(client_ip)
 
@@ -148,3 +236,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Remaining"] = str(remaining)
 
         return response
+
+
+def reset_rate_limiter() -> None:
+    """Reset rate limiter storage. Used for testing."""
+    global _rate_limiter_instance
+    if _rate_limiter_instance is not None:
+        _rate_limiter_instance.reset()

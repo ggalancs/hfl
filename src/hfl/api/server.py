@@ -23,6 +23,7 @@ Security:
 - Optional API key authentication via --api-key flag
 """
 
+import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Callable
@@ -33,6 +34,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from hfl.api.routes_health import router as health_router
+from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_tts import router as tts_router
@@ -44,8 +47,11 @@ from hfl.config import config
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware that validates API key if configured."""
 
-    # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = {"/", "/health", "/api/version"}
+    # Endpoints that don't require authentication (exact match)
+    PUBLIC_ENDPOINTS = {"/", "/api/version"}
+
+    # Path prefixes that don't require authentication
+    PUBLIC_PREFIXES = ("/health", "/metrics")
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         state = get_state()
@@ -55,22 +61,28 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             response: Response = await call_next(request)
             return response
 
-        # Skip auth for public endpoints
+        # Skip auth for public endpoints (exact match)
         if request.url.path in self.PUBLIC_ENDPOINTS:
             response = await call_next(request)
             return response
 
+        # Skip auth for public prefixes (e.g., /health, /health/ready, /health/live)
+        if request.url.path.startswith(self.PUBLIC_PREFIXES):
+            response = await call_next(request)
+            return response
+
         # Check for API key in Authorization header (Bearer token)
+        # Use constant-time comparison to prevent timing attacks
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            if token == state.api_key:
+            if secrets.compare_digest(token.encode(), state.api_key.encode()):
                 response = await call_next(request)
                 return response
 
         # Check for API key in X-API-Key header
         api_key_header = request.headers.get("X-API-Key", "")
-        if api_key_header == state.api_key:
+        if api_key_header and secrets.compare_digest(api_key_header.encode(), state.api_key.encode()):
             response = await call_next(request)
             return response
 
@@ -125,9 +137,11 @@ app = FastAPI(
 )
 
 # CORS - Configurable via config.py
+# Use ["*"] if cors_allow_all is True, otherwise use explicit origins
+_cors_origins = ["*"] if config.cors_allow_all else config.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.cors_origins,
+    allow_origins=_cors_origins,
     allow_credentials=config.cors_allow_credentials,
     allow_methods=config.cors_allow_methods,
     allow_headers=config.cors_allow_headers,
@@ -149,26 +163,21 @@ if config.rate_limit_enabled:
         window_seconds=config.rate_limit_window,
     )
 
+# Request logging and metrics recording
+from hfl.api.middleware import RequestLogger
+
+app.add_middleware(RequestLogger)
+
 app.include_router(openai_router)
 app.include_router(native_router)
 app.include_router(tts_router)
+app.include_router(health_router)
+app.include_router(metrics_router)
 
 
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"status": "hfl is running"}
-
-
-@app.get("/health")
-async def health() -> dict[str, Any]:
-    state = get_state()
-    return {
-        "status": "healthy",
-        "model_loaded": state.is_llm_loaded(),
-        "current_model": state.current_model.name if state.current_model else None,
-        "tts_model_loaded": state.is_tts_loaded(),
-        "current_tts_model": state.current_tts_model.name if state.current_tts_model else None,
-    }
 
 
 def start_server(
