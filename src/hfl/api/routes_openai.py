@@ -115,10 +115,12 @@ async def _stream_chat(
 
     state = _get_state()
     if state.engine is None:
-        err = json.dumps({
-            'error': 'Model not loaded',
-            'code': 'SERVICE_UNAVAILABLE',
-        })
+        err = json.dumps(
+            {
+                "error": "Model not loaded",
+                "code": "SERVICE_UNAVAILABLE",
+            }
+        )
         yield f"data: {err}\n\n"
         return
 
@@ -228,10 +230,12 @@ async def _stream_completion(
 
     state = _get_state()
     if state.engine is None:
-        err = json.dumps({
-            'error': 'Model not loaded',
-            'code': 'SERVICE_UNAVAILABLE',
-        })
+        err = json.dumps(
+            {
+                "error": "Model not loaded",
+                "code": "SERVICE_UNAVAILABLE",
+            }
+        )
         yield f"data: {err}\n\n"
         return
 

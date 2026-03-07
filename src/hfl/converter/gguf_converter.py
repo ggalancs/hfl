@@ -337,8 +337,7 @@ class GGUFConverter:
         min_size = 50 * 1024 * 1024  # 50MB minimum
         if file_size < min_size:
             console.print(
-                f"[yellow]Warning:[/] Output file unusually small: "
-                f"{file_size / 1024 / 1024:.1f}MB"
+                f"[yellow]Warning:[/] Output file unusually small: {file_size / 1024 / 1024:.1f}MB"
             )
 
         # Check input size for comparison (if safetensors available)
@@ -354,9 +353,7 @@ class GGUFConverter:
         except OSError:
             pass  # Skip size comparison if input files not available
 
-        console.print(
-            f"[green]✓[/] Output verified: {output_path.name} ({file_size / 1e9:.2f}GB)"
-        )
+        console.print(f"[green]✓[/] Output verified: {output_path.name} ({file_size / 1e9:.2f}GB)")
 
     def ensure_tools(self):
         """

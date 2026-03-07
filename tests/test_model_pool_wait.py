@@ -73,6 +73,7 @@ class TestModelPoolConcurrentLoad:
 
         # Second call should return cached
         call_count = 0
+
         async def counting_loader():
             nonlocal call_count
             call_count += 1

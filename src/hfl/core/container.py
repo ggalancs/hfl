@@ -158,21 +158,13 @@ class Container:
         container.reset_all()
     """
 
-    config: Singleton["HFLConfig"] = field(
-        default_factory=lambda: Singleton(_create_config)
-    )
+    config: Singleton["HFLConfig"] = field(default_factory=lambda: Singleton(_create_config))
     registry: Singleton["ModelRegistry"] = field(
         default_factory=lambda: Singleton(_create_registry)
     )
-    event_bus: Singleton["EventBus"] = field(
-        default_factory=lambda: Singleton(_create_event_bus)
-    )
-    state: Singleton["ServerState"] = field(
-        default_factory=lambda: Singleton(_create_state)
-    )
-    metrics: Singleton["Metrics"] = field(
-        default_factory=lambda: Singleton(_create_metrics)
-    )
+    event_bus: Singleton["EventBus"] = field(default_factory=lambda: Singleton(_create_event_bus))
+    state: Singleton["ServerState"] = field(default_factory=lambda: Singleton(_create_state))
+    metrics: Singleton["Metrics"] = field(default_factory=lambda: Singleton(_create_metrics))
     rate_limiter: Singleton["RateLimiter"] = field(
         default_factory=lambda: Singleton(_create_rate_limiter)
     )

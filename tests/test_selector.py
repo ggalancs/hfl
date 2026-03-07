@@ -85,11 +85,14 @@ class TestGetEngines:
         mock_engine = MagicMock()
         mock_engine_cls.return_value = mock_engine
 
-        with patch.dict("sys.modules", {
-            "hfl.engine.llama_cpp": MagicMock(
-                LlamaCppEngine=mock_engine_cls,
-            ),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "hfl.engine.llama_cpp": MagicMock(
+                    LlamaCppEngine=mock_engine_cls,
+                ),
+            },
+        ):
             with patch("hfl.engine.llama_cpp.LlamaCppEngine", mock_engine_cls, create=True):
                 # The actual test depends on import behavior
                 pass
@@ -278,9 +281,7 @@ class TestIsBarkModel:
         with tempfile.TemporaryDirectory() as tmpdir:
             model_dir = Path(tmpdir)
             config_path = model_dir / "config.json"
-            config_path.write_text(json.dumps({
-                "architectures": ["BarkModel", "BarkForCausalLM"]
-            }))
+            config_path.write_text(json.dumps({"architectures": ["BarkModel", "BarkForCausalLM"]}))
 
             result = _is_bark_model(model_dir)
             assert result is True
@@ -290,9 +291,7 @@ class TestIsBarkModel:
         with tempfile.TemporaryDirectory() as tmpdir:
             model_dir = Path(tmpdir)
             config_path = model_dir / "config.json"
-            config_path.write_text(json.dumps({
-                "architectures": ["LlamaForCausalLM"]
-            }))
+            config_path.write_text(json.dumps({"architectures": ["LlamaForCausalLM"]}))
 
             result = _is_bark_model(model_dir)
             assert result is False

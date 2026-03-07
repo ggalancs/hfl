@@ -141,7 +141,10 @@ class TestLoadLLM:
     @patch("hfl.api.model_loader.get_registry")
     @patch("hfl.api.model_loader.detect_model_type")
     async def test_wrong_model_type_raises_400(
-        self, mock_detect, mock_get_registry, mock_get_state,
+        self,
+        mock_detect,
+        mock_get_registry,
+        mock_get_state,
     ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
@@ -274,7 +277,10 @@ class TestLoadTTS:
     @patch("hfl.api.model_loader.get_registry")
     @patch("hfl.api.model_loader.detect_model_type")
     async def test_wrong_model_type_raises_400(
-        self, mock_detect, mock_get_registry, mock_get_state,
+        self,
+        mock_detect,
+        mock_get_registry,
+        mock_get_state,
     ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()

@@ -224,6 +224,7 @@ class TestErrorFormats:
         """404 error should have proper format."""
         with patch("hfl.api.routes_openai._ensure_model_loaded") as mock_load:
             from fastapi import HTTPException
+
             mock_load.side_effect = HTTPException(404, "Model not found: nonexistent")
 
             response = client.post(

@@ -60,10 +60,7 @@ class TestModelPoolStress:
 
             return _load
 
-        tasks = [
-            pool.get_or_load(f"model-{i}", await loader_for(f"model-{i}"))
-            for i in range(5)
-        ]
+        tasks = [pool.get_or_load(f"model-{i}", await loader_for(f"model-{i}")) for i in range(5)]
         results = await asyncio.gather(*tasks)
         assert len(results) == 5
         assert pool.size <= 5

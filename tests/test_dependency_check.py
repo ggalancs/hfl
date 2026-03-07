@@ -101,6 +101,7 @@ class TestCheckEngineAvailability:
         """check_engine_availability returns error string when llama_cpp is missing."""
         # Force reimport
         import sys
+
         if "llama_cpp" in sys.modules:
             del sys.modules["llama_cpp"]
 

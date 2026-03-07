@@ -165,9 +165,7 @@ async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Res
         )
 
     # Run sync engine call in thread pool with timeout
-    result = await run_with_timeout(
-        state.engine.chat, messages, gen_config, operation="chat"
-    )
+    result = await run_with_timeout(state.engine.chat, messages, gen_config, operation="chat")
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -50,9 +50,7 @@ class TestMiddlewareExecutionOrder:
         """Unauthenticated requests should be rejected by auth, not rate limit."""
         app = self._create_app_correct_order(api_key="test-key-123")
 
-        with patch.object(
-            type(app), "_state", create=True
-        ):
+        with patch.object(type(app), "_state", create=True):
             from hfl.api.state import get_state
 
             state = get_state()

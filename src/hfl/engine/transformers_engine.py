@@ -70,7 +70,7 @@ class TransformersEngine(InferenceEngine):
 
         # Load with partial failure cleanup to prevent resource leaks
         logger.info("Loading transformers model: %s", model_path)
-        logger.debug("Load config: quant=%s, device_map=%s", quant, load_kwargs.get('device_map'))
+        logger.debug("Load config: quant=%s, device_map=%s", quant, load_kwargs.get("device_map"))
 
         start_time = time.perf_counter()
         tokenizer = None

@@ -165,6 +165,7 @@ class TestClientIPDetection:
 # Tests for rate_limit.py rate limiter implementations
 # =============================================================================
 
+
 class TestInMemoryRateLimiter:
     """Tests for InMemoryRateLimiter."""
 

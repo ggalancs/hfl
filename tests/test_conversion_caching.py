@@ -95,9 +95,7 @@ class TestConvertWithCacheMiss:
         result = convert_with_cache(mock_converter, model_path, output_path, "Q4_K_M")
 
         assert result == expected
-        mock_converter.convert.assert_called_once_with(
-            model_path, output_path, "Q4_K_M"
-        )
+        mock_converter.convert.assert_called_once_with(model_path, output_path, "Q4_K_M")
 
     def test_passes_kwargs_to_convert(self, mock_converter, tmp_paths):
         model_path, output_path = tmp_paths
@@ -174,9 +172,7 @@ class TestConvertWithCacheConcurrency:
 
         def thread_fn(idx):
             try:
-                results[idx] = convert_with_cache(
-                    converter, model_path, output_path, "Q4_K_M"
-                )
+                results[idx] = convert_with_cache(converter, model_path, output_path, "Q4_K_M")
             except Exception as e:
                 errors[idx] = e
 
@@ -215,9 +211,7 @@ class TestConvertWithCacheConcurrency:
 
         def thread_fn(idx, quant):
             try:
-                results[idx] = convert_with_cache(
-                    converter, model_path, output_path, quant
-                )
+                results[idx] = convert_with_cache(converter, model_path, output_path, quant)
             except Exception as e:
                 errors[idx] = e
 

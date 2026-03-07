@@ -58,8 +58,8 @@ class TestTransformersEngineLoadErrors:
         """Test that model load failure cleans up tokenizer."""
         mock_tokenizer = MagicMock()
         mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = (
-            RuntimeError("Out of memory")
+        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = RuntimeError(
+            "Out of memory"
         )
 
         with patch.dict(
@@ -87,9 +87,7 @@ class TestTransformersEngineLoadErrors:
 
     def test_load_failure_clears_cuda_cache(self, mock_torch, mock_transformers):
         """Test that CUDA cache is cleared on load failure."""
-        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = (
-            Exception("GPU error")
-        )
+        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = Exception("GPU error")
 
         with patch.dict(
             sys.modules,
@@ -110,8 +108,8 @@ class TestTransformersEngineLoadErrors:
     def test_load_failure_no_cuda_available(self, mock_torch, mock_transformers):
         """Test load failure when CUDA is not available."""
         mock_torch.cuda.is_available.return_value = False
-        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = (
-            Exception("Load failed")
+        mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = Exception(
+            "Load failed"
         )
 
         with patch.dict(
@@ -273,9 +271,7 @@ class TestTransformersEngineGenerateErrors:
             with pytest.raises(TypeError):
                 engine.chat(messages)
 
-    def test_generate_stream_without_loaded_model_raises(
-        self, mock_torch, mock_transformers
-    ):
+    def test_generate_stream_without_loaded_model_raises(self, mock_torch, mock_transformers):
         """Test that calling generate_stream without a loaded model raises."""
         with patch.dict(
             sys.modules,

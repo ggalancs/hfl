@@ -45,7 +45,8 @@ class ConcreteInferenceEngine(InferenceEngine):
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
         return GenerationResult(
-            text="chat response", tokens_generated=5,
+            text="chat response",
+            tokens_generated=5,
         )
 
     def chat_stream(

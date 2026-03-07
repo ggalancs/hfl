@@ -99,9 +99,7 @@ class VLLMEngine(InferenceEngine):
 
             self._ensure_loop()
             engine_args = AsyncEngineArgs(model=model_path, **kwargs)
-            self._engine = self._run_async(
-                AsyncLLMEngine.from_engine_args(engine_args)
-            )
+            self._engine = self._run_async(AsyncLLMEngine.from_engine_args(engine_args))
             self._is_async = True
             logger.info("vLLM async engine loaded: %s", model_path)
         except (ImportError, AttributeError):
@@ -163,9 +161,7 @@ class VLLMEngine(InferenceEngine):
         return GenerationResult(
             text=completion.text,
             tokens_generated=len(completion.token_ids),
-            stop_reason=(
-                str(completion.finish_reason) if completion.finish_reason else "stop"
-            ),
+            stop_reason=(str(completion.finish_reason) if completion.finish_reason else "stop"),
         )
 
     def _generate_sync(self, prompt: str, sampling_params) -> GenerationResult:
@@ -179,9 +175,7 @@ class VLLMEngine(InferenceEngine):
             stop_reason="stop",
         )
 
-    def generate_stream(
-        self, prompt: str, config: GenerationConfig | None = None
-    ) -> Iterator[str]:
+    def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:
         """Stream text generation token by token.
 
         In async mode, yields incremental text deltas as they're generated.
@@ -206,11 +200,9 @@ class VLLMEngine(InferenceEngine):
         async def _producer():
             prev_text = ""
             try:
-                async for output in self._engine.generate(
-                    prompt, sampling_params, request_id
-                ):
+                async for output in self._engine.generate(prompt, sampling_params, request_id):
                     for completion in output.outputs:
-                        new_text = completion.text[len(prev_text):]
+                        new_text = completion.text[len(prev_text) :]
                         if new_text:
                             token_queue.put(new_text, timeout=60.0)
                             prev_text = completion.text

@@ -335,7 +335,8 @@ def serve(
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
     log_level: str = typer.Option(
-        "INFO", "--log-level",
+        "INFO",
+        "--log-level",
         help="Log level (DEBUG, INFO, WARNING, ERROR)",
     ),
     json_logs: bool = typer.Option(False, "--json-logs", help="Output logs in JSON format"),

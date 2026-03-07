@@ -373,18 +373,21 @@ class ModelPool:
                 consecutive_errors += 1
                 logger.error(
                     "Error in background eviction loop (%s/%s): %s",
-                    consecutive_errors, max_consecutive_errors, e
+                    consecutive_errors,
+                    max_consecutive_errors,
+                    e,
                 )
 
                 if consecutive_errors >= max_consecutive_errors:
                     logger.critical(
                         "Background eviction loop stopping after %s "
                         "consecutive errors. Manual restart required.",
-                        max_consecutive_errors
+                        max_consecutive_errors,
                     )
                     # Emit event for monitoring if available
                     try:
                         from hfl.events import EventType, emit
+
                         emit(
                             EventType.ERROR,
                             source="model_pool",

@@ -55,9 +55,7 @@ class TestConcurrentModelLoading:
 
         # Start 5 concurrent loads of the same model
         tasks = [
-            asyncio.create_task(
-                fresh_state.ensure_llm_loaded("test-model", mock_loader)
-            )
+            asyncio.create_task(fresh_state.ensure_llm_loaded("test-model", mock_loader))
             for _ in range(5)
         ]
 
@@ -84,18 +82,15 @@ class TestConcurrentModelLoading:
                 manifest = MagicMock()
                 manifest.name = model_name
                 return engine, manifest
+
             return loader
 
         loader_a = await create_loader("model-a", 0.1)
         loader_b = await create_loader("model-b", 0.1)
 
         # Load two different models concurrently
-        task_a = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("model-a", loader_a)
-        )
-        task_b = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("model-b", loader_b)
-        )
+        task_a = asyncio.create_task(fresh_state.ensure_llm_loaded("model-a", loader_a))
+        task_b = asyncio.create_task(fresh_state.ensure_llm_loaded("model-b", loader_b))
 
         await asyncio.gather(task_a, task_b)
 
@@ -122,17 +117,13 @@ class TestConcurrentModelLoading:
             return engine, manifest
 
         # Start slow load
-        task_a = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("model-a", slow_loader)
-        )
+        task_a = asyncio.create_task(fresh_state.ensure_llm_loaded("model-a", slow_loader))
 
         # Give it time to start
         await asyncio.sleep(0.01)
 
         # Start fast load of different model
-        task_b = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("model-b", fast_loader)
-        )
+        task_b = asyncio.create_task(fresh_state.ensure_llm_loaded("model-b", fast_loader))
 
         # Let fast load complete first
         await asyncio.sleep(0.01)
@@ -160,9 +151,7 @@ class TestCleanupUnderLoad:
             return mock_engine, mock_manifest
 
         # Start loading
-        load_task = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("test-model", slow_loader)
-        )
+        load_task = asyncio.create_task(fresh_state.ensure_llm_loaded("test-model", slow_loader))
 
         await load_started.wait()
 
@@ -198,6 +187,7 @@ class TestStateConsistency:
     @pytest.mark.asyncio
     async def test_engine_and_model_atomicity(self, fresh_state, mock_engine, mock_manifest):
         """Engine and model should always be consistent."""
+
         async def loader():
             return mock_engine, mock_manifest
 
@@ -240,6 +230,7 @@ class TestStateConsistency:
     @pytest.mark.asyncio
     async def test_timeout_handling(self, fresh_state):
         """Loading timeout should be handled properly."""
+
         async def infinite_loader():
             await asyncio.sleep(10)  # Would take 10 seconds
             raise AssertionError("Should not reach here")
@@ -248,7 +239,7 @@ class TestStateConsistency:
             await fresh_state.ensure_llm_loaded(
                 "test-model",
                 infinite_loader,
-                timeout=0.1  # 100ms timeout
+                timeout=0.1,  # 100ms timeout
             )
 
         # State should be clean after timeout
@@ -278,12 +269,8 @@ class TestTTSConcurrency:
             manifest.name = "tts-model"
             return engine, manifest
 
-        llm_task = asyncio.create_task(
-            fresh_state.ensure_llm_loaded("llm-model", llm_loader)
-        )
-        tts_task = asyncio.create_task(
-            fresh_state.ensure_tts_loaded("tts-model", tts_loader)
-        )
+        llm_task = asyncio.create_task(fresh_state.ensure_llm_loaded("llm-model", llm_loader))
+        tts_task = asyncio.create_task(fresh_state.ensure_tts_loaded("tts-model", tts_loader))
 
         await asyncio.gather(llm_task, tts_task)
 

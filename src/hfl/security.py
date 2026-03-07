@@ -30,9 +30,7 @@ class PathTraversalError(Exception):
 # =============================================================================
 
 # Control characters to remove (except common whitespace)
-_CONTROL_CHARS_PATTERN = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
-)
+_CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 # Excessive whitespace (3+ consecutive spaces/newlines)
 _EXCESSIVE_WHITESPACE_PATTERN = re.compile(r"[ ]{3,}")
@@ -203,9 +201,7 @@ def detect_injection_attempt(text: str) -> list[str]:
             detected.append(pattern)
 
     if detected:
-        logger.warning(
-            f"Potential injection patterns detected: {len(detected)} matches"
-        )
+        logger.warning(f"Potential injection patterns detected: {len(detected)} matches")
 
     return detected
 

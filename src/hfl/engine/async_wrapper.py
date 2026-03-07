@@ -136,19 +136,13 @@ class AsyncEngineWrapper:
             """Run sync generator and put tokens in queue."""
             try:
                 for token in self._engine.generate_stream(prompt, config):
-                    asyncio.run_coroutine_threadsafe(
-                        queue.put(token), loop
-                    ).result(timeout=60)
+                    asyncio.run_coroutine_threadsafe(queue.put(token), loop).result(timeout=60)
             except Exception as e:
                 logger.error("Error in stream producer: %s", e)
                 # Send exception to consumer instead of swallowing it
-                asyncio.run_coroutine_threadsafe(
-                    queue.put(e), loop
-                ).result(timeout=60)
+                asyncio.run_coroutine_threadsafe(queue.put(e), loop).result(timeout=60)
             finally:
-                asyncio.run_coroutine_threadsafe(
-                    queue.put(None), loop
-                ).result(timeout=60)
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=60)
 
         # Start producer in thread pool
         producer_task = asyncio.create_task(asyncio.to_thread(producer))
@@ -200,19 +194,13 @@ class AsyncEngineWrapper:
             """Run sync generator and put tokens in queue."""
             try:
                 for token in self._engine.chat_stream(messages, config):
-                    asyncio.run_coroutine_threadsafe(
-                        queue.put(token), loop
-                    ).result(timeout=60)
+                    asyncio.run_coroutine_threadsafe(queue.put(token), loop).result(timeout=60)
             except Exception as e:
                 logger.error("Error in chat stream producer: %s", e)
                 # Send exception to consumer instead of swallowing it
-                asyncio.run_coroutine_threadsafe(
-                    queue.put(e), loop
-                ).result(timeout=60)
+                asyncio.run_coroutine_threadsafe(queue.put(e), loop).result(timeout=60)
             finally:
-                asyncio.run_coroutine_threadsafe(
-                    queue.put(None), loop
-                ).result(timeout=60)
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=60)
 
         # Start producer in thread pool
         producer_task = asyncio.create_task(asyncio.to_thread(producer))

@@ -117,8 +117,7 @@ class ModelManifest:
         actual_size = self.path.stat().st_size
         if self.size_bytes > 0 and actual_size != self.size_bytes:
             return False, (
-                f"Size mismatch: expected {self.size_bytes} bytes, "
-                f"found {actual_size} bytes"
+                f"Size mismatch: expected {self.size_bytes} bytes, found {actual_size} bytes"
             )
 
         # If no hash stored, file exists with correct size is good enough
@@ -132,8 +131,7 @@ class ModelManifest:
 
         if actual_hash.lower() != self.file_hash.lower():
             return False, (
-                f"Hash mismatch: expected {self.file_hash[:16]}..., "
-                f"got {actual_hash[:16]}..."
+                f"Hash mismatch: expected {self.file_hash[:16]}..., got {actual_hash[:16]}..."
             )
 
         # Update verification timestamp

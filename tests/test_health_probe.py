@@ -42,9 +42,7 @@ class TestHealthDeepProbe:
         mock_state.current_model = MagicMock(name="test-model")
         mock_state.current_tts_model = None
         mock_state.engine = MagicMock()
-        mock_state.engine.generate.return_value = GenerationResult(
-            text="ok", tokens_generated=1
-        )
+        mock_state.engine.generate.return_value = GenerationResult(text="ok", tokens_generated=1)
         mock_get_state.return_value = mock_state
 
         resp = client.get("/health/deep?probe=true")

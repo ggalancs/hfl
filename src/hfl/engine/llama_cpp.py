@@ -157,7 +157,7 @@ class LlamaCppEngine(InferenceEngine):
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
 
-        logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen/elapsed)
+        logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen / elapsed)
 
         return GenerationResult(
             text=text,

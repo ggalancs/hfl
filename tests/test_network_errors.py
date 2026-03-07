@@ -31,7 +31,7 @@ class TestDownloadFailures:
             with patch("hfl.hub.downloader._download_file") as mock_download:
                 mock_download.side_effect = RetryExhausted(
                     "Failed after 4 attempts",
-                    last_exception=ConnectionError("Connection timed out")
+                    last_exception=ConnectionError("Connection timed out"),
                 )
 
                 with pytest.raises((DownloadError, ConnectionError, RetryExhausted)):
@@ -99,8 +99,7 @@ class TestDownloadFailures:
         with patch("hfl.hub.downloader.ensure_auth", return_value=None):
             with patch("hfl.hub.downloader._download_file") as mock_download:
                 mock_download.side_effect = RetryExhausted(
-                    "Failed after 4 attempts",
-                    last_exception=ConnectionError("Connection lost")
+                    "Failed after 4 attempts", last_exception=ConnectionError("Connection lost")
                 )
 
                 with pytest.raises((DownloadError, ConnectionError, RetryExhausted)):

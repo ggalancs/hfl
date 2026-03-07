@@ -43,9 +43,7 @@ class TestRegistryLoad:
 
     def test_load_valid_file(self, mock_config):
         """Should load valid registry file."""
-        mock_config.registry_path.write_text(
-            json.dumps([create_manifest("model1")])
-        )
+        mock_config.registry_path.write_text(json.dumps([create_manifest("model1")]))
 
         with patch("hfl.models.registry.config", mock_config):
             registry = ModelRegistry()
@@ -107,9 +105,7 @@ class TestRegistrySave:
 
     def test_save_creates_backup(self, mock_config):
         """Save should create backup of existing file."""
-        mock_config.registry_path.write_text(
-            json.dumps([create_manifest("original")])
-        )
+        mock_config.registry_path.write_text(json.dumps([create_manifest("original")]))
 
         with patch("hfl.models.registry.config", mock_config):
             registry = ModelRegistry()

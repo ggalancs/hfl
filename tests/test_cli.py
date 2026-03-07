@@ -969,9 +969,7 @@ class TestCheckCommand:
         assert result.exit_code == 0
         assert "Backend" in result.stdout
         # Should mention llama-cpp, transformers, or vllm
-        assert any(
-            backend in result.stdout for backend in ["llama-cpp", "transformers", "vllm"]
-        )
+        assert any(backend in result.stdout for backend in ["llama-cpp", "transformers", "vllm"])
 
     def test_check_shows_gpu(self, runner, temp_config):
         """Check command shows GPU status."""

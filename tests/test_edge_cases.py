@@ -251,9 +251,7 @@ class TestMaliciousInputs:
             "/v1/chat/completions",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": "Hello\x00World\x1b[31mRed\x1b[0m"}
-                ],
+                "messages": [{"role": "user", "content": "Hello\x00World\x1b[31mRed\x1b[0m"}],
             },
         )
         # Should not crash - 404 = model not found

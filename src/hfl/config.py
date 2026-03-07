@@ -107,9 +107,7 @@ class HFLConfig:
 
     # Server (configurable via HFL_HOST / HFL_PORT env vars)
     host: str = field(default_factory=lambda: os.environ.get("HFL_HOST", "127.0.0.1"))
-    port: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_PORT", "11434"))
-    )
+    port: int = field(default_factory=lambda: int(os.environ.get("HFL_PORT", "11434")))
 
     # Security - CORS
     # By default, CORS is restrictive (same-origin only).
@@ -170,9 +168,7 @@ class HFLConfig:
         if errors:
             import logging
 
-            logging.getLogger(__name__).warning(
-                "Invalid SLO configuration: %s", "; ".join(errors)
-            )
+            logging.getLogger(__name__).warning("Invalid SLO configuration: %s", "; ".join(errors))
 
     def ensure_dirs(self):
         """Creates the necessary directories."""

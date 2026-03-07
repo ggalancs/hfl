@@ -24,6 +24,7 @@ class TestStreamingContext:
 
         # Extract IDs from chunks
         import json
+
         data1 = json.loads(chunk1.split("data: ")[1].strip())
         data2 = json.loads(chunk2.split("data: ")[1].strip())
 
@@ -34,6 +35,7 @@ class TestStreamingContext:
         ctx = StreamingContext("test-model")
 
         import time
+
         # Small delay to ensure time.time() would differ
         time.sleep(0.01)
 
@@ -41,6 +43,7 @@ class TestStreamingContext:
         chunk2 = ctx.format_chunk(content=" world")
 
         import json
+
         data1 = json.loads(chunk1.split("data: ")[1].strip())
         data2 = json.loads(chunk2.split("data: ")[1].strip())
 
@@ -59,6 +62,7 @@ class TestStreamingContext:
         chunk = ctx.format_chunk(finish_reason="stop")
 
         import json
+
         data = json.loads(chunk.split("data: ")[1].strip())
 
         assert data["choices"][0]["finish_reason"] == "stop"
@@ -131,6 +135,7 @@ class TestNDJSONStreaming:
             chunks.append(chunk)
 
         import json
+
         # Each chunk should be valid JSON ending with newline
         for chunk in chunks:
             assert chunk.endswith("\n")
@@ -169,12 +174,14 @@ class TestStreamingBackpressure:
         from hfl.engine.base import GenerationConfig
 
         mock_engine = MagicMock()
-        mock_engine.chat_stream.return_value = iter([
-            "Hello ",
-            "世界 ",  # Chinese
-            "🌍 ",   # Emoji
-            "مرحبا",  # Arabic
-        ])
+        mock_engine.chat_stream.return_value = iter(
+            [
+                "Hello ",
+                "世界 ",  # Chinese
+                "🌍 ",  # Emoji
+                "مرحبا",  # Arabic
+            ]
+        )
 
         messages = [MagicMock(role="user", content="Test")]
         config = GenerationConfig()
@@ -185,6 +192,7 @@ class TestStreamingBackpressure:
 
         # Verify all chunks are valid
         import json
+
         for chunk in chunks[:-1]:  # Exclude [DONE]
             if "data: " in chunk and "[DONE]" not in chunk:
                 data = json.loads(chunk.split("data: ")[1].strip())
@@ -211,6 +219,7 @@ class TestOllamaChatStreaming:
             chunks.append(chunk)
 
         import json
+
         # Last chunk should have done=True
         last_chunk = json.loads(chunks[-1].strip())
         assert last_chunk["done"] is True

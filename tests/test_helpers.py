@@ -78,21 +78,25 @@ class TestOptionsToConfig:
 
     def test_none_values_ignored(self):
         """None values in options are ignored."""
-        config = options_to_config({
-            "temperature": None,
-            "top_p": None,
-        })
+        config = options_to_config(
+            {
+                "temperature": None,
+                "top_p": None,
+            }
+        )
         # Should not raise and return default
         assert isinstance(config, GenerationConfig)
 
     def test_multiple_options(self):
         """Multiple options map correctly."""
-        config = options_to_config({
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "num_predict": 200,
-            "seed": 123,
-        })
+        config = options_to_config(
+            {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "num_predict": 200,
+                "seed": 123,
+            }
+        )
         assert config.temperature == 0.7
         assert config.top_p == 0.95
         assert config.max_tokens == 200
@@ -529,7 +533,10 @@ class TestEnsureLLMLoaded:
     @patch("hfl.api.helpers.get_registry")
     @patch("hfl.api.helpers.detect_model_type")
     async def test_wrong_model_type_raises_400(
-        self, mock_detect, mock_get_registry, mock_get_state,
+        self,
+        mock_detect,
+        mock_get_registry,
+        mock_get_state,
     ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()
@@ -642,7 +649,10 @@ class TestEnsureTTSLoaded:
     @patch("hfl.api.helpers.get_registry")
     @patch("hfl.api.helpers.detect_model_type")
     async def test_wrong_model_type_raises_400(
-        self, mock_detect, mock_get_registry, mock_get_state,
+        self,
+        mock_detect,
+        mock_get_registry,
+        mock_get_state,
     ):
         """Wrong model type raises HTTPException 400."""
         mock_state = MagicMock()

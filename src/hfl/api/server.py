@@ -141,10 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 _openapi_tags = [
     {
         "name": "OpenAI",
-        "description": (
-            "OpenAI-compatible endpoints"
-            " (chat completions, completions, models)"
-        ),
+        "description": ("OpenAI-compatible endpoints (chat completions, completions, models)"),
     },
     {"name": "Ollama", "description": "Ollama-compatible endpoints (generate, chat, tags)"},
     {"name": "TTS", "description": "Text-to-speech endpoints"},

@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for prompt sanitization functions."""
 
-
 from hfl.engine.base import ChatMessage
 from hfl.engine.prompt_builder import PromptBuilder, PromptFormat
 from hfl.security import (
@@ -308,6 +307,7 @@ class TestIsSafeFilename:
 # ---------------------------------------------------------------------------
 # Prompt builder delimiter escaping tests
 # ---------------------------------------------------------------------------
+
 
 class TestPromptBuilderDelimiterEscaping:
     """Tests for format-specific delimiter escaping in PromptBuilder."""

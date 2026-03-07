@@ -17,6 +17,7 @@ from hfl.api.timeout import run_with_timeout, with_timeout
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _FakeConfig:
     generation_timeout: float = 600.0

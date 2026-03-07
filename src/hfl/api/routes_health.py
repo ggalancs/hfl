@@ -127,9 +127,7 @@ async def health_deep(probe: bool = False) -> dict[str, Any]:
             from hfl.engine.base import GenerationConfig
 
             probe_config = GenerationConfig(max_tokens=1)
-            probe_result = await asyncio.to_thread(
-                state.engine.generate, "test", probe_config
-            )
+            probe_result = await asyncio.to_thread(state.engine.generate, "test", probe_config)
             result["llm"]["probe"] = "ok" if probe_result.text else "empty"
         except Exception as e:
             result["llm"]["probe"] = f"failed: {type(e).__name__}"
@@ -236,7 +234,9 @@ async def health_sli() -> dict[str, Any]:
             "current": sli["availability"],
             "target": slo.availability_target,
             "status": check_rate(
-                sli["availability"], slo.availability_target, lower_is_better=False,
+                sli["availability"],
+                slo.availability_target,
+                lower_is_better=False,
             ),
         },
         "memory": {

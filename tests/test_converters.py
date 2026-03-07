@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for API format converters."""
 
-
 from hfl.api.converters import (
     clamp,
     generation_config_to_ollama,

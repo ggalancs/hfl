@@ -233,7 +233,10 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
 
     # Validate types at API boundary
     def _validate_float(
-        key: str, val: Any, min_val: float = 0.0, max_val: float = float("inf"),
+        key: str,
+        val: Any,
+        min_val: float = 0.0,
+        max_val: float = float("inf"),
     ) -> float:
         if not isinstance(val, (int, float)):
             raise HTTPException(400, detail=f"'{key}' must be a number, got {type(val).__name__}")
@@ -260,7 +263,10 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
         config.max_tokens = _validate_int("num_predict", options["num_predict"], 1)
     if "repeat_penalty" in options and options["repeat_penalty"] is not None:
         config.repeat_penalty = _validate_float(
-            "repeat_penalty", options["repeat_penalty"], 0.0, 10.0,
+            "repeat_penalty",
+            options["repeat_penalty"],
+            0.0,
+            10.0,
         )
     if "stop" in options:
         config.stop = options["stop"]

@@ -26,9 +26,7 @@ def mock_vllm():
     # Async engine mocks
     mock_async_engine_instance = MagicMock()
     mock_async_engine_class = MagicMock()
-    mock_async_engine_class.from_engine_args = AsyncMock(
-        return_value=mock_async_engine_instance
-    )
+    mock_async_engine_class.from_engine_args = AsyncMock(return_value=mock_async_engine_instance)
     mock_engine_args = MagicMock()
 
     # Main vllm module
@@ -239,9 +237,7 @@ class TestVLLMEngineGenerate:
         mock_output.outputs = [mock_completion]
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter([mock_output])
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter([mock_output]))
         engine._ensure_loop()
 
         result = engine.generate("Test", GenerationConfig(max_tokens=50))
@@ -267,9 +263,7 @@ class TestVLLMEngineGenerate:
         mock_output.outputs = [mock_completion]
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter([mock_output])
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter([mock_output]))
         engine._ensure_loop()
 
         result = engine.generate("Test")
@@ -360,9 +354,7 @@ class TestVLLMEngineStreaming:
             outputs.append(mock_output)
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter(outputs)
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter(outputs))
         engine._ensure_loop()
 
         chunks = list(engine.generate_stream("Test"))
@@ -386,9 +378,7 @@ class TestVLLMEngineStreaming:
         mock_output.outputs = [mock_completion]
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter([mock_output])
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter([mock_output]))
         engine._ensure_loop()
 
         chunks = list(engine.generate_stream("Test"))
@@ -414,9 +404,7 @@ class TestVLLMEngineStreaming:
             raise RuntimeError("GPU error")
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            side_effect=lambda *a, **kw: _error_gen(*a, **kw)
-        )
+        engine._engine.generate = MagicMock(side_effect=lambda *a, **kw: _error_gen(*a, **kw))
         engine._ensure_loop()
 
         with pytest.raises(RuntimeError, match="GPU error"):
@@ -442,9 +430,7 @@ class TestVLLMEngineStreaming:
             outputs.append(mock_output)
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter(outputs)
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter(outputs))
         engine._ensure_loop()
 
         chunks = list(engine.generate_stream("Test"))
@@ -563,9 +549,7 @@ class TestVLLMEngineChat:
             outputs.append(mock_output)
 
         engine._engine = MagicMock()
-        engine._engine.generate = MagicMock(
-            return_value=_async_iter(outputs)
-        )
+        engine._engine.generate = MagicMock(return_value=_async_iter(outputs))
         engine._ensure_loop()
 
         messages = [ChatMessage(role="user", content="Hello")]

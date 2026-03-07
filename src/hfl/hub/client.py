@@ -179,6 +179,7 @@ def reset_hf_clients() -> None:
             # Best-effort sync close to avoid connection leak
             try:
                 import asyncio
+
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     loop.create_task(_async_client.aclose())

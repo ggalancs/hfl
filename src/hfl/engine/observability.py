@@ -219,9 +219,12 @@ class EngineObserver:
                     "model_path": model_path,
                     "duration_ms": round(load_info["duration_ms"], 2),
                     **{
-                        k: v for k, v in load_info.items()
-                        if k not in [
-                            "start_time", "end_time",
+                        k: v
+                        for k, v in load_info.items()
+                        if k
+                        not in [
+                            "start_time",
+                            "end_time",
                             "model_path",
                         ]
                     },

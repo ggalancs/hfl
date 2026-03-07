@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for async engine wrapper."""
 
-
 import pytest
 
 from hfl.engine.async_wrapper import AsyncEngineWrapper

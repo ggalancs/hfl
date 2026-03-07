@@ -61,9 +61,7 @@ class TestPerModelRateLimiterPerModel:
         assert allowed_b
 
     def test_remaining_returns_min_of_global_and_model(self) -> None:
-        limiter = PerModelRateLimiter(
-            global_rpm=10, per_model_rpm=3, window_seconds=60
-        )
+        limiter = PerModelRateLimiter(global_rpm=10, per_model_rpm=3, window_seconds=60)
         allowed, remaining = limiter.is_allowed("client1", "modelA")
         assert allowed
         # remaining should be min(global_remaining=9, model_remaining=2) = 2
@@ -214,9 +212,7 @@ class TestCreateRateLimiterPerModel:
         assert isinstance(limiter, PerModelRateLimiter)
 
     def test_create_per_model_uses_global_rpm(self) -> None:
-        limiter = create_rate_limiter(
-            per_model=True, requests_per_window=42, per_model_rpm=10
-        )
+        limiter = create_rate_limiter(per_model=True, requests_per_window=42, per_model_rpm=10)
         assert isinstance(limiter, PerModelRateLimiter)
         assert limiter.global_limiter.requests_per_window == 42
 

@@ -212,7 +212,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if self._request_counter >= self._cleanup_interval:
             self._request_counter = 0
             stale_ips = [
-                ip for ip, timestamps in self._request_counts.items()
+                ip
+                for ip, timestamps in self._request_counts.items()
                 if not timestamps or timestamps[-1] < window_start
             ]
             for ip in stale_ips:
