@@ -15,23 +15,10 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import sys
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Awaitable, Callable
-
-# Python 3.11+ has async_timeout, for 3.10 we use asyncio.wait_for wrapper
-if sys.version_info >= (3, 11):
-    from asyncio import timeout as async_timeout
-else:
-    from contextlib import asynccontextmanager
-    from typing import AsyncIterator
-
-    @asynccontextmanager
-    async def async_timeout(delay: float) -> AsyncIterator[None]:
-        """Compatibility wrapper for async_timeout (Python 3.10)."""
-        yield  # No timeout enforcement in 3.10 fallback
-
+from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 
 if TYPE_CHECKING:
     from hfl.engine.base import AudioEngine, InferenceEngine
@@ -141,14 +128,26 @@ class ServerState:
             self._engine = engine
             self._current_model = model
 
-    async def with_llm_engine(self) -> asyncio.Lock:
-        """Context manager for exclusive LLM engine access.
+    @asynccontextmanager
+    async def with_llm_engine(self) -> AsyncIterator["InferenceEngine"]:
+        """Context manager for safe LLM engine access with lock protection.
+
+        Acquires the LLM lock and yields the engine. Ensures the engine
+        cannot be unloaded while in use.
 
         Usage:
-            async with state.with_llm_engine():
-                result = state.engine.generate(...)
+            async with state.with_llm_engine() as engine:
+                result = engine.generate(...)
+
+        Raises:
+            ModelNotLoadedError: If no LLM model is loaded
         """
-        return self._llm_lock
+        from hfl.exceptions import ModelNotLoadedError
+
+        async with self._llm_lock:
+            if self._engine is None:
+                raise ModelNotLoadedError()
+            yield self._engine
 
     def is_llm_loaded(self) -> bool:
         """Check if LLM engine is loaded."""
@@ -187,17 +186,16 @@ class ServerState:
         Raises:
             asyncio.TimeoutError: If loading takes longer than timeout
         """
-        # Fast path - already loaded
-        if self._current_model and self._current_model.name == model_name:
-            assert self._engine is not None
-            return self._engine, self._current_model
 
-        # Serialize loading per model
-        async with async_timeout(timeout):
+        async def _load_with_lock() -> tuple["InferenceEngine", "ModelManifest"]:
             async with self._model_locks[model_name]:
-                # Double-check after acquiring lock
-                if self._current_model and self._current_model.name == model_name:
-                    assert self._engine is not None
+                # Check state inside lock to prevent race condition
+                # Another thread could clear the engine between check and use
+                if (
+                    self._current_model
+                    and self._current_model.name == model_name
+                    and self._engine is not None
+                ):
                     return self._engine, self._current_model
 
                 self._loading_models.add(model_name)
@@ -207,6 +205,9 @@ class ServerState:
                     return engine, manifest
                 finally:
                     self._loading_models.discard(model_name)
+
+        # Use asyncio.wait_for for cross-platform timeout (works on Python 3.10+)
+        return await asyncio.wait_for(_load_with_lock(), timeout=timeout)
 
     async def ensure_tts_loaded(
         self,
@@ -218,15 +219,15 @@ class ServerState:
 
         Similar to ensure_llm_loaded but for TTS models.
         """
-        # Fast path
-        if self._current_tts_model and self._current_tts_model.name == model_name:
-            assert self._tts_engine is not None
-            return self._tts_engine, self._current_tts_model
 
-        async with async_timeout(timeout):
+        async def _load_with_lock() -> tuple["AudioEngine", "ModelManifest"]:
             async with self._model_locks[f"tts:{model_name}"]:
-                if self._current_tts_model and self._current_tts_model.name == model_name:
-                    assert self._tts_engine is not None
+                # Check state inside lock to prevent race condition
+                if (
+                    self._current_tts_model
+                    and self._current_tts_model.name == model_name
+                    and self._tts_engine is not None
+                ):
                     return self._tts_engine, self._current_tts_model
 
                 self._loading_models.add(f"tts:{model_name}")
@@ -236,6 +237,9 @@ class ServerState:
                     return engine, manifest
                 finally:
                     self._loading_models.discard(f"tts:{model_name}")
+
+        # Use asyncio.wait_for for cross-platform timeout (works on Python 3.10+)
+        return await asyncio.wait_for(_load_with_lock(), timeout=timeout)
 
     # Thread-safe TTS operations
     async def set_tts_engine(
@@ -256,9 +260,26 @@ class ServerState:
             self._tts_engine = engine
             self._current_tts_model = model
 
-    async def with_tts_engine(self) -> asyncio.Lock:
-        """Context manager for exclusive TTS engine access."""
-        return self._tts_lock
+    @asynccontextmanager
+    async def with_tts_engine(self) -> AsyncIterator["AudioEngine"]:
+        """Context manager for safe TTS engine access with lock protection.
+
+        Acquires the TTS lock and yields the engine. Ensures the engine
+        cannot be unloaded while in use.
+
+        Usage:
+            async with state.with_tts_engine() as engine:
+                result = engine.synthesize(...)
+
+        Raises:
+            ModelNotLoadedError: If no TTS model is loaded
+        """
+        from hfl.exceptions import ModelNotLoadedError
+
+        async with self._tts_lock:
+            if self._tts_engine is None:
+                raise ModelNotLoadedError()
+            yield self._tts_engine
 
     def is_tts_loaded(self) -> bool:
         """Check if TTS engine is loaded."""
@@ -280,8 +301,7 @@ class ServerState:
             self._current_tts_model = None
 
 
-# Singleton instance
-_state: ServerState | None = None
+# Singleton access delegated to container for unified management
 
 
 def get_state() -> ServerState:
@@ -289,13 +309,13 @@ def get_state() -> ServerState:
 
     Creates the instance on first call (lazy initialization).
     """
-    global _state
-    if _state is None:
-        _state = ServerState()
-    return _state
+    from hfl.core.container import get_state as _get_state
+
+    return _get_state()
 
 
 def reset_state() -> None:
     """Reset state (for testing purposes)."""
-    global _state
-    _state = None
+    from hfl.core.container import get_container
+
+    get_container().state.reset()

@@ -196,11 +196,70 @@ class TestServerStateLLMOperations:
         assert state.is_llm_loaded() is False
 
     @pytest.mark.asyncio
-    async def test_with_llm_engine_returns_lock(self):
-        """with_llm_engine returns the LLM lock."""
+    async def test_with_llm_engine_yields_engine(self):
+        """with_llm_engine yields the engine."""
         state = ServerState()
-        lock = await state.with_llm_engine()
-        assert lock is state._llm_lock
+        engine = MockEngine()
+        manifest = MockManifest("test-model")
+        state._engine = engine
+        state._current_model = manifest
+
+        async with state.with_llm_engine() as yielded_engine:
+            assert yielded_engine is engine
+
+    @pytest.mark.asyncio
+    async def test_with_llm_engine_raises_when_no_engine(self):
+        """with_llm_engine raises ModelNotLoadedError when no engine."""
+        from hfl.exceptions import ModelNotLoadedError
+
+        state = ServerState()
+
+        with pytest.raises(ModelNotLoadedError):
+            async with state.with_llm_engine():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_with_llm_engine_holds_lock(self):
+        """with_llm_engine holds the lock while in context."""
+        state = ServerState()
+        engine = MockEngine()
+        state._engine = engine
+
+        lock_was_held = False
+
+        async def check_lock():
+            nonlocal lock_was_held
+            lock_was_held = state._llm_lock.locked()
+
+        async with state.with_llm_engine():
+            await check_lock()
+
+        assert lock_was_held
+
+    @pytest.mark.asyncio
+    async def test_with_llm_engine_releases_lock_after(self):
+        """with_llm_engine releases lock after context exit."""
+        state = ServerState()
+        engine = MockEngine()
+        state._engine = engine
+
+        async with state.with_llm_engine():
+            pass
+
+        assert not state._llm_lock.locked()
+
+    @pytest.mark.asyncio
+    async def test_with_llm_engine_releases_lock_on_exception(self):
+        """with_llm_engine releases lock on exception."""
+        state = ServerState()
+        engine = MockEngine()
+        state._engine = engine
+
+        with pytest.raises(ValueError):
+            async with state.with_llm_engine():
+                raise ValueError("Test error")
+
+        assert not state._llm_lock.locked()
 
 
 class TestServerStateTTSOperations:
@@ -270,11 +329,58 @@ class TestServerStateTTSOperations:
         assert state.is_tts_loaded() is False
 
     @pytest.mark.asyncio
-    async def test_with_tts_engine_returns_lock(self):
-        """with_tts_engine returns the TTS lock."""
+    async def test_with_tts_engine_yields_engine(self):
+        """with_tts_engine yields the TTS engine."""
         state = ServerState()
-        lock = await state.with_tts_engine()
-        assert lock is state._tts_lock
+        engine = MockTTSEngine()
+        manifest = MockManifest("test-tts")
+        state._tts_engine = engine
+        state._current_tts_model = manifest
+
+        async with state.with_tts_engine() as yielded_engine:
+            assert yielded_engine is engine
+
+    @pytest.mark.asyncio
+    async def test_with_tts_engine_raises_when_no_engine(self):
+        """with_tts_engine raises ModelNotLoadedError when no engine."""
+        from hfl.exceptions import ModelNotLoadedError
+
+        state = ServerState()
+
+        with pytest.raises(ModelNotLoadedError):
+            async with state.with_tts_engine():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_with_tts_engine_holds_lock(self):
+        """with_tts_engine holds the lock while in context."""
+        state = ServerState()
+        engine = MockTTSEngine()
+        state._tts_engine = engine
+
+        lock_was_held = False
+
+        async def check_lock():
+            nonlocal lock_was_held
+            lock_was_held = state._tts_lock.locked()
+
+        async with state.with_tts_engine():
+            await check_lock()
+
+        assert lock_was_held
+
+    @pytest.mark.asyncio
+    async def test_with_tts_engine_releases_lock_on_exception(self):
+        """with_tts_engine releases lock on exception."""
+        state = ServerState()
+        engine = MockTTSEngine()
+        state._tts_engine = engine
+
+        with pytest.raises(ValueError):
+            async with state.with_tts_engine():
+                raise ValueError("Test error")
+
+        assert not state._tts_lock.locked()
 
 
 class TestEnsureLLMLoaded:
