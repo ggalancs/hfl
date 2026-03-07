@@ -8,6 +8,7 @@ Supports:
 - Complete repo download (safetensors)
 - Resume of interrupted downloads
 - Smart cache (no re-download if already exists)
+- Automatic retry on network errors
 
 Compliance with HuggingFace ToS (R8 - Legal Audit):
 - Rate limiting between API calls
@@ -19,13 +20,18 @@ import time
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub.utils import HfHubHTTPError
+from requests.exceptions import ConnectionError, Timeout
 from rich.console import Console
 
 from hfl.config import config
 from hfl.hub.auth import ensure_auth
 from hfl.hub.resolver import ResolvedModel
+from hfl.logging_config import get_logger
+from hfl.utils.retry import with_retry
 
 console = Console()
+logger = get_logger()
 
 # Rate limiting to comply with HuggingFace ToS (R8)
 _last_api_call: float = 0
@@ -50,12 +56,74 @@ def _rate_limit() -> None:
     _last_api_call = time.time()
 
 
+# Network exceptions that should trigger retry
+_RETRYABLE_EXCEPTIONS = (ConnectionError, Timeout, OSError)
+
+
+def _on_download_retry(exception: Exception, attempt: int) -> None:
+    """Log retry attempts for downloads."""
+    logger.warning(f"Download attempt {attempt} failed: {exception}. Retrying...")
+    console.print(f"[yellow]Retry {attempt}:[/] {type(exception).__name__} - Retrying...")
+
+
+@with_retry(
+    max_retries=config.max_retries,
+    base_delay=config.retry_base_delay,
+    max_delay=config.retry_max_delay,
+    exceptions=_RETRYABLE_EXCEPTIONS,
+    on_retry=_on_download_retry,
+)
+def _download_file(
+    repo_id: str,
+    filename: str,
+    revision: str | None,
+    local_dir: Path,
+    token: str | None,
+) -> Path:
+    """Download a single file with retry logic."""
+    local_path = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        revision=revision,
+        local_dir=local_dir,
+        token=token,
+    )
+    return Path(local_path)
+
+
+@with_retry(
+    max_retries=config.max_retries,
+    base_delay=config.retry_base_delay,
+    max_delay=config.retry_max_delay,
+    exceptions=_RETRYABLE_EXCEPTIONS,
+    on_retry=_on_download_retry,
+)
+def _download_snapshot(
+    repo_id: str,
+    revision: str | None,
+    local_dir: Path,
+    token: str | None,
+    allow_patterns: list[str] | None,
+) -> Path:
+    """Download a repo snapshot with retry logic."""
+    local_path = snapshot_download(
+        repo_id=repo_id,
+        revision=revision,
+        local_dir=local_dir,
+        token=token,
+        allow_patterns=allow_patterns,
+    )
+    return Path(local_path)
+
+
 def pull_model(resolved: ResolvedModel) -> Path:
     """
     Download a model and return the local path.
 
     For GGUF: downloads the individual file.
     For safetensors: downloads the complete repo snapshot.
+
+    Automatically retries on network errors with exponential backoff.
     """
     # Rate limiting before API calls (R8 - ToS compliance)
     _rate_limit()
@@ -71,18 +139,16 @@ def pull_model(resolved: ResolvedModel) -> Path:
     )
 
     if resolved.format == "gguf" and resolved.filename:
-        # Individual GGUF file download
-        # (resume_download is deprecated - downloads always resume automatically)
-        local_path = hf_hub_download(
+        # Individual GGUF file download with retry
+        return _download_file(
             repo_id=resolved.repo_id,
             filename=resolved.filename,
             revision=resolved.revision,
             local_dir=model_dir,
             token=token,
         )
-        return Path(local_path)
     else:
-        # Complete snapshot download
+        # Complete snapshot download with retry
         # Filter only the necessary files
         allow_patterns = []
         if resolved.format == "safetensors":
@@ -96,12 +162,10 @@ def pull_model(resolved: ResolvedModel) -> Path:
                 "generation_config.json",
             ]
 
-        # (resume_download is deprecated - downloads always resume automatically)
-        local_dir = snapshot_download(
+        return _download_snapshot(
             repo_id=resolved.repo_id,
             revision=resolved.revision,
             local_dir=model_dir,
             token=token,
             allow_patterns=allow_patterns or None,
         )
-        return Path(local_dir)

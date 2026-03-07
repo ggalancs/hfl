@@ -23,6 +23,7 @@ This design ensures that:
 """
 
 from huggingface_hub import HfApi, get_token
+from huggingface_hub.utils import HfHubHTTPError, LocalTokenNotFoundError
 
 from hfl.config import config
 
@@ -42,7 +43,7 @@ def get_hf_token() -> str | None:
     # Then the token saved by huggingface_hub
     try:
         return get_token()
-    except Exception:
+    except LocalTokenNotFoundError:
         return None
 
 
@@ -66,8 +67,8 @@ def ensure_auth(repo_id: str) -> str | None:
     try:
         api.model_info(repo_id, token=token)
         return token
-    except Exception:
-        pass
+    except HfHubHTTPError:
+        pass  # Model may require auth, continue to prompt
 
     # If there is no token, request one interactively
     if not token:
@@ -86,8 +87,16 @@ def ensure_auth(repo_id: str) -> str | None:
         api.model_info(repo_id, token=token)
         return token
     except Exception as e:
+        # Sanitize error message to prevent token leakage (R6 - Privacy)
+        # Original exception may contain sensitive information
+        error_type = type(e).__name__
+        # Only include safe parts of the error message
+        safe_msg = str(e)
+        # Remove any potential token references from the message
+        if token and token in safe_msg:
+            safe_msg = safe_msg.replace(token, "[REDACTED]")
         raise RuntimeError(
             f"Cannot access {repo_id}. "
             f"Verify that you have accepted the license at huggingface.co/{repo_id} "
-            f"and that your token has read permissions.\nError: {e}"
+            f"and that your token has read permissions.\nError ({error_type}): {safe_msg}"
         )

@@ -4,6 +4,15 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from huggingface_hub.utils import HfHubHTTPError, LocalTokenNotFoundError
+
+
+def _make_hf_http_error(message: str) -> HfHubHTTPError:
+    """Create a HfHubHTTPError with mocked response."""
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.headers = {}
+    return HfHubHTTPError(message, response=mock_response)
 
 
 class TestGetHfToken:
@@ -38,11 +47,11 @@ class TestGetHfToken:
                 assert get_hf_token() is None
 
     def test_huggingface_hub_exception(self):
-        """Test returns None when huggingface_hub raises an exception."""
+        """Test returns None when huggingface_hub raises LocalTokenNotFoundError."""
         with patch("hfl.hub.auth.config") as mock_config:
             mock_config.hf_token = None
             with patch("hfl.hub.auth.get_token") as mock_get_token:
-                mock_get_token.side_effect = Exception("Token error")
+                mock_get_token.side_effect = LocalTokenNotFoundError("Token not found")
                 from hfl.hub.auth import get_hf_token
 
                 assert get_hf_token() is None
@@ -89,7 +98,7 @@ class TestEnsureAuth:
             mock_api = MagicMock()
             # First call fails (no token), second call succeeds (with user-provided token)
             mock_api.model_info.side_effect = [
-                Exception("Gated model requires auth"),
+                _make_hf_http_error("Gated model requires auth"),
                 MagicMock(),
             ]
             mock_api_class.return_value = mock_api
@@ -115,7 +124,8 @@ class TestEnsureAuth:
         """Test that invalid token raises RuntimeError."""
         with patch("hfl.hub.auth.HfApi") as mock_api_class:
             mock_api = MagicMock()
-            mock_api.model_info.side_effect = Exception("Invalid token")
+            # Both HfHubHTTPError calls - first triggers prompt, second fails validation
+            mock_api.model_info.side_effect = _make_hf_http_error("Invalid token")
             mock_api_class.return_value = mock_api
 
             with patch("hfl.hub.auth.get_hf_token") as mock_get_token:

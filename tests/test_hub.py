@@ -6,6 +6,15 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from huggingface_hub.utils import HfHubHTTPError
+
+
+def _make_hf_http_error(message: str) -> HfHubHTTPError:
+    """Create a HfHubHTTPError with mocked response."""
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.headers = {}
+    return HfHubHTTPError(message, response=mock_response)
 
 
 class TestAuth:
@@ -25,9 +34,9 @@ class TestAuth:
 
     def test_ensure_auth_gated_model_with_token(self, mock_hf_api, temp_config, monkeypatch):
         """Verifies authentication with token for gated models."""
-        # First call fails (no token), second succeeds
+        # First call fails with HfHubHTTPError, second succeeds
         mock_hf_api.model_info.side_effect = [
-            Exception("Gated model"),
+            _make_hf_http_error("Gated model"),
             MagicMock(),
         ]
         monkeypatch.setenv("HF_TOKEN", "valid-token")
@@ -43,7 +52,7 @@ class TestAuth:
 
     def test_ensure_auth_raises_on_invalid_token(self, mock_hf_api, temp_config):
         """Verifies that error is raised with invalid token."""
-        mock_hf_api.model_info.side_effect = Exception("Unauthorized")
+        mock_hf_api.model_info.side_effect = _make_hf_http_error("Unauthorized")
 
         from hfl.hub.auth import ensure_auth
 
