@@ -55,7 +55,8 @@ class TestDownloadFailures:
 
                 mock_download.side_effect = EntryNotFoundError("Not found")
 
-                with pytest.raises((DownloadError, EntryNotFoundError)):
+                # The retry decorator wraps the error in RetryExhausted
+                with pytest.raises((DownloadError, EntryNotFoundError, RetryExhausted)):
                     pull_model(resolved)
 
     def test_rate_limit_error(self, temp_config):
