@@ -243,11 +243,13 @@
 │   │
 │   ├── <span class="dir">core/</span>                <span class="desc">— NÚCLEO DEL SISTEMA</span>
 │   │   ├── <span class="file">__init__.py</span>
-│   │   └── <span class="file">container.py</span>     <span class="desc">— Contenedor DI con Singleton thread-safe</span>
+│   │   ├── <span class="file">container.py</span>     <span class="desc">— Contenedor DI con Singleton thread-safe</span>
+│   │   ├── <span class="file">observability_setup.py</span> <span class="desc">— Setup de listeners de observabilidad</span>
+│   │   └── <span class="file">tracing.py</span>       <span class="desc">— Request tracing con IDs</span>
 │   │
 │   ├── <span class="dir">cli/</span>                 <span class="desc">— INTERFAZ DE LÍNEA DE COMANDOS</span>
 │   │   ├── <span class="file">__init__.py</span>
-│   │   ├── <span class="file">main.py</span>          <span class="desc">— 11 comandos: pull, run, serve, list, search, rm, inspect, alias, login, logout, version</span>
+│   │   ├── <span class="file">main.py</span>          <span class="desc">— 12 comandos: pull, run, serve, list, search, rm, inspect, alias, login, logout, version, compliance-report</span>
 │   │   └── <span class="dir">commands/</span>        <span class="desc">— Comandos modularizados</span>
 │   │       └── <span class="file">_utils.py</span>    <span class="desc">— Utilidades compartidas CLI</span>
 │   │
@@ -264,7 +266,10 @@
 │   │   ├── <span class="file">routes_openai.py</span> <span class="desc">— /v1/chat/completions, /v1/completions, /v1/models</span>
 │   │   ├── <span class="file">routes_native.py</span> <span class="desc">— /api/generate, /api/chat, /api/tags (Ollama-compatible)</span>
 │   │   ├── <span class="file">routes_tts.py</span>    <span class="desc">— /v1/audio/speech, /api/tts (TTS endpoints)</span>
-│   │   └── <span class="file">routes_health.py</span> <span class="desc">— /health, /ready, /live (healthchecks)</span>
+│   │   ├── <span class="file">routes_health.py</span> <span class="desc">— /health, /ready, /live (healthchecks)</span>
+│   │   ├── <span class="file">routes_metrics.py</span> <span class="desc">— /metrics (Prometheus + JSON)</span>
+│   │   ├── <span class="file">exception_handlers.py</span> <span class="desc">— Manejo global de excepciones HFLError</span>
+│   │   └── <span class="file">timeout.py</span>       <span class="desc">— Decorator @with_timeout + timeout configurable</span>
 │   │
 │   ├── <span class="dir">engine/</span>              <span class="desc">— MOTORES DE INFERENCIA</span>
 │   │   ├── <span class="file">__init__.py</span>
@@ -277,7 +282,11 @@
 │   │   ├── <span class="file">coqui_engine.py</span>  <span class="desc">— CoquiEngine (TTS XTTS-v2)</span>
 │   │   ├── <span class="file">async_wrapper.py</span> <span class="desc">— Wrapper sync→async para engines</span>
 │   │   ├── <span class="file">model_pool.py</span>    <span class="desc">— Pool de modelos con LRU eviction</span>
-│   │   └── <span class="file">dependency_check.py</span> <span class="desc">— Verificación de dependencias opcionales</span>
+│   │   ├── <span class="file">dependency_check.py</span> <span class="desc">— Verificación de dependencias opcionales</span>
+│   │   ├── <span class="file">failover.py</span>      <span class="desc">— FailoverEngine (multi-engine retry con sticky routing)</span>
+│   │   ├── <span class="file">memory.py</span>        <span class="desc">— Tracking de memoria RAM/GPU en tiempo real</span>
+│   │   ├── <span class="file">observability.py</span> <span class="desc">— Métricas de rendimiento del engine</span>
+│   │   └── <span class="file">prompt_builder.py</span> <span class="desc">— Formatos de prompt + escape de delimitadores</span>
 │   │
 │   ├── <span class="dir">hub/</span>                 <span class="desc">— INTEGRACIÓN HUGGINGFACE</span>
 │   │   ├── <span class="file">__init__.py</span>
@@ -291,7 +300,8 @@
 │   │   ├── <span class="file">__init__.py</span>
 │   │   ├── <span class="file">manifest.py</span>      <span class="desc">— ModelManifest — metadata completa</span>
 │   │   ├── <span class="file">provenance.py</span>    <span class="desc">— ConversionRecord + ProvenanceLog</span>
-│   │   └── <span class="file">registry.py</span>      <span class="desc">— ModelRegistry — inventario local JSON</span>
+│   │   ├── <span class="file">registry.py</span>      <span class="desc">— ModelRegistry — inventario local JSON</span>
+│   │   └── <span class="dir">backends/</span>        <span class="desc">— Backends de almacenamiento (File + SQLite)</span>
 │   │
 │   ├── <span class="dir">converter/</span>           <span class="desc">— CONVERSIÓN DE FORMATOS</span>
 │   │   ├── <span class="file">__init__.py</span>
@@ -319,7 +329,7 @@
 │   │   └── <span class="file">0006-rate-limiting-strategy.md</span>
 │   └── <span class="file">*.html</span>               <span class="desc">— Documentación arquitectura</span>
 │
-└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS (66 archivos, 90%+ cobertura)</span>
+└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS (80+ archivos, 90%+ cobertura)</span>
     ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures compartidas</span>
     ├── <span class="file">test_api*.py</span>         <span class="desc">— Tests API (5 archivos)</span>
     ├── <span class="file">test_cli*.py</span>         <span class="desc">— Tests CLI (4 archivos)</span>
@@ -506,12 +516,17 @@
     <tr><td><code>cache_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/cache</code></td><td>Caché temporal de HuggingFace</td></tr>
     <tr><td><code>registry_path</code></td><td>Path (prop)</td><td><code>~/.hfl/models.json</code></td><td>Registro de modelos (inventario local)</td></tr>
     <tr><td><code>llama_cpp_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/tools/llama.cpp</code></td><td>Herramientas de conversión compiladas</td></tr>
-    <tr><td><code>host</code></td><td>str</td><td><code>127.0.0.1</code></td><td>Dirección del servidor API</td></tr>
-    <tr><td><code>port</code></td><td>int</td><td><code>11434</code></td><td>Puerto (igual que Ollama para compatibilidad)</td></tr>
+    <tr><td><code>host</code></td><td>str</td><td><code>127.0.0.1</code></td><td>Dirección del servidor API. Override con <code>HFL_HOST</code></td></tr>
+    <tr><td><code>port</code></td><td>int</td><td><code>11434</code></td><td>Puerto (igual que Ollama para compatibilidad). Override con <code>HFL_PORT</code></td></tr>
     <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>4096</code></td><td>Tokens de contexto por defecto</td></tr>
     <tr><td><code>default_n_gpu_layers</code></td><td>int</td><td><code>-1</code></td><td>Capas GPU (-1 = todas)</td></tr>
     <tr><td><code>hf_token</code></td><td>str|None</td><td>env <code>HF_TOKEN</code></td><td>Token de autenticación (solo memoria, nunca persiste)</td></tr>
+    <tr><td><code>rate_limit_enabled</code></td><td>bool</td><td><code>true</code></td><td>Habilitar rate limiting. Override con <code>HFL_RATE_LIMIT_ENABLED</code></td></tr>
+    <tr><td><code>rate_limit_requests</code></td><td>int</td><td><code>60</code></td><td>Peticiones permitidas por ventana. Override con <code>HFL_RATE_LIMIT_REQUESTS</code></td></tr>
+    <tr><td><code>rate_limit_window</code></td><td>int</td><td><code>60</code></td><td>Ventana de tiempo en segundos. Override con <code>HFL_RATE_LIMIT_WINDOW</code></td></tr>
   </table>
+
+  <p>Adicionalmente, <code>SLOConfig</code> define los Service Level Objectives del servidor: availability target, latencia P50/P95/P99.</p>
 
   <div class="highlight highlight-legal">
     <strong>Privacidad (R6):</strong> El <code>hf_token</code> se lee SOLO de la variable de entorno. Nunca se persiste a disco, nunca se guarda en models.json ni en ningún archivo de configuración. Existe solo en memoria durante la ejecución del proceso.
@@ -522,7 +537,7 @@
 <section id="cli">
   <h2>6. Módulo cli — Interfaz de Línea de Comandos</h2>
   <div class="card">
-    <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~810 líneas)</p>
+    <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~870 líneas)</p>
     <p><strong>Framework:</strong> Typer + Rich. Entry point registrado en pyproject.toml como <code>hfl = "hfl.cli.main:app"</code></p>
   </div>
 
@@ -539,7 +554,12 @@
     <tr><td><code>hfl login</code></td><td>Configura token HF</td><td><code>--token</code> o interactivo. Verifica con <code>whoami()</code></td></tr>
     <tr><td><code>hfl logout</code></td><td>Elimina token guardado</td><td>Usa <code>huggingface_hub.logout()</code></td></tr>
     <tr><td><code>hfl version</code></td><td>Muestra versión + licencia</td><td>—</td></tr>
+    <tr><td><code>hfl compliance-report</code></td><td>Informe de cumplimiento legal (JSON/Markdown)</td><td>—</td></tr>
   </table>
+
+  <div class="highlight highlight-info">
+    <strong>Signal Handling:</strong> El comando <code>run</code> maneja Ctrl+C durante el streaming de tokens de forma limpia, preservando la respuesta parcial.
+  </div>
 
   <h3>Funciones Auxiliares del CLI</h3>
   <p><code>_format_size()</code> convierte bytes a formato legible. <code>_get_key()</code> lee una tecla sin Enter (raw terminal). <code>_extract_params_from_name()</code> extrae parámetros del nombre (regex: "70b", "7b", "1.5b"). <code>_estimate_model_size()</code> estima tamaño en disco según parámetros y cuantización. <code>_display_model_row()</code> renderiza una fila de resultado de búsqueda. <code>_get_params_value()</code> extrae el valor numérico para filtrado.</p>
@@ -668,7 +688,18 @@
     </div>
     <div class="card">
       <h4>VLLMEngine</h4>
-      <p><span class="badge badge-yellow">EXPERIMENTAL</span> Backend para producción GPU. Wrappea <code>vllm.LLM</code> con <code>SamplingParams</code>. Streaming básico (yield resultado completo). Build de prompt simple <code>Role: content</code>. Requiere GPU NVIDIA con CUDA.</p>
+      <p><span class="badge badge-yellow">EXPERIMENTAL</span> Backend para producción GPU. Wrappea <code>vllm.LLM</code> con <code>SamplingParams</code>. Streaming real con AsyncLLMEngine, con fallback sincrono para compatibilidad. Requiere GPU NVIDIA con CUDA.</p>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-top: 1rem;">
+    <div class="card">
+      <h4>FailoverEngine</h4>
+      <p>Motor con multiple backends y sticky routing — reintenta automaticamente con el siguiente engine disponible si uno falla.</p>
+    </div>
+    <div class="card">
+      <h4>Model Pool & Memory</h4>
+      <p>Pool de modelos con espera no recursiva (bounded polling), evitando stack overflow con multiples cargas concurrentes. Tracking de memoria RAM y GPU en tiempo real mediante psutil y GPUtil.</p>
     </div>
   </div>
 
@@ -740,7 +771,7 @@
 
       <!-- Middleware stack -->
       <rect x="250" y="75" width="400" height="30" rx="6" fill="#21262d" stroke="#30363d"/>
-      <text x="450" y="95" text-anchor="middle" fill="#d29922" font-size="10">CORS → APIKeyMiddleware → DisclaimerMiddleware → RequestLogger</text>
+      <text x="450" y="95" text-anchor="middle" fill="#d29922" font-size="10">RequestLogger → APIKey → RateLimit → Disclaimer → CORS</text>
 
       <!-- OpenAI routes -->
       <rect x="50" y="130" width="380" height="250" rx="10" fill="#0d1117" stroke="#58a6ff"/>
@@ -794,10 +825,27 @@
   <p>Clase con <code>engine</code> (InferenceEngine activo), <code>current_model</code> (ModelManifest cargado) y <code>api_key</code> (str|None para autenticación). Instanciada como singleton global. El lifespan del servidor hace cleanup al cerrar.</p>
 
   <h3>Middleware Stack</h3>
+  <p>Orden de ejecución Starlette (outer → inner): <code>RequestLogger → APIKey → RateLimit (condicional) → Disclaimer → CORS</code>. El orden de <code>add_middleware()</code> es inverso: CORS, Disclaimer, RateLimit, APIKey, RequestLogger. APIKey se ejecuta ANTES de RateLimit, de modo que las peticiones no autenticadas son rechazadas sin consumir tokens del rate limiter.</p>
   <p><strong>CORSMiddleware</strong> — Permite todas las orígenes, métodos y headers (desarrollo local).</p>
-  <p><strong>APIKeyMiddleware</strong> — Autenticación opcional via <code>--api-key</code>. Soporta <code>Authorization: Bearer &lt;key&gt;</code> y <code>X-API-Key: &lt;key&gt;</code>. Endpoints públicos (<code>/health</code>, <code>/</code>) exentos.</p>
   <p><strong>DisclaimerMiddleware</strong> — Añade header <code>X-AI-Disclaimer</code> a respuestas de endpoints de generación AI (R9).</p>
+  <p><strong>RateLimitMiddleware</strong> — Limitación de tasa por IP, configurable vía env vars. Soporta rate limiting por modelo.</p>
+  <p><strong>APIKeyMiddleware</strong> — Autenticación opcional via <code>--api-key</code>. Soporta <code>Authorization: Bearer &lt;key&gt;</code> y <code>X-API-Key: &lt;key&gt;</code>. Endpoints públicos (<code>/health</code>, <code>/</code>) exentos.</p>
   <p><strong>RequestLogger</strong> — Logging privacy-safe. NUNCA registra: bodies (prompts/outputs), headers auth, User-Agent. Solo: método, path, status, duración.</p>
+
+  <h3>Exception Handlers</h3>
+  <p>Manejo centralizado de excepciones via <code>register_exception_handlers(app)</code>. Mapea toda la jerarquia <code>HFLError</code> a respuestas HTTP con codigos apropiados (400 para validacion, 429 para rate limit, 500 para errores internos).</p>
+
+  <h3>OpenAPI Documentation</h3>
+  <p>Todos los endpoints incluyen <code>tags</code>, <code>summary</code> y <code>responses</code> en sus decoradores para documentacion OpenAPI auto-generada. Tags: OpenAI, Ollama, TTS, Health, Metrics.</p>
+
+  <h3>Structured Logging</h3>
+  <p>Todo el logging usa format strings %-style (<code>logger.info('Model loaded: %s', name)</code>) en lugar de f-strings, evitando evaluacion innecesaria cuando el nivel de log esta deshabilitado.</p>
+
+  <h3>Health & Metrics Endpoints</h3>
+  <p><code>/health/deep?probe=true</code> — Ejecuta un test de inferencia minimo para verificar que el modelo funciona correctamente. Si falla, reporta estado "degraded".</p>
+  <p><code>/health/sli</code> — Service Level Indicators con metricas de disponibilidad y latencia.</p>
+  <p><code>/metrics</code> — Metricas en formato Prometheus.</p>
+  <p><code>/metrics/json</code> — Metricas en formato JSON.</p>
 </section>
 
 <!-- ========== 12. I18N ========== -->
@@ -1138,7 +1186,7 @@
 <section id="tests">
   <h2>20. Testing</h2>
   <div class="highlight highlight-success">
-    <strong>Cobertura: 90%+ con 1278 tests</strong> — Suite exhaustiva con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 66 archivos de test con fixtures compartidas en <code>conftest.py</code>.
+    <strong>Cobertura: 90%+ con 1900 tests</strong> — Suite exhaustiva con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 80+ archivos de test con fixtures compartidas en <code>conftest.py</code>.
   </div>
 
   <h3>Categorías de Tests</h3>
@@ -1213,6 +1261,21 @@
     <tr><td><code>test_server_lifecycle.py</code></td><td>Startup, shutdown, cleanup</td></tr>
   </table>
 
+  <h3>Tests Adicionales (v0.1.0)</h3>
+  <table>
+    <tr><td>Signal handling CLI</td><td>Ctrl+C durante streaming preserva respuesta parcial</td></tr>
+    <tr><td>Middleware order</td><td>Verifica orden correcto de ejecucion del middleware stack</td></tr>
+    <tr><td>Exception handlers</td><td>Mapeo HFLError → HTTP status codes</td></tr>
+    <tr><td>Health probe</td><td>Deep health check con inferencia minima</td></tr>
+    <tr><td>Config env vars</td><td>Override de configuracion via variables de entorno</td></tr>
+    <tr><td>Model pool wait</td><td>Espera no recursiva (bounded polling)</td></tr>
+    <tr><td>Stress tests</td><td>Concurrent streaming, model pool stress</td></tr>
+    <tr><td>Timeout</td><td>Decorator @with_timeout y timeout configurable</td></tr>
+    <tr><td>Failover</td><td>Multi-engine retry con sticky routing</td></tr>
+    <tr><td>Per-model rate limit</td><td>Rate limiting diferenciado por modelo</td></tr>
+    <tr><td>Conversion caching</td><td>Cache de conversiones GGUF</td></tr>
+  </table>
+
   <p><strong>Fixtures principales</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (directorio temporal), <code>mock_hf_api</code> (mock HfApi), <code>sample_manifest</code> (modelo ejemplo), <code>populated_registry</code> (registro pre-populado), <code>mock_engine</code> (engine de inferencia mockeado), <code>test_client</code> (FastAPI TestClient).</p>
 
   <pre><code><span class="comment"># Ejecutar tests con cobertura</span>
@@ -1275,7 +1338,7 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
   <p><strong>HFL v0.1.0</strong> — Documentación de Arquitectura Exhaustiva</p>
-  <p>Actualizado el 6 de marzo de 2026 — Todos los diagramas son SVG interactivos</p>
+  <p>Actualizado el 7 de marzo de 2026 — Todos los diagramas son SVG interactivos</p>
   <p>Licencia: HRUL v1.0 (source-available) — Copyright © 2026 Gabriel Galán Pelayo</p>
 </div>
 
