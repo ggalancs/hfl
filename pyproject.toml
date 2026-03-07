@@ -9,15 +9,16 @@ description = "Run HuggingFace models locally like Ollama"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [
-    "typer>=0.12.0",
-    "rich>=13.0.0",
-    "huggingface-hub>=0.27.0",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.10.0",
-    "httpx>=0.28.0",
-    "sse-starlette>=2.0.0",
-    "pyyaml>=6.0",
+    # Using ~= (compatible release) for stability: allows patch updates only
+    "typer~=0.12.0",
+    "rich~=13.0",
+    "huggingface-hub~=0.27.0",
+    "fastapi~=0.115.0",
+    "uvicorn[standard]~=0.32.0",
+    "pydantic~=2.10.0",
+    "httpx~=0.28.0",
+    "sse-starlette~=2.0.0",
+    "pyyaml~=6.0",
 ]
 
 [project.optional-dependencies]

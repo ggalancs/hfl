@@ -24,6 +24,22 @@ def set_english_language(monkeypatch):
     get_language.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset rate limiter storage before each test to prevent 429 errors."""
+    # Import server first to ensure middleware is initialized
+    try:
+        import hfl.api.server  # noqa: F401 - ensures app is created
+        from hfl.api.middleware import reset_rate_limiter as do_reset
+
+        do_reset()
+        yield
+        do_reset()
+    except ImportError:
+        # If server module isn't available, just yield
+        yield
+
+
 @pytest.fixture
 def temp_dir():
     """Creates a temporary directory for tests."""
