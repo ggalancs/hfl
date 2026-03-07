@@ -13,8 +13,20 @@ from hfl.core.container import (
     get_state,
     reset_container,
 )
+from hfl.core.tracing import (
+    RequestContext,
+    clear_request_id,
+    format_log_prefix,
+    generate_request_id,
+    get_request_id,
+    get_trace_context,
+    set_request_id,
+    set_trace_context,
+    with_request_id,
+)
 
 __all__ = [
+    # Container
     "Container",
     "Singleton",
     "get_config",
@@ -24,4 +36,14 @@ __all__ = [
     "get_registry",
     "get_state",
     "reset_container",
+    # Tracing
+    "RequestContext",
+    "clear_request_id",
+    "format_log_prefix",
+    "generate_request_id",
+    "get_request_id",
+    "get_trace_context",
+    "set_request_id",
+    "set_trace_context",
+    "with_request_id",
 ]

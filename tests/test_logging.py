@@ -5,6 +5,9 @@
 import json
 import logging
 
+import pytest
+
+from hfl.core.tracing import clear_request_id
 from hfl.logging_config import (
     PrettyFormatter,
     StructuredFormatter,
@@ -14,9 +17,25 @@ from hfl.logging_config import (
     log_error,
     log_model_load,
     log_request,
-    request_id_var,
     set_request_id,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_logging_state():
+    """Reset logging state after each test to prevent pollution."""
+    # Store original state
+    hfl_logger = logging.getLogger("hfl")
+    original_level = hfl_logger.level
+    original_handlers = hfl_logger.handlers.copy()
+    original_propagate = hfl_logger.propagate
+
+    yield
+
+    # Restore original state
+    hfl_logger.setLevel(original_level)
+    hfl_logger.handlers = original_handlers
+    hfl_logger.propagate = original_propagate
 
 
 class TestRequestIdTracing:
@@ -25,7 +44,7 @@ class TestRequestIdTracing:
     def test_set_and_get_request_id(self):
         """Test setting and getting request ID."""
         # Reset context
-        request_id_var.set(None)
+        clear_request_id()
 
         request_id = set_request_id("test-123")
         assert request_id == "test-123"
@@ -33,7 +52,7 @@ class TestRequestIdTracing:
 
     def test_auto_generate_request_id(self):
         """Test auto-generation of request ID."""
-        request_id_var.set(None)
+        clear_request_id()
 
         request_id = set_request_id()
         assert request_id is not None
@@ -42,7 +61,7 @@ class TestRequestIdTracing:
 
     def test_get_request_id_when_not_set(self):
         """Test getting request ID when not set."""
-        request_id_var.set(None)
+        clear_request_id()
         assert get_request_id() is None
 
 
@@ -72,7 +91,7 @@ class TestStructuredFormatter:
 
     def test_format_with_request_id(self):
         """Test formatting includes request ID."""
-        request_id_var.set("req-456")
+        set_request_id("req-456")
 
         formatter = StructuredFormatter()
         record = logging.LogRecord(
@@ -91,7 +110,7 @@ class TestStructuredFormatter:
         assert data["request_id"] == "req-456"
 
         # Clean up
-        request_id_var.set(None)
+        clear_request_id()
 
     def test_format_with_extra_fields(self):
         """Test formatting with extra fields."""
@@ -142,7 +161,7 @@ class TestPrettyFormatter:
 
     def test_format_with_request_id(self):
         """Test formatting includes request ID."""
-        request_id_var.set("abc123")
+        set_request_id("abc123")
 
         formatter = PrettyFormatter()
         record = logging.LogRecord(
@@ -160,7 +179,7 @@ class TestPrettyFormatter:
         assert "[abc123]" in result
 
         # Clean up
-        request_id_var.set(None)
+        clear_request_id()
 
 
 class TestConfigureLogging:

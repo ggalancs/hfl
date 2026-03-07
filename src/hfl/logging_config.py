@@ -15,26 +15,22 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import uuid
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
-# Context variable for request ID tracing
-request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+# Import unified tracing from core module
+from hfl.core.tracing import get_request_id, set_request_id
 
-
-def get_request_id() -> str | None:
-    """Get the current request ID from context."""
-    return request_id_var.get()
-
-
-def set_request_id(request_id: str | None = None) -> str:
-    """Set a request ID in context. Generates one if not provided."""
-    if request_id is None:
-        request_id = uuid.uuid4().hex[:8]
-    request_id_var.set(request_id)
-    return request_id
+# Re-export for backward compatibility
+__all__ = [
+    "get_request_id",
+    "set_request_id",
+    "configure_logging",
+    "get_logger",
+    "log_request",
+    "log_model_load",
+    "log_error",
+]
 
 
 class StructuredFormatter(logging.Formatter):
