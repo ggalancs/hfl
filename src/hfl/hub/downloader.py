@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download, snapshot_download
-from requests.exceptions import ConnectionError, Timeout
 from rich.console import Console
 
 from hfl.config import config
@@ -56,7 +55,14 @@ def _rate_limit() -> None:
 
 
 # Network exceptions that should trigger retry
-_RETRYABLE_EXCEPTIONS = (ConnectionError, Timeout, OSError)
+# Use stdlib/httpx exceptions for compatibility with huggingface-hub >=1.0 (uses httpx)
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, OSError)
+try:
+    from httpx import ConnectError, TimeoutException
+
+    _RETRYABLE_EXCEPTIONS = (ConnectError, TimeoutException, OSError)
+except ImportError:
+    pass
 
 
 def _on_download_retry(exception: Exception, attempt: int) -> None:

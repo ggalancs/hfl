@@ -23,7 +23,12 @@ This design ensures that:
 """
 
 from huggingface_hub import HfApi, get_token
-from huggingface_hub.utils import HfHubHTTPError, LocalTokenNotFoundError
+from huggingface_hub.utils import HfHubHTTPError
+
+try:
+    from huggingface_hub.utils import LocalTokenNotFoundError
+except ImportError:
+    LocalTokenNotFoundError = Exception
 
 from hfl.config import config
 
