@@ -340,6 +340,12 @@ def serve(
         help="Log level (DEBUG, INFO, WARNING, ERROR)",
     ),
     json_logs: bool = typer.Option(False, "--json-logs", help="Output logs in JSON format"),
+    tray: bool = typer.Option(
+        False,
+        "--tray",
+        "--gui",
+        help="Show system tray icon for server management",
+    ),
 ):
     """Start the API server (OpenAI + Ollama compatible)."""
     from hfl.api.server import start_server
@@ -352,6 +358,28 @@ def serve(
 
     # Connect events to metrics
     setup_event_listeners()
+
+    # Tray mode: launch system tray icon with server control
+    if tray:
+        try:
+            from hfl.tray.icon import run_tray
+
+            run_tray(
+                host=host,
+                port=port,
+                api_key=api_key,
+                model=model,
+                log_level=log_level,
+                json_logs=json_logs,
+                auto_start=True,
+            )
+            return
+        except ImportError:
+            console.print(
+                "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
+                "Install with: [cyan]pip install hfl[tray][/]"
+            )
+            raise typer.Exit(1)
 
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
@@ -1128,6 +1156,115 @@ def compliance_report(
         output_path.write_text("\n".join(lines))
 
     console.print(f"[green]Report saved to {output_path}[/green]")
+
+
+@app.command(name="help")
+def help_command(
+    extras: bool = typer.Option(
+        False,
+        "--extras",
+        help=t("help.options.extras"),
+    ),
+):
+    """Show help information and available options."""
+    import importlib
+
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    if extras:
+        # Show detailed extras information
+        console.print(
+            Panel(
+                t("help.extras_intro"),
+                title=f"[bold cyan]{t('help.extras_title')}[/]",
+                border_style="cyan",
+            )
+        )
+        console.print()
+
+        extra_order = [
+            "llama",
+            "transformers",
+            "vllm",
+            "convert",
+            "tts",
+            "coqui",
+            "audio",
+            "tray",
+            "all",
+        ]
+
+        table = Table(show_header=True, border_style="dim")
+        table.add_column(t("table.name"), style="cyan", min_width=14)
+        table.add_column("", min_width=40)
+        table.add_column("Status", justify="center", min_width=14)
+        table.add_column("pip install", style="dim", min_width=22)
+
+        for extra_name in extra_order:
+            info = t(f"help.extras.{extra_name}.summary")
+            install_cmd = t(f"help.extras.{extra_name}.install")
+            check_module = t(f"help.extras.{extra_name}.check_module")
+
+            # Check if installed
+            if check_module and check_module != "null":
+                try:
+                    importlib.import_module(check_module)
+                    status = f"[green]{t('help.extras_installed')}[/]"
+                except ImportError:
+                    status = f"[dim]{t('help.extras_not_installed')}[/]"
+            else:
+                status = "[dim]—[/]"
+
+            table.add_row(extra_name, info, status, install_cmd)
+
+        console.print(table)
+
+        # Show multi-install syntax (escape brackets for Rich markup)
+        console.print(f"\n[dim]{t('help.extras_multiple')}:[/]")
+        console.print("  [cyan]pip install hfl\\[llama,tray][/]")
+        console.print("  [cyan]pip install hfl\\[all][/]")
+        console.print()
+
+        # Detail each extra
+        for extra_name in extra_order:
+            desc = t(f"help.extras.{extra_name}.description")
+            packages = t(f"help.extras.{extra_name}.packages")
+            install_cmd = t(f"help.extras.{extra_name}.install")
+
+            detail = Text()
+            detail.append(f"{desc}\n\n")
+            detail.append(f"Packages: {packages}\n", style="dim")
+            detail.append(f"Install:  {install_cmd}", style="cyan")
+
+            console.print(
+                Panel(detail, title=f"[bold]{extra_name}[/]", border_style="dim", width=80)
+            )
+
+    else:
+        # General help
+        help_text = Text()
+        help_text.append(f"{t('help.general_help')}\n\n", style="bold")
+        help_text.append(f"{t('help.usage')}:\n", style="bold cyan")
+        help_text.append("  hfl <command> [options]\n\n")
+
+        help_text.append(f"{t('help.common_commands')}:\n", style="bold cyan")
+        commands = [
+            ("pull <model>", t("help.common_pull")),
+            ("run <model>", t("help.common_run")),
+            ("serve [--tray]", t("help.common_serve")),
+            ("search <query>", t("help.common_search")),
+            ("list", t("help.common_list")),
+        ]
+        for cmd, desc in commands:
+            help_text.append(f"  hfl {cmd:<22}", style="cyan")
+            help_text.append(f" {desc}\n")
+
+        help_text.append(f"\n{t('help.more_info')}\n\n", style="dim")
+        help_text.append(t("help.extras_hint") + "\n", style="bold")
+
+        console.print(Panel(help_text, title="[bold]hfl[/]", border_style="cyan"))
 
 
 if __name__ == "__main__":

@@ -252,6 +252,101 @@
     "na": "N/A",
     "tokens": "tokens"
   },
+  "help": {
+    "description": "Muestra información de ayuda y opciones disponibles.",
+    "options": {
+      "extras": "Muestra los extras de instalación opcionales disponibles"
+    },
+    "general_help": "HFL — Ejecuta modelos de HuggingFace localmente como Ollama.",
+    "usage": "Uso",
+    "common_commands": "Comandos principales",
+    "common_pull": "Descarga un modelo de HuggingFace Hub",
+    "common_run": "Inicia un chat interactivo con un modelo",
+    "common_serve": "Inicia el servidor API",
+    "common_search": "Busca modelos en HuggingFace Hub",
+    "common_list": "Lista los modelos descargados",
+    "more_info": "Ejecuta 'hfl <comando> --help' para detalles de cualquier comando.",
+    "extras_title": "Extras de Instalación Opcionales",
+    "extras_intro": "HFL usa grupos de dependencias opcionales para mantener la instalación base ligera.\nLos extras se instalan mediante pip (el gestor de paquetes de Python).\n\nSintaxis:  pip install hfl[<extra>]\n           pip install hfl[<extra1>,<extra2>]\n           pip install hfl[all]",
+    "extras_multiple": "Instala varios extras a la vez",
+    "extras_installed": "instalado",
+    "extras_not_installed": "no instalado",
+    "extras_hint": "Usa 'hfl help --extras' para ver esta lista en cualquier momento.",
+    "extras": {
+      "llama": {
+        "name": "llama",
+        "summary": "Backend llama.cpp para modelos GGUF",
+        "description": "Proporciona el motor de inferencia llama.cpp para ejecutar modelos cuantizados GGUF.\nRequiere un compilador C++ (gcc/clang/MSVC) y CMake para compilación.",
+        "install": "pip install hfl[llama]",
+        "packages": "llama-cpp-python>=0.3.0",
+        "check_module": "llama_cpp"
+      },
+      "transformers": {
+        "name": "transformers",
+        "summary": "Backend PyTorch + HuggingFace Transformers",
+        "description": "Proporciona el motor de inferencia Transformers para ejecutar modelos safetensors.\nIncluye PyTorch (~2GB), Accelerate para offloading a GPU, y tokenizador SentencePiece.",
+        "install": "pip install hfl[transformers]",
+        "packages": "transformers>=4.47.0, torch>=2.5.0, accelerate>=1.2.0, sentencepiece>=0.2.0",
+        "check_module": "transformers"
+      },
+      "vllm": {
+        "name": "vllm",
+        "summary": "Motor de inferencia vLLM de alto rendimiento",
+        "description": "Proporciona el motor vLLM para servir con alto rendimiento usando PagedAttention.\nSolo disponible en Linux con GPUs NVIDIA CUDA.",
+        "install": "pip install hfl[vllm]",
+        "packages": "vllm>=0.6.0",
+        "check_module": "vllm"
+      },
+      "convert": {
+        "name": "convert",
+        "summary": "Soporte de conversión de modelos a GGUF",
+        "description": "Permite convertir modelos safetensors a formato GGUF con cuantización.\nNecesario para 'hfl pull' al descargar modelos que no son GGUF.",
+        "install": "pip install hfl[convert]",
+        "packages": "gguf>=0.10.0",
+        "check_module": "gguf"
+      },
+      "tts": {
+        "name": "tts",
+        "summary": "Texto a voz con Bark (vía Transformers)",
+        "description": "Habilita síntesis de texto a voz usando el modelo Bark vía Transformers.\nIncluye PyTorch, torchaudio para procesamiento de audio, y soundfile para salida WAV.",
+        "install": "pip install hfl[tts]",
+        "packages": "transformers>=4.47.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
+        "check_module": "torchaudio"
+      },
+      "coqui": {
+        "name": "coqui",
+        "summary": "Motor Coqui TTS (multi-voz, multi-idioma)",
+        "description": "Habilita texto a voz con Coqui TTS para síntesis multi-hablante de alta calidad.\nSoporta múltiples idiomas y clonación de voz.",
+        "install": "pip install hfl[coqui]",
+        "packages": "coqui-tts>=0.24.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
+        "check_module": "TTS"
+      },
+      "audio": {
+        "name": "audio",
+        "summary": "Reproducción de audio (para 'hfl speak')",
+        "description": "Habilita reproducción directa de audio desde la terminal.\nUsado por 'hfl speak' para reproducir audio sintetizado sin guardar en archivo.",
+        "install": "pip install hfl[audio]",
+        "packages": "sounddevice>=0.4.6, soundfile>=0.12.1",
+        "check_module": "sounddevice"
+      },
+      "tray": {
+        "name": "tray",
+        "summary": "Icono de bandeja del sistema para gestión GUI del servidor",
+        "description": "Añade un icono en la bandeja del sistema para arrancar/parar el servidor desde cualquier OS.\nSe usa con 'hfl serve --tray'. Funciona en macOS, Windows y Linux.",
+        "install": "pip install hfl[tray]",
+        "packages": "pystray>=0.19.0, Pillow>=10.0.0",
+        "check_module": "pystray"
+      },
+      "all": {
+        "name": "all",
+        "summary": "Instalar todo",
+        "description": "Instala todas las dependencias opcionales de una vez.\nConveniente para desarrollo o si quieres funcionalidad completa.",
+        "install": "pip install hfl[all]",
+        "packages": "Todos los anteriores",
+        "check_module": null
+      }
+    }
+  },
   "confirm": {
     "delete_model": "¿Eliminar {name} ({size})?",
     "pull_model": "¿Descargar este modelo?"

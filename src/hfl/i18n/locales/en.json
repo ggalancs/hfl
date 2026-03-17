@@ -252,6 +252,101 @@
     "na": "N/A",
     "tokens": "tokens"
   },
+  "help": {
+    "description": "Show help information and available options.",
+    "options": {
+      "extras": "Show available optional installation extras"
+    },
+    "general_help": "HFL — Run HuggingFace models locally like Ollama.",
+    "usage": "Usage",
+    "common_commands": "Common commands",
+    "common_pull": "Download a model from HuggingFace Hub",
+    "common_run": "Start an interactive chat with a model",
+    "common_serve": "Start the API server",
+    "common_search": "Search models on HuggingFace Hub",
+    "common_list": "List downloaded models",
+    "more_info": "Run 'hfl <command> --help' for details on any command.",
+    "extras_title": "Optional Installation Extras",
+    "extras_intro": "HFL uses optional dependency groups to keep the base install lightweight.\nExtras are installed via pip (Python's package manager).\n\nSyntax:  pip install hfl[<extra>]\n         pip install hfl[<extra1>,<extra2>]\n         pip install hfl[all]",
+    "extras_multiple": "Install multiple extras at once",
+    "extras_installed": "installed",
+    "extras_not_installed": "not installed",
+    "extras_hint": "Use 'hfl help --extras' to see this list at any time.",
+    "extras": {
+      "llama": {
+        "name": "llama",
+        "summary": "llama.cpp backend for GGUF models",
+        "description": "Provides the llama.cpp inference engine for running GGUF-quantized models.\nRequires a C++ compiler (gcc/clang/MSVC) and CMake for compilation.",
+        "install": "pip install hfl[llama]",
+        "packages": "llama-cpp-python>=0.3.0",
+        "check_module": "llama_cpp"
+      },
+      "transformers": {
+        "name": "transformers",
+        "summary": "PyTorch + HuggingFace Transformers backend",
+        "description": "Provides the Transformers inference engine for running safetensors models.\nIncludes PyTorch (~2GB), Accelerate for GPU offloading, and SentencePiece tokenizer.",
+        "install": "pip install hfl[transformers]",
+        "packages": "transformers>=4.47.0, torch>=2.5.0, accelerate>=1.2.0, sentencepiece>=0.2.0",
+        "check_module": "transformers"
+      },
+      "vllm": {
+        "name": "vllm",
+        "summary": "vLLM high-throughput inference engine",
+        "description": "Provides the vLLM engine for high-throughput serving with PagedAttention.\nOnly available on Linux with NVIDIA CUDA GPUs.",
+        "install": "pip install hfl[vllm]",
+        "packages": "vllm>=0.6.0",
+        "check_module": "vllm"
+      },
+      "convert": {
+        "name": "convert",
+        "summary": "GGUF model conversion support",
+        "description": "Enables converting safetensors models to GGUF format with quantization.\nRequired for 'hfl pull' when downloading non-GGUF models.",
+        "install": "pip install hfl[convert]",
+        "packages": "gguf>=0.10.0",
+        "check_module": "gguf"
+      },
+      "tts": {
+        "name": "tts",
+        "summary": "Text-to-speech with Bark (via Transformers)",
+        "description": "Enables text-to-speech synthesis using the Bark model via Transformers.\nIncludes PyTorch, torchaudio for audio processing, and soundfile for WAV output.",
+        "install": "pip install hfl[tts]",
+        "packages": "transformers>=4.47.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
+        "check_module": "torchaudio"
+      },
+      "coqui": {
+        "name": "coqui",
+        "summary": "Coqui TTS engine (multi-voice, multi-language)",
+        "description": "Enables text-to-speech with Coqui TTS for high-quality multi-speaker synthesis.\nSupports multiple languages and voice cloning.",
+        "install": "pip install hfl[coqui]",
+        "packages": "coqui-tts>=0.24.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
+        "check_module": "TTS"
+      },
+      "audio": {
+        "name": "audio",
+        "summary": "Audio playback support (for 'hfl speak')",
+        "description": "Enables direct audio playback from the terminal.\nUsed by 'hfl speak' to play synthesized audio without saving to a file.",
+        "install": "pip install hfl[audio]",
+        "packages": "sounddevice>=0.4.6, soundfile>=0.12.1",
+        "check_module": "sounddevice"
+      },
+      "tray": {
+        "name": "tray",
+        "summary": "System tray icon for GUI server management",
+        "description": "Adds a system tray icon to start/stop the server from any OS.\nUsed with 'hfl serve --tray'. Works on macOS, Windows, and Linux.",
+        "install": "pip install hfl[tray]",
+        "packages": "pystray>=0.19.0, Pillow>=10.0.0",
+        "check_module": "pystray"
+      },
+      "all": {
+        "name": "all",
+        "summary": "Install everything",
+        "description": "Installs all optional dependencies at once.\nConvenient for development or if you want full functionality.",
+        "install": "pip install hfl[all]",
+        "packages": "All of the above",
+        "check_module": null
+      }
+    }
+  },
   "confirm": {
     "delete_model": "Delete {name} ({size})?",
     "pull_model": "Download this model?"
