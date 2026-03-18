@@ -233,7 +233,7 @@ def pull(
 def run(
     model: str = typer.Argument(help=t("commands.run.args.model")),
     backend: str = typer.Option("auto", "--backend", "-b", help=t("commands.run.options.backend")),
-    ctx: int = typer.Option(4096, "--ctx", "-c", help=t("commands.run.options.ctx")),
+    ctx: int = typer.Option(0, "--ctx", "-c", help=t("commands.run.options.ctx")),
     system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
     verbose: bool = typer.Option(
         False,
@@ -340,6 +340,12 @@ def serve(
         help="Log level (DEBUG, INFO, WARNING, ERROR)",
     ),
     json_logs: bool = typer.Option(False, "--json-logs", help="Output logs in JSON format"),
+    ctx: int = typer.Option(
+        0,
+        "--ctx",
+        "-c",
+        help="Context size override (0 = use model default or 4096)",
+    ),
     tray: bool = typer.Option(
         False,
         "--tray",
@@ -347,7 +353,7 @@ def serve(
         help="Show system tray icon for server management",
     ),
 ):
-    """Start the API server (OpenAI + Ollama compatible)."""
+    """Start the API server (OpenAI + Ollama + Anthropic compatible)."""
     from hfl.api.server import start_server
     from hfl.api.state import get_state
     from hfl.core.observability_setup import setup_event_listeners
@@ -391,28 +397,34 @@ def serve(
         if not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 
+    # Store context size override in state for lazy-load path
+    state = get_state()
+    if ctx > 0:
+        state.context_size_override = ctx
+
     if model:
         from pathlib import Path
 
         from hfl.engine.selector import MissingDependencyError, select_engine
         from hfl.models.registry import ModelRegistry
 
-        state = get_state()
         registry = ModelRegistry()
         manifest = registry.get(model)
         if manifest:
             console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
             try:
+                n_ctx = ctx if ctx > 0 else 0  # 0 = auto-detect from model
                 state.engine = select_engine(Path(manifest.local_path))
-                state.engine.load(manifest.local_path)
+                state.engine.load(manifest.local_path, n_ctx=n_ctx)
                 state.current_model = manifest
             except MissingDependencyError as e:
                 console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
                 raise typer.Exit(1)
 
     console.print(f"[bold green]{t('messages.server_at', host=host, port=port)}[/]")
-    console.print("  OpenAI: POST /v1/chat/completions")
-    console.print("  Ollama: POST /api/chat")
+    console.print("  OpenAI:    POST /v1/chat/completions")
+    console.print("  Anthropic: POST /v1/messages")
+    console.print("  Ollama:    POST /api/chat")
     if api_key:
         console.print(f"  [cyan]{t('messages.auth_required')}[/]")
     start_server(host=host, port=port, api_key=api_key)

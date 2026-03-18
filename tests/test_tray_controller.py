@@ -232,12 +232,13 @@ class TestTrayServerControllerPreload:
         mock_select.return_value = mock_engine
 
         mock_state = MagicMock()
+        mock_state.context_size_override = 0
         mock_get_state.return_value = mock_state
 
         ctrl = TrayServerController(model="test-model")
         ctrl._preload_model()
 
-        mock_engine.load.assert_called_once_with("/fake/path")
+        mock_engine.load.assert_called_once_with("/fake/path", n_ctx=0)
         assert mock_state.engine == mock_engine
         assert mock_state.current_model == mock_manifest
 

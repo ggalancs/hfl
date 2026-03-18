@@ -181,6 +181,7 @@ class TestLoadLLM:
         """Successfully loads model through full path."""
         mock_state = MagicMock()
         mock_state.current_model = None
+        mock_state.context_size_override = 0
         mock_state.set_llm_engine = AsyncMock()
         mock_get_state.return_value = mock_state
 

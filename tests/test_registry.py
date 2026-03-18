@@ -67,7 +67,7 @@ class TestModelManifest:
         assert manifest.original_format is None
         assert manifest.architecture is None
         assert manifest.parameters is None
-        assert manifest.context_length == 4096
+        assert manifest.context_length == 0
         assert manifest.chat_template is None
         assert manifest.last_used is None
         assert manifest.created_at is not None

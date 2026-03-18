@@ -143,7 +143,7 @@ class TestHFLConfig:
 
     def test_default_inference_settings(self, temp_config):
         """Verifies default inference configuration."""
-        assert temp_config.default_ctx_size == 4096
+        assert temp_config.default_ctx_size == 0  # 0 = auto-detect from model
         assert temp_config.default_n_gpu_layers == -1
         assert temp_config.default_threads == 0
 

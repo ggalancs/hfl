@@ -78,9 +78,12 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
         )
 
     # Load model in thread pool to avoid blocking event loop
+    # context_size_override > 0 means explicit user override via --ctx flag
+    # Otherwise pass 0 to let the engine auto-detect from model metadata
+    n_ctx = state.context_size_override if state.context_size_override > 0 else 0
     engine = select_engine(model_path)
     try:
-        await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=manifest.context_length)
+        await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=n_ctx)
         await state.set_llm_engine(engine, manifest)
         return engine, manifest
     except Exception:

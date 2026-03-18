@@ -92,8 +92,12 @@ class LlamaCppEngine(InferenceEngine):
         # Use resolved path to prevent path traversal issues
         model_path = str(path)
 
+        from hfl.config import config as hfl_config
+
         verbose = kwargs.get("verbose", False)
-        n_ctx = kwargs.get("n_ctx", 4096)
+        n_ctx = kwargs.get("n_ctx", None)
+        if n_ctx is None or n_ctx == 0:
+            n_ctx = hfl_config.default_ctx_size  # 0 = auto from GGUF metadata
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)
 
         logger.info("Loading GGUF model: %s", path.name)

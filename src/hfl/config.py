@@ -132,8 +132,10 @@ class HFLConfig:
         default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_WINDOW", "60"))
     )
 
-    # LLM Inference
-    default_ctx_size: int = 4096
+    # LLM Inference (0 = auto-detect from model's GGUF metadata)
+    default_ctx_size: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_DEFAULT_CTX_SIZE", "0"))
+    )
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
     default_threads: int = 0  # 0 = auto-detect
 

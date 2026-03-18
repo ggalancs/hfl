@@ -48,6 +48,9 @@ class ServerState:
     # Security
     _api_key: str | None = None
 
+    # Context size override (0 = use model default)
+    context_size_override: int = 0
+
     # Locks for thread-safe access
     _llm_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _tts_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

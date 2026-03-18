@@ -184,8 +184,9 @@ class TrayServerController:
 
         try:
             state = get_state()
+            n_ctx = state.context_size_override if state.context_size_override > 0 else 0
             engine = select_engine(Path(manifest.local_path))
-            engine.load(manifest.local_path)
+            engine.load(manifest.local_path, n_ctx=n_ctx)
             state.engine = engine
             state.current_model = manifest
             logger.info("Model pre-loaded: %s", manifest.name)

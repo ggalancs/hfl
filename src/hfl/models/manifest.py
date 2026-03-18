@@ -35,7 +35,7 @@ class ModelManifest:
     # Model
     architecture: str | None = None  # llama, mistral, gemma, etc.
     parameters: str | None = None  # "7B", "70B", etc.
-    context_length: int = 4096  # Context length
+    context_length: int = 0  # Context length (0 = auto-detect from model)
     model_type: str | None = None  # "llm", "tts", "stt", etc. (from ModelType enum)
 
     # Chat template
