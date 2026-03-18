@@ -193,8 +193,27 @@ def run_tray(
         json_logs=json_logs,
     )
 
+    tray = HFLTrayIcon(controller)
+
     if auto_start:
         controller.start()
+        # Schedule icon update so it transitions from STARTING to RUNNING
+        if tray._icon is None:
+            # Icon not yet created; run() will create it with STARTING status.
+            # We schedule the update after a brief delay to give run() time to set _icon.
+            import threading
 
-    tray = HFLTrayIcon(controller)
+            def _deferred_update() -> None:
+                import time
+
+                # Wait for the icon to be created by run()
+                for _ in range(20):
+                    time.sleep(0.25)
+                    if tray._icon is not None:
+                        break
+                if tray._icon is not None:
+                    _schedule_icon_update(tray._icon, controller)
+
+            threading.Thread(target=_deferred_update, daemon=True).start()
+
     tray.run()
