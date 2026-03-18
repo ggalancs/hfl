@@ -26,15 +26,34 @@ def set_english_language(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def reset_rate_limiter():
-    """Reset rate limiter storage before each test to prevent 429 errors."""
-    # Import server first to ensure middleware is initialized
+    """Reset rate limiter storage before each test to prevent 429 errors.
+
+    Resets the middleware instance's request counts AND walks the app's
+    middleware stack to reset any instance that may differ from the global
+    reference (e.g., after middleware stack rebuild).
+    """
     try:
         import hfl.api.server  # noqa: F401 - ensures app is created
-        from hfl.api.middleware import reset_rate_limiter as do_reset
+        from hfl.api.middleware import (
+            RateLimitMiddleware,
+            reset_rate_limiter as do_reset,
+        )
 
-        do_reset()
+        def _reset_all() -> None:
+            # Reset the global-tracked instance
+            do_reset()
+            # Also walk the middleware stack to find and reset any instance
+            # that might differ from _rate_limiter_instance
+            app = hfl.api.server.app
+            current = getattr(app, "middleware_stack", None)
+            while current is not None:
+                if isinstance(current, RateLimitMiddleware):
+                    current.reset()
+                current = getattr(current, "app", None)
+
+        _reset_all()
         yield
-        do_reset()
+        _reset_all()
     except ImportError:
         # If server module isn't available, just yield
         yield
