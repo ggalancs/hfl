@@ -39,10 +39,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.exception_handlers import register_exception_handlers
 from hfl.api.middleware import RequestLogger
+from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
-from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.state import get_state

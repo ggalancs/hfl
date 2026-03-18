@@ -34,10 +34,8 @@ def reset_rate_limiter():
     """
     try:
         import hfl.api.server  # noqa: F401 - ensures app is created
-        from hfl.api.middleware import (
-            RateLimitMiddleware,
-            reset_rate_limiter as do_reset,
-        )
+        from hfl.api.middleware import RateLimitMiddleware
+        from hfl.api.middleware import reset_rate_limiter as do_reset
 
         def _reset_all() -> None:
             # Reset the global-tracked instance
