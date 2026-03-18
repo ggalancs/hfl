@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: HRUL-1.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
-REST API server compatible with OpenAI and Ollama.
+REST API server compatible with OpenAI, Ollama, and Anthropic.
 
 Implemented endpoints:
   OpenAI:
     POST /v1/chat/completions
     POST /v1/completions
     GET  /v1/models
+
+  Anthropic:
+    POST /v1/messages
 
   Ollama-native:
     POST /api/generate
@@ -39,6 +42,7 @@ from hfl.api.middleware import RequestLogger
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
+from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.state import get_state
@@ -109,6 +113,8 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
         "/v1/completions",
         "/api/generate",
         "/api/chat",
+        # Anthropic endpoints
+        "/v1/messages",
         # TTS endpoints
         "/v1/audio/speech",
         "/api/tts",
@@ -143,6 +149,10 @@ _openapi_tags = [
         "name": "OpenAI",
         "description": ("OpenAI-compatible endpoints (chat completions, completions, models)"),
     },
+    {
+        "name": "Anthropic",
+        "description": "Anthropic Messages API-compatible endpoints",
+    },
     {"name": "Ollama", "description": "Ollama-compatible endpoints (generate, chat, tags)"},
     {"name": "TTS", "description": "Text-to-speech endpoints"},
     {"name": "Health", "description": "Health check and readiness probes"},
@@ -151,7 +161,7 @@ _openapi_tags = [
 
 app = FastAPI(
     title="hfl API",
-    description="OpenAI and Ollama compatible API for HuggingFace models",
+    description="OpenAI, Ollama, and Anthropic compatible API for HuggingFace models",
     version="0.1.0",
     lifespan=lifespan,
     openapi_tags=_openapi_tags,
@@ -195,6 +205,7 @@ app.add_middleware(RequestLogger)
 # Register global exception handlers for HFLError hierarchy
 register_exception_handlers(app)
 
+app.include_router(anthropic_router)
 app.include_router(openai_router)
 app.include_router(native_router)
 app.include_router(tts_router)

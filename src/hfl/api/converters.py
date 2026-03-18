@@ -16,6 +16,7 @@ from hfl.engine.base import GenerationConfig
 
 if TYPE_CHECKING:
     from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
+    from hfl.api.schemas.anthropic import AnthropicMessagesRequest
 
 
 def clamp(value: float | int, min_val: float | int, max_val: float | int) -> float | int:
@@ -112,6 +113,27 @@ def generation_config_to_openai(config: GenerationConfig) -> dict[str, Any]:
         result["seed"] = config.seed
 
     return result
+
+
+def anthropic_to_generation_config(
+    req: "AnthropicMessagesRequest",
+) -> GenerationConfig:
+    """Convert Anthropic Messages API request to GenerationConfig.
+
+    Args:
+        req: Anthropic-style request
+
+    Returns:
+        GenerationConfig for inference
+    """
+    return GenerationConfig(
+        temperature=req.temperature if req.temperature is not None else 0.7,
+        top_p=req.top_p if req.top_p is not None else 0.9,
+        top_k=req.top_k if req.top_k is not None else 40,
+        max_tokens=req.max_tokens,
+        stop=req.stop_sequences,
+        seed=-1,
+    )
 
 
 def generation_config_to_ollama(config: GenerationConfig) -> dict[str, Any]:

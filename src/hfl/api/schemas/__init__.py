@@ -9,6 +9,11 @@ organized by API compatibility layer:
 - TTS schemas
 """
 
+from hfl.api.schemas.anthropic import (
+    AnthropicMessage,
+    AnthropicMessagesRequest,
+    AnthropicTextBlock,
+)
 from hfl.api.schemas.ollama import (
     ChatRequest,
     GenerateRequest,
@@ -26,6 +31,10 @@ from hfl.api.schemas.tts import (
 )
 
 __all__ = [
+    # Anthropic
+    "AnthropicMessage",
+    "AnthropicMessagesRequest",
+    "AnthropicTextBlock",
     # OpenAI
     "ChatCompletionMessage",
     "ChatCompletionRequest",
