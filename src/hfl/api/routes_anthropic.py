@@ -229,8 +229,10 @@ async def _stream_messages(
         ):
             yield chunk
     except Exception as e:
-        error_payload = json.dumps({
-            "type": "error",
-            "error": {"type": "server_error", "message": str(e)},
-        })
+        error_payload = json.dumps(
+            {
+                "type": "error",
+                "error": {"type": "server_error", "message": str(e)},
+            }
+        )
         yield f"event: error\ndata: {error_payload}\n\n"

@@ -595,16 +595,18 @@ def search(
     try:
         # Search models with progress spinner
         with progress_spinner(t("messages.searching", query=query)):
-            models = list(
-                api.list_models(
-                    search=query,
-                    sort=sort,
-                    direction=-1,
-                    limit=limit,
-                    fetch_config=False,
-                    full=True,  # To get siblings and detect GGUF
-                )
-            )
+            kwargs: dict = {
+                "search": query,
+                "sort": sort,
+                "limit": limit,
+                "fetch_config": False,
+                "full": True,  # To get siblings and detect GGUF
+            }
+            # direction parameter was removed in newer huggingface_hub versions
+            try:
+                models = list(api.list_models(**kwargs, direction=-1))  # type: ignore[call-arg]
+            except TypeError:
+                models = list(api.list_models(**kwargs))
     except Exception as e:
         console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1)
