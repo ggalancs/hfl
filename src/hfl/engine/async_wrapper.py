@@ -98,18 +98,31 @@ class AsyncEngineWrapper:
         return await asyncio.to_thread(self._engine.generate, prompt, config)
 
     async def chat(
-        self, messages: list["ChatMessage"], config: "GenerationConfig | None" = None
+        self,
+        messages: list["ChatMessage"],
+        config: "GenerationConfig | None" = None,
+        tools: list[dict] | None = None,
     ) -> "GenerationResult":
         """Generate chat completion asynchronously.
 
         Args:
             messages: List of chat messages.
             config: Generation configuration.
+            tools: Optional tool definitions forwarded to the underlying
+                engine's chat method.
 
         Returns:
             GenerationResult with the response and metadata.
         """
-        return await asyncio.to_thread(self._engine.chat, messages, config)
+        def _run() -> "GenerationResult":
+            if tools is not None:
+                try:
+                    return self._engine.chat(messages, config, tools=tools)
+                except TypeError:
+                    return self._engine.chat(messages, config)
+            return self._engine.chat(messages, config)
+
+        return await asyncio.to_thread(_run)
 
     async def generate_stream(
         self, prompt: str, config: "GenerationConfig | None" = None
@@ -170,7 +183,10 @@ class AsyncEngineWrapper:
                 await producer_task
 
     async def chat_stream(
-        self, messages: list["ChatMessage"], config: "GenerationConfig | None" = None
+        self,
+        messages: list["ChatMessage"],
+        config: "GenerationConfig | None" = None,
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:
         """Stream chat completion asynchronously.
 
@@ -193,7 +209,16 @@ class AsyncEngineWrapper:
         def producer() -> None:
             """Run sync generator and put tokens in queue."""
             try:
-                for token in self._engine.chat_stream(messages, config):
+                if tools is not None:
+                    try:
+                        stream = self._engine.chat_stream(
+                            messages, config, tools=tools
+                        )
+                    except TypeError:
+                        stream = self._engine.chat_stream(messages, config)
+                else:
+                    stream = self._engine.chat_stream(messages, config)
+                for token in stream:
                     asyncio.run_coroutine_threadsafe(queue.put(token), loop).result(timeout=60)
             except Exception as e:
                 logger.error("Error in chat stream producer: %s", e)

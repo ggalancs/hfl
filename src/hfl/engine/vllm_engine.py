@@ -225,15 +225,27 @@ class VLLMEngine(InferenceEngine):
             yield item
 
     def chat(
-        self, messages: list[ChatMessage], config: GenerationConfig | None = None
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> GenerationResult:
-        """Chat completion using PromptBuilder for format detection."""
-        prompt = PromptBuilder.build(messages, self._prompt_format)
+        """Chat completion using PromptBuilder for format detection.
+
+        ``tools`` is accepted but currently injected into the prompt only
+        via PromptBuilder when supported. Structured tool-call parsing for
+        vLLM output is handled upstream by the per-family parser, so the
+        route layer still gets canonical tool_calls back.
+        """
+        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
         return self.generate(prompt, config)
 
     def chat_stream(
-        self, messages: list[ChatMessage], config: GenerationConfig | None = None
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Streaming chat completion."""
-        prompt = PromptBuilder.build(messages, self._prompt_format)
+        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
         yield from self.generate_stream(prompt, config)

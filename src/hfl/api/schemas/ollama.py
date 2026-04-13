@@ -2,30 +2,102 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Ollama-compatible API schemas.
 
-These schemas match the Ollama API specification for drop-in compatibility.
+These schemas match the Ollama API specification for drop-in compatibility,
+including structured tool calling support (tools / tool_calls / role=tool).
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class OllamaToolFunctionDef(BaseModel):
+    """Definition of a callable tool function (client -> server)."""
+
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=4096)
+    parameters: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}},
+        description="JSON Schema for the function parameters (must be object)",
+    )
+
+
+class OllamaTool(BaseModel):
+    """A tool available to the model."""
+
+    type: Literal["function"] = Field("function")
+    function: OllamaToolFunctionDef
+
+
+class OllamaToolCallFunction(BaseModel):
+    """Function portion of a tool call (server -> client or multi-turn input)."""
+
+    name: str = Field(..., min_length=1, max_length=128)
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parsed JSON arguments as an object (never a string)",
+    )
+
+
+class OllamaToolCall(BaseModel):
+    """A single tool call emitted by the assistant."""
+
+    function: OllamaToolCallFunction
+
+    model_config = {"extra": "ignore"}
 
 
 class OllamaChatMessage(BaseModel):
     """Validated chat message for Ollama API.
 
-    Ensures messages have proper structure with role and content fields.
+    Supports four roles: ``system``, ``user``, ``assistant``, and ``tool``.
+    Assistant messages may carry ``tool_calls`` instead of (or alongside)
+    ``content``. Tool messages must carry ``name`` bound to the prior call.
     """
 
-    role: Literal["system", "user", "assistant"] = Field(
+    role: Literal["system", "user", "assistant", "tool"] = Field(
         ...,
         description="Role of the message sender",
     )
-    content: str = Field(
-        ...,
-        min_length=0,
+    content: str | None = Field(
+        None,
         max_length=2_000_000,
-        description="Message content",
+        description="Message content (may be empty when tool_calls is set)",
     )
+    name: str | None = Field(
+        None,
+        max_length=128,
+        description="Tool name (required when role=tool)",
+    )
+    tool_calls: list[OllamaToolCall] | None = Field(
+        None,
+        description="Assistant tool calls (canonical wire shape)",
+    )
+    tool_call_id: str | None = Field(
+        None,
+        max_length=256,
+        description="Optional id linking a tool result to its call",
+    )
+
+    @model_validator(mode="after")
+    def _check_role_fields(self) -> "OllamaChatMessage":
+        if self.role == "tool":
+            if not self.name:
+                raise ValueError("tool messages must include a 'name' field")
+            if self.content is None:
+                raise ValueError("tool messages must include 'content'")
+        elif self.role in ("system", "user"):
+            if self.content is None:
+                raise ValueError(f"{self.role} messages must include 'content'")
+        else:  # assistant
+            if self.content is None and not self.tool_calls:
+                raise ValueError(
+                    "assistant messages must include 'content' or 'tool_calls'"
+                )
+            if self.content is None:
+                # Canonical wire: empty string when only tool_calls
+                self.content = ""
+        return self
 
 
 class GenerateRequest(BaseModel):
@@ -65,13 +137,17 @@ class GenerateRequest(BaseModel):
 class ChatRequest(BaseModel):
     """Request for chat completion (Ollama-compatible).
 
-    Compatible with Ollama's /api/chat endpoint.
+    Compatible with Ollama's /api/chat endpoint, including the structured
+    ``tools`` field and the ability to carry ``role=tool`` messages back.
 
     Attributes:
         model: Model name or alias to use for chat
-        messages: List of message dicts with 'role' and 'content' keys
+        messages: List of chat messages
         stream: Whether to stream the response (default: True)
         options: Optional generation options (temperature, top_p, etc.)
+        tools: Optional list of tools the model may call
+        tool_choice: Optional tool-selection policy ("auto", "none", or
+            a specific function name)
     """
 
     model: str = Field(
@@ -85,7 +161,7 @@ class ChatRequest(BaseModel):
         ...,
         min_length=1,
         max_length=1000,
-        description="Chat messages with role and content",
+        description="Chat messages",
     )
     stream: bool = Field(
         True,
@@ -94,4 +170,13 @@ class ChatRequest(BaseModel):
     options: dict | None = Field(
         None,
         description="Optional generation parameters (temperature, top_p, etc.)",
+    )
+    tools: list[OllamaTool] | None = Field(
+        None,
+        max_length=128,
+        description="Tools the model may call",
+    )
+    tool_choice: str | dict[str, Any] | None = Field(
+        None,
+        description="Tool-selection policy (auto, none, or a specific tool)",
     )

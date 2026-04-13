@@ -19,8 +19,17 @@ if TYPE_CHECKING:
 
 @dataclass
 class ChatMessage:
-    role: str  # "system", "user", "assistant"
+    role: str  # "system", "user", "assistant", "tool"
     content: str
+    # Tool-calling extensions (only populated when relevant):
+    # - ``tool_calls``: assistant turn requesting one or more function calls.
+    #   Each entry is the canonical Ollama shape:
+    #   ``{"function": {"name": str, "arguments": dict}}``.
+    # - ``name``: for role=tool, the function name whose result this carries.
+    # - ``tool_call_id``: optional id linking a tool result to a prior call.
+    tool_calls: list[dict] | None = None
+    name: str | None = None
+    tool_call_id: str | None = None
 
 
 @dataclass
@@ -41,6 +50,9 @@ class GenerationResult:
     tokens_prompt: int = 0
     tokens_per_second: float = 0.0
     stop_reason: str = "stop"
+    # Populated when the engine (or a downstream parser) produced structured
+    # tool calls. Shape: list of ``{"function": {"name", "arguments": dict}}``.
+    tool_calls: list[dict] | None = None
 
 
 class InferenceEngine(ABC):
@@ -79,8 +91,20 @@ class InferenceEngine(ABC):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> GenerationResult:
-        """Synchronous chat with message format."""
+        """Synchronous chat with message format.
+
+        Args:
+            messages: Chat history, possibly including ``role=tool`` results
+                and prior assistant ``tool_calls``.
+            config: Sampling configuration.
+            tools: Optional list of OpenAI/Ollama-shaped tool definitions
+                (``[{"type": "function", "function": {...}}, ...]``). If
+                provided and supported by the backend, the model's native
+                chat template is applied with tool awareness so that
+                structured tool calls can be emitted.
+        """
         ...
 
     @abstractmethod
@@ -88,8 +112,12 @@ class InferenceEngine(ABC):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
-        """Streaming chat token by token."""
+        """Streaming chat token by token.
+
+        Same semantics as :meth:`chat` for the ``tools`` argument.
+        """
         ...
 
     @property

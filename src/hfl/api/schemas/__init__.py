@@ -17,6 +17,11 @@ from hfl.api.schemas.anthropic import (
 from hfl.api.schemas.ollama import (
     ChatRequest,
     GenerateRequest,
+    OllamaChatMessage,
+    OllamaTool,
+    OllamaToolCall,
+    OllamaToolCallFunction,
+    OllamaToolFunctionDef,
 )
 from hfl.api.schemas.openai import (
     ChatCompletionMessage,
@@ -42,6 +47,11 @@ __all__ = [
     # Ollama
     "GenerateRequest",
     "ChatRequest",
+    "OllamaChatMessage",
+    "OllamaTool",
+    "OllamaToolCall",
+    "OllamaToolCallFunction",
+    "OllamaToolFunctionDef",
     # TTS
     "AudioFormat",
     "NativeTTSRequest",

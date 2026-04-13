@@ -116,12 +116,20 @@ class FailoverEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> GenerationResult:
         last_error: Exception | None = None
         for idx in self._ordered_indices():
             engine = self._engines[idx]
             try:
-                result = engine.chat(messages, config)
+                if tools is not None:
+                    try:
+                        result = engine.chat(messages, config, tools=tools)
+                    except TypeError:
+                        # Legacy engine without ``tools`` kwarg
+                        result = engine.chat(messages, config)
+                else:
+                    result = engine.chat(messages, config)
                 self._set_current_index(idx)
                 return result
             except Exception as exc:  # noqa: BLE001
@@ -138,12 +146,19 @@ class FailoverEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         last_error: Exception | None = None
         for idx in self._ordered_indices():
             engine = self._engines[idx]
             try:
-                it = engine.chat_stream(messages, config)
+                if tools is not None:
+                    try:
+                        it = engine.chat_stream(messages, config, tools=tools)
+                    except TypeError:
+                        it = engine.chat_stream(messages, config)
+                else:
+                    it = engine.chat_stream(messages, config)
                 first = next(it)
                 self._set_current_index(idx)
                 yield first

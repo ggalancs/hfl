@@ -16,6 +16,7 @@ from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import run_with_timeout
 from hfl.api.schemas import ChatRequest, GenerateRequest
+from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig
 
@@ -45,6 +46,76 @@ async def _ensure_model_loaded(model_name: str) -> None:
 def _options_to_config(options: dict | None) -> GenerationConfig:
     """Convert Ollama options dict to GenerationConfig."""
     return ollama_to_generation_config(options)
+
+
+def _to_chat_messages(req: ChatRequest) -> list[ChatMessage]:
+    """Convert an Ollama request's messages into engine-level ChatMessages.
+
+    Preserves ``tool_calls``, ``name`` and ``tool_call_id`` so multi-turn
+    agent loops (spec rule C6) propagate back to the model.
+    """
+    out: list[ChatMessage] = []
+    for m in req.messages:
+        tool_calls = None
+        if m.tool_calls:
+            tool_calls = [tc.model_dump() for tc in m.tool_calls]
+        out.append(
+            ChatMessage(
+                role=m.role,
+                content=m.content or "",
+                tool_calls=tool_calls,
+                name=m.name,
+                tool_call_id=m.tool_call_id,
+            )
+        )
+    return out
+
+
+def _tools_payload(req: ChatRequest) -> list[dict] | None:
+    """Materialize the ``tools`` field as a list of plain dicts, or None."""
+    if req.tools is None:
+        return None
+    return [t.model_dump() for t in req.tools]
+
+
+def _build_chat_message(
+    raw_text: str,
+    model_name: str,
+    tools: list[dict] | None,
+    engine_tool_calls: list[dict] | None,
+) -> dict:
+    """Build the canonical assistant message for an Ollama chat response.
+
+    - If the engine returned structured ``tool_calls``, use them as-is.
+    - Otherwise, run the text through the per-family parser and move any
+      recovered calls into ``tool_calls``, stripping them from ``content``.
+    - When ``tool_calls`` is non-empty, ``content`` is set to "" so the
+      client never has to parse narration out of the tool payload
+      (spec rule C4).
+    - ``tool_calls`` is always a list (spec rule C7): empty when none.
+    """
+    # Only trust structured tool_calls from the engine if they are an
+    # actual list — MagicMock auto-attrs in unit tests would otherwise
+    # masquerade as populated data.
+    if isinstance(engine_tool_calls, list) and engine_tool_calls:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": engine_tool_calls,
+        }
+
+    cleaned, parsed_calls = parse_tool_calls(raw_text, model_name, tools)
+    if parsed_calls:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": parsed_calls,
+        }
+    return {
+        "role": "assistant",
+        "content": cleaned,
+        "tool_calls": [],
+    }
 
 
 # --- Endpoints ---
@@ -155,21 +226,37 @@ async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Res
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
 
-    messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
+    messages = _to_chat_messages(req)
     gen_config = _options_to_config(req.options)
+    tools = _tools_payload(req)
 
     if req.stream:
         return StreamingResponse(
-            _stream_chat(req.model, messages, gen_config),
+            _stream_chat(req.model, messages, gen_config, tools),
             media_type="application/x-ndjson",
         )
 
-    # Run sync engine call in thread pool with timeout
-    result = await run_with_timeout(state.engine.chat, messages, gen_config, operation="chat")
+    # Run sync engine call in thread pool with timeout. ``tools`` is
+    # forwarded as a kwarg so engines without tool support raise
+    # TypeError and fall back via the per-engine shim.
+    result = await run_with_timeout(
+        state.engine.chat,
+        messages,
+        gen_config,
+        tools=tools,
+        operation="chat",
+    )
+
+    message = _build_chat_message(
+        raw_text=result.text,
+        model_name=req.model,
+        tools=tools,
+        engine_tool_calls=getattr(result, "tool_calls", None),
+    )
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "message": {"role": "assistant", "content": result.text},
+        "message": message,
         "done": True,
     }
 
@@ -178,8 +265,14 @@ async def _stream_chat(
     model_name: str,
     messages: list[ChatMessage],
     config: GenerationConfig,
+    tools: list[dict] | None = None,
 ) -> AsyncIterator[str]:
-    """Stream chat in Ollama NDJSON format with backpressure."""
+    """Stream chat in Ollama NDJSON format with backpressure.
+
+    The full generated text is accumulated so that the final ``done: true``
+    chunk can emit structured ``tool_calls`` extracted from the assembled
+    output (spec rule C5). Intermediate chunks keep ``tool_calls: null``.
+    """
     from hfl.api.streaming import stream_with_backpressure
 
     state = _get_state()
@@ -189,28 +282,49 @@ async def _stream_chat(
         return
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    accumulated: list[str] = []
 
     def format_chunk(token: str) -> str:
+        accumulated.append(token)
         chunk = {
             "model": model_name,
             "created_at": created_at,
-            "message": {"role": "assistant", "content": token},
+            "message": {
+                "role": "assistant",
+                "content": token,
+                "tool_calls": None,
+            },
             "done": False,
         }
         return json.dumps(chunk) + "\n"
 
     def format_done() -> str:
+        full_text = "".join(accumulated)
+        cleaned, calls = parse_tool_calls(full_text, model_name, tools)
+        final_message: dict = {"role": "assistant", "content": "", "tool_calls": []}
+        if calls:
+            final_message["tool_calls"] = calls
         chunk = {
             "model": model_name,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "message": {"role": "assistant", "content": ""},
+            "message": final_message,
             "done": True,
         }
         return json.dumps(chunk) + "\n"
 
+    # Obtain the sync token iterator, tolerating engines without ``tools``
+    # support by falling back to the 2-arg signature.
+    if tools is not None:
+        try:
+            sync_iterator = state.engine.chat_stream(messages, config, tools=tools)
+        except TypeError:
+            sync_iterator = state.engine.chat_stream(messages, config)
+    else:
+        sync_iterator = state.engine.chat_stream(messages, config)
+
     try:
         async for chunk in stream_with_backpressure(
-            sync_iterator=state.engine.chat_stream(messages, config),
+            sync_iterator=sync_iterator,
             format_item=format_chunk,
             format_done=format_done,
         ):

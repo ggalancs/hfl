@@ -246,12 +246,42 @@ class PromptBuilder:
 
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _prepend_tools_system(
+        messages: list["ChatMessage"],
+        tools: list[dict] | None,
+    ) -> list["ChatMessage"]:
+        """Return ``messages`` with a synthetic system preamble that lists
+        the available tools.
+
+        Used by backends that do not have a tool-aware chat template
+        (raw ``PromptBuilder`` formats). The model output is still parsed
+        upstream by :mod:`hfl.api.tool_parsers`; this preamble is what
+        gives the model a chance to emit a recognizable call envelope.
+        """
+        if not tools:
+            return messages
+        import json as _json
+
+        from hfl.engine.base import ChatMessage as _CM
+
+        lines = [
+            "You have access to the following tools. When you need to call "
+            "one, respond with a single JSON object of the form "
+            '{"name": "<tool_name>", "arguments": {...}} and nothing else.',
+            "Tools:",
+            _json.dumps([t for t in tools], ensure_ascii=False),
+        ]
+        preamble = _CM(role="system", content="\n".join(lines))
+        return [preamble, *messages]
+
     @classmethod
     def build(
         cls,
         messages: list["ChatMessage"],
         format: PromptFormat = PromptFormat.GENERIC,
         add_generation_prompt: bool = True,
+        tools: list[dict] | None = None,
     ) -> str:
         """Build prompt using specified format.
 
@@ -259,6 +289,10 @@ class PromptBuilder:
             messages: List of chat messages
             format: Prompt format to use
             add_generation_prompt: Whether to add generation prompt
+            tools: Optional list of tool definitions. When provided, a
+                best-effort preamble is injected so backends without a
+                tool-aware chat template still have a chance of emitting
+                a recognizable tool-call envelope.
 
         Returns:
             Formatted prompt string
@@ -272,8 +306,9 @@ class PromptBuilder:
             PromptFormat.GENERIC: cls.build_generic,
         }
 
+        effective_messages = cls._prepend_tools_system(messages, tools)
         builder = builders.get(format, cls.build_generic)
-        return builder(messages, add_generation_prompt)
+        return builder(effective_messages, add_generation_prompt)
 
 
 def detect_format_from_tokenizer(tokenizer) -> PromptFormat:

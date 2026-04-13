@@ -80,6 +80,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "--cov=hfl --cov-report=term-missing --cov-report=html --cov-report=xml"
+markers = [
+    "acceptance: tool-calling acceptance suite (spec §6, T1–T7)",
+]
 
 [tool.coverage.run]
 source = ["src/hfl"]

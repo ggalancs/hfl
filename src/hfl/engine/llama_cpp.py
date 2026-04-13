@@ -192,17 +192,36 @@ class LlamaCppEngine(InferenceEngine):
             if text:
                 yield text
 
+    @staticmethod
+    def _messages_to_llama_cpp(messages: list[ChatMessage]) -> list[dict]:
+        """Convert internal ChatMessage list to llama-cpp-python format.
+
+        Preserves ``tool_calls`` on assistant turns and ``name`` on tool
+        turns so the underlying chat template can render them correctly.
+        """
+        out: list[dict] = []
+        for m in messages:
+            entry: dict = {"role": m.role, "content": m.content or ""}
+            if m.tool_calls:
+                entry["tool_calls"] = m.tool_calls
+            if m.name:
+                entry["name"] = m.name
+            if m.tool_call_id:
+                entry["tool_call_id"] = m.tool_call_id
+            out.append(entry)
+        return out
+
     def chat(
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> GenerationResult:
         cfg = config or GenerationConfig()
 
-        msgs = [{"role": m.role, "content": m.content} for m in messages]
+        msgs = self._messages_to_llama_cpp(messages)
 
-        t0 = time.perf_counter()
-        output = self._model.create_chat_completion(
+        kwargs: dict = dict(
             messages=msgs,
             max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
@@ -211,9 +230,50 @@ class LlamaCppEngine(InferenceEngine):
             repeat_penalty=cfg.repeat_penalty,
             stop=cfg.stop,
         )
+        if tools:
+            # llama-cpp-python >= 0.3.0 forwards ``tools`` into the chat
+            # template and parses tool calls back into the response.
+            kwargs["tools"] = tools
+
+        t0 = time.perf_counter()
+        try:
+            output = self._model.create_chat_completion(**kwargs)
+        except TypeError:
+            # Older llama-cpp-python without ``tools`` support — fall back
+            # so the caller's text-based parser can still extract calls.
+            kwargs.pop("tools", None)
+            output = self._model.create_chat_completion(**kwargs)
         elapsed = time.perf_counter() - t0
 
-        text = output["choices"][0]["message"]["content"]
+        message = output["choices"][0].get("message", {})
+        text = message.get("content") or ""
+        tool_calls = message.get("tool_calls")
+
+        # Normalise tool_calls shape: llama-cpp-python may return
+        # [{"id": ..., "type": "function", "function": {"name", "arguments"}}]
+        # with ``arguments`` as a JSON string. We want a parsed dict.
+        normalised_tool_calls: list[dict] | None = None
+        if tool_calls:
+            import json as _json
+
+            normalised_tool_calls = []
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = _json.loads(args)
+                    except (ValueError, TypeError):
+                        args = {}
+                normalised_tool_calls.append(
+                    {
+                        "function": {
+                            "name": fn.get("name", ""),
+                            "arguments": args or {},
+                        }
+                    }
+                )
+
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
 
@@ -222,17 +282,19 @@ class LlamaCppEngine(InferenceEngine):
             tokens_generated=n_gen,
             tokens_prompt=usage.get("prompt_tokens", 0),
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
+            tool_calls=normalised_tool_calls,
         )
 
     def chat_stream(
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         cfg = config or GenerationConfig()
-        msgs = [{"role": m.role, "content": m.content} for m in messages]
+        msgs = self._messages_to_llama_cpp(messages)
 
-        for chunk in self._model.create_chat_completion(
+        kwargs: dict = dict(
             messages=msgs,
             max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
@@ -241,7 +303,17 @@ class LlamaCppEngine(InferenceEngine):
             repeat_penalty=cfg.repeat_penalty,
             stop=cfg.stop,
             stream=True,
-        ):
+        )
+        if tools:
+            kwargs["tools"] = tools
+
+        try:
+            iterator = self._model.create_chat_completion(**kwargs)
+        except TypeError:
+            kwargs.pop("tools", None)
+            iterator = self._model.create_chat_completion(**kwargs)
+
+        for chunk in iterator:
             delta = chunk["choices"][0].get("delta", {})
             text = delta.get("content", "")
             if text:

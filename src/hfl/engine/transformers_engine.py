@@ -119,18 +119,43 @@ class TransformersEngine(InferenceEngine):
             except Exception:
                 pass  # Ignore if torch not available or CUDA errors
 
-    def _build_prompt(self, messages: list[ChatMessage]) -> str:
-        """Builds the prompt using the tokenizer's chat template."""
-        msgs = [{"role": m.role, "content": m.content} for m in messages]
+    def _build_prompt(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+    ) -> str:
+        """Builds the prompt using the tokenizer's chat template.
+
+        When ``tools`` is provided, they are forwarded to the tokenizer's
+        ``apply_chat_template`` so models that have tool-aware templates
+        (qwen, llama3, mistral, ...) emit their native tool-call markers.
+        """
+        msgs: list[dict] = []
+        for m in messages:
+            entry: dict = {"role": m.role, "content": m.content or ""}
+            if m.tool_calls:
+                entry["tool_calls"] = m.tool_calls
+            if m.name:
+                entry["name"] = m.name
+            if m.tool_call_id:
+                entry["tool_call_id"] = m.tool_call_id
+            msgs.append(entry)
 
         if hasattr(self._tokenizer, "apply_chat_template"):
-            return self._tokenizer.apply_chat_template(
-                msgs,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            template_kwargs: dict = {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+            if tools:
+                template_kwargs["tools"] = tools
+            try:
+                return self._tokenizer.apply_chat_template(msgs, **template_kwargs)
+            except TypeError:
+                # Older transformers / templates without ``tools`` kwarg
+                template_kwargs.pop("tools", None)
+                return self._tokenizer.apply_chat_template(msgs, **template_kwargs)
 
-        # Generic fallback
+        # Generic fallback (no template, no tool awareness)
         parts = []
         for m in messages:
             if m.role == "system":
@@ -138,7 +163,9 @@ class TransformersEngine(InferenceEngine):
             elif m.role == "user":
                 parts.append(f"[INST] {m.content} [/INST]")
             elif m.role == "assistant":
-                parts.append(m.content)
+                parts.append(m.content or "")
+            elif m.role == "tool":
+                parts.append(f"[TOOL {m.name}] {m.content or ''}")
         return "\n".join(parts)
 
     def generate(
@@ -218,16 +245,18 @@ class TransformersEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> GenerationResult:
-        prompt = self._build_prompt(messages)
+        prompt = self._build_prompt(messages, tools=tools)
         return self.generate(prompt, config)
 
     def chat_stream(
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
-        prompt = self._build_prompt(messages)
+        prompt = self._build_prompt(messages, tools=tools)
         return self.generate_stream(prompt, config)
 
     @property
