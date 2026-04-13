@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-04-13
+
+Completes Gemma 4 support by teaching HFL to parse the family's
+native tool-call format. Without this fix, calling a tool with
+``tools=[...]`` on a Gemma 4 model returned no structured tool_calls
+and the model would hallucinate a fabricated tool response in the
+content field.
+
+### Fixed
+
+- **Gemma 4 tool calls were dropped and the model hallucinated
+  results** (`src/hfl/api/tool_parsers.py`,
+  `src/hfl/engine/llama_cpp.py`). Gemma 4 emits tool calls in a
+  split-pipe DSL that is not JSON:
+  ``<|tool_call>call:NAME{key:<|"|>string<|"|>,num:42}<tool_call|>``.
+  Strings are bracketed by the dedicated ``<|"|>`` token (ID 110 in
+  the Gemma 4 vocabulary), keys are bare identifiers, and numbers /
+  booleans / null are written without quotes. llama-cpp-python 0.3.x
+  has no parser for this format, so ``message.tool_calls`` came back
+  as ``None`` and the DSL landed raw in ``content``.
+  - New ``parse_gemma4`` in ``hfl.api.tool_parsers``. Splits the body
+    on the ``<|"|>`` delimiter and walks alternating outside / inside
+    segments so colons inside string values (e.g. URLs) don't confuse
+    the bare-key transformer. Handles nested objects, numbers,
+    booleans and ``null``; falls back to empty arguments rather than
+    dropping a malformed call entirely so the caller can still see
+    which function was invoked.
+  - ``_detect_family`` now returns ``"gemma4"`` for model names
+    containing ``gemma-4`` / ``gemma4`` / ``gemma 4``, and
+    ``dispatch`` routes such calls through the new parser. Earlier
+    Gemma versions (2, 3) are deliberately NOT routed — they use a
+    different output format and would be mis-parsed.
+- **Model hallucinated a tool response and kept generating after the
+  call** (`src/hfl/engine/llama_cpp.py`). Without a stop token on the
+  ``<tool_call|>`` marker, the model emitted ``<|tool_response>``
+  tokens and synthesised a fake result. ``LlamaCppEngine`` now builds
+  the ``stop`` list via a new ``_build_stop_list()`` helper that
+  appends ``<tool_call|>`` whenever ``tools`` is non-empty and the
+  architecture is ``gemma4``. Caller-supplied stops are preserved.
+- **Channel-marker filter was eating tool payload before it reached
+  the parser** (`src/hfl/engine/llama_cpp.py`). The non-streaming
+  regex and the streaming state machine both used to strip
+  ``<|tool>`` / ``<|tool_call>`` / ``<|tool_response>`` and their
+  closers as generic "open" / "close" markers. That removed the
+  envelope before ``parse_gemma4`` could see it, so routes_native's
+  ``parse_tool_calls`` call site found nothing and returned zero tool
+  calls even when the model had emitted one.
+  - ``_GEMMA4_OPEN_MARKER`` / ``_GEMMA4_CLOSE_MARKER`` regexes now
+    exclude the tool group entirely (``<|channel|turn>`` only).
+  - ``_GEMMA4_STREAM_MARKERS`` drops the tool entries so the stream
+    filter lets them pass through as plain text (character-by-
+    character fallthrough) and the route can re-parse the accumulated
+    stream at ``done: true``.
+
+### Tests
+
+- 10 new tests in ``tests/test_tool_parsers.py`` covering:
+  - Real-world single call captured from the bartowski GGUF during
+    the incident.
+  - Truncated-by-``stop`` variant where ``<tool_call|>`` was consumed
+    and the regex must anchor at end-of-string.
+  - Numeric / boolean / null values.
+  - Nested object arguments.
+  - String values with internal colons (URL regression guard).
+  - Passthrough of tool-free replies.
+  - Multiple tool calls in one generation.
+  - Malformed body → empty arguments but function name surfaced.
+  - ``dispatch`` routing by model-name substring (gemma-4 → parser,
+    gemma-2 → NOT routed).
+
 ## [0.3.1] - 2026-04-13
 
 Stability fixes for the Gemma 4 family, triggered by a real incident
