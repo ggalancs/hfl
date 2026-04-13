@@ -13,7 +13,7 @@ import asyncio
 import functools
 import random
 import time
-from typing import Callable, ParamSpec, Type, TypeVar
+from typing import Awaitable, Callable, ParamSpec, Type, TypeVar, cast
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -82,10 +82,16 @@ def with_retry(
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             last_exception: Exception | None = None
             delay = base_delay
+            # This wrapper is only installed when ``func`` is an
+            # async function (see the dispatch below), but the outer
+            # decorator is generic over ``Callable[P, T]`` and can't
+            # express that. Cast once so mypy can type-check the
+            # await correctly instead of seeing a ``T``-typed value.
+            async_func = cast(Callable[P, Awaitable[T]], func)
 
             for attempt in range(max_retries + 1):
                 try:
-                    return await func(*args, **kwargs)
+                    return await async_func(*args, **kwargs)
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_retries:

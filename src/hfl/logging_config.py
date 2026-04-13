@@ -138,6 +138,7 @@ def configure_logging(
     logger.handlers.clear()
 
     # Choose formatter
+    formatter: logging.Formatter
     if json_format:
         formatter = StructuredFormatter()
     else:
