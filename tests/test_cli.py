@@ -43,11 +43,13 @@ class TestVersionCommand:
 
     def test_version(self, runner, cli_app):
         """Verifies version command."""
+        from hfl import __version__
+
         result = runner.invoke(cli_app, ["version"])
 
         assert result.exit_code == 0
         assert "hfl" in result.stdout
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
         assert "HRUL" in result.stdout  # License reference
 
 
@@ -1021,13 +1023,14 @@ class TestDebugCommand:
 
     def test_debug_shows_hfl_version(self, runner, temp_config):
         """Debug command shows HFL version."""
+        from hfl import __version__
         from hfl.cli.main import app
 
         result = runner.invoke(app, ["debug"])
 
         assert result.exit_code == 0
         assert "HFL" in result.stdout
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
 
     def test_debug_shows_dependencies(self, runner, temp_config):
         """Debug command shows dependencies."""
