@@ -159,8 +159,7 @@ class HFLConfig:
     # ``queue_acquire_timeout_seconds`` caps how long a caller may wait
     # for a slot before giving up with 503.
     queue_enabled: bool = field(
-        default_factory=lambda: os.environ.get("HFL_QUEUE_ENABLED", "true").lower()
-        == "true"
+        default_factory=lambda: os.environ.get("HFL_QUEUE_ENABLED", "true").lower() == "true"
     )
     queue_max_inflight: int = field(
         default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_INFLIGHT", "1"))
@@ -169,9 +168,7 @@ class HFLConfig:
         default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_SIZE", "16"))
     )
     queue_acquire_timeout_seconds: float = field(
-        default_factory=lambda: float(
-            os.environ.get("HFL_QUEUE_ACQUIRE_TIMEOUT", "60")
-        )
+        default_factory=lambda: float(os.environ.get("HFL_QUEUE_ACQUIRE_TIMEOUT", "60"))
     )
 
     # Retry settings

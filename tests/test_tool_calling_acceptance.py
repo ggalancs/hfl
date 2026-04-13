@@ -30,7 +30,6 @@ from hfl.api.server import app
 from hfl.api.state import get_state
 from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 
-
 pytestmark = pytest.mark.acceptance
 
 
@@ -99,9 +98,7 @@ def fake_engine_factory():
 
     installed: list[FakeEngine] = []
 
-    def _install(
-        script: list[str], model_name: str = "qwen3-32b-q4_k_m"
-    ) -> FakeEngine:
+    def _install(script: list[str], model_name: str = "qwen3-32b-q4_k_m") -> FakeEngine:
         eng = FakeEngine(script=script)
         mock_model = MagicMock()
         mock_model.name = model_name
@@ -225,9 +222,7 @@ class TestT2ToolCallExposed:
                 "messages": [
                     {
                         "role": "system",
-                        "content": (
-                            "You MUST call write_wiki, never respond with text."
-                        ),
+                        "content": ("You MUST call write_wiki, never respond with text."),
                     },
                     {
                         "role": "user",
@@ -348,9 +343,7 @@ class TestT4EmptyTools:
 
 
 class TestT5StreamingToolCalls:
-    def test_streaming_final_chunk_has_tool_calls(
-        self, client, fake_engine_factory
-    ):
+    def test_streaming_final_chunk_has_tool_calls(self, client, fake_engine_factory):
         fake_engine_factory([QWEN_TOOL_OUTPUT])
         with client.stream(
             "POST",

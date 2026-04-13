@@ -122,9 +122,7 @@ class TestDeterministicAuth:
         assert resp.status_code == 401
 
         # With correct header -> 200 (or 500 if registry empty, but not 401)
-        resp = client.get(
-            "/api/tags", headers={"Authorization": "Bearer secret"}
-        )
+        resp = client.get("/api/tags", headers={"Authorization": "Bearer secret"})
         assert resp.status_code != 401
 
     def test_tags_is_open_when_no_key(self):

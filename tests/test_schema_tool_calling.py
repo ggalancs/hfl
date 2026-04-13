@@ -85,9 +85,7 @@ class TestChatRequestTools:
 
 class TestToolRoleMessage:
     def test_tool_message_roundtrip(self):
-        msg = OllamaChatMessage(
-            role="tool", name="get_weather", content="22C sunny"
-        )
+        msg = OllamaChatMessage(role="tool", name="get_weather", content="22C sunny")
         assert msg.role == "tool"
         assert msg.name == "get_weather"
         assert msg.content == "22C sunny"

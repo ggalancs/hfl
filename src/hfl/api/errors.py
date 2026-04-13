@@ -17,7 +17,6 @@ from pydantic import BaseModel
 
 from hfl.logging_config import get_request_id
 
-
 ErrorCategory = str  # one of: "auth" | "rate_limit" | "validation" |
 #                     "not_found" | "engine" | "timeout" | "internal"
 

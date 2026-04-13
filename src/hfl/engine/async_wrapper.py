@@ -114,6 +114,7 @@ class AsyncEngineWrapper:
         Returns:
             GenerationResult with the response and metadata.
         """
+
         def _run() -> "GenerationResult":
             if tools is not None:
                 try:
@@ -211,9 +212,7 @@ class AsyncEngineWrapper:
             try:
                 if tools is not None:
                     try:
-                        stream = self._engine.chat_stream(
-                            messages, config, tools=tools
-                        )
+                        stream = self._engine.chat_stream(messages, config, tools=tools)
                     except TypeError:
                         stream = self._engine.chat_stream(messages, config)
                 else:

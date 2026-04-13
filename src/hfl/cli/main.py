@@ -604,7 +604,9 @@ def search(
             }
             # direction parameter was removed in newer huggingface_hub versions
             try:
-                models = list(api.list_models(**kwargs, direction=-1))  # type: ignore[call-arg]
+                models = list(
+                    api.list_models(**kwargs, direction=-1)  # type: ignore[call-arg,unused-ignore]
+                )
             except TypeError:
                 models = list(api.list_models(**kwargs))
     except Exception as e:

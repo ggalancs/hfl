@@ -15,14 +15,15 @@ Covers:
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
 
-from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
+from hfl.engine.base import ChatMessage, GenerationResult
 from hfl.engine.prompt_builder import PromptBuilder, PromptFormat
 
+_HAS_LLAMA_CPP = importlib.util.find_spec("llama_cpp") is not None
 
 TOOL_SPEC = [
     {
@@ -125,6 +126,15 @@ class TestTransformersEngineTools:
         assert call_kwargs["tools"] == TOOL_SPEC
 
 
+# The LlamaCppEngine suite below needs ``llama_cpp`` importable. CI's
+# default ``[dev]`` install does not include the ``[llama]`` extra, so
+# we skip the whole class in environments without it. The rest of the
+# tool-calling test surface is exercised by the transformers, failover,
+# and prompt-builder cases above.
+@pytest.mark.skipif(
+    not _HAS_LLAMA_CPP,
+    reason="llama-cpp-python not installed (optional [llama] extra)",
+)
 class TestLlamaCppEngineTools:
     def _engine_with_fake_model(self, output: dict):
         from hfl.engine.llama_cpp import LlamaCppEngine
@@ -157,9 +167,7 @@ class TestLlamaCppEngineTools:
                 "usage": {"completion_tokens": 5, "prompt_tokens": 10},
             }
         )
-        result = engine.chat(
-            [ChatMessage(role="user", content="hi")], tools=TOOL_SPEC
-        )
+        result = engine.chat([ChatMessage(role="user", content="hi")], tools=TOOL_SPEC)
         call_kwargs = engine._model.create_chat_completion.call_args.kwargs
         assert call_kwargs["tools"] == TOOL_SPEC
         assert result.tool_calls is not None
@@ -188,9 +196,7 @@ class TestLlamaCppEngineTools:
             }
 
         engine._model.create_chat_completion.side_effect = _ccc
-        result = engine.chat(
-            [ChatMessage(role="user", content="hi")], tools=TOOL_SPEC
-        )
+        result = engine.chat([ChatMessage(role="user", content="hi")], tools=TOOL_SPEC)
         assert len(calls) == 2
         assert "tools" in calls[0]
         assert "tools" not in calls[1]

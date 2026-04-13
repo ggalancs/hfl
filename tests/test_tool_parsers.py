@@ -15,7 +15,6 @@ from hfl.api.tool_parsers import (
     parse_qwen,
 )
 
-
 TOOLS = [
     {
         "type": "function",
@@ -57,7 +56,9 @@ class TestQwen:
     def test_thinking_block_is_stripped(self):
         text = (
             "<think>I should call it</think>\n"
-            '<tool_call>{"name": "write_wiki", "arguments": {"path": "a", "content": "b"}}</tool_call>'
+            "<tool_call>"
+            '{"name": "write_wiki", "arguments": {"path": "a", "content": "b"}}'
+            "</tool_call>"
         )
         cleaned, calls = parse_qwen(text)
         assert "think" not in cleaned.lower()
@@ -98,9 +99,7 @@ class TestLlama3:
         assert calls[0]["function"]["name"] == "write_wiki"
 
     def test_function_tag(self):
-        text = (
-            '<function=write_wiki>{"path": "a", "content": "b"}</function>'
-        )
+        text = '<function=write_wiki>{"path": "a", "content": "b"}</function>'
         cleaned, calls = parse_llama3(text)
         assert cleaned == ""
         assert calls[0]["function"]["name"] == "write_wiki"
@@ -117,20 +116,14 @@ class TestLlama3:
 
 class TestMistral:
     def test_tool_calls_array(self):
-        text = (
-            '[TOOL_CALLS][{"name": "write_wiki", '
-            '"arguments": {"path": "a", "content": "b"}}]'
-        )
+        text = '[TOOL_CALLS][{"name": "write_wiki", "arguments": {"path": "a", "content": "b"}}]'
         cleaned, calls = parse_mistral(text)
         assert cleaned == ""
         assert calls[0]["function"]["name"] == "write_wiki"
         assert calls[0]["function"]["arguments"] == {"path": "a", "content": "b"}
 
     def test_multiple_in_one_array(self):
-        text = (
-            '[TOOL_CALLS][{"name": "a", "arguments": {}}, '
-            '{"name": "b", "arguments": {"x": 1}}]'
-        )
+        text = '[TOOL_CALLS][{"name": "a", "arguments": {}}, {"name": "b", "arguments": {"x": 1}}]'
         _, calls = parse_mistral(text)
         assert [c["function"]["name"] for c in calls] == ["a", "b"]
 
@@ -185,9 +178,7 @@ class TestDispatch:
         assert cleaned == ""
 
     def test_routes_to_llama3(self):
-        text = (
-            '<|python_tag|>{"name": "x", "parameters": {"a": 1}}<|eom_id|>'
-        )
+        text = '<|python_tag|>{"name": "x", "parameters": {"a": 1}}<|eom_id|>'
         _, calls = dispatch(text, model_name="llama-3.2-70b", tools=TOOLS)
         assert calls[0]["function"]["arguments"] == {"a": 1}
 
@@ -205,9 +196,7 @@ class TestDispatch:
             '{"tool_call": {"name": "write_wiki", "args": '
             '{"path": "topics/hello.md", "content": "Hello world."}}}'
         )
-        cleaned, calls = dispatch(
-            text, model_name="qwen3-32b-q4_k_m", tools=TOOLS
-        )
+        cleaned, calls = dispatch(text, model_name="qwen3-32b-q4_k_m", tools=TOOLS)
         assert len(calls) == 1
         assert calls[0]["function"]["name"] == "write_wiki"
         assert calls[0]["function"]["arguments"]["path"] == "topics/hello.md"

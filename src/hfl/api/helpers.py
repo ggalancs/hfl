@@ -11,13 +11,18 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from hfl.api.state import get_state
+
+if TYPE_CHECKING:
+    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.config import config
 from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.base import GenerationConfig
@@ -107,9 +112,7 @@ async def run_dispatched(
     from hfl.core import get_dispatcher
 
     dispatcher = get_dispatcher()
-    effective_timeout = (
-        timeout if timeout is not None else config.generation_timeout
-    )
+    effective_timeout = timeout if timeout is not None else config.generation_timeout
 
     async def _execute() -> T:
         try:
@@ -128,16 +131,19 @@ async def run_dispatched(
                 },
             )
 
-    return await dispatcher.run(_execute)
+    # ``dispatcher.run`` is generic and mypy loses the concrete ``T``
+    # across the boundary; cast back so route handlers keep their
+    # precise return type.
+    return cast(T, await dispatcher.run(_execute))
 
 
-async def acquire_stream_slot() -> Any:
+async def acquire_stream_slot() -> "AbstractAsyncContextManager[None] | JSONResponse":
     """Pre-acquire a dispatcher slot for a streaming endpoint.
 
     Returns either an already-entered async context manager (when
     acquisition succeeded) or a :class:`~fastapi.responses.JSONResponse`
     carrying a structured 429 / 503 envelope (spec §5.3). Route handlers
-    check ``hasattr(result, "__aexit__")`` to tell them apart.
+    should branch on ``isinstance(result, JSONResponse)``.
     """
     from hfl.api.errors import queue_full, queue_timeout
     from hfl.core import get_dispatcher
@@ -158,14 +164,18 @@ async def acquire_stream_slot() -> Any:
     return cm
 
 
-def queue_response_from_error(exc: BaseException) -> Any | None:
+def queue_response_from_error(
+    exc: "QueueFullError | QueueTimeoutError",
+) -> JSONResponse:
     """Map a dispatcher exception to a pre-built JSONResponse.
 
-    Returns ``None`` when ``exc`` is not a dispatcher rejection, so
-    callers can ``return queue_response_from_error(exc) or raise``.
+    The parameter is deliberately narrowed to the two dispatcher
+    rejection types so route handlers can ``return
+    queue_response_from_error(exc)`` from an ``except`` block without
+    mypy complaining about a leaking ``None``.
     """
     from hfl.api.errors import queue_full, queue_timeout
-    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
+    from hfl.engine.dispatcher import QueueFullError
 
     if isinstance(exc, QueueFullError):
         return queue_full(
@@ -173,9 +183,7 @@ def queue_response_from_error(exc: BaseException) -> Any | None:
             depth=exc.depth,
             max_queued=exc.max_queued,
         )
-    if isinstance(exc, QueueTimeoutError):
-        return queue_timeout(waited_seconds=exc.waited_seconds)
-    return None
+    return queue_timeout(waited_seconds=exc.waited_seconds)
 
 
 async def run_async_with_timeout(

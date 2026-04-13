@@ -52,9 +52,7 @@ class QueueFullError(Exception):
         self.depth = depth
         self.max_queued = max_queued
         self.retry_after_seconds = retry_after
-        super().__init__(
-            f"inference queue full (depth={depth}, max={max_queued})"
-        )
+        super().__init__(f"inference queue full (depth={depth}, max={max_queued})")
 
 
 class QueueTimeoutError(Exception):
@@ -65,9 +63,7 @@ class QueueTimeoutError(Exception):
 
     def __init__(self, waited_seconds: float):
         self.waited_seconds = waited_seconds
-        super().__init__(
-            f"dispatcher slot acquire timed out after {waited_seconds:.1f}s"
-        )
+        super().__init__(f"dispatcher slot acquire timed out after {waited_seconds:.1f}s")
 
 
 @dataclass(frozen=True)
@@ -207,16 +203,12 @@ class InferenceDispatcher:
                 self._accepted_total += 1
         else:
             try:
-                await asyncio.wait_for(
-                    self._sem.acquire(), timeout=self._acquire_timeout
-                )
+                await asyncio.wait_for(self._sem.acquire(), timeout=self._acquire_timeout)
             except asyncio.TimeoutError:
                 async with self._counter_lock:
                     self._depth -= 1
                     self._rejected_timeout_total += 1
-                raise QueueTimeoutError(
-                    waited_seconds=time.monotonic() - start
-                )
+                raise QueueTimeoutError(waited_seconds=time.monotonic() - start)
             except BaseException:
                 async with self._counter_lock:
                     self._depth -= 1

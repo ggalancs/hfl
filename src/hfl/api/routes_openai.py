@@ -12,7 +12,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
 from fastapi import APIRouter
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.converters import openai_to_generation_config
 from hfl.api.errors import service_unavailable
@@ -82,7 +82,7 @@ async def chat_completions(
 
     if req.stream:
         slot_or_response = await acquire_stream_slot()
-        if not hasattr(slot_or_response, "__aexit__"):
+        if isinstance(slot_or_response, JSONResponse):
             return slot_or_response
         return StreamingResponse(
             _stream_chat(req.model, messages, gen_config, slot_or_response),
@@ -219,7 +219,7 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
 
     if req.stream:
         slot_or_response = await acquire_stream_slot()
-        if not hasattr(slot_or_response, "__aexit__"):
+        if isinstance(slot_or_response, JSONResponse):
             return slot_or_response
         return StreamingResponse(
             _stream_completion(req.model, prompt, gen_config, slot_or_response),

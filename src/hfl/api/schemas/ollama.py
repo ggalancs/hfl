@@ -91,9 +91,7 @@ class OllamaChatMessage(BaseModel):
                 raise ValueError(f"{self.role} messages must include 'content'")
         else:  # assistant
             if self.content is None and not self.tool_calls:
-                raise ValueError(
-                    "assistant messages must include 'content' or 'tool_calls'"
-                )
+                raise ValueError("assistant messages must include 'content' or 'tool_calls'")
             if self.content is None:
                 # Canonical wire: empty string when only tool_calls
                 self.content = ""

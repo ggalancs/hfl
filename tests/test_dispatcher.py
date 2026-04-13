@@ -27,7 +27,6 @@ from hfl.engine.dispatcher import (
     build_default_dispatcher,
 )
 
-
 # --- Construction -------------------------------------------------------------
 
 
@@ -246,9 +245,7 @@ class TestQueueFull:
 
 class TestAcquireTimeout:
     async def test_slot_acquire_times_out(self):
-        d = InferenceDispatcher(
-            max_inflight=1, max_queued=4, acquire_timeout=0.1
-        )
+        d = InferenceDispatcher(max_inflight=1, max_queued=4, acquire_timeout=0.1)
         gate = asyncio.Event()
 
         async def _slow():
@@ -276,9 +273,7 @@ class TestAcquireTimeout:
 
 class TestCancellation:
     async def test_cancel_while_waiting_releases_depth(self):
-        d = InferenceDispatcher(
-            max_inflight=1, max_queued=4, acquire_timeout=5
-        )
+        d = InferenceDispatcher(max_inflight=1, max_queued=4, acquire_timeout=5)
         gate = asyncio.Event()
 
         async def _slow():
@@ -394,9 +389,7 @@ class TestStreamingShape:
                 # Pretend to yield tokens for a while.
                 await asyncio.sleep(0)
                 await stream_midpoint.wait()
-                assert not other_done.is_set(), (
-                    "another caller ran while we held the slot"
-                )
+                assert not other_done.is_set(), "another caller ran while we held the slot"
 
         async def _other():
             async with d.slot():

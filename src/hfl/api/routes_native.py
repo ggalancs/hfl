@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
@@ -149,7 +149,7 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingRespon
 
     if req.stream:
         slot_or_response = await acquire_stream_slot()
-        if not hasattr(slot_or_response, "__aexit__"):
+        if isinstance(slot_or_response, JSONResponse):
             # Queue rejection — ``slot_or_response`` is already a
             # JSONResponse carrying the 429/503 envelope.
             return slot_or_response
@@ -263,12 +263,10 @@ async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Res
 
     if req.stream:
         slot_or_response = await acquire_stream_slot()
-        if not hasattr(slot_or_response, "__aexit__"):
+        if isinstance(slot_or_response, JSONResponse):
             return slot_or_response
         return StreamingResponse(
-            _stream_chat(
-                req.model, messages, gen_config, tools, slot_or_response
-            ),
+            _stream_chat(req.model, messages, gen_config, tools, slot_or_response),
             media_type="application/x-ndjson",
         )
 

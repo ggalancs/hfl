@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Iterator
+from typing import Iterator
 from unittest.mock import MagicMock
 
 import httpx
@@ -36,7 +36,6 @@ from hfl.api.state import get_state
 from hfl.core import get_container
 from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 from hfl.engine.dispatcher import InferenceDispatcher
-
 
 pytestmark = pytest.mark.acceptance
 
@@ -190,9 +189,7 @@ def _reset():
 @pytest.fixture
 async def aclient():
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
 
@@ -231,9 +228,7 @@ class TestSoak:
 
 class TestExceptionRecovery:
     async def test_alternating_failures_do_not_leak_slots(self, aclient):
-        eng, d = _install(
-            delay=0.01, mode="alternating", max_inflight=2, max_queued=32
-        )
+        eng, d = _install(delay=0.01, mode="alternating", max_inflight=2, max_queued=32)
 
         async def _call(i: int):
             return await aclient.post(
@@ -294,8 +289,7 @@ class TestStability:
             reset_rate_limiter()
             results = await _pair()
             assert all(r.status_code == 200 for r in results), (
-                f"iteration {i}: statuses "
-                f"{[r.status_code for r in results]}"
+                f"iteration {i}: statuses {[r.status_code for r in results]}"
             )
 
         snap = d.snapshot()

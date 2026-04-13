@@ -28,11 +28,9 @@ import pytest
 from hfl.api.middleware import reset_rate_limiter
 from hfl.api.server import app
 from hfl.api.state import get_state
-from hfl.config import config as hfl_config
-from hfl.core import get_container, get_dispatcher
+from hfl.core import get_container
 from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 from hfl.engine.dispatcher import InferenceDispatcher
-
 
 # --- Fake engine --------------------------------------------------------------
 
@@ -178,9 +176,7 @@ async def aclient():
     # route-handler exceptions into 500 responses, mirroring the real
     # Uvicorn behaviour and letting us assert on status codes.
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
 
@@ -258,9 +254,7 @@ class TestQueueFull:
                 },
             )
 
-        responses = await asyncio.gather(
-            _call(), _call(), _call(), return_exceptions=True
-        )
+        responses = await asyncio.gather(_call(), _call(), _call(), return_exceptions=True)
         statuses = sorted(r.status_code for r in responses)
         assert statuses == [200, 200, 429], statuses
 
@@ -285,9 +279,7 @@ class TestQueueTimeout:
         ``QUEUE_TIMEOUT`` 503 when the first call takes longer than the
         acquire cap."""
         _install_fake_engine(delay=0.3)
-        _install_dispatcher(
-            max_inflight=1, max_queued=4, acquire_timeout=0.1
-        )
+        _install_dispatcher(max_inflight=1, max_queued=4, acquire_timeout=0.1)
 
         async def _call():
             return await aclient.post(
@@ -456,9 +448,7 @@ class TestStreamingHoldsSlot:
 
         # Fire 3 streams in parallel. With 1 in-flight + 1 queued slot,
         # the third must be rejected.
-        results = await asyncio.gather(
-            _stream_once(), _stream_once(), _stream_once()
-        )
+        results = await asyncio.gather(_stream_once(), _stream_once(), _stream_once())
         statuses = sorted([r for r in results if isinstance(r, int)])
         assert statuses.count(200) == 2
         assert statuses.count(429) == 1
