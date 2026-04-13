@@ -45,6 +45,33 @@ class TestEnvConfig:
             cfg = HFLConfig()
             assert cfg.rate_limit_requests == 100
 
+    def test_dispatcher_defaults(self):
+        """Default dispatcher values match the spec §5.3 guidance:
+        serialize to 1 in-flight with a 16-slot wait queue and 60 s
+        acquire cap."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.queue_enabled is True
+            assert cfg.queue_max_inflight == 1
+            assert cfg.queue_max_size == 16
+            assert cfg.queue_acquire_timeout_seconds == 60.0
+
+    def test_dispatcher_env_overrides(self):
+        with patch.dict(
+            os.environ,
+            {
+                "HFL_QUEUE_ENABLED": "false",
+                "HFL_QUEUE_MAX_INFLIGHT": "4",
+                "HFL_QUEUE_MAX_SIZE": "100",
+                "HFL_QUEUE_ACQUIRE_TIMEOUT": "30",
+            },
+        ):
+            cfg = HFLConfig()
+            assert cfg.queue_enabled is False
+            assert cfg.queue_max_inflight == 4
+            assert cfg.queue_max_size == 100
+            assert cfg.queue_acquire_timeout_seconds == 30.0
+
 
 class TestSLOValidation:
     def test_valid_defaults(self):

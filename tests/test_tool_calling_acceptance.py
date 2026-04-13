@@ -382,7 +382,44 @@ class TestT5StreamingToolCalls:
         assert msg["content"] == ""
 
 
-# T6 (rate-limit headers) and T7 (structured error envelope) are covered
-# by the operational hardening suite in ``tests/test_operational_contract.py``
-# since they exercise middleware/error-envelope features rather than tool
-# calling proper. Keeping them here would duplicate coverage.
+# --- T6: rate-limit headers present on every response ------------------------
+
+
+class TestT6RateLimitHeaders:
+    def test_all_four_headers_present(self, client):
+        resp = client.get("/api/version")
+        headers = {k.lower(): v for k, v in resp.headers.items()}
+        for h in (
+            "x-ratelimit-limit",
+            "x-ratelimit-remaining",
+            "x-ratelimit-reset",
+            "x-ratelimit-window",
+        ):
+            assert h in headers, f"missing rate-limit header: {h}"
+
+
+# --- T7: structured error envelope with code/category/retryable --------------
+
+
+class TestT7ErrorEnvelope:
+    def test_unauthorized_envelope(self, client):
+        get_state().api_key = "expected-key"
+        resp = client.post(
+            "/api/chat",
+            headers={"Authorization": "Bearer wrong-token"},
+            json={
+                "model": "qwen3-32b-q4_k_m",
+                "stream": False,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        assert resp.status_code == 401
+        body = resp.json()
+        err = body.get("error")
+        assert isinstance(err, dict), f"error must be structured dict: {err!r}"
+        for k in ("error", "code", "category", "retryable"):
+            assert k in err, f"error missing {k}"
+        assert err["code"] == "UNAUTHORIZED"
+        assert err["category"] == "auth"
+        assert err["retryable"] is False
+        get_state().api_key = None

@@ -5,6 +5,7 @@ Endpoints compatible with the Ollama native API.
 Allows using hfl as a drop-in replacement for Ollama.
 """
 
+import contextlib
 import json
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -14,11 +15,16 @@ from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
-from hfl.api.helpers import run_with_timeout
+from hfl.api.helpers import (
+    acquire_stream_slot,
+    queue_response_from_error,
+    run_dispatched,
+)
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -142,15 +148,27 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingRespon
     gen_config = _options_to_config(req.options)
 
     if req.stream:
+        slot_or_response = await acquire_stream_slot()
+        if not hasattr(slot_or_response, "__aexit__"):
+            # Queue rejection — ``slot_or_response`` is already a
+            # JSONResponse carrying the 429/503 envelope.
+            return slot_or_response
         return StreamingResponse(
-            _stream_generate(req.model, req.prompt, gen_config),
+            _stream_generate(req.model, req.prompt, gen_config, slot_or_response),
             media_type="application/x-ndjson",
         )
 
-    # Run sync engine call in thread pool with timeout
-    result = await run_with_timeout(
-        state.engine.generate, req.prompt, gen_config, operation="generate"
-    )
+    # Run sync engine call in thread pool with timeout, serialized by
+    # the inference dispatcher (spec §5.3).
+    try:
+        result = await run_dispatched(
+            state.engine.generate,
+            req.prompt,
+            gen_config,
+            operation="generate",
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc)
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -166,14 +184,23 @@ async def _stream_generate(
     model_name: str,
     prompt: str,
     config: GenerationConfig,
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
-    """Stream text generation in Ollama NDJSON format with backpressure."""
+    """Stream text generation in Ollama NDJSON format with backpressure.
+
+    ``slot_cm`` is an already-entered dispatcher slot context manager
+    (from :func:`_acquire_stream_slot`). It is released at the end of
+    the generator regardless of success or failure.
+    """
     from hfl.api.streaming import stream_with_backpressure
 
     state = _get_state()
     if state.engine is None:
         error = {"model": model_name, "error": "Model not loaded", "done": True}
         yield json.dumps(error) + "\n"
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
         return
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -206,6 +233,10 @@ async def _stream_generate(
     except Exception as e:
         error = {"model": model_name, "error": str(e), "done": True}
         yield json.dumps(error) + "\n"
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
 
 
 @router.post(
@@ -231,21 +262,30 @@ async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Res
     tools = _tools_payload(req)
 
     if req.stream:
+        slot_or_response = await acquire_stream_slot()
+        if not hasattr(slot_or_response, "__aexit__"):
+            return slot_or_response
         return StreamingResponse(
-            _stream_chat(req.model, messages, gen_config, tools),
+            _stream_chat(
+                req.model, messages, gen_config, tools, slot_or_response
+            ),
             media_type="application/x-ndjson",
         )
 
-    # Run sync engine call in thread pool with timeout. ``tools`` is
-    # forwarded as a kwarg so engines without tool support raise
-    # TypeError and fall back via the per-engine shim.
-    result = await run_with_timeout(
-        state.engine.chat,
-        messages,
-        gen_config,
-        tools=tools,
-        operation="chat",
-    )
+    # Run sync engine call in thread pool with timeout, serialized by
+    # the inference dispatcher (spec §5.3). ``tools`` is forwarded as a
+    # kwarg so engines without tool support raise TypeError and fall
+    # back via the per-engine shim.
+    try:
+        result = await run_dispatched(
+            state.engine.chat,
+            messages,
+            gen_config,
+            tools=tools,
+            operation="chat",
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc)
 
     message = _build_chat_message(
         raw_text=result.text,
@@ -266,12 +306,18 @@ async def _stream_chat(
     messages: list[ChatMessage],
     config: GenerationConfig,
     tools: list[dict] | None = None,
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
     """Stream chat in Ollama NDJSON format with backpressure.
 
     The full generated text is accumulated so that the final ``done: true``
     chunk can emit structured ``tool_calls`` extracted from the assembled
     output (spec rule C5). Intermediate chunks keep ``tool_calls: null``.
+
+    ``slot_cm`` is an already-entered dispatcher slot context manager
+    from :func:`_acquire_stream_slot`; it is released in ``finally``
+    regardless of outcome (spec §5.3 — a hung stream must not leak
+    capacity).
     """
     from hfl.api.streaming import stream_with_backpressure
 
@@ -279,6 +325,9 @@ async def _stream_chat(
     if state.engine is None:
         error = {"model": model_name, "error": "Model not loaded", "done": True}
         yield json.dumps(error) + "\n"
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
         return
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -332,6 +381,10 @@ async def _stream_chat(
     except Exception as e:
         error = {"model": model_name, "error": str(e), "done": True}
         yield json.dumps(error) + "\n"
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
 
 
 @router.get("/api/tags", tags=["Ollama"], summary="List local models")

@@ -150,6 +150,30 @@ class HFLConfig:
     conversion_timeout: float = 7200.0  # 2 hours
     api_request_timeout: float = 120.0  # 2 minutes
 
+    # Inference dispatcher (spec §5.3 — concurrency / queueing).
+    # Llama.cpp and transformers-GPU share a single non-reentrant model
+    # instance; concurrent requests must be serialized by a bounded
+    # in-server queue. ``queue_max_inflight`` is the number of requests
+    # that may run at once, ``queue_max_size`` is how many more may wait
+    # in line before further requests are rejected with 429, and
+    # ``queue_acquire_timeout_seconds`` caps how long a caller may wait
+    # for a slot before giving up with 503.
+    queue_enabled: bool = field(
+        default_factory=lambda: os.environ.get("HFL_QUEUE_ENABLED", "true").lower()
+        == "true"
+    )
+    queue_max_inflight: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_INFLIGHT", "1"))
+    )
+    queue_max_size: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_SIZE", "16"))
+    )
+    queue_acquire_timeout_seconds: float = field(
+        default_factory=lambda: float(
+            os.environ.get("HFL_QUEUE_ACQUIRE_TIMEOUT", "60")
+        )
+    )
+
     # Retry settings
     max_retries: int = 3
     retry_base_delay: float = 1.0

@@ -74,6 +74,21 @@ class RequestLogger(BaseHTTPMiddleware):
         # Add request ID to response headers for tracing
         response.headers["X-Request-ID"] = request_id
 
+        # Observability headers for the inference dispatcher (spec §5.3).
+        # Exposed on every response (including health/metrics paths) so
+        # monitoring dashboards and agent clients can trivially observe
+        # live backpressure state.
+        try:
+            from hfl.core import get_dispatcher
+
+            snap = get_dispatcher().snapshot()
+            response.headers["X-Queue-Depth"] = str(snap.depth)
+            response.headers["X-Queue-In-Flight"] = str(snap.in_flight)
+            response.headers["X-Queue-Max-Inflight"] = str(snap.max_inflight)
+            response.headers["X-Queue-Max-Size"] = str(snap.max_queued)
+        except Exception:  # pragma: no cover — defensive
+            pass
+
         # Log request with structured data (privacy-safe)
         # R6 - Privacy compliance: no personal data in logs
         log_request(

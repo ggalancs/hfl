@@ -5,6 +5,7 @@ Endpoints compatible with the OpenAI API.
 Drop-in replacement for applications using the OpenAI SDK.
 """
 
+import contextlib
 import json
 import time
 import uuid
@@ -15,10 +16,15 @@ from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import openai_to_generation_config
 from hfl.api.errors import service_unavailable
-from hfl.api.helpers import run_with_timeout
+from hfl.api.helpers import (
+    acquire_stream_slot,
+    queue_response_from_error,
+    run_dispatched,
+)
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -75,15 +81,25 @@ async def chat_completions(
     gen_config = _to_gen_config(req)
 
     if req.stream:
+        slot_or_response = await acquire_stream_slot()
+        if not hasattr(slot_or_response, "__aexit__"):
+            return slot_or_response
         return StreamingResponse(
-            _stream_chat(req.model, messages, gen_config),
+            _stream_chat(req.model, messages, gen_config, slot_or_response),
             media_type="text/event-stream",
         )
 
-    # Run sync engine call in thread pool with timeout
-    result = await run_with_timeout(
-        state.engine.chat, messages, gen_config, operation="chat_completion"
-    )
+    # Run sync engine call in thread pool with timeout, serialized by
+    # the inference dispatcher (spec §5.3).
+    try:
+        result = await run_dispatched(
+            state.engine.chat,
+            messages,
+            gen_config,
+            operation="chat_completion",
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc)
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -109,8 +125,13 @@ async def _stream_chat(
     model: str,
     messages: list[ChatMessage],
     config: GenerationConfig,
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
-    """Generate OpenAI-compatible SSE responses with backpressure."""
+    """Generate OpenAI-compatible SSE responses with backpressure.
+
+    ``slot_cm`` is the dispatcher slot held for the entire stream
+    (spec §5.3). It is released in ``finally`` regardless of outcome.
+    """
     from hfl.api.streaming import stream_with_backpressure
 
     state = _get_state()
@@ -122,6 +143,9 @@ async def _stream_chat(
             }
         )
         yield f"data: {err}\n\n"
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
         return
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -166,6 +190,10 @@ async def _stream_chat(
             yield chunk
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
 
 
 @router.post(
@@ -190,15 +218,25 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
     gen_config = _to_gen_config(req)
 
     if req.stream:
+        slot_or_response = await acquire_stream_slot()
+        if not hasattr(slot_or_response, "__aexit__"):
+            return slot_or_response
         return StreamingResponse(
-            _stream_completion(req.model, prompt, gen_config),
+            _stream_completion(req.model, prompt, gen_config, slot_or_response),
             media_type="text/event-stream",
         )
 
-    # Run sync engine call in thread pool with timeout
-    result = await run_with_timeout(
-        state.engine.generate, prompt, gen_config, operation="text_completion"
-    )
+    # Run sync engine call in thread pool with timeout, serialized by
+    # the inference dispatcher (spec §5.3).
+    try:
+        result = await run_dispatched(
+            state.engine.generate,
+            prompt,
+            gen_config,
+            operation="text_completion",
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc)
 
     return {
         "id": f"cmpl-{uuid.uuid4().hex[:8]}",
@@ -224,8 +262,13 @@ async def _stream_completion(
     model: str,
     prompt: str,
     config: GenerationConfig,
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
-    """Generate text completion SSE responses with backpressure."""
+    """Generate text completion SSE responses with backpressure.
+
+    ``slot_cm`` is the dispatcher slot held for the entire stream
+    (spec §5.3); it is released in ``finally``.
+    """
     from hfl.api.streaming import stream_with_backpressure
 
     state = _get_state()
@@ -237,6 +280,9 @@ async def _stream_completion(
             }
         )
         yield f"data: {err}\n\n"
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
         return
 
     completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"
@@ -265,6 +311,10 @@ async def _stream_completion(
             yield chunk
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
 
 
 @router.get("/v1/models", tags=["OpenAI"], summary="List available models")

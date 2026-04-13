@@ -43,9 +43,8 @@ async def healthz() -> JSONResponse:
 
     Returns 200 with ``status=ok`` when an LLM engine is loaded and ready,
     otherwise 503 with ``status=degraded``. The body always includes the
-    list of loaded model names, queue depth (loading models as a rough
-    proxy) and uptime so operators can monitor without scraping multiple
-    endpoints.
+    list of loaded model names, queue depth, and uptime so operators can
+    monitor without scraping multiple endpoints.
     """
     state = get_state()
     uptime = (datetime.now() - _startup_time).total_seconds()
@@ -56,9 +55,15 @@ async def healthz() -> JSONResponse:
     if state.current_tts_model is not None:
         models_loaded.append(state.current_tts_model.name)
 
+    # Live queue_depth from the inference dispatcher (spec §5.3).
     queue_depth = 0
+    queue_in_flight = 0
     try:
-        queue_depth = len(state.loading_models)
+        from hfl.core import get_dispatcher
+
+        snap = get_dispatcher().snapshot()
+        queue_depth = snap.depth
+        queue_in_flight = snap.in_flight
     except Exception:  # pragma: no cover — defensive
         pass
 
@@ -67,6 +72,7 @@ async def healthz() -> JSONResponse:
         "status": "ok" if healthy else "degraded",
         "models_loaded": models_loaded,
         "queue_depth": queue_depth,
+        "queue_in_flight": queue_in_flight,
         "uptime_seconds": uptime,
     }
     return JSONResponse(status_code=200 if healthy else 503, content=body)

@@ -81,6 +81,103 @@ async def run_with_timeout(
         )
 
 
+async def run_dispatched(
+    func: Callable[..., T],
+    *args: Any,
+    timeout: float | None = None,
+    operation: str = "operation",
+    **kwargs: Any,
+) -> T:
+    """Run a sync engine call through the inference dispatcher (spec §5.3).
+
+    This is the one-stop entry point for route handlers that want their
+    engine call to honour the queue. It:
+
+    1. Acquires a slot on the global :class:`InferenceDispatcher`.
+    2. Runs ``func`` in a thread pool (sync backends are not re-entrant
+       so the thread simply drives the engine).
+    3. Applies the generation timeout from config.
+
+    The 504 timeout path is unchanged: if the engine takes too long
+    after having been dispatched, :class:`asyncio.TimeoutError` is
+    raised. Dispatcher rejections (``QueueFullError`` /
+    ``QueueTimeoutError``) propagate unchanged so the route layer can
+    map them to 429 / 503 with the correct headers.
+    """
+    from hfl.core import get_dispatcher
+
+    dispatcher = get_dispatcher()
+    effective_timeout = (
+        timeout if timeout is not None else config.generation_timeout
+    )
+
+    async def _execute() -> T:
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(func, *args, **kwargs),
+                timeout=effective_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "error": f"{operation} timed out",
+                    "code": "TIMEOUT",
+                    "timeout_seconds": effective_timeout,
+                    "operation": operation,
+                },
+            )
+
+    return await dispatcher.run(_execute)
+
+
+async def acquire_stream_slot() -> Any:
+    """Pre-acquire a dispatcher slot for a streaming endpoint.
+
+    Returns either an already-entered async context manager (when
+    acquisition succeeded) or a :class:`~fastapi.responses.JSONResponse`
+    carrying a structured 429 / 503 envelope (spec §5.3). Route handlers
+    check ``hasattr(result, "__aexit__")`` to tell them apart.
+    """
+    from hfl.api.errors import queue_full, queue_timeout
+    from hfl.core import get_dispatcher
+    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
+
+    dispatcher = get_dispatcher()
+    cm = dispatcher.slot()
+    try:
+        await cm.__aenter__()
+    except QueueFullError as exc:
+        return queue_full(
+            retry_after=exc.retry_after_seconds,
+            depth=exc.depth,
+            max_queued=exc.max_queued,
+        )
+    except QueueTimeoutError as exc:
+        return queue_timeout(waited_seconds=exc.waited_seconds)
+    return cm
+
+
+def queue_response_from_error(exc: BaseException) -> Any | None:
+    """Map a dispatcher exception to a pre-built JSONResponse.
+
+    Returns ``None`` when ``exc`` is not a dispatcher rejection, so
+    callers can ``return queue_response_from_error(exc) or raise``.
+    """
+    from hfl.api.errors import queue_full, queue_timeout
+    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
+
+    if isinstance(exc, QueueFullError):
+        return queue_full(
+            retry_after=exc.retry_after_seconds,
+            depth=exc.depth,
+            max_queued=exc.max_queued,
+        )
+    if isinstance(exc, QueueTimeoutError):
+        return queue_timeout(waited_seconds=exc.waited_seconds)
+    return None
+
+
 async def run_async_with_timeout(
     coro: Any,
     timeout: float | None = None,

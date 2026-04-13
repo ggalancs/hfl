@@ -54,6 +54,9 @@ _ERROR_POLICY: dict[str, tuple[str, bool]] = {
     "MODEL_LOADING": ("engine", True),
     "TIMEOUT": ("engine", True),
     "INTERNAL_ERROR": ("internal", True),
+    # Spec §5.3 — inference dispatcher backpressure.
+    "QUEUE_FULL": ("rate_limit", True),
+    "QUEUE_TIMEOUT": ("engine", True),
 }
 
 
@@ -307,6 +310,47 @@ def model_loading(model_name: str) -> JSONResponse:
             category=category,
             retryable=retryable,
             details={"model": model_name},
+            request_id=get_request_id(),
+        ).model_dump(),
+        headers={"Retry-After": "5"},
+    )
+
+
+def queue_full(retry_after: int, depth: int, max_queued: int) -> JSONResponse:
+    """Create 429 response for a full inference queue (spec §5.3)."""
+    category, retryable = _policy_for("QUEUE_FULL")
+    return JSONResponse(
+        status_code=429,
+        content=ErrorDetail(
+            error="Inference queue is full",
+            code="QUEUE_FULL",
+            category=category,
+            retryable=retryable,
+            details={
+                "retry_after_seconds": retry_after,
+                "queue_depth": depth,
+                "max_queued": max_queued,
+            },
+            request_id=get_request_id(),
+        ).model_dump(),
+        headers={
+            "Retry-After": str(retry_after),
+            "X-Queue-Depth": str(depth),
+        },
+    )
+
+
+def queue_timeout(waited_seconds: float) -> JSONResponse:
+    """Create 503 response for a dispatcher slot acquire timeout."""
+    category, retryable = _policy_for("QUEUE_TIMEOUT")
+    return JSONResponse(
+        status_code=503,
+        content=ErrorDetail(
+            error="Inference server busy — slot acquire timed out",
+            code="QUEUE_TIMEOUT",
+            category=category,
+            retryable=retryable,
+            details={"waited_seconds": round(waited_seconds, 2)},
             request_id=get_request_id(),
         ).model_dump(),
         headers={"Retry-After": "5"},

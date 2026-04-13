@@ -10,6 +10,7 @@ Implemented endpoints:
   POST /v1/messages  - Create a message (streaming and non-streaming)
 """
 
+import contextlib
 import json
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -19,9 +20,14 @@ from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import anthropic_to_generation_config
 from hfl.api.errors import service_unavailable
-from hfl.api.helpers import run_with_timeout
+from hfl.api.helpers import (
+    acquire_stream_slot,
+    queue_response_from_error,
+    run_dispatched,
+)
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
 from hfl.engine.base import ChatMessage
+from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -103,16 +109,24 @@ async def create_message(
     gen_config = anthropic_to_generation_config(req)
 
     if req.stream:
+        slot_or_response = await acquire_stream_slot()
+        if not hasattr(slot_or_response, "__aexit__"):
+            return slot_or_response
         return StreamingResponse(
-            _stream_messages(model_name, messages, gen_config),
+            _stream_messages(model_name, messages, gen_config, slot_or_response),
             media_type="text/event-stream",
         )
 
-    # Non-streaming
+    # Non-streaming, serialized by the inference dispatcher (spec §5.3).
     try:
-        result = await run_with_timeout(
-            state.engine.chat, messages, gen_config, operation="anthropic_messages"
+        result = await run_dispatched(
+            state.engine.chat,
+            messages,
+            gen_config,
+            operation="anthropic_messages",
         )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc)
     except ValueError as e:
         # llama_cpp raises ValueError when tokens exceed context window
         error_msg = str(e)
@@ -152,8 +166,13 @@ async def _stream_messages(
     model: str,
     messages: list[ChatMessage],
     config: "GenerationConfig",
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
-    """Generate Anthropic-compatible SSE streaming responses."""
+    """Generate Anthropic-compatible SSE streaming responses.
+
+    ``slot_cm`` is the dispatcher slot held for the entire stream
+    (spec §5.3); it is released in ``finally``.
+    """
     from hfl.api.streaming import stream_with_backpressure
 
     state = _get_state()
@@ -162,6 +181,9 @@ async def _stream_messages(
             {"type": "error", "error": {"type": "server_error", "message": "Model not loaded"}}
         )
         yield f"event: error\ndata: {err}\n\n"
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
         return
 
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
@@ -236,3 +258,7 @@ async def _stream_messages(
             }
         )
         yield f"event: error\ndata: {error_payload}\n\n"
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)

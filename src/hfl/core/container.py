@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from hfl.api.rate_limit import RateLimiter
     from hfl.api.state import ServerState
     from hfl.config import HFLConfig
+    from hfl.engine.dispatcher import InferenceDispatcher
     from hfl.events import EventBus
     from hfl.metrics import Metrics
     from hfl.models.registry import ModelRegistry
@@ -142,6 +143,13 @@ def _create_rate_limiter() -> "RateLimiter":
     )
 
 
+def _create_dispatcher() -> "InferenceDispatcher":
+    """Factory for the in-server inference dispatcher (spec §5.3)."""
+    from hfl.engine.dispatcher import build_default_dispatcher
+
+    return build_default_dispatcher()
+
+
 @dataclass
 class Container:
     """Central dependency injection container for HFL.
@@ -168,6 +176,9 @@ class Container:
     rate_limiter: Singleton["RateLimiter"] = field(
         default_factory=lambda: Singleton(_create_rate_limiter)
     )
+    dispatcher: Singleton["InferenceDispatcher"] = field(
+        default_factory=lambda: Singleton(_create_dispatcher)
+    )
 
     def reset_all(self) -> None:
         """Reset all singletons.
@@ -180,6 +191,7 @@ class Container:
         self.state.reset()
         self.metrics.reset()
         self.rate_limiter.reset()
+        self.dispatcher.reset()
 
 
 # Global container instance
@@ -268,3 +280,12 @@ def get_rate_limiter() -> "RateLimiter":
         The global RateLimiter instance.
     """
     return get_container().rate_limiter.get()
+
+
+def get_dispatcher() -> "InferenceDispatcher":
+    """Get the global inference dispatcher instance (spec §5.3).
+
+    Returns:
+        The global :class:`InferenceDispatcher` singleton.
+    """
+    return get_container().dispatcher.get()
