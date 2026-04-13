@@ -348,14 +348,24 @@ class TestGGUFConverter:
                         except Exception:
                             pass
 
-        # Verify that the first call uses sys.executable, not "python"
-        assert len(captured_commands) >= 1
-        first_cmd = captured_commands[0]
-        assert first_cmd[0] == sys.executable, (
-            f"Must use sys.executable ({sys.executable}), not '{first_cmd[0]}'. "
+        # The converter now runs an env-probe subprocess BEFORE the
+        # convert command, so the first captured call may be the probe
+        # (``[sys.executable, "-c", "import transformers..."]``). Find
+        # the actual convert command by content.
+        convert_cmds = [
+            c
+            for c in captured_commands
+            if isinstance(c, list)
+            and len(c) > 1
+            and isinstance(c[1], str)
+            and "convert_hf_to_gguf.py" in c[1]
+        ]
+        assert convert_cmds, f"convert_hf_to_gguf.py call not captured. Calls: {captured_commands}"
+        convert_cmd = convert_cmds[0]
+        assert convert_cmd[0] == sys.executable, (
+            f"Must use sys.executable ({sys.executable}), not '{convert_cmd[0]}'. "
             "On macOS 'python' doesn't exist, only 'python3'."
         )
-        assert "convert_hf_to_gguf.py" in first_cmd[1]
 
     def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config, monkeypatch):
         """

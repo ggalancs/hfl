@@ -355,6 +355,50 @@ class GGUFConverter:
 
         console.print(f"[green]✓[/] Output verified: {output_path.name} ({file_size / 1e9:.2f}GB)")
 
+    def _check_conversion_environment(self) -> None:
+        """Probe the same Python that will run ``convert_hf_to_gguf.py``.
+
+        ``convert_hf_to_gguf.py`` imports ``transformers`` at module
+        load. If the host Python has an incompatible
+        ``transformers`` / ``huggingface_hub`` combo (e.g. transformers
+        5.x with huggingface_hub 0.x), the import crashes with a
+        cryptic ``ImportError: cannot import name 'is_offline_mode'``.
+
+        We probe with a short subprocess that imports the same surface,
+        and turn any failure into an actionable error message *before*
+        we waste time launching the real conversion.
+        """
+        probe = (
+            "import sys\n"
+            "try:\n"
+            "    import huggingface_hub  # noqa: F401\n"
+            "    import transformers  # noqa: F401\n"
+            "    from transformers import AutoTokenizer  # noqa: F401\n"
+            "except Exception as e:\n"
+            "    sys.stderr.write(f'{type(e).__name__}: {e}')\n"
+            "    sys.exit(2)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip() or "<no stderr>"
+            raise RuntimeError(
+                "The Python interpreter HFL would use to run "
+                "convert_hf_to_gguf.py cannot import transformers + "
+                "huggingface_hub cleanly:\n\n"
+                f"    {stderr}\n\n"
+                "This usually means an incompatible package combo on the "
+                "host Python (often transformers 5.x with huggingface_hub "
+                "0.x, or vice versa). Fix it with:\n\n"
+                "    pip install --upgrade --force-reinstall \\\n"
+                "        'transformers>=4.47.0,<5.0' \\\n"
+                "        'huggingface-hub>=0.27.0,<1.0'\n\n"
+                f"Interpreter: {sys.executable}"
+            )
+
     def ensure_tools(self):
         """
         Verifies that llama.cpp is available.
@@ -455,6 +499,10 @@ class GGUFConverter:
             console.print("[green]Resuming:[/] FP16 intermediate already exists, skipping step 1")
         else:
             console.print("[cyan]Step 1/2:[/] Converting to GGUF FP16...")
+            # Fail fast on incompatible host Python before invoking
+            # convert_hf_to_gguf.py — otherwise the user sees a cryptic
+            # ``ImportError`` from inside transformers/huggingface_hub.
+            self._check_conversion_environment()
 
             subprocess.run(
                 [

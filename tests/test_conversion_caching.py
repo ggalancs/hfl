@@ -276,16 +276,21 @@ class TestConvertResumeSupport:
         converter.ensure_tools = MagicMock()
         converter._verify_output = MagicMock()
 
-        call_index = 0
+        # The converter now runs an env-probe subprocess
+        # (``[sys.executable, "-c", ...]``) before the FP16 step. Skip
+        # those when classifying call types and only count the real
+        # conversion subprocesses.
+        convert_step = 0
 
         def side_effect(cmd, **kwargs):
-            nonlocal call_index
-            call_index += 1
-            if call_index == 1:
-                # FP16 conversion - create the intermediate
+            nonlocal convert_step
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[1] == "-c":
+                # env probe — return success without doing anything
+                return MagicMock(returncode=0)
+            convert_step += 1
+            if convert_step == 1:
                 fp16_path.write_bytes(b"fp16 data")
-            elif call_index == 2:
-                # Quantization - create final
+            elif convert_step == 2:
                 final_path.write_bytes(b"quantized data")
             return MagicMock(returncode=0)
 
@@ -294,7 +299,7 @@ class TestConvertResumeSupport:
         converter.convert(model_path, output_path, "Q4_K_M")
 
         # Both FP16 conversion and quantization should run
-        assert mock_run.call_count == 2
+        assert convert_step == 2
 
     @patch("hfl.converter.gguf_converter.subprocess.run")
     def test_runs_fp16_when_intermediate_is_empty(self, mock_run, tmp_path):
@@ -312,14 +317,17 @@ class TestConvertResumeSupport:
         converter.ensure_tools = MagicMock()
         converter._verify_output = MagicMock()
 
-        call_index = 0
+        convert_step = 0
 
         def side_effect(cmd, **kwargs):
-            nonlocal call_index
-            call_index += 1
-            if call_index == 1:
+            nonlocal convert_step
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[1] == "-c":
+                # env probe — return success without doing anything
+                return MagicMock(returncode=0)
+            convert_step += 1
+            if convert_step == 1:
                 fp16_path.write_bytes(b"fp16 data")
-            elif call_index == 2:
+            elif convert_step == 2:
                 final_path.write_bytes(b"quantized data")
             return MagicMock(returncode=0)
 
@@ -328,7 +336,7 @@ class TestConvertResumeSupport:
         converter.convert(model_path, output_path, "Q4_K_M")
 
         # Both steps should run since intermediate was empty
-        assert mock_run.call_count == 2
+        assert convert_step == 2
 
     @patch("hfl.converter.gguf_converter.subprocess.run")
     def test_f16_quantization_with_existing_intermediate(self, mock_run, tmp_path):
