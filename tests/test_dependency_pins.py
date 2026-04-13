@@ -106,6 +106,26 @@ class TestStaticPyprojectPins:
             pin = _find_pin(extras, "transformers")
             assert ">=4." in pin, f"[{extra_name}] transformers pin needs a >=4.x lower bound"
 
+    def test_llama_cpp_python_pin_supports_gemma4(self):
+        """The ``[llama]`` extra must require a llama-cpp-python build
+        that recognises the ``gemma4`` GGUF architecture.
+
+        Pre-0.3.20 builds reject Gemma 4 GGUFs with
+        ``unknown model architecture: 'gemma4'``. Anything older brings
+        back the bug for fresh installs.
+        """
+        cfg = _load_pyproject()
+        extras = cfg["project"]["optional-dependencies"]["llama"]
+        pin = _find_pin(extras, "llama-cpp-python")
+        # Parse the lower bound
+        match = re.search(r">=([\d.]+)", pin)
+        assert match, f"llama-cpp-python pin must have a >= bound: {pin!r}"
+        major, minor, *patch = match.group(1).split(".")
+        bound = (int(major), int(minor), int(patch[0]) if patch else 0)
+        assert bound >= (0, 3, 20), (
+            f"llama-cpp-python pin {pin!r} is below the Gemma-4 cutoff. Bump to >=0.3.20."
+        )
+
 
 # --- 2. Live smoke import -----------------------------------------------------
 

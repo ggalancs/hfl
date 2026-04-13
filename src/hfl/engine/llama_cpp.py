@@ -14,14 +14,23 @@ import time
 from contextlib import contextmanager
 from typing import Iterator
 
-from llama_cpp import Llama
-
 from hfl.engine.base import (
     ChatMessage,
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
 )
+
+# ``llama_cpp`` is an optional dependency (HFL ``[llama]`` extra). The
+# import is wrapped in try/except so the rest of the module — including
+# the GGUF chat-format detection helper, the architecture map, and any
+# test that monkeypatches ``hfl.engine.llama_cpp.Llama`` — can be
+# imported and exercised in environments without llama-cpp-python (CI
+# default, doc generators, type checkers).
+try:
+    from llama_cpp import Llama  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover — exercised by the [dev] CI matrix
+    Llama = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +59,71 @@ def _nullcontext():
     yield
 
 
+# Map from GGUF ``general.architecture`` to the chat_format string that
+# llama-cpp-python ships built-in. We only override when the GGUF lacks a
+# usable ``tokenizer.chat_template`` AND when llama-cpp-python's own
+# auto-detection guesses wrong (it falls back to a Llama-2 [INST] format
+# for unknown architectures, which silently destroys the chat quality of
+# Gemma family models).
+_ARCHITECTURE_CHAT_FORMAT: dict[str, str] = {
+    "gemma": "gemma",
+    "gemma2": "gemma",
+    "gemma3": "gemma",
+    "gemma4": "gemma",
+}
+
+
+def _detect_chat_format_from_gguf(model_path: str) -> str | None:
+    """Read ``general.architecture`` from a GGUF and map it to a
+    llama-cpp-python ``chat_format``.
+
+    Returns ``None`` when:
+
+    - the optional ``gguf`` package isn't installed (HFL ships it in the
+      ``[convert]`` extra, not in the core deps);
+    - the file isn't readable;
+    - the architecture isn't in our mapping table — in which case we
+      defer to llama-cpp-python's own auto-detection.
+
+    This helper exists because newer Gemma family GGUFs (released after
+    Gemma 4) ship without an embedded ``tokenizer.chat_template``, so
+    llama-cpp-python's fallback chooses the Llama-2 ``[INST]`` format,
+    which silently destroys output quality. Detecting the architecture
+    from the GGUF header lets us pick the correct format ahead of time.
+    """
+    try:
+        import gguf  # type: ignore[import-not-found]
+    except ImportError:
+        logger.debug(
+            "gguf package not installed; skipping chat-format auto-detection. "
+            "Install hfl[convert] for full support."
+        )
+        return None
+
+    try:
+        reader = gguf.GGUFReader(model_path)
+        arch_field = reader.fields.get("general.architecture")
+        if arch_field is None:
+            return None
+        # The architecture value is stored as a UTF-8 string in the last
+        # ``parts`` chunk of the field record.
+        arch_bytes = bytes(arch_field.parts[-1])
+        arch = arch_bytes.decode("utf-8", errors="replace").strip()
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("could not read GGUF metadata for %s: %s", model_path, exc)
+        return None
+
+    fmt = _ARCHITECTURE_CHAT_FORMAT.get(arch)
+    if fmt is not None:
+        logger.info("Detected GGUF architecture %r → using chat_format=%r", arch, fmt)
+    return fmt
+
+
 class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
     def __init__(self):
-        self._model: Llama | None = None
+        self._model: "Llama | None" = None
         self._model_path: str = ""
 
     def load(self, model_path: str, **kwargs) -> None:
@@ -92,6 +161,11 @@ class LlamaCppEngine(InferenceEngine):
         # Use resolved path to prevent path traversal issues
         model_path = str(path)
 
+        if Llama is None:
+            raise RuntimeError(
+                "llama-cpp-python is not installed. Install it with: pip install 'hfl[llama]'"
+            )
+
         from hfl.config import config as hfl_config
 
         verbose = kwargs.get("verbose", False)
@@ -100,8 +174,22 @@ class LlamaCppEngine(InferenceEngine):
             n_ctx = hfl_config.default_ctx_size  # 0 = auto from GGUF metadata
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)
 
+        # Chat format selection: prefer an explicit caller override; otherwise
+        # try to detect a known architecture from the GGUF header (fixes the
+        # Gemma family which llama-cpp-python's fallback misidentifies as
+        # Llama-2 ``[INST]``). ``None`` means "let llama-cpp-python decide".
+        chat_format = kwargs.get("chat_format")
+        if chat_format is None:
+            chat_format = _detect_chat_format_from_gguf(model_path)
+
         logger.info("Loading GGUF model: %s", path.name)
-        logger.debug("Model path: %s, n_ctx=%s, n_gpu_layers=%s", model_path, n_ctx, n_gpu_layers)
+        logger.debug(
+            "Model path: %s, n_ctx=%s, n_gpu_layers=%s, chat_format=%s",
+            model_path,
+            n_ctx,
+            n_gpu_layers,
+            chat_format,
+        )
 
         start_time = time.perf_counter()
         try:
@@ -115,7 +203,7 @@ class LlamaCppEngine(InferenceEngine):
                     n_threads=kwargs.get("n_threads", 0) or None,
                     verbose=verbose,
                     flash_attn=kwargs.get("flash_attn", True),
-                    chat_format=kwargs.get("chat_format", None),  # auto-detect
+                    chat_format=chat_format,
                 )
             self._model_path = model_path
             elapsed = time.perf_counter() - start_time

@@ -12,12 +12,25 @@ import pytest
 
 # Mock llama_cpp before importing modules
 @pytest.fixture(autouse=True)
-def mock_llama_cpp_module():
-    """Mock of the llama_cpp module for all tests."""
+def mock_llama_cpp_module(monkeypatch):
+    """Mock the optional ``llama_cpp`` package for all tests in this file.
+
+    ``hfl.engine.llama_cpp`` binds ``Llama`` at module import time via a
+    try/except so it remains importable when the optional ``[llama]``
+    extra is not installed (CI default). When this happens ``Llama`` is
+    ``None``, so a plain ``patch.dict(sys.modules, ...)`` is too late to
+    influence subsequent ``engine.load()`` calls. We additionally
+    monkeypatch ``engine_module.Llama`` directly; pytest restores both
+    after the test.
+    """
     mock_llama = MagicMock()
     mock_llama.Llama = MagicMock()
-    with patch.dict(sys.modules, {"llama_cpp": mock_llama}):
-        yield mock_llama
+    monkeypatch.setitem(sys.modules, "llama_cpp", mock_llama)
+
+    import hfl.engine.llama_cpp as engine_module
+
+    monkeypatch.setattr(engine_module, "Llama", mock_llama.Llama)
+    yield mock_llama
 
 
 @pytest.fixture

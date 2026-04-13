@@ -27,8 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# llama-cpp-python requires compilation - install separately if needed
-llama = ["llama-cpp-python>=0.3.0"]
+# llama-cpp-python requires compilation - install separately if needed.
+# Pinned to >=0.3.20 because earlier versions bundle a llama.cpp build
+# that doesn't recognise the ``gemma4`` architecture and rejects Gemma 4
+# GGUFs at load time with "unknown model architecture".
+llama = ["llama-cpp-python>=0.3.20"]
 transformers = [
     # Pinned to the 4.x line: transformers 5.x requires huggingface_hub
     # >= 1.5.0 (different API) which is incompatible with the rest of
