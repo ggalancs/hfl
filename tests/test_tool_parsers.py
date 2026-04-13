@@ -10,6 +10,7 @@ from __future__ import annotations
 from hfl.api.tool_parsers import (
     dispatch,
     parse_fallback,
+    parse_gemma4,
     parse_llama3,
     parse_mistral,
     parse_qwen,
@@ -165,6 +166,126 @@ class TestFallback:
         cleaned, calls = parse_fallback("just a plain reply")
         assert calls == []
         assert cleaned == "just a plain reply"
+
+
+# --- Gemma 4 -----------------------------------------------------------------
+
+
+class TestGemma4:
+    """Gemma 4 uses its own split-pipe DSL, not JSON:
+
+        <|tool_call>call:NAME{key:<|"|>string<|"|>,num:42}<tool_call|>
+
+    The string delimiter is the dedicated ``<|"|>`` token (ID 110 in
+    the Gemma 4 vocabulary). The parser transforms the DSL to JSON
+    and delegates to ``json.loads``.
+
+    These fixtures are transcribed from real outputs produced by
+    ``bartowski/google_gemma-4-31B-it-GGUF`` during the 0.3.1/0.3.2
+    incident so any regression in the transform path reproduces the
+    bug that broke tool calling end to end.
+    """
+
+    def test_real_world_single_call(self):
+        """Exact output captured from the bartowski GGUF when asked
+        about the weather in Barcelona with ``get_weather`` supplied
+        as a tool."""
+        text = (
+            '<|tool_call>call:get_weather{city:<|"|>Barcelona<|"|>,'
+            'unit:<|"|>celsius<|"|>}<tool_call|>'
+        )
+        cleaned, calls = parse_gemma4(text)
+        assert cleaned == ""
+        assert len(calls) == 1
+        assert calls[0] == {
+            "function": {
+                "name": "get_weather",
+                "arguments": {"city": "Barcelona", "unit": "celsius"},
+            }
+        }
+
+    def test_truncated_by_stop_token(self):
+        """When the engine sets ``stop=["<tool_call|>"]`` the closing
+        marker is consumed by the stop machinery and never reaches
+        the output. The regex must still match the envelope, ending
+        at end-of-string."""
+        text = '<|channel>thought\n<channel|><|tool_call>call:get_weather{city:<|"|>Paris<|"|>}'
+        cleaned, calls = parse_gemma4(text)
+        # The thought wrapper is left for the channel-marker filter
+        # to strip; parse_gemma4 only extracts tool calls.
+        assert "thought" in cleaned
+        assert calls[0]["function"] == {
+            "name": "get_weather",
+            "arguments": {"city": "Paris"},
+        }
+
+    def test_numeric_boolean_and_null_values(self):
+        text = "<|tool_call>call:cfg{n:42,f:3.14,b:true,ok:false,missing:null}<tool_call|>"
+        _, calls = parse_gemma4(text)
+        args = calls[0]["function"]["arguments"]
+        assert args == {"n": 42, "f": 3.14, "b": True, "ok": False, "missing": None}
+
+    def test_nested_object_argument(self):
+        text = '<|tool_call>call:configure{outer:{inner:<|"|>hello<|"|>,count:3}}<tool_call|>'
+        _, calls = parse_gemma4(text)
+        assert calls[0]["function"]["arguments"] == {"outer": {"inner": "hello", "count": 3}}
+
+    def test_string_with_internal_colon(self):
+        """Colons inside string values (e.g. URLs) must not confuse
+        the bare-key transformer. The split-on-delimiter approach
+        handles this because string content never reaches the
+        key-quoting regex."""
+        text = '<|tool_call>call:http_get{url:<|"|>http://example.com:8080/path<|"|>}<tool_call|>'
+        _, calls = parse_gemma4(text)
+        assert calls[0]["function"]["arguments"]["url"] == ("http://example.com:8080/path")
+
+    def test_no_tool_call_is_passthrough(self):
+        text = "Just a normal reply, no tool call here."
+        cleaned, calls = parse_gemma4(text)
+        assert cleaned == text
+        assert calls == []
+
+    def test_multiple_tool_calls(self):
+        text = (
+            "<|tool_call>call:a{x:1}<tool_call|>"
+            "middle text "
+            '<|tool_call>call:b{y:<|"|>z<|"|>}<tool_call|>'
+        )
+        cleaned, calls = parse_gemma4(text)
+        assert "middle text" in cleaned
+        assert [c["function"]["name"] for c in calls] == ["a", "b"]
+        assert calls[0]["function"]["arguments"] == {"x": 1}
+        assert calls[1]["function"]["arguments"] == {"y": "z"}
+
+    def test_malformed_body_yields_empty_args(self):
+        """A call whose body can't be decoded still surfaces the
+        function name so the caller can at least see *what* was
+        invoked, with empty arguments as a safe default."""
+        text = "<|tool_call>call:broken{this is not valid}<tool_call|>"
+        _, calls = parse_gemma4(text)
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "broken"
+        assert calls[0]["function"]["arguments"] == {}
+
+    def test_dispatch_routes_gemma4_by_model_name(self):
+        """``dispatch`` must pick ``parse_gemma4`` based on the
+        ``model_name`` substring ``gemma-4`` (or ``gemma4``). Earlier
+        Gemma versions (2, 3) use a different output format and must
+        NOT be routed through this parser."""
+        text = '<|tool_call>call:search{q:<|"|>python<|"|>}<tool_call|>'
+        _, calls = dispatch(text, model_name="google_gemma-4-31b-it-q4_k_m", tools=TOOLS)
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "search"
+
+    def test_dispatch_does_not_route_gemma2_to_gemma4_parser(self):
+        """A Gemma 2 or Gemma 3 model name must NOT land in
+        ``parse_gemma4`` — those families have their own output
+        format (or none) and accidental routing would misparse
+        legitimate replies as tool calls."""
+        # Plain text reply. No tool calls expected.
+        text = "Hello, how can I help you today?"
+        _, calls = dispatch(text, model_name="google/gemma-2-9b-it", tools=TOOLS)
+        assert calls == []
 
 
 # --- Dispatch -----------------------------------------------------------------

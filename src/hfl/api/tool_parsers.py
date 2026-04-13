@@ -15,6 +15,10 @@ This module implements the mapping described in ``hfl-tool-calling-spec.md``
 - **Llama 3.x**: ``<|python_tag|>{json}<|eom_id|>`` or
   ``<function=name>{json}</function>``
 - **Mistral / Mixtral**: ``[TOOL_CALLS][{json array}]``
+- **Gemma 4**: split-pipe DSL
+  ``<|tool_call>call:NAME{key:<|"|>val<|"|>,k2:42}<tool_call|>``
+  (not JSON — keys are bare, strings wrapped in Gemma 4's dedicated
+  ``<|"|>`` delimiter token).
 - **Fallback**: bare ``{"name": ..., "arguments": {...}}`` or
   ``{"tool_call": {"name": ..., "args|arguments": {...}}}`` envelopes.
 
@@ -163,6 +167,108 @@ def parse_mistral(text: str) -> ParseResult:
     return cleaned.strip(), calls
 
 
+# --- Gemma 4 ------------------------------------------------------------------
+
+
+# Gemma 4's dedicated string-delimiter token (ID 110 in the vocab).
+# Opens AND closes string values in the argument DSL — the same token
+# is used on both ends, so it's not a balanced pair like regular
+# quotes.
+_GEMMA4_STR_DELIM = '<|"|>'
+
+# Tool-call envelope. Body is matched non-greedily so that the
+# ``}<tool_call|>`` / ``}$`` anchor forces the minimal balanced
+# ``{...}``. The closing marker is optional because callers may set
+# ``stop=["<tool_call|>"]`` on the underlying ``create_chat_completion``
+# call, which consumes the stop string before it reaches the output.
+_GEMMA4_TOOL_CALL_RE = re.compile(
+    r"<\|tool_call>call:([\w.\-]+)\{(.*?)\}(?:<tool_call\|>|(?=<\|)|$)",
+    re.DOTALL,
+)
+
+
+def _gemma4_dsl_to_dict(body: str) -> dict:
+    """Convert a Gemma 4 argument DSL body into a Python dict.
+
+    The body syntax is::
+
+        key:<|"|>string<|"|>,key2:42,key3:true,key4:{nested:<|"|>v<|"|>}
+
+    Strings are delimited by the ``<|"|>`` token on *both* sides, keys
+    are bare identifiers, numbers / booleans / null are bare, and
+    nested objects use ``{...}``. We transform the DSL to equivalent
+    JSON and delegate to :func:`json.loads` for robustness.
+
+    Returns ``{}`` on any decoding error so a malformed payload does
+    not drop the surrounding tool call itself — the caller can still
+    see which function was invoked and respond appropriately.
+    """
+    if not body.strip():
+        return {}
+
+    # Split alternating outside / inside string-delimiter segments.
+    # Well-formed input always has an odd number of parts (each
+    # string opens and closes with the same delimiter). An even count
+    # means an unclosed string → malformed.
+    parts = body.split(_GEMMA4_STR_DELIM)
+    if len(parts) % 2 == 0:
+        return {}
+
+    out: list[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            # Outside a string: quote bare keys. Keys appear either at
+            # the start of the segment, after a comma, or after an
+            # opening brace (nested objects). The lookbehind
+            # ``(?<![\w"])`` avoids mangling partial words and already-
+            # quoted strings.
+            transformed = re.sub(
+                r'(?<![\w"])(\w+)(?=\s*:)',
+                r'"\1"',
+                part,
+            )
+            out.append(transformed)
+        else:
+            # Inside a string: re-emit as a JSON-escaped string body
+            # so embedded quotes / backslashes / control chars don't
+            # break the outer json.loads.
+            escaped = json.dumps(part)  # includes outer quotes
+            out.append(escaped)
+
+    wrapped = "{" + "".join(out) + "}"
+    parsed = _safe_json_load(wrapped)
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def parse_gemma4(text: str) -> ParseResult:
+    """Parse Gemma 4's split-pipe ``<|tool_call>...<tool_call|>`` markers.
+
+    Extracts each ``<|tool_call>call:NAME{...}<tool_call|>`` block,
+    decodes the argument DSL, and returns ``(cleaned_text, calls)``
+    where ``cleaned_text`` has the blocks stripped and ``calls`` is
+    the list of canonical tool-call dicts.
+
+    Thought / turn / response markers that may surround the call are
+    left alone so they can be stripped by the separate channel-marker
+    filter (``hfl.engine.llama_cpp._strip_gemma4_channel_markers``).
+    Orphan tool markers without a matching body are also left alone —
+    they're expected to be cleaned up downstream.
+    """
+    calls: list[ToolCall] = []
+
+    def _sub(match: re.Match) -> str:
+        name = match.group(1)
+        body = match.group(2)
+        args = _gemma4_dsl_to_dict(body)
+        calls.append(_wrap(name, args))
+        return ""
+
+    cleaned = _GEMMA4_TOOL_CALL_RE.sub(_sub, text)
+    return cleaned, calls
+
+
 # --- Generic JSON envelope fallback -------------------------------------------
 
 
@@ -283,7 +389,12 @@ def _detect_family(model_name: str) -> str:
     """Return a short family tag from a model name.
 
     We match on common substrings: ``qwen``, ``llama`` (→ llama3 for
-    versions >= 3, llama2 otherwise), ``mistral``/``mixtral``.
+    versions >= 3, llama2 otherwise), ``mistral``/``mixtral``,
+    ``gemma-4`` / ``gemma4``.
+
+    Note: earlier Gemma versions (2 and 3) do not share the split-
+    pipe tool-call DSL that the Gemma 4 family uses, so they are
+    *not* routed to ``parse_gemma4``.
     """
     name = (model_name or "").lower()
     if "qwen" in name:
@@ -295,6 +406,8 @@ def _detect_family(model_name: str) -> str:
         return "llama3"
     if "mistral" in name or "mixtral" in name:
         return "mistral"
+    if "gemma-4" in name or "gemma4" in name or "gemma 4" in name:
+        return "gemma4"
     return "generic"
 
 
@@ -323,6 +436,7 @@ def dispatch(
         "qwen": parse_qwen,
         "llama3": parse_llama3,
         "mistral": parse_mistral,
+        "gemma4": parse_gemma4,
     }
     parser = parsers_by_family.get(family)
 

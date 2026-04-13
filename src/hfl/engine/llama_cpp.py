@@ -112,12 +112,19 @@ _ARCHITECTURE_CHANNEL_FILTER: set[str] = {"gemma4"}
 #   3. Orphan closing markers like ``<channel|>`` / ``<turn|>`` are
 #      dropped.
 #
+# Tool markers (``<|tool>``, ``<|tool_call>``, ``<|tool_response>`` and
+# their closers) are deliberately NOT stripped by this filter — they
+# carry the payload that :func:`hfl.api.tool_parsers.parse_gemma4`
+# extracts at the route layer. The route runs ``parse_tool_calls`` on
+# the engine's output to recover structured ``tool_calls``, and would
+# find nothing if we pre-stripped the markers here.
+#
 # The exact tag names come from the model's vocabulary (tokens 98–218
-# on the NoxStrix/gemma-4-31B fine-tune that triggered the incident).
+# on the bartowski/google_gemma-4-31B GGUF used in production).
 _GEMMA4_THOUGHT_BLOCK = re.compile(r"<\|channel>thought[\s\S]*?<channel\|>")
 _GEMMA4_THINK_BLOCK = re.compile(r"<\|think>[\s\S]*?<think\|>")
-_GEMMA4_OPEN_MARKER = re.compile(r"<\|(?:channel|turn|tool|tool_call|tool_response)>[a-z_]*\n?")
-_GEMMA4_CLOSE_MARKER = re.compile(r"<(?:channel|turn|think|tool|tool_call|tool_response)\|>")
+_GEMMA4_OPEN_MARKER = re.compile(r"<\|(?:channel|turn)>[a-z_]*\n?")
+_GEMMA4_CLOSE_MARKER = re.compile(r"<(?:channel|turn|think)\|>")
 
 # Maximum length of any single marker — used by the streaming filter
 # to decide how much of the tail it must hold back to avoid emitting a
@@ -154,18 +161,17 @@ def _strip_gemma4_channel_markers(text: str) -> str:
 _GEMMA4_STREAM_MARKERS: list[tuple[str, str]] = [
     ("<|channel>thought", "thought_open"),
     ("<|channel>final", "final_open"),
-    ("<|tool_response>", "open"),
-    ("<tool_response|>", "close"),
-    ("<|tool_call>", "open"),
-    ("<tool_call|>", "close"),
     ("<|channel>", "open"),
     ("<channel|>", "close"),
     ("<|think>", "think_open"),
     ("<think|>", "close"),
     ("<|turn>", "open"),
     ("<turn|>", "close"),
-    ("<|tool>", "open"),
-    ("<tool|>", "close"),
+    # ``<|tool*>`` markers are deliberately omitted — they carry
+    # tool-call payload that ``hfl.api.tool_parsers.parse_gemma4``
+    # needs to extract. The streaming filter lets them through as
+    # plain text (character-by-character fallthrough) so the route
+    # can re-parse the accumulated stream at the end.
 ]
 
 
@@ -780,6 +786,29 @@ class LlamaCppEngine(InferenceEngine):
             if text:
                 yield text
 
+    def _build_stop_list(
+        self, caller_stop: list[str] | None, tools: list[dict] | None
+    ) -> list[str]:
+        """Compose the stop list passed to ``create_chat_completion``.
+
+        The caller's own stop strings are always preserved. For Gemma 4
+        models with ``tools`` supplied, we additionally append
+        ``<tool_call|>`` so the model halts immediately after emitting
+        a tool call instead of hallucinating the tool's response and
+        continuing with a fabricated answer (observed in the wild on
+        the bartowski/google_gemma-4-31B GGUF — without a stop, the
+        model emits ``<|tool_response>`` tokens and fakes JSON output
+        as if the tool had already run).
+
+        Returns a list even when the caller passed ``None`` so the
+        downstream kwargs pass a consistent type.
+        """
+        stop: list[str] = list(caller_stop) if caller_stop else []
+        if tools and self._architecture == "gemma4":
+            if "<tool_call|>" not in stop:
+                stop.append("<tool_call|>")
+        return stop
+
     @staticmethod
     def _messages_to_llama_cpp(messages: list[ChatMessage]) -> list[dict]:
         """Convert internal ChatMessage list to llama-cpp-python format.
@@ -816,7 +845,7 @@ class LlamaCppEngine(InferenceEngine):
             top_p=cfg.top_p,
             top_k=cfg.top_k,
             repeat_penalty=cfg.repeat_penalty,
-            stop=cfg.stop,
+            stop=self._build_stop_list(cfg.stop, tools),
         )
         if tools:
             # llama-cpp-python >= 0.3.0 forwards ``tools`` into the chat
@@ -895,7 +924,7 @@ class LlamaCppEngine(InferenceEngine):
             top_p=cfg.top_p,
             top_k=cfg.top_k,
             repeat_penalty=cfg.repeat_penalty,
-            stop=cfg.stop,
+            stop=self._build_stop_list(cfg.stop, tools),
             stream=True,
         )
         if tools:
