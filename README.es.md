@@ -22,21 +22,25 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 | Facilidad de uso | Excelente | Buena |
 | Compatible con API OpenAI | Sí | Sí |
 | Compatible con API Ollama | Nativo | Sí (drop-in) |
+| API Anthropic Messages | No | Sí (compatible con Claude Code) |
+| Tool calling estructurado | Sí | Sí (qwen / llama3 / mistral) |
 | Multi-backend | solo llama.cpp | llama.cpp + Transformers + vLLM |
 | Verificación de licencia | No | Sí (5 niveles de riesgo) |
 | Trazabilidad legal | No | Sí (log de procedencia) |
-| Madurez | Alta (establecido) | Pre-alpha (v0.1.0) |
+| Madurez | Alta (establecido) | Alpha (v0.3.0) |
 
 **HFL no compite con Ollama — lo complementa.** Usa Ollama para modelos curados; usa HFL cuando necesites algo del ecosistema completo de HuggingFace.
 
 ## Características
 
-- **CLI y API**: Interfaz CLI completa más API REST compatible con OpenAI y Ollama
+- **CLI y API**: Interfaz CLI completa más API REST compatible con OpenAI, Ollama y Anthropic
 - **Búsqueda de Modelos**: Búsqueda paginada interactiva en HuggingFace Hub (como `more`)
 - **Múltiples Backends**: llama.cpp (GGUF/CPU), Transformers (GPU nativo), vLLM (producción)
 - **Conversión Automática**: Descarga modelos de HuggingFace y convierte a GGUF automáticamente
 - **Cuantización Inteligente**: Soporta niveles de cuantización Q2_K hasta F16
 - **Texto a Voz**: Soporte nativo TTS con Bark, SpeechT5, Coqui XTTS y más
+- **Tool calling estructurado**: Protocolo `tools` / `tool_calls` compatible con Ollama, con parsers por familia para qwen, llama3 y mistral — los agentes funcionan sin configuración extra
+- **Cola de inferencia acotada**: serialización de peticiones en el servidor con backpressure explícito (429 / 503), cabeceras `X-Queue-Depth` en vivo y `GET /healthz` para orquestadores
 - **Compatible Drop-in**: Funciona como reemplazo de Ollama con herramientas existentes
 - **Internacionalizado**: Soporte completo i18n (Inglés, Español) - configura `HFL_LANG` para cambiar idioma
 
@@ -289,6 +293,114 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
+## Tool Calling (Agentes)
+
+HFL implementa el protocolo de **tool calling estructurado** compatible
+con Ollama, de forma que los agentes escritos con el SDK de Ollama
+pueden ejecutar bucles multi-turno de herramientas directamente. Cuando
+el cliente envía `tools` en `/api/chat`, HFL los propaga a través de la
+plantilla nativa del modelo (qwen3 `<tool_call>`, llama3
+`<|python_tag|>`, mistral `[TOOL_CALLS]`), parsea la respuesta a
+`message.tool_calls` canónicos con `arguments` como objeto JSON, y
+acepta resultados `role: "tool"` en el turno siguiente.
+
+```bash
+curl http://localhost:11434/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-32b-q4_k_m",
+    "stream": false,
+    "messages": [
+      {"role":"system","content":"Debes llamar a write_wiki, nunca respondas con texto."},
+      {"role":"user","content":"Guarda Hola en topics/hello.md"}
+    ],
+    "tools":[{
+      "type":"function",
+      "function":{
+        "name":"write_wiki",
+        "description":"Crea o sobrescribe un artículo del wiki",
+        "parameters":{
+          "type":"object",
+          "properties":{"path":{"type":"string"},"content":{"type":"string"}},
+          "required":["path","content"]
+        }
+      }
+    }]
+  }'
+```
+
+Respuesta:
+
+```json
+{
+  "model": "qwen3-32b-q4_k_m",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+      {
+        "function": {
+          "name": "write_wiki",
+          "arguments": {"path": "topics/hello.md", "content": "Hola"}
+        }
+      }
+    ]
+  },
+  "done": true
+}
+```
+
+El parser por familia también gestiona un fallback genérico
+`{"tool_call": {...}}` para plantillas que no se aplicaron
+correctamente. En streaming (`stream: true`), HFL acumula toda la
+respuesta y emite los `tool_calls` en el chunk final `done: true`. La
+especificación completa está en
+[`hfl-tool-calling-spec.md`](../hfl-tool-calling-spec.md) y la suite de
+aceptación en `tests/test_tool_calling_acceptance.py`.
+
+## Concurrencia y Backpressure
+
+Los backends locales de inferencia (llama.cpp, transformers-GPU)
+comparten una única instancia de modelo no reentrante. HFL los protege
+con un **dispatcher de inferencia interno** que serializa las peticiones
+sobre el motor cargado con una cola de espera acotada:
+
+| Parámetro | Variable de entorno | Por defecto | Significado |
+|---|---|---|---|
+| Máx. en vuelo | `HFL_QUEUE_MAX_INFLIGHT` | `1` | Peticiones paralelas permitidas |
+| Tamaño de cola | `HFL_QUEUE_MAX_SIZE` | `16` | Peticiones que pueden esperar |
+| Timeout de adquisición | `HFL_QUEUE_ACQUIRE_TIMEOUT` | `60` | Segundos que puede esperar una petición |
+| Habilitado | `HFL_QUEUE_ENABLED` | `true` | Interruptor global |
+
+Cuando la cola de espera está llena, HFL responde **429** con un
+envelope estructurado y `Retry-After`:
+
+```json
+{
+  "error": "Inference queue is full",
+  "code": "QUEUE_FULL",
+  "category": "rate_limit",
+  "retryable": true,
+  "details": {"retry_after_seconds": 60, "queue_depth": 1, "max_queued": 1}
+}
+```
+
+Si un llamante lleva más de `HFL_QUEUE_ACQUIRE_TIMEOUT` en cola, HFL
+devuelve **503** con `code=QUEUE_TIMEOUT`. Cada respuesta incluye
+`X-Queue-Depth`, `X-Queue-In-Flight`, `X-Queue-Max-Inflight` y
+`X-Queue-Max-Size` para que los agentes apliquen backoff
+proporcional. El estado en vivo también está disponible vía:
+
+```bash
+curl http://localhost:11434/healthz
+# { "status":"ok", "models_loaded":[...], "queue_depth":0,
+#   "queue_in_flight":0, "uptime_seconds":12345 }
+```
+
+Las tres superficies de API (Ollama, OpenAI, Anthropic) comparten el
+mismo dispatcher, así que una llamada lenta en `/api/chat` bloquea
+correctamente a `/v1/chat/completions` y `/v1/messages`.
+
 ## Niveles de Cuantización
 
 | Nivel | Bits/peso | Calidad | Caso de Uso |
@@ -356,10 +468,9 @@ Idiomas soportados: Inglés (`en`), Español (`es`)
 
 ## Limitaciones Conocidas
 
-Esta es una versión v0.1.0. Las limitaciones conocidas incluyen:
+Esta es una versión alpha v0.3.0. Las limitaciones conocidas incluyen:
 
 - **Backend vLLM es experimental**: Implementación básica sin soporte completo de streaming
-- **Sin limitación de tasa en API**: Solo las llamadas a HuggingFace Hub tienen límite de tasa
 - **CORS es permisivo**: La API permite todos los orígenes (configurable en futuras versiones)
 - **Soporte Windows**: No completamente probado; se recomiendan sistemas Unix-like
 

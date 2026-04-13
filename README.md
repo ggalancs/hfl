@@ -22,21 +22,25 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 | Ease of use | Excellent | Good |
 | OpenAI API compatible | Yes | Yes |
 | Ollama API compatible | Native | Yes (drop-in) |
+| Anthropic Messages API | No | Yes (Claude Code compatible) |
+| Structured tool calling | Yes | Yes (qwen / llama3 / mistral) |
 | Multi-backend | llama.cpp only | llama.cpp + Transformers + vLLM |
 | License verification | No | Yes (5 risk levels) |
 | Legal traceability | No | Yes (provenance log) |
-| Maturity | High (established) | Pre-alpha (v0.1.0) |
+| Maturity | High (established) | Alpha (v0.3.0) |
 
 **HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
 
 ## Features
 
-- **CLI & API**: Full CLI interface plus REST API compatible with OpenAI and Ollama
+- **CLI & API**: Full CLI interface plus REST API compatible with OpenAI, Ollama, and Anthropic
 - **Model Search**: Interactive paginated search of HuggingFace Hub (like `more`)
 - **Multiple Backends**: llama.cpp (GGUF/CPU), Transformers (GPU native), vLLM (production)
 - **Automatic Conversion**: Downloads HuggingFace models and converts to GGUF automatically
 - **Smart Quantization**: Supports Q2_K through F16 quantization levels
 - **Text-to-Speech**: Native TTS support with Bark, SpeechT5, Coqui XTTS and more
+- **Structured tool calling**: Ollama-compatible `tools` / `tool_calls` wire protocol with per-family parsers for qwen, llama3, and mistral — agents work out of the box
+- **Bounded inference queue**: server-side serialisation of requests with explicit 429 / 503 backpressure, live `X-Queue-Depth` headers, and `GET /healthz` for orchestrators
 - **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
 - **Internationalized**: Full i18n support (English, Spanish) - set `HFL_LANG` to change language
 
@@ -289,6 +293,112 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
+## Tool Calling (Agents)
+
+HFL implements the Ollama wire protocol for **structured tool calling**, so
+agents written against the Ollama Python SDK can drive multi-turn tool loops
+directly. When a client sends `tools` on `/api/chat`, HFL forwards them
+through the model's native chat template (qwen3 `<tool_call>`, llama3
+`<|python_tag|>`, mistral `[TOOL_CALLS]`), parses the reply into canonical
+`message.tool_calls` with `arguments` as a parsed object, and accepts
+`role: "tool"` results on the next turn.
+
+```bash
+curl http://localhost:11434/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-32b-q4_k_m",
+    "stream": false,
+    "messages": [
+      {"role":"system","content":"You MUST call write_wiki, never respond with text."},
+      {"role":"user","content":"Save Hello at topics/hello.md"}
+    ],
+    "tools":[{
+      "type":"function",
+      "function":{
+        "name":"write_wiki",
+        "description":"Create or overwrite a wiki article",
+        "parameters":{
+          "type":"object",
+          "properties":{"path":{"type":"string"},"content":{"type":"string"}},
+          "required":["path","content"]
+        }
+      }
+    }]
+  }'
+```
+
+Response:
+
+```json
+{
+  "model": "qwen3-32b-q4_k_m",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+      {
+        "function": {
+          "name": "write_wiki",
+          "arguments": {"path": "topics/hello.md", "content": "Hello"}
+        }
+      }
+    ]
+  },
+  "done": true
+}
+```
+
+The per-family parser also handles a generic `{"tool_call": {...}}`
+fallback for templates that weren't properly applied. Streaming (`stream:
+true`) accumulates the full reply and emits `tool_calls` on the final
+`done: true` chunk. Full spec is in
+[`hfl-tool-calling-spec.md`](../hfl-tool-calling-spec.md) and the
+acceptance suite lives at `tests/test_tool_calling_acceptance.py`.
+
+## Concurrency & Backpressure
+
+Local inference backends (llama.cpp, transformers-GPU) share a single
+non-reentrant model instance. HFL protects them with an **in-server
+inference dispatcher** that serialises requests on the currently-loaded
+engine with a bounded wait queue:
+
+| Setting | Env var | Default | Meaning |
+|---|---|---|---|
+| Max in-flight | `HFL_QUEUE_MAX_INFLIGHT` | `1` | Parallel requests allowed |
+| Wait queue size | `HFL_QUEUE_MAX_SIZE` | `16` | Requests allowed to wait |
+| Acquire timeout | `HFL_QUEUE_ACQUIRE_TIMEOUT` | `60` | Seconds a request may wait |
+| Enabled | `HFL_QUEUE_ENABLED` | `true` | Master switch |
+
+When the wait queue is saturated, HFL returns **429** with a structured
+envelope and `Retry-After`:
+
+```json
+{
+  "error": "Inference queue is full",
+  "code": "QUEUE_FULL",
+  "category": "rate_limit",
+  "retryable": true,
+  "details": {"retry_after_seconds": 60, "queue_depth": 1, "max_queued": 1}
+}
+```
+
+When a caller has been queued longer than `HFL_QUEUE_ACQUIRE_TIMEOUT`,
+HFL returns **503** with `code=QUEUE_TIMEOUT`. Every response carries
+`X-Queue-Depth`, `X-Queue-In-Flight`, `X-Queue-Max-Inflight` and
+`X-Queue-Max-Size` so agents can back off proportionally. Live state is
+also available via:
+
+```bash
+curl http://localhost:11434/healthz
+# { "status":"ok", "models_loaded":[...], "queue_depth":0,
+#   "queue_in_flight":0, "uptime_seconds":12345 }
+```
+
+All three API surfaces (Ollama, OpenAI, Anthropic) share the same
+dispatcher, so a slow call on `/api/chat` correctly blocks
+`/v1/chat/completions` and `/v1/messages`.
+
 ## Quantization Levels
 
 | Level | Bits/weight | Quality | Use Case |
@@ -356,10 +466,9 @@ Supported languages: English (`en`), Spanish (`es`)
 
 ## Known Limitations
 
-This is a v0.1.0 release. Known limitations include:
+This is a v0.3.0 alpha release. Known limitations include:
 
 - **vLLM backend is experimental**: Basic implementation without full streaming support
-- **No rate limiting on API**: Only HuggingFace Hub calls are rate-limited
 - **CORS is permissive**: API allows all origins (configurable in future versions)
 - **Windows support**: Not fully tested; Unix-like systems recommended
 
