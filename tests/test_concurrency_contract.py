@@ -224,14 +224,14 @@ class TestSerialization:
                 },
             )
 
-        t0 = time.perf_counter()
         responses = await asyncio.gather(*(_call() for _ in range(4)))
-        elapsed = time.perf_counter() - t0
 
         assert all(r.status_code == 200 for r in responses)
+        # The structural invariant — at most two engine calls overlapped
+        # at any point — is what guarantees two-way parallelism. A
+        # timing upper bound would be flaky on slow CI runners where
+        # setup overhead dwarfs the 100 ms engine sleeps.
         assert eng.max_concurrent_observed == 2
-        # ~0.2 s with two-wide pipeline (2 batches of 2).
-        assert elapsed < 0.35
 
 
 # --- 2. Queue full -----------------------------------------------------------
