@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from hfl.api.state import get_state
 from hfl.config import config
@@ -34,6 +35,41 @@ def _check_registry() -> bool:
     except (OSError, ValueError, KeyError, AttributeError) as e:
         logger.debug("Registry check failed: %s", e)
         return False
+
+
+@router.get("/healthz", tags=["Health"], summary="Orchestrator health check")
+async def healthz() -> JSONResponse:
+    """Orchestrator-friendly health endpoint (spec §5.5).
+
+    Returns 200 with ``status=ok`` when an LLM engine is loaded and ready,
+    otherwise 503 with ``status=degraded``. The body always includes the
+    list of loaded model names, queue depth (loading models as a rough
+    proxy) and uptime so operators can monitor without scraping multiple
+    endpoints.
+    """
+    state = get_state()
+    uptime = (datetime.now() - _startup_time).total_seconds()
+
+    models_loaded: list[str] = []
+    if state.current_model is not None:
+        models_loaded.append(state.current_model.name)
+    if state.current_tts_model is not None:
+        models_loaded.append(state.current_tts_model.name)
+
+    queue_depth = 0
+    try:
+        queue_depth = len(state.loading_models)
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    healthy = state.is_llm_loaded() or not models_loaded
+    body: dict[str, Any] = {
+        "status": "ok" if healthy else "degraded",
+        "models_loaded": models_loaded,
+        "queue_depth": queue_depth,
+        "uptime_seconds": uptime,
+    }
+    return JSONResponse(status_code=200 if healthy else 503, content=body)
 
 
 @router.get("/health", tags=["Health"], summary="Basic health check")

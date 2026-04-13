@@ -53,8 +53,11 @@ from hfl.config import config
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware that validates API key if configured."""
 
-    # Endpoints that don't require authentication (exact match)
-    PUBLIC_ENDPOINTS = {"/", "/api/version"}
+    # Endpoints that don't require authentication (exact match).
+    # /api/tags is intentionally kept out of the public set so auth policy
+    # is deterministic (spec §5.1): when an API key is configured, /api/tags
+    # always requires it, matching /api/chat.
+    PUBLIC_ENDPOINTS = {"/", "/api/version", "/healthz"}
 
     # Path prefixes that don't require authentication
     PUBLIC_PREFIXES = ("/health", "/metrics")
@@ -94,10 +97,18 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
 
-        # Authentication failed
+        # Authentication failed — return a structured envelope so clients
+        # can decide retry policy without parsing prose (spec §5.4).
         return JSONResponse(
             status_code=401,
-            content={"error": "Invalid or missing API key"},
+            content={
+                "error": {
+                    "error": "Invalid or missing API key",
+                    "code": "UNAUTHORIZED",
+                    "category": "auth",
+                    "retryable": False,
+                }
+            },
             headers={"WWW-Authenticate": "Bearer"},
         )
 

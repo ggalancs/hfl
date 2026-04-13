@@ -18,18 +18,48 @@ from pydantic import BaseModel
 from hfl.logging_config import get_request_id
 
 
+ErrorCategory = str  # one of: "auth" | "rate_limit" | "validation" |
+#                     "not_found" | "engine" | "timeout" | "internal"
+
+
 class ErrorDetail(BaseModel):
     """Structured error response model.
 
     Used for consistent error response format across all endpoints.
+
+    The ``category`` and ``retryable`` fields (spec §5.4) let a client's
+    retry / circuit-breaker logic decide between dead-letter and back-off
+    without parsing prose.
     """
 
     error: str
     code: str
+    category: ErrorCategory = "internal"
+    retryable: bool = False
     details: dict[str, Any] | None = None
     request_id: str | None = None
 
     model_config = {"extra": "forbid"}
+
+
+# Mapping from internal error ``code`` to (category, retryable).
+_ERROR_POLICY: dict[str, tuple[str, bool]] = {
+    "UNAUTHORIZED": ("auth", False),
+    "FORBIDDEN": ("auth", False),
+    "VALIDATION_ERROR": ("validation", False),
+    "MODEL_NOT_FOUND": ("not_found", False),
+    "MODEL_TYPE_MISMATCH": ("validation", False),
+    "RATE_LIMIT_EXCEEDED": ("rate_limit", True),
+    "SERVICE_UNAVAILABLE": ("engine", True),
+    "MODEL_LOADING": ("engine", True),
+    "TIMEOUT": ("engine", True),
+    "INTERNAL_ERROR": ("internal", True),
+}
+
+
+def _policy_for(code: str) -> tuple[str, bool]:
+    """Return ``(category, retryable)`` for an internal error code."""
+    return _ERROR_POLICY.get(code, ("internal", False))
 
 
 class HFLHTTPException(HTTPException):
@@ -44,6 +74,8 @@ class HFLHTTPException(HTTPException):
         error: str,
         code: str,
         details: dict[str, Any] | None = None,
+        category: str | None = None,
+        retryable: bool | None = None,
     ):
         """Create structured HTTP exception.
 
@@ -52,10 +84,16 @@ class HFLHTTPException(HTTPException):
             error: Human-readable error message
             code: Machine-readable error code
             details: Additional error details
+            category: Error category (defaults from ``_ERROR_POLICY``)
+            retryable: Whether the client should retry (defaults from
+                ``_ERROR_POLICY``)
         """
+        auto_category, auto_retryable = _policy_for(code)
         detail = ErrorDetail(
             error=error,
             code=code,
+            category=category if category is not None else auto_category,
+            retryable=retryable if retryable is not None else auto_retryable,
             details=details,
             request_id=get_request_id(),
         )
@@ -138,11 +176,14 @@ def rate_limit_exceeded(retry_after: int, window_seconds: int | None = None) -> 
     if window_seconds:
         details["window_seconds"] = window_seconds
 
+    category, retryable = _policy_for("RATE_LIMIT_EXCEEDED")
     return JSONResponse(
         status_code=429,
         content=ErrorDetail(
             error="Rate limit exceeded",
             code="RATE_LIMIT_EXCEEDED",
+            category=category,
+            retryable=retryable,
             details=details,
             request_id=get_request_id(),
         ).model_dump(),
@@ -159,11 +200,14 @@ def unauthorized(message: str = "Authentication required") -> JSONResponse:
     Returns:
         JSONResponse with 401 status
     """
+    category, retryable = _policy_for("UNAUTHORIZED")
     return JSONResponse(
         status_code=401,
         content=ErrorDetail(
             error=message,
             code="UNAUTHORIZED",
+            category=category,
+            retryable=retryable,
             request_id=get_request_id(),
         ).model_dump(),
         headers={"WWW-Authenticate": "Bearer"},
@@ -179,11 +223,14 @@ def forbidden(message: str = "Access denied") -> JSONResponse:
     Returns:
         JSONResponse with 403 status
     """
+    category, retryable = _policy_for("FORBIDDEN")
     return JSONResponse(
         status_code=403,
         content=ErrorDetail(
             error=message,
             code="FORBIDDEN",
+            category=category,
+            retryable=retryable,
             request_id=get_request_id(),
         ).model_dump(),
     )
@@ -227,11 +274,14 @@ def service_unavailable(
     if retry_after:
         headers["Retry-After"] = str(retry_after)
 
+    category, retryable = _policy_for("SERVICE_UNAVAILABLE")
     return JSONResponse(
         status_code=503,
         content=ErrorDetail(
             error=message,
             code="SERVICE_UNAVAILABLE",
+            category=category,
+            retryable=retryable,
             details={"retry_after": retry_after} if retry_after else None,
             request_id=get_request_id(),
         ).model_dump(),
@@ -248,11 +298,14 @@ def model_loading(model_name: str) -> JSONResponse:
     Returns:
         JSONResponse with 503 status
     """
+    category, retryable = _policy_for("MODEL_LOADING")
     return JSONResponse(
         status_code=503,
         content=ErrorDetail(
             error=f"Model '{model_name}' is currently loading",
             code="MODEL_LOADING",
+            category=category,
+            retryable=retryable,
             details={"model": model_name},
             request_id=get_request_id(),
         ).model_dump(),

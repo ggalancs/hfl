@@ -62,7 +62,11 @@ class TestRateLimitMiddleware:
         # Fourth request should be rate limited
         response = client.get("/test")
         assert response.status_code == 429
-        assert "Too Many Requests" in response.json()["error"]
+        body = response.json()
+        # New structured envelope (spec §5.4)
+        assert body["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+        assert body["error"]["category"] == "rate_limit"
+        assert body["error"]["retryable"] is True
 
     def test_rate_limit_headers_present(self, client):
         """Test rate limit headers are included in response."""

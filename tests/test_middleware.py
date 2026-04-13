@@ -210,7 +210,13 @@ class TestRateLimitMiddleware:
         # Next request should be rate limited
         response = client.get("/api/test")
         assert response.status_code == 429
-        assert "Rate limit exceeded" in response.json()["message"]
+        body = response.json()
+        # Structured envelope (spec §5.4)
+        err = body["error"]
+        assert isinstance(err, dict)
+        assert "Rate limit exceeded" in err["error"]
+        assert err["code"] == "RATE_LIMIT_EXCEEDED"
+        assert err["retryable"] is True
 
     def test_health_endpoint_bypasses_rate_limit(self, rate_limited_app):
         """Health endpoints should bypass rate limiting."""

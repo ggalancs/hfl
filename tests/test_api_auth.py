@@ -75,7 +75,14 @@ class TestAPIKeyMiddleware:
         response = client.get("/v1/models")
 
         assert response.status_code == 401
-        assert "Invalid or missing API key" in response.json()["error"]
+        body = response.json()
+        # Structured error envelope (spec §5.4)
+        err = body["error"]
+        assert isinstance(err, dict)
+        assert err["code"] == "UNAUTHORIZED"
+        assert err["category"] == "auth"
+        assert err["retryable"] is False
+        assert "Invalid or missing API key" in err["error"]
 
     def test_bearer_token_authentication(self):
         """Test authentication with Bearer token."""

@@ -230,25 +230,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = self._get_client_ip(request)
         is_limited, remaining = self._is_rate_limited(client_ip)
 
+        reset_at = int(time.time()) + self.window_seconds
+
         if is_limited:
             return JSONResponse(
                 status_code=429,
                 content={
-                    "error": "Too Many Requests",
-                    "message": f"Rate limit exceeded. Try again in {self.window_seconds} seconds.",
+                    "error": {
+                        "error": "Rate limit exceeded",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "category": "rate_limit",
+                        "retryable": True,
+                        "details": {
+                            "retry_after_seconds": self.window_seconds,
+                            "window_seconds": self.window_seconds,
+                        },
+                    }
                 },
                 headers={
                     "Retry-After": str(self.window_seconds),
                     "X-RateLimit-Limit": str(self.requests_per_window),
                     "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(reset_at),
+                    "X-RateLimit-Window": str(self.window_seconds),
                 },
             )
 
         response = await call_next(request)
 
-        # Add rate limit headers
+        # Add rate limit headers on every response so the client can plan
+        # back-off proportionally (spec §5.2).
         response.headers["X-RateLimit-Limit"] = str(self.requests_per_window)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset_at)
+        response.headers["X-RateLimit-Window"] = str(self.window_seconds)
 
         return response
 
