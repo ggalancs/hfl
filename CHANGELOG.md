@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-13
+
+Stability fixes for the Gemma 4 family, triggered by a real incident
+where loading `gemma-4-31B-it-Q4_K_M` kernel-panicked an M3 Max twice
+with a ``watchdog timeout`` (all 128 GiB of unified memory became
+wired by Metal for the fp16 KV cache + flash-attn scratch of the
+auto-detected 262144-token context). Also unblocks the CI type-check
+job on Python 3.12.
+
+### Fixed
+
+- **Gemma 4 kernel panics on load** (`src/hfl/engine/llama_cpp.py`).
+  Added three layers of defence in `LlamaCppEngine.load()`:
+  - `_ARCHITECTURE_CTX_CAP` caps `n_ctx` to 8192 for `gemma3` and
+    `gemma4` when the caller doesn't pass an explicit override,
+    instead of letting llama-cpp-python auto-detect the 262144-token
+    context from the GGUF header.
+  - `_ARCHITECTURE_NO_FLASH_ATTN` forces `flash_attn=False` for
+    `gemma4` unless the caller explicitly opts in, because
+    llama-cpp-python's flash-attention Metal kernel is still
+    crash-prone on this arch.
+  - `_preflight_memory_check` estimates weights + KV cache against
+    available system RAM and raises `OutOfMemoryError` **before** the
+    `Llama` constructor runs when the load would exceed
+    `_MEMORY_SAFETY_FRACTION` (85 %). The estimator is GQA-aware —
+    it reads `attention.head_count` / `.head_count_kv` from the GGUF
+    and uses `n_kv_heads * head_dim` instead of `embedding_length`,
+    so heavy-GQA models like Gemma 4 31B (8:1 ratio) aren't falsely
+    rejected. Falls back to the conservative upper bound when GQA
+    metadata is missing. Set `HFL_DISABLE_MEMORY_PREFLIGHT=1` to
+    bypass.
+- **Gemma 4 channel markers leaking into chat output**
+  (`src/hfl/engine/llama_cpp.py`). Gemma 4's native output format
+  uses split-pipe reasoning delimiters (`<|channel>thought<channel|>`,
+  `<|turn>...<turn|>`, `<|think>...<think|>`) and always prepends an
+  empty thought channel when `enable_thinking` is False. Added a
+  character-level streaming filter (`_Gemma4StreamFilter`) and its
+  non-streaming counterpart (`_strip_gemma4_channel_markers`) that
+  strip these markers from `chat()` and `chat_stream()` output for
+  the `gemma4` architecture. The streaming filter is a state machine
+  that holds the buffer until the longest possible marker match is
+  determined, so markers split across token chunks (the common case
+  when llama-cpp-python streams one token at a time) are still
+  caught correctly. No-op for other architectures.
+- **Static `_ARCHITECTURE_CHAT_FORMAT` override corrupting
+  well-packaged GGUFs** (`src/hfl/engine/llama_cpp.py`). The override
+  (added so community GGUFs that forget to embed
+  `tokenizer.chat_template` don't fall through to llama-cpp-python's
+  Llama-2 `[INST]` fallback) was also firing on bartowski / unsloth /
+  lmstudio-community GGUFs that ship the correct Jinja template,
+  downgrading their Gemma 4 format to Gemma 2 and silently breaking
+  the prompt side. `load()` now probes the GGUF for
+  `tokenizer.chat_template` and only applies the static override when
+  it's missing. The embedded template is always preferred.
+- **CI type-check job on Python 3.12 failing with pre-existing mypy
+  errors** (`src/hfl/utils/retry.py`, `src/hfl/logging_config.py`).
+  - `retry.py` dispatches to an `async_wrapper` for coroutine
+    functions but the outer decorator is generic over
+    `Callable[P, T]`, which mypy can't specialise to
+    `Callable[P, Awaitable[T]]`. Cast `func` once inside the async
+    branch so mypy can type-check the `await` correctly.
+  - `logging_config.py` assigned `StructuredFormatter()` and
+    `PrettyFormatter()` to the same variable in an if/else; added an
+    explicit `logging.Formatter` annotation so the two branches
+    don't fight over the inferred type.
+
+### Tests
+
+- New `tests/test_llama_cpp_preflight.py` (45 tests) covering:
+  - Architecture-based `n_ctx` cap for `gemma3`/`gemma4` and explicit
+    override precedence.
+  - `flash_attn` disable for `gemma4` with explicit override
+    precedence.
+  - Preflight refusal before `Llama()` is constructed (explicit
+    exploding stub verifies the constructor is never reached).
+  - `HFL_DISABLE_MEMORY_PREFLIGHT` bypass.
+  - `psutil`-missing graceful degradation (arch caps still apply).
+  - GQA-aware vs. naive estimator with the real numbers from
+    `bartowski/google_gemma-4-31B-it-GGUF` (60 layers, 5376 embed
+    dim, 32/4 GQA, 262144 max context).
+  - Channel marker filter in non-streaming, streaming (chunks split
+    at marker boundaries), and single-character streaming modes.
+  - Embedded chat_template deference vs. static override fallback.
+- Project coverage rose to 89.18 % (up from 16.84 % on the paths
+  this change touches), all 2131 tests pass on Python 3.10, 3.11,
+  and 3.12 across Ubuntu and macOS CI matrices.
+
 ## [0.3.0] - 2026-04-13
 
 Full implementation of the **HFL tool-calling specification**: structured
