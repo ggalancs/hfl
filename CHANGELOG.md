@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-04-17
+
+Tighter input validation and a misconfiguration guard for CORS. Closes
+items from the second-pass security audit; no behaviour changes for
+well-formed clients.
+
+### Security
+
+- **`seed` field now bounded to unsigned 32-bit** on OpenAI
+  `ChatCompletionRequest` and `CompletionRequest` (`ge=0, le=2**32-1`).
+  Previously unbounded; could pass integer-overflow values into
+  backends that expect uint32.
+- **`stop` sequences bounded** on OpenAI chat + completion: at most 10
+  entries, each at most 256 characters. Prevents a client from forcing
+  quadratic-per-token stop-sequence matching.
+- **Anthropic `stop_sequences` bounded** (max 10 entries, 256 chars
+  each via `field_validator`).
+- **Anthropic `metadata` bounded**: at most 64 keys, key length
+  ≤128 chars, string values ≤1024 chars. Prevents DoS via a
+  multi-megabyte metadata dict.
+- **TTS `voice` and `language` fields** now have `max_length` (128 and
+  32 respectively) in both OpenAI and native TTS request schemas.
+- **CORS misconfiguration rejected at construction**: `HFLConfig`
+  raises `ValueError` when `cors_allow_credentials=True` is paired
+  with wildcard origins (`cors_allow_all=True` or
+  `cors_origins=["*"]`). Previously the combination was accepted
+  silently even though every browser rejects it (W3C Fetch §3.2.1).
+
+### Docs
+
+- README.md / README.es.md version references updated from the stale
+  "v0.3.0 alpha" text. The CORS-is-permissive bullet was also wrong
+  (CORS defaults have been restrictive since 0.3.0); replaced with the
+  current opt-in model.
+
+### Tests
+
+- Added boundary tests for `RequestBodyLimitMiddleware` (exact-at-limit
+  accepted, one byte over rejected — guards against `>` vs `>=` drift).
+- Added 4 tests for the new CORS validator.
+- New pytest markers `slow` and `integration` registered in
+  `pyproject.toml` so future filesystem / timing-dependent tests can
+  be tagged and filtered on CI.
+
 ## [0.3.3] - 2026-04-17
 
 Operational hardening release. Closes remaining issues from the

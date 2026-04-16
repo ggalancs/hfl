@@ -120,6 +120,35 @@ class TestSLOValidation:
             assert cfg.slo.availability_target == 5.0
 
 
+class TestCORSValidation:
+    def test_wildcard_with_credentials_rejected(self):
+        """cors_allow_all=True with cors_allow_credentials=True raises at construction."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cors_allow_credentials"):
+            HFLConfig(cors_allow_all=True, cors_allow_credentials=True)
+
+    def test_explicit_wildcard_origin_with_credentials_rejected(self):
+        """cors_origins=['*'] with credentials=True is equivalent and rejected."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cors_allow_credentials"):
+            HFLConfig(cors_origins=["*"], cors_allow_credentials=True)
+
+    def test_wildcard_without_credentials_ok(self):
+        """Wildcard origins without credentials is a valid, common dev config."""
+        cfg = HFLConfig(cors_allow_all=True, cors_allow_credentials=False)
+        assert cfg.cors_allow_all is True
+
+    def test_specific_origin_with_credentials_ok(self):
+        """Explicit origins + credentials is the canonical secure setup."""
+        cfg = HFLConfig(
+            cors_origins=["https://app.example.com"],
+            cors_allow_credentials=True,
+        )
+        assert cfg.cors_allow_credentials is True
+
+
 class TestSafeEnsureDirs:
     def test_ensure_dirs_tolerates_oserror(self):
         """_safe_ensure_dirs handles OSError gracefully."""

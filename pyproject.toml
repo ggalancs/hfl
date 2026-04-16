@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hfl"
-version = "0.3.3"
+version = "0.3.4"
 description = "Run HuggingFace models locally like Ollama"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
@@ -95,6 +95,8 @@ testpaths = ["tests"]
 addopts = "--cov=hfl --cov-report=term-missing --cov-report=html --cov-report=xml"
 markers = [
     "acceptance: tool-calling acceptance suite (spec §6, T1–T7)",
+    "slow: tests that take noticeable wall-clock time (sleeps, concurrency)",
+    "integration: tests that exercise filesystem, subprocesses, or system probes",
 ]
 
 [tool.coverage.run]

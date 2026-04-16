@@ -48,6 +48,7 @@ class OpenAITTSRequest(BaseModel):
     )
     voice: str = Field(
         default="alloy",
+        max_length=128,
         description="Voice to use for synthesis",
         examples=["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
     )
@@ -91,10 +92,12 @@ class NativeTTSRequest(BaseModel):
     )
     voice: str = Field(
         default="default",
+        max_length=128,
         description="Voice/speaker to use",
     )
     language: str = Field(
         default="en",
+        max_length=32,
         description="Language code",
         examples=["en", "es", "fr", "de", "it"],
     )

@@ -201,6 +201,22 @@ class HFLConfig:
 
             logging.getLogger(__name__).warning("Invalid SLO configuration: %s", "; ".join(errors))
 
+        # CORS: the wildcard + credentials combination is rejected by every
+        # modern browser (W3C Fetch §3.2.1), but Starlette/FastAPI will
+        # still accept it and emit the headers — a silent misconfiguration.
+        # Reject at construction time so the error surfaces on import/boot
+        # rather than after the server has been serving broken CORS for
+        # hours. ``cors_origins=["*"]`` explicit value is treated the same
+        # as ``cors_allow_all=True``.
+        wildcard = self.cors_allow_all or self.cors_origins == ["*"]
+        if wildcard and self.cors_allow_credentials:
+            raise ValueError(
+                "CORS misconfiguration: cors_allow_credentials=True is not compatible "
+                "with wildcard origins (cors_allow_all=True or cors_origins=['*']). "
+                "Browsers will reject the response; either set explicit origins or "
+                "disable credentials."
+            )
+
     def ensure_dirs(self):
         """Creates the necessary directories."""
         self.models_dir.mkdir(parents=True, exist_ok=True)

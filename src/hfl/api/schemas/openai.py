@@ -89,7 +89,9 @@ class ChatCompletionRequest(BaseModel):
     )
     seed: int | None = Field(
         None,
-        description="Random seed for reproducibility",
+        ge=0,
+        le=2**32 - 1,
+        description="Random seed for reproducibility (unsigned 32-bit)",
     )
 
     @field_validator("messages")
@@ -99,6 +101,29 @@ class ChatCompletionRequest(BaseModel):
         total = sum(len(m.content) for m in v)
         if total > 2_000_000:
             raise ValueError("Total message content exceeds 2M characters")
+        return v
+
+    @field_validator("stop")
+    @classmethod
+    def validate_stop(cls, v: list[str] | str | None) -> list[str] | str | None:
+        """Bound stop sequences: at most 10 entries, each at most 256 chars.
+
+        Prevents a client from pushing the tokenizer into quadratic work
+        on every generated token by supplying thousands of long stops.
+        """
+        if v is None:
+            return v
+        if isinstance(v, str):
+            if len(v) > 256:
+                raise ValueError("stop string must be <= 256 characters")
+            return v
+        if len(v) > 10:
+            raise ValueError("stop must contain at most 10 sequences")
+        for s in v:
+            if not isinstance(s, str):
+                raise ValueError("every stop entry must be a string")
+            if len(s) > 256:
+                raise ValueError("each stop sequence must be <= 256 characters")
         return v
 
 
@@ -147,5 +172,26 @@ class CompletionRequest(BaseModel):
     )
     seed: int | None = Field(
         None,
-        description="Random seed for reproducibility",
+        ge=0,
+        le=2**32 - 1,
+        description="Random seed for reproducibility (unsigned 32-bit)",
     )
+
+    @field_validator("stop")
+    @classmethod
+    def validate_stop(cls, v: list[str] | str | None) -> list[str] | str | None:
+        """Same bounds as chat completions (see ChatCompletionRequest.validate_stop)."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            if len(v) > 256:
+                raise ValueError("stop string must be <= 256 characters")
+            return v
+        if len(v) > 10:
+            raise ValueError("stop must contain at most 10 sequences")
+        for s in v:
+            if not isinstance(s, str):
+                raise ValueError("every stop entry must be a string")
+            if len(s) > 256:
+                raise ValueError("each stop sequence must be <= 256 characters")
+        return v

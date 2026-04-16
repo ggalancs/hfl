@@ -27,7 +27,7 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 | Multi-backend | solo llama.cpp | llama.cpp + Transformers + vLLM |
 | Verificación de licencia | No | Sí (5 niveles de riesgo) |
 | Trazabilidad legal | No | Sí (log de procedencia) |
-| Madurez | Alta (establecido) | Alpha (v0.3.0) |
+| Madurez | Alta (establecido) | Alpha (v0.3.4) |
 
 **HFL no compite con Ollama — lo complementa.** Usa Ollama para modelos curados; usa HFL cuando necesites algo del ecosistema completo de HuggingFace.
 
@@ -468,10 +468,10 @@ Idiomas soportados: Inglés (`en`), Español (`es`)
 
 ## Limitaciones Conocidas
 
-Esta es una versión alpha v0.3.0. Las limitaciones conocidas incluyen:
+Esta es una versión alpha v0.3.x. Las limitaciones conocidas incluyen:
 
 - **Backend vLLM es experimental**: Implementación básica sin soporte completo de streaming
-- **CORS es permisivo**: La API permite todos los orígenes (configurable en futuras versiones)
+- **CORS es restrictivo por defecto**: mismo-origen solamente; habilitar con `cors_allow_all` o `cors_origins` explícito
 - **Soporte Windows**: No completamente probado; se recomiendan sistemas Unix-like
 
 ### Autenticación de API

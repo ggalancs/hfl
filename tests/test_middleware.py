@@ -346,3 +346,35 @@ class TestRequestBodyLimitMiddleware:
         )
         # Route still processes (malformed header is ignored by the limit)
         assert response.status_code == 200
+
+    def test_exact_boundary_accepted(self):
+        """A body whose declared Content-Length equals max_bytes is allowed.
+
+        Guards against an off-by-one (``>`` vs ``>=``) regression in the
+        middleware's comparison.
+        """
+        # Build a JSON payload whose serialised length is exactly N bytes.
+        # The route returns ok: True for any valid JSON object.
+        raw = b'{"msg":"' + b"a" * (64 - len(b'{"msg":"') - len(b'"}')) + b'"}'
+        assert len(raw) == 64
+        app = self._make_app(max_bytes=64)
+        client = TestClient(app)
+        response = client.post(
+            "/echo",
+            content=raw,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 200
+
+    def test_one_byte_over_boundary_rejected(self):
+        """A body one byte over max_bytes is rejected (boundary-off-by-one guard)."""
+        raw = b'{"msg":"' + b"a" * (65 - len(b'{"msg":"') - len(b'"}')) + b'"}'
+        assert len(raw) == 65
+        app = self._make_app(max_bytes=64)
+        client = TestClient(app)
+        response = client.post(
+            "/echo",
+            content=raw,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 413
