@@ -61,7 +61,7 @@ class TestOllamaChat:
 
         client = TestClient(app)
 
-        with patch("hfl.api.helpers.get_registry") as mock_get_registry:
+        with patch("hfl.api.model_loader.get_registry") as mock_get_registry:
             mock_registry = MagicMock()
             mock_registry.get.return_value = None
             mock_get_registry.return_value = mock_registry

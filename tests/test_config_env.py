@@ -56,6 +56,24 @@ class TestEnvConfig:
             assert cfg.queue_max_size == 16
             assert cfg.queue_acquire_timeout_seconds == 60.0
 
+    def test_default_max_request_bytes(self):
+        """Default max_request_bytes is 10 MiB."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 10 * 1024 * 1024
+
+    def test_max_request_bytes_via_env(self):
+        """HFL_MAX_REQUEST_BYTES configurable via env."""
+        with patch.dict(os.environ, {"HFL_MAX_REQUEST_BYTES": "2048"}):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 2048
+
+    def test_max_request_bytes_zero_disables(self):
+        """HFL_MAX_REQUEST_BYTES=0 keeps the limit disabled."""
+        with patch.dict(os.environ, {"HFL_MAX_REQUEST_BYTES": "0"}):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 0
+
     def test_dispatcher_env_overrides(self):
         with patch.dict(
             os.environ,

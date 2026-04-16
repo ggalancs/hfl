@@ -12,27 +12,18 @@ import asyncio
 import json
 import time
 from contextlib import AbstractAsyncContextManager
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from hfl.api.state import get_state
-
-if TYPE_CHECKING:
-    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.config import config
-from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.base import GenerationConfig
-from hfl.engine.selector import select_engine, select_tts_engine
-from hfl.models.registry import get_registry
-from hfl.validators import ValidationError, validate_model_name
 
 if TYPE_CHECKING:
-    from hfl.engine.base import AudioEngine, InferenceEngine
-    from hfl.models.manifest import ModelManifest
+    from hfl.engine.base import InferenceEngine
+    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 T = TypeVar("T")
 
@@ -184,144 +175,6 @@ def queue_response_from_error(
             max_queued=exc.max_queued,
         )
     return queue_timeout(waited_seconds=exc.waited_seconds)
-
-
-async def run_async_with_timeout(
-    coro: Any,
-    timeout: float | None = None,
-    operation: str = "operation",
-) -> Any:
-    """Run an async coroutine with configurable timeout.
-
-    Args:
-        coro: Async coroutine to await
-        timeout: Timeout in seconds (None = use config.generation_timeout)
-        operation: Operation name for error messages
-
-    Returns:
-        Result of the coroutine
-
-    Raises:
-        HTTPException: 504 Gateway Timeout if the operation times out
-    """
-    effective_timeout = timeout if timeout is not None else config.generation_timeout
-
-    try:
-        return await asyncio.wait_for(coro, timeout=effective_timeout)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": f"{operation} timed out",
-                "code": "TIMEOUT",
-                "timeout_seconds": effective_timeout,
-                "operation": operation,
-            },
-        )
-
-
-async def ensure_llm_loaded(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
-    """Ensure LLM model is loaded and return engine + manifest.
-
-    This is the primary entry point for model loading in API routes.
-    Handles validation, registry lookup, type checking, and loading.
-
-    Args:
-        model_name: Name, alias, or repo_id of the model
-
-    Returns:
-        Tuple of (InferenceEngine, ModelManifest)
-
-    Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
-    """
-    # Validate input
-    try:
-        validate_model_name(model_name)
-    except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
-
-    state = get_state()
-
-    # Fast path - already loaded
-    if state.current_model and state.current_model.name == model_name:
-        if state.engine is None:
-            raise HTTPException(503, detail="Model engine not available")
-        return state.engine, state.current_model
-
-    # Lookup in registry
-    manifest = get_registry().get(model_name)
-    if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
-
-    # Verify model type
-    model_path = Path(manifest.local_path)
-    model_type = detect_model_type(model_path)
-    if model_type != ModelType.LLM:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "llm",
-                "got": model_type.value,
-            },
-        )
-
-    # Load model
-    engine = select_engine(model_path)
-    engine.load(manifest.local_path)
-    await state.set_llm_engine(engine, manifest)
-
-    return engine, manifest
-
-
-async def ensure_tts_loaded(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
-    """Ensure TTS model is loaded and return engine + manifest.
-
-    Args:
-        model_name: Name, alias, or repo_id of the TTS model
-
-    Returns:
-        Tuple of (AudioEngine, ModelManifest)
-
-    Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
-    """
-    try:
-        validate_model_name(model_name)
-    except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
-
-    state = get_state()
-
-    if state.current_tts_model and state.current_tts_model.name == model_name:
-        if state.tts_engine is None:
-            raise HTTPException(503, detail="TTS engine not available")
-        return state.tts_engine, state.current_tts_model
-
-    manifest = get_registry().get(model_name)
-    if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
-
-    model_path = Path(manifest.local_path)
-    model_type = detect_model_type(model_path)
-    if model_type != ModelType.TTS:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "tts",
-                "got": model_type.value,
-            },
-        )
-
-    engine = select_tts_engine(model_path)
-    engine.load(manifest.local_path)
-    await state.set_tts_engine(engine, manifest)
-
-    return engine, manifest
 
 
 def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:

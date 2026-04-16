@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-04-17
+
+Operational hardening release. Closes remaining issues from the
+architecture review, removes dead code paths that had accumulated in
+`api/helpers.py` during the 0.3.x line, and adds a request-body-size
+guard that was previously missing.
+
+### Security
+
+- **Request body size limit** (`src/hfl/api/middleware.py`,
+  `src/hfl/api/server.py`, `src/hfl/config.py`). Added
+  `RequestBodyLimitMiddleware` which rejects requests whose
+  `Content-Length` exceeds `config.max_request_bytes` (default 10 MiB,
+  override with `HFL_MAX_REQUEST_BYTES=<bytes>`; set to `0` to
+  disable). The limit runs before auth and rate-limit so oversized
+  payloads are rejected with `413 PAYLOAD_TOO_LARGE` without consuming
+  auth work or rate-limit tokens. Previously a malicious client could
+  send a multi-gigabyte prompt and force the server to buffer it.
+
+### Fixed
+
+- **Python 3.16 compatibility — `asyncio.iscoroutinefunction`
+  deprecation** (`src/hfl/utils/retry.py`, `src/hfl/core/tracing.py`).
+  Switched both call sites to `inspect.iscoroutinefunction`. The
+  asyncio wrapper is slated for removal in 3.16 and emitted
+  `DeprecationWarning` on Python 3.14+, polluting test output and
+  posing a near-term upgrade blocker.
+- **Stale `@pytest.mark.xfail` marker on `_has_cuda`**
+  (`tests/test_selector.py`). The marker was added when pytest's full
+  suite re-imported torch in a way that broke the check; the
+  underlying issue is long-gone and the test has been XPASSing for
+  releases. Removed the marker so CI stays strict about regressions
+  here.
+
+### Removed
+
+- **Dead model-loading helpers in `api/helpers.py`**
+  (`src/hfl/api/helpers.py`, `tests/test_helpers.py`,
+  `tests/test_routes_native.py`). `ensure_llm_loaded`,
+  `ensure_tts_loaded`, and `run_async_with_timeout` were superseded by
+  the locked `ServerState.ensure_llm_loaded` / `.ensure_tts_loaded`
+  methods and `api/model_loader.py` several releases ago, but the old
+  copies and their tests lingered. The old helpers had two subtle
+  issues vs. the replacements: no per-model locking, and
+  `engine.load()` called synchronously in the event loop instead of
+  via `asyncio.to_thread`. Removed to avoid future regressions from
+  someone accidentally reaching for the wrong entry point. Also
+  trimmed the test that patched `hfl.api.helpers.get_registry` (it
+  now patches `hfl.api.model_loader.get_registry`, matching where the
+  real import lives).
+
+### Tests
+
+- 2107 passing (was 2113 — 14 removed with the dead helpers, 8 added
+  for the new body-size middleware + env-var guard).
+- Coverage held at 88.8% (was 88.8%).
+
 ## [0.3.2] - 2026-04-13
 
 Completes Gemma 4 support by teaching HFL to parse the family's

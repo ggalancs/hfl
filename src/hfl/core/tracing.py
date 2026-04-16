@@ -25,6 +25,7 @@ Features:
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from contextvars import ContextVar, Token
 from typing import Callable
@@ -139,9 +140,7 @@ def with_request_id(rid: str | None = None) -> Callable:
                 else:
                     clear_request_id()
 
-        import asyncio
-
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 

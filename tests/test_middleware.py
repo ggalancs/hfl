@@ -290,3 +290,59 @@ class TestRateLimitMiddleware:
         assert middleware._is_excluded("/api/test") is False
         assert middleware._is_excluded("/v1/chat/completions") is False
         assert middleware._is_excluded("/") is False
+
+
+class TestRequestBodyLimitMiddleware:
+    """Tests for RequestBodyLimitMiddleware."""
+
+    def _make_app(self, max_bytes: int) -> FastAPI:
+        from hfl.api.middleware import RequestBodyLimitMiddleware
+
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=max_bytes)
+
+        @app.post("/echo")
+        def echo(payload: dict) -> dict:
+            return {"ok": True, "len": len(str(payload))}
+
+        return app
+
+    def test_small_body_passes(self):
+        """Body under the limit is accepted."""
+        app = self._make_app(max_bytes=1024)
+        client = TestClient(app)
+        response = client.post("/echo", json={"msg": "small"})
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+
+    def test_oversize_body_rejected_with_413(self):
+        """Body over the limit is rejected with 413 and structured error."""
+        app = self._make_app(max_bytes=128)
+        client = TestClient(app)
+        response = client.post("/echo", json={"msg": "x" * 1024})
+        assert response.status_code == 413
+        body = response.json()
+        assert body["error"]["code"] == "PAYLOAD_TOO_LARGE"
+        assert body["error"]["retryable"] is False
+        assert body["error"]["details"]["max_bytes"] == 128
+
+    def test_zero_disables_limit(self):
+        """max_bytes=0 disables the limit — any size is accepted."""
+        app = self._make_app(max_bytes=0)
+        client = TestClient(app)
+        response = client.post("/echo", json={"msg": "y" * 5000})
+        assert response.status_code == 200
+
+    def test_malformed_content_length_falls_through(self):
+        """Malformed Content-Length header doesn't crash — request proceeds."""
+        app = self._make_app(max_bytes=1024)
+        client = TestClient(app)
+        # httpx sets a correct Content-Length when we pass content; we
+        # overwrite it with garbage to simulate a malformed header.
+        response = client.post(
+            "/echo",
+            content=b'{"msg":"ok"}',
+            headers={"Content-Type": "application/json", "Content-Length": "notanumber"},
+        )
+        # Route still processes (malformed header is ignored by the limit)
+        assert response.status_code == 200

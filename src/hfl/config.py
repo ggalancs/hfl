@@ -150,6 +150,14 @@ class HFLConfig:
     conversion_timeout: float = 7200.0  # 2 hours
     api_request_timeout: float = 120.0  # 2 minutes
 
+    # Maximum request body size (bytes) — prevents DoS by oversized prompts.
+    # Default 10 MiB: comfortably fits legitimate multi-turn conversations
+    # (a 128k-token prompt at ~4 chars/token is ~512 KB) while rejecting
+    # obvious abuse. Override with HFL_MAX_REQUEST_BYTES=0 to disable.
+    max_request_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_MAX_REQUEST_BYTES", str(10 * 1024 * 1024)))
+    )
+
     # Inference dispatcher (spec §5.3 — concurrency / queueing).
     # Llama.cpp and transformers-GPU share a single non-reentrant model
     # instance; concurrent requests must be serialized by a bounded

@@ -38,7 +38,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl.api.exception_handlers import register_exception_handlers
-from hfl.api.middleware import RequestLogger
+from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
@@ -193,9 +193,10 @@ app.add_middleware(
 app.add_middleware(DisclaimerMiddleware)
 
 # Middleware execution order (Starlette runs in reverse add order):
-# RequestLogger → APIKey → RateLimit → Disclaimer → CORS
-# This ensures: auth checked before rate limit tokens consumed,
-# and all requests are logged regardless of auth/rate-limit outcome.
+# RequestLogger → BodyLimit → APIKey → RateLimit → Disclaimer → CORS
+# Body-limit runs before auth/rate-limit so oversized requests are
+# rejected with 413 without consuming rate-limit tokens or touching
+# auth; this matches the "reject early, reject cheap" principle.
 
 # Optional rate limiting (after auth in execution order)
 if config.rate_limit_enabled:
@@ -209,6 +210,11 @@ if config.rate_limit_enabled:
 
 # API key authentication (runs before rate limiting)
 app.add_middleware(APIKeyMiddleware)
+
+# Body-size limit (runs before auth so oversized bodies are rejected
+# without consuming auth/rate-limit work). 0 disables the limit.
+if config.max_request_bytes > 0:
+    app.add_middleware(RequestBodyLimitMiddleware, max_bytes=config.max_request_bytes)
 
 # Request logging and metrics recording (outermost - runs first)
 app.add_middleware(RequestLogger)
