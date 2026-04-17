@@ -384,6 +384,21 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
         except Exception:
             return None
 
+    def _read_bool(field_name: str) -> bool | None:
+        field = reader.fields.get(field_name)
+        if field is None:
+            return None
+        try:
+            value = field.parts[-1]
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                return bool(int.from_bytes(bytes(value), "little", signed=False))
+            import numpy as np  # type: ignore[import-not-found]
+
+            arr = np.asarray(value)
+            return bool(int(arr.flat[0]))
+        except Exception:
+            return None
+
     arch = _read_str("general.architecture")
     if arch is None:
         return None
@@ -401,6 +416,13 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
         # preset llama-cpp-python ships, especially for new arches
         # like Gemma 4 whose prompt format differs from Gemma 2.
         "has_chat_template": "tokenizer.chat_template" in reader.fields,
+        # Phase 11 P1 — V2 row 39. Gemma 4 models are shipped with
+        # ``tokenizer.ggml.add_bos_token = false`` because their chat
+        # template handles the BOS token explicitly. Engines that
+        # also auto-prepend BOS double-insert it and mis-predict the
+        # first few tokens. We surface this flag so the tokenize /
+        # generate paths can respect it.
+        "add_bos_token": _read_bool("tokenizer.ggml.add_bos_token"),
     }
 
 
@@ -881,6 +903,11 @@ class LlamaCppEngine(InferenceEngine):
                 self._model = Llama(**llama_kwargs)
             self._model_path = model_path
             self._architecture = architecture
+            # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
+            # preference so downstream ``tokenize()`` calls don't
+            # double-prepend BOS on Gemma 4 and friends. Default True
+            # mirrors llama-cpp-python's old behaviour.
+            self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
             self._is_multimodal = chat_handler is not None
             elapsed = time.perf_counter() - start_time
             mm_note = " (multimodal)" if self._is_multimodal else ""
@@ -961,7 +988,13 @@ class LlamaCppEngine(InferenceEngine):
         if cfg.keep_context:
             try:
                 full = (effective_prompt + text).encode("utf-8", errors="replace")
-                context_tokens = list(self._model.tokenize(full, add_bos=False))
+                # Phase 11 P1 — V2 row 39. When the model's GGUF
+                # says ``tokenizer.ggml.add_bos_token=false`` we
+                # must not re-prepend BOS during tokenisation (Gemma
+                # 4 is the canonical offender). Default True to
+                # match llama-cpp's prior behaviour.
+                add_bos = getattr(self, "_tokenizer_add_bos", True)
+                context_tokens = list(self._model.tokenize(full, add_bos=bool(add_bos)))
             except Exception:  # noqa: BLE001
                 logger.warning("keep_context requested but tokenize() failed", exc_info=True)
                 context_tokens = []
