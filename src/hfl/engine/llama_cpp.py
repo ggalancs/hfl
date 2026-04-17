@@ -531,6 +531,73 @@ def _preflight_memory_check(
         raise err
 
 
+def _build_vision_chat_handler(
+    *,
+    architecture: str | None,
+    clip_model_path: str,
+    verbose: bool = False,
+) -> object | None:
+    """Instantiate the right multimodal chat handler for this arch.
+
+    Phase 4 P0-6. llama-cpp-python ships one ``chat_handler``
+    subclass per vision family; the arch name we detected from the
+    GGUF header picks which one. Returns ``None`` (with a warning
+    log) when the local llama-cpp-python install is too old to
+    expose the handlers, so load falls back to text-only mode
+    instead of crashing.
+
+    Arguments:
+        architecture: ``general.architecture`` value from the GGUF
+            header (e.g. ``gemma3``, ``llama4``, ``qwen2vl``,
+            ``llava``).
+        clip_model_path: Absolute path to the CLIP projector GGUF
+            (typically ``mmproj-*.gguf``).
+        verbose: Passed through to the handler for logging.
+    """
+    arch = (architecture or "").lower()
+
+    try:
+        from llama_cpp.llama_chat_format import (
+            Gemma3ChatHandler,
+            Llava15ChatHandler,
+            Llava16ChatHandler,
+            MoondreamChatHandler,
+            Qwen25VLChatHandler,
+        )
+    except ImportError:
+        logger.warning(
+            "llama-cpp-python installed here lacks multimodal chat handlers; "
+            "loading %s without vision support. Upgrade with: "
+            "pip install -U 'llama-cpp-python>=0.3.20'",
+            arch or "model",
+        )
+        return None
+
+    # Arch → handler. Order matters: most-specific substring first
+    # so e.g. ``llava-v1.6`` doesn't match the v1.5 handler.
+    if "gemma" in arch and ("3" in arch or "4" in arch):
+        handler_cls = Gemma3ChatHandler
+    elif "qwen" in arch and "vl" in arch:
+        handler_cls = Qwen25VLChatHandler
+    elif "moondream" in arch:
+        handler_cls = MoondreamChatHandler
+    elif "llava-v1.6" in arch or "llava_1.6" in arch or "llava16" in arch:
+        handler_cls = Llava16ChatHandler
+    elif "llava" in arch:
+        handler_cls = Llava15ChatHandler
+    else:
+        # Unknown architecture but we have a CLIP projector — try
+        # the most common (LLaVA 1.5) and let the model complain at
+        # first inference if it mismatches.
+        logger.warning(
+            "Unknown vision architecture %r; falling back to Llava15 handler",
+            architecture,
+        )
+        handler_cls = Llava15ChatHandler
+
+    return handler_cls(clip_model_path=clip_model_path, verbose=verbose)
+
+
 class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
@@ -538,6 +605,10 @@ class LlamaCppEngine(InferenceEngine):
         self._model: "Llama | None" = None
         self._model_path: str = ""
         self._architecture: str | None = None
+        # True when the model was loaded with a CLIP projector and
+        # accepts images in ``create_chat_completion`` messages.
+        # Phase 4 P0-6.
+        self._is_multimodal: bool = False
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -695,12 +766,35 @@ class LlamaCppEngine(InferenceEngine):
             architecture,
         )
 
+        # Phase 4 P0-6: vision / multimodal. Vision-capable GGUF
+        # models ship a paired CLIP/vision projector file (usually
+        # ``mmproj-*.gguf``). When the caller passes one — either as
+        # an explicit ``clip_model_path`` kwarg or as a path
+        # adjacent to ``model_path`` — build the matching multimodal
+        # chat handler so ``create_chat_completion`` accepts
+        # ``images`` in its messages.
+        clip_model_path: str | None = kwargs.get("clip_model_path")
+        if clip_model_path is None:
+            # Convention: ``mmproj-*.gguf`` in the same directory.
+            for candidate in path.parent.glob("mmproj-*.gguf"):
+                clip_model_path = str(candidate)
+                logger.info("Auto-detected CLIP projector: %s", candidate.name)
+                break
+
+        chat_handler = None
+        if clip_model_path:
+            chat_handler = _build_vision_chat_handler(
+                architecture=architecture,
+                clip_model_path=clip_model_path,
+                verbose=verbose,
+            )
+
         start_time = time.perf_counter()
         try:
             # Suppress Metal/CUDA initialization messages if verbose=False
             context = _suppress_stderr if not verbose else _nullcontext
             with context():
-                self._model = Llama(
+                llama_kwargs: dict = dict(
                     model_path=model_path,
                     n_ctx=n_ctx,
                     n_gpu_layers=n_gpu_layers,
@@ -709,10 +803,20 @@ class LlamaCppEngine(InferenceEngine):
                     flash_attn=flash_attn,
                     chat_format=chat_format,
                 )
+                if chat_handler is not None:
+                    # When a multimodal chat_handler is supplied,
+                    # ``chat_format`` must be None so llama-cpp-python
+                    # doesn't try to install a conflicting text-only
+                    # template.
+                    llama_kwargs["chat_handler"] = chat_handler
+                    llama_kwargs.pop("chat_format", None)
+                self._model = Llama(**llama_kwargs)
             self._model_path = model_path
             self._architecture = architecture
+            self._is_multimodal = chat_handler is not None
             elapsed = time.perf_counter() - start_time
-            logger.info("Model loaded in %.2fs: %s", elapsed, path.name)
+            mm_note = " (multimodal)" if self._is_multimodal else ""
+            logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
         except Exception as e:
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
@@ -814,11 +918,43 @@ class LlamaCppEngine(InferenceEngine):
         """Convert internal ChatMessage list to llama-cpp-python format.
 
         Preserves ``tool_calls`` on assistant turns and ``name`` on tool
-        turns so the underlying chat template can render them correctly.
+        turns so the underlying chat template can render them
+        correctly. When a message carries ``images``, convert the
+        content to llama-cpp's list-of-parts form
+        (``[{"type":"text", "text": "..."}, {"type":"image_url",
+        "image_url":{"url":"data:image/png;base64,..."}}]``) which
+        the multimodal chat handlers recognise.
         """
+        import base64 as _base64
+
         out: list[dict] = []
         for m in messages:
-            entry: dict = {"role": m.role, "content": m.content or ""}
+            # Text-only fast path
+            if not m.images:
+                entry: dict = {"role": m.role, "content": m.content or ""}
+            else:
+                parts: list[dict] = []
+                if m.content:
+                    parts.append({"type": "text", "text": m.content})
+                for image_bytes in m.images:
+                    # llama-cpp's multimodal handlers accept
+                    # ``data:image/...;base64,...`` URIs on the
+                    # ``image_url.url`` field. Sniff the MIME from
+                    # magic bytes so the URI is correct even if we
+                    # came in as raw bytes.
+                    if image_bytes.startswith(b"\x89PNG"):
+                        mime = "image/png"
+                    elif image_bytes.startswith(b"\xff\xd8\xff"):
+                        mime = "image/jpeg"
+                    elif image_bytes.startswith((b"GIF87a", b"GIF89a")):
+                        mime = "image/gif"
+                    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+                        mime = "image/webp"
+                    else:
+                        mime = "image/png"  # Best-effort fallback.
+                    uri = f"data:{mime};base64," + _base64.b64encode(image_bytes).decode("ascii")
+                    parts.append({"type": "image_url", "image_url": {"url": uri}})
+                entry = {"role": m.role, "content": parts}
             if m.tool_calls:
                 entry["tool_calls"] = m.tool_calls
             if m.name:
