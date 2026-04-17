@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-17
+
+**Phase 11 of OLLAMA_PARITY_PLAN_V2 — Runtime I.** Five runtime
+knobs that matter the moment a model gets non-trivial.
+
+### Added — KV cache quantisation (row 9)
+
+- ``config.kv_cache_type`` (``HFL_KV_CACHE_TYPE``) — one of
+  ``"f16"`` (default), ``"q8_0"`` (half VRAM), ``"q4_0"``
+  (quarter VRAM). Propagated to llama-cpp via ``type_k`` /
+  ``type_v``.
+
+### Added — Shared-prefix prompt cache (row 10)
+
+- New ``hfl.engine.prompt_cache.PromptPrefixCache`` LRU. Engines
+  that support prefix reuse can query ``longest_prefix(tokens)``
+  to skip recomputing overlap across turns. Module lands
+  self-contained; the llama-cpp integration point is wired in
+  subsequent commits.
+- ``HFL_PROMPT_CACHE_ENABLED`` / ``HFL_PROMPT_CACHE_MAX_ENTRIES``.
+
+### Added — VRAM-aware context sizing (row 13)
+
+- New ``hfl.engine.vram`` module probes NVIDIA (pynvml),
+  Apple Metal (torch.mps + sysctl fallback) and AMD ROCm
+  (``/sys/class/drm``) then picks ``num_ctx`` from Ollama's
+  ladder: ``< 24 GiB → 4 096``, ``24–48 GiB → 32 768``,
+  ``≥ 48 GiB → 262 144``.
+- ``HFL_VRAM_OVERRIDE_GIB`` short-circuits for containers /
+  tests.
+- LlamaCppEngine consults the ladder whenever the caller didn't
+  pin ``n_ctx``.
+
+### Added — ``tokenizer.ggml.add_bos_token`` honoured (row 39)
+
+- Gemma 4 GGUFs ship with ``add_bos_token=false`` — their chat
+  template inserts BOS explicitly, so a second insert from the
+  tokeniser mis-predicts the first tokens. Engine now reads the
+  flag at load time and respects it on subsequent ``tokenize()``
+  calls.
+
+### Added — Full Go-template rendering (row 23)
+
+- New ``hfl.converter.go_template`` evaluator supports nested
+  field access, ``{{ if / else / end }}``, ``{{ range / end }}``,
+  string literals and ``{{- ... -}}`` whitespace trimming.
+  Covers Llama 3, Gemma 4, Qwen 2.5 Modelfile templates the old
+  regex substitution bailed on.
+- Parse errors fall back to the literal template with a WARNING
+  — never crashes generation.
+
+### Test & CI
+
+- Total suite: 2792 passing, 28 skipped. Coverage ≈ 88%.
+- ci-local green on every commit.
+
+---
+
 ## [0.8.1] - 2026-04-17
 
 **Phase 10 of OLLAMA_PARITY_PLAN_V2 — Agentic.** Five items land
