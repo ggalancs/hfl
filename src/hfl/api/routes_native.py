@@ -471,14 +471,61 @@ async def api_chat(
     # the inference dispatcher (spec §5.3). ``tools`` is forwarded as a
     # kwarg so engines without tool support raise TypeError and fall
     # back via the per-engine shim.
+    trace_payload: list[dict] | None = None
     try:
-        result = await run_dispatched(
-            state.engine.chat,
-            messages,
-            gen_config,
-            tools=tools,
-            operation="chat",
-        )
+        if req.agent_loop:
+            # Phase 10 P1: native agent loop. Dispatches tool calls
+            # itself (MCP only for now) and re-submits results to the
+            # model until we get a tool-call-free reply or reach
+            # ``max_iterations``.
+            from hfl.api.agent_loop import run_agent_loop
+
+            async def _chat_fn(msgs, cfg, tools_arg):
+                return await run_dispatched(
+                    state.engine.chat,
+                    msgs,
+                    cfg,
+                    tools=tools_arg,
+                    operation="chat",
+                )
+
+            mcp_caller = None
+            try:
+                from hfl.mcp.client import get_client as _get_mcp
+
+                mcp_client = _get_mcp()
+                mcp_caller = mcp_client.call_tool
+            except Exception:
+                mcp_caller = None
+
+            loop_result = await run_agent_loop(
+                messages=messages,
+                config=gen_config,
+                tools=tools,
+                chat_fn=_chat_fn,
+                mcp_caller=mcp_caller,
+                max_iterations=req.max_iterations or 6,
+            )
+            result = loop_result.final
+            trace_payload = [
+                {
+                    "iteration": entry.iteration,
+                    "name": entry.name,
+                    "arguments": entry.arguments,
+                    "result": entry.result,
+                    "error": entry.error,
+                    "call_id": entry.call_id,
+                }
+                for entry in loop_result.tool_trace
+            ]
+        else:
+            result = await run_dispatched(
+                state.engine.chat,
+                messages,
+                gen_config,
+                tools=tools,
+                operation="chat",
+            )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
 
@@ -504,7 +551,7 @@ async def api_chat(
     if extracted_thinking:
         message["thinking"] = extracted_thinking
 
-    return {
+    envelope: dict[str, Any] = {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "message": message,
@@ -517,6 +564,12 @@ async def api_chat(
         "eval_count": result.tokens_generated,
         "eval_duration": result.eval_duration,
     }
+    # Phase 10 P1: replay-ready agent-loop trace for consumers that
+    # want to inspect each tool invocation the server dispatched on
+    # their behalf.
+    if trace_payload is not None:
+        envelope["tool_trace"] = trace_payload
+    return envelope
 
 
 async def _stream_chat(

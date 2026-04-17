@@ -277,3 +277,21 @@ class ChatRequest(BaseModel):
             "(Ollama-parity P1-1)."
         ),
     )
+    agent_loop: bool | None = Field(
+        None,
+        description=(
+            "Run the server-side agent loop (Phase 10 P1). When true, "
+            "HFL dispatches tool calls itself and re-submits results "
+            "to the model, returning only the final assistant turn "
+            "alongside a ``tool_trace`` for replay. Only meaningful on "
+            "non-streaming requests."
+        ),
+    )
+    max_iterations: int | None = Field(
+        None,
+        ge=1,
+        le=20,
+        description=(
+            "Hard cap on agent-loop iterations (default 6). Ignored unless ``agent_loop`` is true."
+        ),
+    )
