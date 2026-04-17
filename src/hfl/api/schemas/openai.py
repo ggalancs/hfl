@@ -93,6 +93,16 @@ class ChatCompletionRequest(BaseModel):
         le=2**32 - 1,
         description="Random seed for reproducibility (unsigned 32-bit)",
     )
+    response_format: dict | None = Field(
+        None,
+        description=(
+            "OpenAI JSON-mode envelope. Accepts "
+            "{'type':'text'} (default), {'type':'json_object'} for "
+            "free-form JSON, or {'type':'json_schema', 'json_schema': "
+            "{'name':'...', 'schema':{...}}} for strict schema "
+            "conformance. See OLLAMA_PARITY_PLAN P0-5."
+        ),
+    )
 
     @field_validator("messages")
     @classmethod

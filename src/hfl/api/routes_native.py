@@ -166,6 +166,12 @@ async def api_generate(
 
     gen_config = _options_to_config(req.options)
 
+    # OLLAMA_PARITY_PLAN P0-5: honour ``format`` for structured output.
+    if req.format is not None:
+        from hfl.api.structured_outputs import normalize_ollama_format
+
+        gen_config.response_format = normalize_ollama_format(req.format)
+
     if req.stream:
         return await prepare_stream_response(
             lambda slot: _stream_generate(req.model, req.prompt, gen_config, slot),
@@ -289,6 +295,12 @@ async def api_chat(
     messages = _to_chat_messages(req)
     gen_config = _options_to_config(req.options)
     tools = _tools_payload(req)
+
+    # OLLAMA_PARITY_PLAN P0-5: structured-output constraint.
+    if req.format is not None:
+        from hfl.api.structured_outputs import normalize_ollama_format
+
+        gen_config.response_format = normalize_ollama_format(req.format)
 
     if req.stream:
         return await prepare_stream_response(

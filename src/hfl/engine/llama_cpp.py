@@ -852,13 +852,41 @@ class LlamaCppEngine(InferenceEngine):
             # template and parses tool calls back into the response.
             kwargs["tools"] = tools
 
+        # OLLAMA_PARITY_PLAN P0-5: structured outputs.
+        # Compile the request's response_format into a GBNF grammar
+        # that llama-cpp enforces at sampling time. We use the dict
+        # ``response_format`` kwarg that create_chat_completion accepts
+        # natively (maps to OpenAI's JSON mode for free-form JSON, or
+        # to a compiled schema grammar for strict conformance).
+        _rf = cfg.response_format
+        if _rf is not None:
+            if _rf == "json":
+                kwargs["response_format"] = {"type": "json_object"}
+            elif isinstance(_rf, dict):
+                kwargs["response_format"] = {
+                    "type": "json_object",
+                    "schema": _rf,
+                }
+            # ``GBNF:`` raw-grammar passthrough: build LlamaGrammar
+            # directly so advanced users can ship custom grammars.
+            elif isinstance(_rf, str) and _rf.startswith("GBNF:"):
+                try:
+                    from llama_cpp import LlamaGrammar
+
+                    kwargs["grammar"] = LlamaGrammar.from_string(_rf[len("GBNF:") :])
+                except ImportError:  # pragma: no cover — optional dep
+                    pass
+
         t0 = time.perf_counter()
         try:
             output = self._model.create_chat_completion(**kwargs)
         except TypeError:
-            # Older llama-cpp-python without ``tools`` support — fall back
-            # so the caller's text-based parser can still extract calls.
+            # Older llama-cpp-python without ``tools`` / ``response_format``
+            # support — strip them and retry so the caller's text-based
+            # parser can still extract calls.
             kwargs.pop("tools", None)
+            kwargs.pop("response_format", None)
+            kwargs.pop("grammar", None)
             output = self._model.create_chat_completion(**kwargs)
         elapsed = time.perf_counter() - t0
 

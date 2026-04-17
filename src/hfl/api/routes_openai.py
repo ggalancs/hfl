@@ -87,6 +87,12 @@ async def chat_completions(
     messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
     gen_config = _to_gen_config(req)
 
+    # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
+    if req.response_format is not None:
+        from hfl.api.structured_outputs import normalize_openai_response_format
+
+        gen_config.response_format = normalize_openai_response_format(req.response_format)
+
     if req.stream:
         return await prepare_stream_response(
             lambda slot: _stream_chat(req.model, messages, gen_config, slot),

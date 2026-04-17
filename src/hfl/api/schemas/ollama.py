@@ -139,6 +139,14 @@ class GenerateRequest(BaseModel):
             "to keep loaded indefinitely, or null for the server default."
         ),
     )
+    format: str | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured-output constraint. Accepts 'json' (free-form "
+            "JSON) or a JSON Schema object for strict conformance. "
+            "See OLLAMA_PARITY_PLAN P0-5."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
@@ -192,5 +200,12 @@ class ChatRequest(BaseModel):
         description=(
             "Model residency override — see GenerateRequest.keep_alive. "
             "Supports '5m' / 30 / 0 (unload) / -1 (keep forever) / null."
+        ),
+    )
+    format: str | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured-output constraint. Accepts 'json' (free-form "
+            "JSON) or a JSON Schema object. See GenerateRequest.format."
         ),
     )

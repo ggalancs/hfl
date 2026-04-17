@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-17
+
+**Phase 3 of OLLAMA_PARITY_PLAN — structured outputs.** Every client
+library that requests JSON-constrained generation (instructor,
+LangChain OutputParsers, LlamaIndex Pydantic programs, the Anthropic
+Claude SDK's ``tool_use``) now flows through HFL with zero patches.
+
+### Added — Ollama ``format``
+
+``POST /api/generate`` and ``POST /api/chat`` accept:
+
+- ``format: "json"`` → free-form JSON.
+- ``format: { ...JSON Schema... }`` → strict schema conformance.
+- ``format: "GBNF:<body>"`` → raw GBNF grammar passthrough for
+  advanced users.
+
+The field is validated at the router boundary (depth ≤10, total
+properties ≤200, regex patterns ≤1024 chars) so abusive schemas
+fail fast with 400 instead of hanging the grammar compiler.
+
+### Added — OpenAI ``response_format``
+
+``POST /v1/chat/completions`` accepts the full OpenAI JSON-mode
+envelope:
+
+- ``{"type": "text"}`` → unconstrained.
+- ``{"type": "json_object"}`` → free-form JSON.
+- ``{"type": "json_schema", "json_schema": {"name": "...", "schema":
+  {...}}}`` → strict schema conformance. The inner ``schema`` is
+  unwrapped and validated.
+
+### Internal
+
+- New ``GenerationConfig.response_format`` field (``str | dict |
+  None``) carries the normalised constraint from router to engine.
+- ``LlamaCppEngine.chat`` maps the field to llama-cpp-python's
+  native ``response_format`` (for ``json``/schema) or ``grammar``
+  (for raw GBNF). Older llama-cpp versions that don't support those
+  kwargs fall back gracefully — the TypeError path strips the
+  kwargs and retries, so the engine still produces unconstrained
+  text rather than 500ing.
+- New module ``hfl.api.structured_outputs`` — normalisation for
+  both Ollama and OpenAI shapes plus the depth/property/pattern
+  validator. Standalone unit-testable.
+
+### Tests
+
+- 33 new tests across ``test_structured_outputs.py`` (schema
+  validator, OpenAI/Ollama envelope normalisation) and
+  ``test_routes_structured_outputs.py`` (field flows from HTTP body
+  through to ``engine.chat``'s GenerationConfig).
+
+### Metrics
+
+| | 0.4.1 | 0.4.2 |
+|-|-|-|
+| Tests | 2318 | 2351 (+33) |
+| Ollama ``format`` on /api/generate+/api/chat | ❌ | ✅ |
+| OpenAI ``response_format`` | ❌ | ✅ |
+| JSON Schema DoS guard (depth/props/patterns) | ❌ | ✅ |
+
+Remaining parity items (P0-6 vision, Modelfile ingestion, blobs,
+copy, system/think overrides, metrics) land in 0.5.x.
+
 ## [0.4.1] - 2026-04-17
 
 **Phase 2 of OLLAMA_PARITY_PLAN is complete — embeddings are live.**

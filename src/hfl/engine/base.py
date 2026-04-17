@@ -41,6 +41,19 @@ class GenerationConfig:
     stop: list[str] | None = None
     repeat_penalty: float = 1.1
     seed: int = -1
+    # Structured-output constraint (OLLAMA_PARITY_PLAN P0-5).
+    # Backends that support grammar-based constrained decoding
+    # (llama-cpp-python GBNF, vLLM GuidedDecodingParams, Transformers
+    # + outlines) honour this to force the model's output to conform
+    # to a JSON schema or a raw GBNF grammar. ``None`` means
+    # unconstrained generation.
+    #
+    # - ``"json"`` → free-form JSON object (value is the literal
+    #   string; backends compile it to their "any JSON" grammar).
+    # - ``dict`` → JSON Schema (validated at the route boundary).
+    # - ``str`` starting with ``"GBNF:"`` → raw GBNF grammar body
+    #   (advanced users; bypasses schema validation).
+    response_format: str | dict | None = None
 
 
 @dataclass
