@@ -656,6 +656,27 @@ class LlamaCppEngine(InferenceEngine):
         user_n_ctx = kwargs.get("n_ctx", None)
         explicit_n_ctx = user_n_ctx is not None and user_n_ctx > 0
         n_ctx = user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size
+        # Phase 11 P1 — V2 row 13. When the operator hasn't pinned a
+        # context size via manifest / env / kwarg, size it
+        # automatically from detected VRAM using Ollama's 4k/32k/256k
+        # ladder. This is a ceiling, not a floor — if the model's
+        # advertised context is smaller we'll still clamp below.
+        if not explicit_n_ctx and n_ctx <= 0:
+            try:
+                from hfl.engine.vram import pick_ctx_size
+
+                tier = pick_ctx_size()
+                n_ctx = tier.ctx
+                if tier.vram_gib is not None:
+                    logger.info(
+                        "VRAM probe saw %.1f GiB → num_ctx=%d",
+                        tier.vram_gib,
+                        n_ctx,
+                    )
+                else:
+                    logger.info("VRAM probe inconclusive → defaulting num_ctx=%d", n_ctx)
+            except Exception:
+                logger.debug("VRAM auto-sizing failed", exc_info=True)
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)
 
         # Read the GGUF header once and use it for BOTH chat-format
