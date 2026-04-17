@@ -180,7 +180,11 @@ def _resolve_from(
         try:
             digest = parse_digest(source)
         except ValueError as exc:
-            raise ValueError(f"invalid blob digest in FROM: {exc}") from exc
+            # Don't interpolate ``exc`` into the user message — CodeQL
+            # treats its repr as a taint source for
+            # ``py/stack-trace-exposure`` and the parse_digest error
+            # already carries enough information on its own.
+            raise ValueError("invalid blob digest in FROM") from exc
         if not blob_exists(digest):
             raise ValueError(
                 f"FROM references unknown blob sha256:{digest[:12]}… "
@@ -254,9 +258,14 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
     yield _event("writing manifest")
     try:
         await asyncio.to_thread(get_registry().add, manifest)
-    except Exception as exc:
+    except Exception:
+        # Swallow the exception text: ``exc`` may reveal internal
+        # paths or library class names (CodeQL
+        # ``py/stack-trace-exposure``). The full traceback is in the
+        # server log via ``logger.exception``; the client just sees
+        # a generic failure event.
         logger.exception("registry add failed during /api/create")
-        yield _error_event(f"failed to persist manifest: {exc}")
+        yield _error_event("failed to persist manifest")
         return
 
     # 5. Done.

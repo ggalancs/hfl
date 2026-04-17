@@ -35,8 +35,18 @@ from typing import Union
 # "0.5s" (decimals allowed). Ollama's implementation uses Go's
 # ``time.ParseDuration`` — we mirror the subset that appears in real
 # model-serving traffic.
-_COMPONENT_RE = re.compile(r"(\d+(?:\.\d+)?)(ms|us|µs|ns|s|m|h)")
-_NUMBER_ONLY_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+#
+# Split the number into two alternation branches (``\d+\.\d+`` vs
+# ``\d+``) instead of a single ``\d+(?:\.\d+)?``. The single form
+# backtracks on inputs like ``"999999999x"`` — the engine tries every
+# partition of the digits between ``\d+`` and the optional ``.\d+``
+# before giving up. Alternation with explicit branches short-circuits
+# on the first atomic match, avoiding the polynomial blow-up that
+# CodeQL's ``py/polynomial-redos`` flags. A hard length cap before the
+# regex runs gives a second line of defence for unexpected inputs.
+_MAX_DURATION_STRING_LENGTH = 128
+_COMPONENT_RE = re.compile(r"(\d+\.\d+|\d+)(ms|us|µs|ns|s|m|h)")
+_NUMBER_ONLY_RE = re.compile(r"^-?(?:\d+\.\d+|\d+)$")
 
 # Sentinel for "keep loaded forever". Encoded as timedelta(-1s) so
 # callers can branch with ``is NEVER_EXPIRE`` (identity) or with a
@@ -96,6 +106,14 @@ def parse_keep_alive(value: Union[str, int, float, None]) -> timedelta | None:
 
     # String path
     if isinstance(value, str):
+        # Bound input length before running the regex. Combined with
+        # the non-backtracking alternation in ``_COMPONENT_RE`` this
+        # defeats polynomial-redos: a malicious client can never make
+        # the parser do more than ``O(len)`` work.
+        if len(value) > _MAX_DURATION_STRING_LENGTH:
+            raise InvalidKeepAliveError(
+                f"keep_alive string exceeds {_MAX_DURATION_STRING_LENGTH} characters"
+            )
         stripped = value.strip()
         if not stripped:
             return None
