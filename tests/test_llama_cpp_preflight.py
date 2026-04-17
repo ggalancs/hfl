@@ -214,9 +214,17 @@ class TestGemmaContextCap:
     def test_non_gemma_arch_is_not_capped(self, monkeypatch, patched_gguf, dummy_gguf):
         """The cap is targeted at Gemma 3/4 specifically. Other
         architectures keep their existing auto-detect behaviour.
+
+        Phase 11 P1 (V2 row 13) added VRAM-aware context sizing that
+        fires when the caller didn't pin ``n_ctx``. Stub the probe
+        to None so this test exercises the "no probe" floor (4096)
+        deterministically, independent of the test host's VRAM.
         """
         patched_gguf(arch="qwen3", block_count=32, embedding_length=2048)
         _stub_memory_snapshot(monkeypatch, available_gb=64.0)
+        from hfl.engine import vram as _vram_module
+
+        monkeypatch.setattr(_vram_module, "detect_vram_gib", lambda: None)
 
         captured: dict = {}
         _install_stub_llama(monkeypatch, captured)
@@ -224,9 +232,10 @@ class TestGemmaContextCap:
         engine = engine_module.LlamaCppEngine()
         engine.load(dummy_gguf(), n_gpu_layers=0, verbose=True)
 
-        # Non-Gemma default falls through to hfl_config.default_ctx_size
-        # which is 0 (let llama-cpp-python decide).
-        assert captured["n_ctx"] == 0
+        # No VRAM probe signal → floor tier (4096). Was 0 before V2
+        # row 13 — llama-cpp would infer from the GGUF; we now take
+        # ownership of the size.
+        assert captured["n_ctx"] == 4096
 
 
 # --- Architecture-based flash_attn disable -----------------------------------

@@ -139,6 +139,26 @@ class HFLConfig:
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
     default_threads: int = 0  # 0 = auto-detect
 
+    # KV cache dtype (Phase 11 P1 — OLLAMA_PARITY_PLAN_V2 row 9).
+    # Quantising the KV cache halves / quarters its VRAM footprint
+    # at the cost of some accuracy, mirroring Ollama's
+    # ``OLLAMA_KV_CACHE_TYPE``. One of: ``"f16"`` (default, no
+    # quantisation), ``"q8_0"`` (half VRAM, negligible quality
+    # loss), ``"q4_0"`` (quarter VRAM, visible on small models).
+    kv_cache_type: str = field(default_factory=lambda: os.environ.get("HFL_KV_CACHE_TYPE", "f16"))
+
+    # Prefix cache across requests (Phase 11 P1 — V2 row 10). When
+    # True, the engine reuses KV-cache state when the current prompt
+    # shares a prefix with a recently-served one. Only the latest-N
+    # prefixes are retained; ``prompt_cache_max_entries`` caps the
+    # LRU.
+    prompt_cache_enabled: bool = field(
+        default_factory=lambda: os.environ.get("HFL_PROMPT_CACHE_ENABLED", "true").lower() == "true"
+    )
+    prompt_cache_max_entries: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_PROMPT_CACHE_MAX_ENTRIES", "32"))
+    )
+
     # TTS defaults
     default_tts_sample_rate: int = 22050
     default_tts_format: str = "wav"  # wav, mp3, ogg
@@ -149,6 +169,14 @@ class HFLConfig:
     download_timeout: float = 3600.0  # 1 hour
     conversion_timeout: float = 7200.0  # 2 hours
     api_request_timeout: float = 120.0  # 2 minutes
+
+    # Maximum request body size (bytes) — prevents DoS by oversized prompts.
+    # Default 10 MiB: comfortably fits legitimate multi-turn conversations
+    # (a 128k-token prompt at ~4 chars/token is ~512 KB) while rejecting
+    # obvious abuse. Override with HFL_MAX_REQUEST_BYTES=0 to disable.
+    max_request_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_MAX_REQUEST_BYTES", str(10 * 1024 * 1024)))
+    )
 
     # Inference dispatcher (spec §5.3 — concurrency / queueing).
     # Llama.cpp and transformers-GPU share a single non-reentrant model
@@ -176,6 +204,34 @@ class HFLConfig:
     retry_base_delay: float = 1.0
     retry_max_delay: float = 60.0
 
+    # Streaming queue timeouts (seconds). These previously lived as
+    # magic numbers inside ``engine/async_wrapper.py``,
+    # ``engine/vllm_engine.py``, and ``api/streaming.py``. Centralising
+    # them here lets operators tune streaming backpressure without a
+    # code change.
+    stream_queue_put_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_PUT_TIMEOUT", "60"))
+    )
+    stream_queue_get_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_GET_TIMEOUT", "30"))
+    )
+    # vLLM-specific: time allowed for the error sentinel to reach the
+    # consumer when the worker thread failed. Shorter than the regular
+    # put timeout because a dying stream shouldn't wait for
+    # backpressure relief.
+    vllm_error_put_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_VLLM_ERROR_PUT_TIMEOUT", "10"))
+    )
+    # vLLM worker-thread join timeout during shutdown.
+    vllm_shutdown_join_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT", "5"))
+    )
+    # SQLite registry backend: busy-timeout (seconds) waiting for a
+    # lock before raising ``OperationalError``.
+    registry_sqlite_busy_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_REGISTRY_SQLITE_TIMEOUT", "30"))
+    )
+
     # Service Level Objectives (SLOs)
     slo: SLOConfig = field(default_factory=SLOConfig)
 
@@ -183,6 +239,17 @@ class HFLConfig:
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.
     # It is NEVER persisted to disk, NEVER stored in models.json or any config file.
     # Token is held in memory only for the duration of the process.
+    #
+    # Known limitation (platform, not a bug): Python strings are
+    # immutable, so once ``hf_token`` is assigned the original bytes
+    # cannot be reliably overwritten — a memory dump of a running
+    # process will still contain the secret. This is true for every
+    # Python program reading a secret into a ``str``. Mitigations:
+    # (a) prefer ``huggingface-cli login`` which writes a token file
+    # with 0600 permissions and does not require setting an env var,
+    # (b) restrict the env var's scope to the systemd unit / shell
+    # session that launches ``hfl``, (c) run HFL under an unprivileged
+    # user whose memory cannot be inspected by other processes.
     hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
     def __post_init__(self) -> None:
@@ -192,6 +259,22 @@ class HFLConfig:
             import logging
 
             logging.getLogger(__name__).warning("Invalid SLO configuration: %s", "; ".join(errors))
+
+        # CORS: the wildcard + credentials combination is rejected by every
+        # modern browser (W3C Fetch §3.2.1), but Starlette/FastAPI will
+        # still accept it and emit the headers — a silent misconfiguration.
+        # Reject at construction time so the error surfaces on import/boot
+        # rather than after the server has been serving broken CORS for
+        # hours. ``cors_origins=["*"]`` explicit value is treated the same
+        # as ``cors_allow_all=True``.
+        wildcard = self.cors_allow_all or self.cors_origins == ["*"]
+        if wildcard and self.cors_allow_credentials:
+            raise ValueError(
+                "CORS misconfiguration: cors_allow_credentials=True is not compatible "
+                "with wildcard origins (cors_allow_all=True or cors_origins=['*']). "
+                "Browsers will reject the response; either set explicit origins or "
+                "disable credentials."
+            )
 
     def ensure_dirs(self):
         """Creates the necessary directories."""

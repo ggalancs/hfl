@@ -78,6 +78,19 @@ class OllamaChatMessage(BaseModel):
         max_length=256,
         description="Optional id linking a tool result to its call",
     )
+    # Vision / multimodal — Phase 4, P0-6. Each entry is either a
+    # bare base64 string OR a ``data:image/...;base64,...`` URI.
+    # The router decodes + validates via hfl.api.image_validator
+    # before forwarding to the engine.
+    images: list[str] | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "Base64-encoded images attached to this message. Accepted "
+            "formats: PNG, JPEG, WEBP, GIF. Max 32 per message, each "
+            "≤20 MiB, ≤4096x4096 pixels."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_role_fields(self) -> "OllamaChatMessage":
@@ -130,6 +143,59 @@ class GenerateRequest(BaseModel):
         None,
         description="Optional generation parameters (temperature, top_p, etc.)",
     )
+    keep_alive: str | int | float | None = Field(
+        None,
+        description=(
+            "How long to keep the model loaded after this request. "
+            "Accepts Ollama-style values: a Go duration ('5m', '30s', "
+            "'1h30m'), raw seconds (10), 0 to unload immediately, -1 "
+            "to keep loaded indefinitely, or null for the server default."
+        ),
+    )
+    format: str | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured-output constraint. Accepts 'json' (free-form "
+            "JSON) or a JSON Schema object for strict conformance. "
+            "See OLLAMA_PARITY_PLAN P0-5."
+        ),
+    )
+    system: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "System prompt override for this request. Inserted as the "
+            "first message with role=system regardless of what the "
+            "Modelfile defined. Ollama-parity (P1-1)."
+        ),
+    )
+    think: bool | str | None = Field(
+        None,
+        description=(
+            "Expose the model's reasoning / chain-of-thought channel "
+            "in the response (Ollama 2026 behaviour). Accepts a bool "
+            "(True → medium, False → off) or one of the GPT-OSS "
+            "levels ``low`` / ``medium`` / ``high``."
+        ),
+    )
+    template: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "Per-request chat-template override (Jinja). Substitutes the "
+            "model's default template for this request only. Phase 6 "
+            "P2-3 — Ollama-parity."
+        ),
+    )
+    raw: bool | None = Field(
+        None,
+        description=(
+            "Raw prompt mode. When true, the prompt is forwarded to the "
+            "model verbatim (no chat template, no BOS). Useful for "
+            "evaluation harnesses or manual prompt engineering. Phase 6 "
+            "P2-3 — Ollama-parity."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
@@ -177,4 +243,54 @@ class ChatRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = Field(
         None,
         description="Tool-selection policy (auto, none, or a specific tool)",
+    )
+    keep_alive: str | int | float | None = Field(
+        None,
+        description=(
+            "Model residency override — see GenerateRequest.keep_alive. "
+            "Supports '5m' / 30 / 0 (unload) / -1 (keep forever) / null."
+        ),
+    )
+    format: str | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured-output constraint. Accepts 'json' (free-form "
+            "JSON) or a JSON Schema object. See GenerateRequest.format."
+        ),
+    )
+    think: bool | str | None = Field(
+        None,
+        description=(
+            "Expose the model's reasoning channel in the response "
+            "(Ollama 2026). Accepts a bool (True → medium, False → off) "
+            "or a GPT-OSS level (``low`` / ``medium`` / ``high``)."
+        ),
+    )
+    system: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "System prompt override for this chat. Inserted as the "
+            "FIRST message with role=system, regardless of what the "
+            "caller already included or what the Modelfile defined "
+            "(Ollama-parity P1-1)."
+        ),
+    )
+    agent_loop: bool | None = Field(
+        None,
+        description=(
+            "Run the server-side agent loop (Phase 10 P1). When true, "
+            "HFL dispatches tool calls itself and re-submits results "
+            "to the model, returning only the final assistant turn "
+            "alongside a ``tool_trace`` for replay. Only meaningful on "
+            "non-streaming requests."
+        ),
+    )
+    max_iterations: int | None = Field(
+        None,
+        ge=1,
+        le=20,
+        description=(
+            "Hard cap on agent-loop iterations (default 6). Ignored unless ``agent_loop`` is true."
+        ),
     )

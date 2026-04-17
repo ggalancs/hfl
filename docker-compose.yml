@@ -1,0 +1,40 @@
+# HFL — docker-compose for local evaluation.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose exec hfl hfl pull llama3.3
+#   curl http://localhost:11434/api/tags
+#
+# Models persist under ./data/hfl on the host so pulls survive
+# container restarts. Customise ``HFL_EXTRAS`` in .env (or pass via
+# ``docker compose build --build-arg HFL_EXTRAS=all``) to change the
+# extras set baked into the image.
+
+version: "3.9"
+
+services:
+  hfl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HFL_EXTRAS: ${HFL_EXTRAS:-llama}
+    image: ghcr.io/ggalancs/hfl:${HFL_TAG:-latest}
+    container_name: hfl
+    restart: unless-stopped
+    ports:
+      - "${HFL_PORT:-11434}:11434"
+    environment:
+      HFL_HOST: "0.0.0.0"
+      HFL_PORT: "11434"
+      HFL_LANG: "${HFL_LANG:-en}"
+      # Optional API key — set HFL_API_KEY in .env to lock the server.
+      HFL_API_KEY: "${HFL_API_KEY:-}"
+    volumes:
+      - ./data/hfl:/var/lib/hfl
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:11434/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

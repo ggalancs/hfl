@@ -27,6 +27,7 @@ def create_mock_manifest(name: str = "test") -> MagicMock:
     return manifest
 
 
+@pytest.mark.slow
 class TestModelPoolStress:
     """Stress tests for the ModelPool class."""
 

@@ -56,6 +56,65 @@ class TestEnvConfig:
             assert cfg.queue_max_size == 16
             assert cfg.queue_acquire_timeout_seconds == 60.0
 
+    def test_default_max_request_bytes(self):
+        """Default max_request_bytes is 10 MiB."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 10 * 1024 * 1024
+
+    def test_max_request_bytes_via_env(self):
+        """HFL_MAX_REQUEST_BYTES configurable via env."""
+        with patch.dict(os.environ, {"HFL_MAX_REQUEST_BYTES": "2048"}):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 2048
+
+    def test_max_request_bytes_zero_disables(self):
+        """HFL_MAX_REQUEST_BYTES=0 keeps the limit disabled."""
+        with patch.dict(os.environ, {"HFL_MAX_REQUEST_BYTES": "0"}):
+            cfg = HFLConfig()
+            assert cfg.max_request_bytes == 0
+
+    def test_default_streaming_timeouts(self):
+        """Streaming timeouts have sensible defaults when unset."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_put_timeout == 60.0
+            assert cfg.stream_queue_get_timeout == 30.0
+            assert cfg.vllm_error_put_timeout == 10.0
+            assert cfg.vllm_shutdown_join_timeout == 5.0
+            assert cfg.registry_sqlite_busy_timeout == 30.0
+
+    def test_stream_queue_put_timeout_via_env(self):
+        """HFL_STREAM_QUEUE_PUT_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_STREAM_QUEUE_PUT_TIMEOUT": "15"}):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_put_timeout == 15.0
+
+    def test_stream_queue_get_timeout_via_env(self):
+        """HFL_STREAM_QUEUE_GET_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_STREAM_QUEUE_GET_TIMEOUT": "7.5"}):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_get_timeout == 7.5
+
+    def test_vllm_timeouts_via_env(self):
+        """HFL_VLLM_* env vars override defaults."""
+        with patch.dict(
+            os.environ,
+            {
+                "HFL_VLLM_ERROR_PUT_TIMEOUT": "2",
+                "HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT": "1.5",
+            },
+        ):
+            cfg = HFLConfig()
+            assert cfg.vllm_error_put_timeout == 2.0
+            assert cfg.vllm_shutdown_join_timeout == 1.5
+
+    def test_registry_sqlite_timeout_via_env(self):
+        """HFL_REGISTRY_SQLITE_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_REGISTRY_SQLITE_TIMEOUT": "120"}):
+            cfg = HFLConfig()
+            assert cfg.registry_sqlite_busy_timeout == 120.0
+
     def test_dispatcher_env_overrides(self):
         with patch.dict(
             os.environ,
@@ -100,6 +159,35 @@ class TestSLOValidation:
             # This should not raise, just warn
             cfg = HFLConfig(slo=SLOConfig(availability_target=5.0))
             assert cfg.slo.availability_target == 5.0
+
+
+class TestCORSValidation:
+    def test_wildcard_with_credentials_rejected(self):
+        """cors_allow_all=True with cors_allow_credentials=True raises at construction."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cors_allow_credentials"):
+            HFLConfig(cors_allow_all=True, cors_allow_credentials=True)
+
+    def test_explicit_wildcard_origin_with_credentials_rejected(self):
+        """cors_origins=['*'] with credentials=True is equivalent and rejected."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cors_allow_credentials"):
+            HFLConfig(cors_origins=["*"], cors_allow_credentials=True)
+
+    def test_wildcard_without_credentials_ok(self):
+        """Wildcard origins without credentials is a valid, common dev config."""
+        cfg = HFLConfig(cors_allow_all=True, cors_allow_credentials=False)
+        assert cfg.cors_allow_all is True
+
+    def test_specific_origin_with_credentials_ok(self):
+        """Explicit origins + credentials is the canonical secure setup."""
+        cfg = HFLConfig(
+            cors_origins=["https://app.example.com"],
+            cors_allow_credentials=True,
+        )
+        assert cfg.cors_allow_credentials is True
 
 
 class TestSafeEnsureDirs:

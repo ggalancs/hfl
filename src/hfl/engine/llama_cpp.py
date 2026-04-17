@@ -384,6 +384,21 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
         except Exception:
             return None
 
+    def _read_bool(field_name: str) -> bool | None:
+        field = reader.fields.get(field_name)
+        if field is None:
+            return None
+        try:
+            value = field.parts[-1]
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                return bool(int.from_bytes(bytes(value), "little", signed=False))
+            import numpy as np  # type: ignore[import-not-found]
+
+            arr = np.asarray(value)
+            return bool(int(arr.flat[0]))
+        except Exception:
+            return None
+
     arch = _read_str("general.architecture")
     if arch is None:
         return None
@@ -401,6 +416,13 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
         # preset llama-cpp-python ships, especially for new arches
         # like Gemma 4 whose prompt format differs from Gemma 2.
         "has_chat_template": "tokenizer.chat_template" in reader.fields,
+        # Phase 11 P1 — V2 row 39. Gemma 4 models are shipped with
+        # ``tokenizer.ggml.add_bos_token = false`` because their chat
+        # template handles the BOS token explicitly. Engines that
+        # also auto-prepend BOS double-insert it and mis-predict the
+        # first few tokens. We surface this flag so the tokenize /
+        # generate paths can respect it.
+        "add_bos_token": _read_bool("tokenizer.ggml.add_bos_token"),
     }
 
 
@@ -531,6 +553,73 @@ def _preflight_memory_check(
         raise err
 
 
+def _build_vision_chat_handler(
+    *,
+    architecture: str | None,
+    clip_model_path: str,
+    verbose: bool = False,
+) -> object | None:
+    """Instantiate the right multimodal chat handler for this arch.
+
+    Phase 4 P0-6. llama-cpp-python ships one ``chat_handler``
+    subclass per vision family; the arch name we detected from the
+    GGUF header picks which one. Returns ``None`` (with a warning
+    log) when the local llama-cpp-python install is too old to
+    expose the handlers, so load falls back to text-only mode
+    instead of crashing.
+
+    Arguments:
+        architecture: ``general.architecture`` value from the GGUF
+            header (e.g. ``gemma3``, ``llama4``, ``qwen2vl``,
+            ``llava``).
+        clip_model_path: Absolute path to the CLIP projector GGUF
+            (typically ``mmproj-*.gguf``).
+        verbose: Passed through to the handler for logging.
+    """
+    arch = (architecture or "").lower()
+
+    try:
+        from llama_cpp.llama_chat_format import (
+            Gemma3ChatHandler,
+            Llava15ChatHandler,
+            Llava16ChatHandler,
+            MoondreamChatHandler,
+            Qwen25VLChatHandler,
+        )
+    except ImportError:
+        logger.warning(
+            "llama-cpp-python installed here lacks multimodal chat handlers; "
+            "loading %s without vision support. Upgrade with: "
+            "pip install -U 'llama-cpp-python>=0.3.20'",
+            arch or "model",
+        )
+        return None
+
+    # Arch → handler. Order matters: most-specific substring first
+    # so e.g. ``llava-v1.6`` doesn't match the v1.5 handler.
+    if "gemma" in arch and ("3" in arch or "4" in arch):
+        handler_cls = Gemma3ChatHandler
+    elif "qwen" in arch and "vl" in arch:
+        handler_cls = Qwen25VLChatHandler
+    elif "moondream" in arch:
+        handler_cls = MoondreamChatHandler
+    elif "llava-v1.6" in arch or "llava_1.6" in arch or "llava16" in arch:
+        handler_cls = Llava16ChatHandler
+    elif "llava" in arch:
+        handler_cls = Llava15ChatHandler
+    else:
+        # Unknown architecture but we have a CLIP projector — try
+        # the most common (LLaVA 1.5) and let the model complain at
+        # first inference if it mismatches.
+        logger.warning(
+            "Unknown vision architecture %r; falling back to Llava15 handler",
+            architecture,
+        )
+        handler_cls = Llava15ChatHandler
+
+    return handler_cls(clip_model_path=clip_model_path, verbose=verbose)
+
+
 class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
@@ -538,6 +627,10 @@ class LlamaCppEngine(InferenceEngine):
         self._model: "Llama | None" = None
         self._model_path: str = ""
         self._architecture: str | None = None
+        # True when the model was loaded with a CLIP projector and
+        # accepts images in ``create_chat_completion`` messages.
+        # Phase 4 P0-6.
+        self._is_multimodal: bool = False
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -585,6 +678,11 @@ class LlamaCppEngine(InferenceEngine):
         user_n_ctx = kwargs.get("n_ctx", None)
         explicit_n_ctx = user_n_ctx is not None and user_n_ctx > 0
         n_ctx = user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size
+        # Phase 11 P1 — V2 row 13 VRAM auto-sizing moved *after* the
+        # architecture cap below so that arch-specific safe defaults
+        # (Gemma's 8192 cap) always take precedence. We only reach
+        # the VRAM path when neither the caller nor the architecture
+        # pinned a value.
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)
 
         # Read the GGUF header once and use it for BOTH chat-format
@@ -651,6 +749,27 @@ class LlamaCppEngine(InferenceEngine):
                 )
                 n_ctx = cap
 
+        # Phase 11 P1 — V2 row 13. When neither the caller nor the
+        # architecture pinned a value, fall back to a VRAM-tier
+        # recommendation (4 k / 32 k / 256 k). No-op on Gemma 3/4
+        # because the arch cap above already set n_ctx.
+        if not explicit_n_ctx and n_ctx == 0:
+            try:
+                from hfl.engine.vram import pick_ctx_size
+
+                tier = pick_ctx_size()
+                n_ctx = tier.ctx
+                if tier.vram_gib is not None:
+                    logger.info(
+                        "VRAM probe saw %.1f GiB → num_ctx=%d",
+                        tier.vram_gib,
+                        n_ctx,
+                    )
+                else:
+                    logger.info("VRAM probe inconclusive → defaulting num_ctx=%d", n_ctx)
+            except Exception:
+                logger.debug("VRAM auto-sizing failed", exc_info=True)
+
         # Flash-attention is not safe for every architecture: llama-cpp-
         # python's flash-attn path has been historically crash-prone for
         # new arches. Force-disable for known-bad arches unless the
@@ -695,12 +814,35 @@ class LlamaCppEngine(InferenceEngine):
             architecture,
         )
 
+        # Phase 4 P0-6: vision / multimodal. Vision-capable GGUF
+        # models ship a paired CLIP/vision projector file (usually
+        # ``mmproj-*.gguf``). When the caller passes one — either as
+        # an explicit ``clip_model_path`` kwarg or as a path
+        # adjacent to ``model_path`` — build the matching multimodal
+        # chat handler so ``create_chat_completion`` accepts
+        # ``images`` in its messages.
+        clip_model_path: str | None = kwargs.get("clip_model_path")
+        if clip_model_path is None:
+            # Convention: ``mmproj-*.gguf`` in the same directory.
+            for candidate in path.parent.glob("mmproj-*.gguf"):
+                clip_model_path = str(candidate)
+                logger.info("Auto-detected CLIP projector: %s", candidate.name)
+                break
+
+        chat_handler = None
+        if clip_model_path:
+            chat_handler = _build_vision_chat_handler(
+                architecture=architecture,
+                clip_model_path=clip_model_path,
+                verbose=verbose,
+            )
+
         start_time = time.perf_counter()
         try:
             # Suppress Metal/CUDA initialization messages if verbose=False
             context = _suppress_stderr if not verbose else _nullcontext
             with context():
-                self._model = Llama(
+                llama_kwargs: dict = dict(
                     model_path=model_path,
                     n_ctx=n_ctx,
                     n_gpu_layers=n_gpu_layers,
@@ -709,10 +851,72 @@ class LlamaCppEngine(InferenceEngine):
                     flash_attn=flash_attn,
                     chat_format=chat_format,
                 )
+                # Phase 11 P1: KV cache quantisation. Maps
+                # ``"q4_0"`` / ``"q8_0"`` strings to llama-cpp's
+                # ``type_k`` / ``type_v`` integer enum. ``"f16"`` is
+                # the default and leaves the fields unset so the
+                # library picks its own default.
+                kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
+                if kv_type and kv_type != "f16":
+                    try:
+                        from llama_cpp import llama_cpp as _lcpp  # type: ignore
+                    except Exception:
+                        _lcpp = None
+                    type_map = {}
+                    if _lcpp is not None:
+                        type_map = {
+                            "q4_0": getattr(_lcpp, "GGML_TYPE_Q4_0", None),
+                            "q8_0": getattr(_lcpp, "GGML_TYPE_Q8_0", None),
+                            "f32": getattr(_lcpp, "GGML_TYPE_F32", None),
+                            "f16": getattr(_lcpp, "GGML_TYPE_F16", None),
+                        }
+                    code = type_map.get(kv_type.lower())
+                    if code is not None:
+                        llama_kwargs["type_k"] = code
+                        llama_kwargs["type_v"] = code
+                        logger.info("KV cache quantised to %s", kv_type)
+                    else:
+                        logger.warning(
+                            "kv_cache_type=%r unsupported by this llama-cpp build, "
+                            "falling back to f16",
+                            kv_type,
+                        )
+                if chat_handler is not None:
+                    # When a multimodal chat_handler is supplied,
+                    # ``chat_format`` must be None so llama-cpp-python
+                    # doesn't try to install a conflicting text-only
+                    # template.
+                    llama_kwargs["chat_handler"] = chat_handler
+                    llama_kwargs.pop("chat_format", None)
+                # Phase 8 P3-2: LoRA adapters. llama-cpp-python accepts
+                # a single ``lora_path`` at load time; we honour the
+                # first path the Modelfile declared. Stacking more
+                # than one requires a post-load ``apply_lora_from_file``
+                # call which landed in llama-cpp 0.3+. For portability
+                # we only wire the first path here and log the rest.
+                lora_paths = kwargs.get("lora_paths") or []
+                if lora_paths:
+                    primary = lora_paths[0]
+                    logger.info("Loading LoRA adapter: %s", primary)
+                    llama_kwargs["lora_path"] = primary
+                    if len(lora_paths) > 1:
+                        logger.warning(
+                            "%d additional LoRA adapter(s) ignored — "
+                            "llama-cpp's ``lora_path`` accepts only one",
+                            len(lora_paths) - 1,
+                        )
+                self._model = Llama(**llama_kwargs)
             self._model_path = model_path
             self._architecture = architecture
+            # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
+            # preference so downstream ``tokenize()`` calls don't
+            # double-prepend BOS on Gemma 4 and friends. Default True
+            # mirrors llama-cpp-python's old behaviour.
+            self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
+            self._is_multimodal = chat_handler is not None
             elapsed = time.perf_counter() - start_time
-            logger.info("Model loaded in %.2fs: %s", elapsed, path.name)
+            mm_note = " (multimodal)" if self._is_multimodal else ""
+            logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
         except Exception as e:
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
@@ -738,9 +942,28 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         logger.debug("Generating with max_tokens=%s, temp=%s", cfg.max_tokens, cfg.temperature)
 
-        t0 = time.perf_counter()
-        output = self._model(
-            prompt,
+        # OLLAMA_PARITY_PLAN P2-3 + Phase 11 P1 (V2 row 23). When
+        # ``template_override`` is set and ``raw`` is False, render
+        # the Modelfile's Go-template against the caller's prompt via
+        # the proper Go-template evaluator (hfl.converter.go_template).
+        # Covers ``{{ range }}``, ``{{ if }}``, ``{{- -}}`` trimming
+        # and nested field access — not just the ``{{ .Prompt }}`` /
+        # ``{{ .System }}`` placeholders the old regex handled. The
+        # evaluator falls back to the literal template on parse
+        # errors so a user's typo never crashes generation.
+        effective_prompt = prompt
+        if cfg.template_override and not cfg.raw:
+            from hfl.converter.go_template import render_go_template
+
+            effective_prompt = render_go_template(
+                cfg.template_override,
+                {"Prompt": prompt, "System": "", "Messages": []},
+            )
+
+        # Phase 12 P1 — V2 row 7. llama-cpp's ``__call__`` accepts
+        # ``logprobs`` directly; passing 0 keeps them off (library
+        # default).
+        call_kwargs: dict = dict(
             max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
             top_p=cfg.top_p,
@@ -749,20 +972,89 @@ class LlamaCppEngine(InferenceEngine):
             stop=cfg.stop,
             seed=cfg.seed if cfg.seed >= 0 else None,
         )
-        elapsed = time.perf_counter() - t0
+        if cfg.logprobs and cfg.logprobs > 0:
+            call_kwargs["logprobs"] = cfg.logprobs
+
+        start_ns = time.monotonic_ns()
+        output = self._model(effective_prompt, **call_kwargs)
+        total_ns = time.monotonic_ns() - start_ns
+        elapsed = total_ns / 1e9
 
         text = output["choices"][0]["text"]
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
+        n_prompt = usage.get("prompt_tokens", 0)
+
+        # Phase 12 P1 — V2 row 7. Normalise llama-cpp's OpenAI-style
+        # logprobs block into a token-major list so routes don't have
+        # to re-traverse. Shape:
+        #   [{"token": str, "logprob": float,
+        #     "top_logprobs": [{"token", "logprob"}, ...]}, ...]
+        logprobs_list: list[dict] | None = None
+        raw_lp = output["choices"][0].get("logprobs") if cfg.logprobs else None
+        if raw_lp:
+            tokens = raw_lp.get("tokens", []) or []
+            token_lps = raw_lp.get("token_logprobs", []) or []
+            top_lps = raw_lp.get("top_logprobs", []) or []
+            logprobs_list = []
+            for i, token in enumerate(tokens):
+                lp_val = token_lps[i] if i < len(token_lps) else None
+                alternatives_raw = top_lps[i] if i < len(top_lps) else {}
+                alternatives = (
+                    [
+                        {"token": alt_tok, "logprob": alt_lp}
+                        for alt_tok, alt_lp in (alternatives_raw or {}).items()
+                    ]
+                    if isinstance(alternatives_raw, dict)
+                    else []
+                )
+                logprobs_list.append(
+                    {
+                        "token": token,
+                        "logprob": lp_val,
+                        "top_logprobs": alternatives,
+                    }
+                )
 
         logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen / elapsed)
+
+        # See chat() for the rationale behind this split.
+        total_tokens = max(1, n_prompt + n_gen)
+        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
+        eval_ns = total_ns - prompt_eval_ns
+
+        # Phase 7 P2-4: populate the legacy ``context`` array when
+        # the caller opted in via ``keep_context=True``. llama-cpp's
+        # ``tokenize`` on the concatenated prompt + response is the
+        # cheapest way to obtain the integer sequence clients feed
+        # back on the next turn.
+        context_tokens: list[int] | None = None
+        if cfg.keep_context:
+            try:
+                full = (effective_prompt + text).encode("utf-8", errors="replace")
+                # Phase 11 P1 — V2 row 39. When the model's GGUF
+                # says ``tokenizer.ggml.add_bos_token=false`` we
+                # must not re-prepend BOS during tokenisation (Gemma
+                # 4 is the canonical offender). Default True to
+                # match llama-cpp's prior behaviour.
+                add_bos = getattr(self, "_tokenizer_add_bos", True)
+                context_tokens = list(self._model.tokenize(full, add_bos=bool(add_bos)))
+            except Exception:  # noqa: BLE001
+                logger.warning("keep_context requested but tokenize() failed", exc_info=True)
+                context_tokens = []
 
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
-            tokens_prompt=usage.get("prompt_tokens", 0),
+            tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
             stop_reason=output["choices"][0].get("finish_reason", "stop"),
+            total_duration=total_ns,
+            load_duration=0,
+            prompt_eval_duration=prompt_eval_ns,
+            eval_duration=eval_ns,
+            context_tokens=context_tokens,
+            logprobs=logprobs_list,
         )
 
     def generate_stream(
@@ -814,11 +1106,43 @@ class LlamaCppEngine(InferenceEngine):
         """Convert internal ChatMessage list to llama-cpp-python format.
 
         Preserves ``tool_calls`` on assistant turns and ``name`` on tool
-        turns so the underlying chat template can render them correctly.
+        turns so the underlying chat template can render them
+        correctly. When a message carries ``images``, convert the
+        content to llama-cpp's list-of-parts form
+        (``[{"type":"text", "text": "..."}, {"type":"image_url",
+        "image_url":{"url":"data:image/png;base64,..."}}]``) which
+        the multimodal chat handlers recognise.
         """
+        import base64 as _base64
+
         out: list[dict] = []
         for m in messages:
-            entry: dict = {"role": m.role, "content": m.content or ""}
+            # Text-only fast path
+            if not m.images:
+                entry: dict = {"role": m.role, "content": m.content or ""}
+            else:
+                parts: list[dict] = []
+                if m.content:
+                    parts.append({"type": "text", "text": m.content})
+                for image_bytes in m.images:
+                    # llama-cpp's multimodal handlers accept
+                    # ``data:image/...;base64,...`` URIs on the
+                    # ``image_url.url`` field. Sniff the MIME from
+                    # magic bytes so the URI is correct even if we
+                    # came in as raw bytes.
+                    if image_bytes.startswith(b"\x89PNG"):
+                        mime = "image/png"
+                    elif image_bytes.startswith(b"\xff\xd8\xff"):
+                        mime = "image/jpeg"
+                    elif image_bytes.startswith((b"GIF87a", b"GIF89a")):
+                        mime = "image/gif"
+                    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+                        mime = "image/webp"
+                    else:
+                        mime = "image/png"  # Best-effort fallback.
+                    uri = f"data:{mime};base64," + _base64.b64encode(image_bytes).decode("ascii")
+                    parts.append({"type": "image_url", "image_url": {"url": uri}})
+                entry = {"role": m.role, "content": parts}
             if m.tool_calls:
                 entry["tool_calls"] = m.tool_calls
             if m.name:
@@ -852,23 +1176,59 @@ class LlamaCppEngine(InferenceEngine):
             # template and parses tool calls back into the response.
             kwargs["tools"] = tools
 
-        t0 = time.perf_counter()
+        # OLLAMA_PARITY_PLAN P0-5: structured outputs.
+        # Compile the request's response_format into a GBNF grammar
+        # that llama-cpp enforces at sampling time. We use the dict
+        # ``response_format`` kwarg that create_chat_completion accepts
+        # natively (maps to OpenAI's JSON mode for free-form JSON, or
+        # to a compiled schema grammar for strict conformance).
+        _rf = cfg.response_format
+        if _rf is not None:
+            if _rf == "json":
+                kwargs["response_format"] = {"type": "json_object"}
+            elif isinstance(_rf, dict):
+                kwargs["response_format"] = {
+                    "type": "json_object",
+                    "schema": _rf,
+                }
+            # ``GBNF:`` raw-grammar passthrough: build LlamaGrammar
+            # directly so advanced users can ship custom grammars.
+            elif isinstance(_rf, str) and _rf.startswith("GBNF:"):
+                try:
+                    from llama_cpp import LlamaGrammar
+
+                    kwargs["grammar"] = LlamaGrammar.from_string(_rf[len("GBNF:") :])
+                except ImportError:  # pragma: no cover — optional dep
+                    pass
+
+        # Nanosecond timings (Ollama-parity P1-3). ``monotonic_ns``
+        # is the right clock for wall-clock deltas — perf_counter_ns
+        # has the same resolution but ``monotonic_ns`` is what Ollama
+        # uses internally.
+        start_ns = time.monotonic_ns()
         try:
             output = self._model.create_chat_completion(**kwargs)
         except TypeError:
-            # Older llama-cpp-python without ``tools`` support — fall back
-            # so the caller's text-based parser can still extract calls.
+            # Older llama-cpp-python without ``tools`` / ``response_format``
+            # support — strip them and retry so the caller's text-based
+            # parser can still extract calls.
             kwargs.pop("tools", None)
+            kwargs.pop("response_format", None)
+            kwargs.pop("grammar", None)
             output = self._model.create_chat_completion(**kwargs)
-        elapsed = time.perf_counter() - t0
+        total_ns = time.monotonic_ns() - start_ns
+        elapsed = total_ns / 1e9  # seconds, for the tokens/s ratio
 
         message = output["choices"][0].get("message", {})
         text = message.get("content") or ""
         # Post-filter channel/think/turn markers for architectures
         # whose GGUFs don't ship a proper ``tokenizer.chat_template``
         # and whose vocab contains split-pipe reasoning delimiters.
-        # No-op for architectures not in the filter set.
-        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER:
+        # No-op for architectures not in the filter set. When the
+        # caller requested ``expose_reasoning`` (Phase 5 P1-1, Ollama
+        # ``think=true``) we leave the markers IN the text so the
+        # route layer can separate reasoning from answer.
+        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             text = _strip_gemma4_channel_markers(text)
         tool_calls = message.get("tool_calls")
 
@@ -899,13 +1259,27 @@ class LlamaCppEngine(InferenceEngine):
 
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
+        n_prompt = usage.get("prompt_tokens", 0)
+
+        # Estimate prompt_eval / eval split from token counts.
+        # llama-cpp-python doesn't surface the pre-first-token delta
+        # natively, so we apportion total_ns proportionally to
+        # prompt vs. generated tokens — the ratio is what matters
+        # for monitoring (tokens/sec stays consistent).
+        total_tokens = max(1, n_prompt + n_gen)
+        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
+        eval_ns = total_ns - prompt_eval_ns
 
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
-            tokens_prompt=usage.get("prompt_tokens", 0),
+            tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
             tool_calls=normalised_tool_calls,
+            total_duration=total_ns,
+            load_duration=0,  # Model was already loaded — this is chat, not load()
+            prompt_eval_duration=prompt_eval_ns,
+            eval_duration=eval_ns,
         )
 
     def chat_stream(
@@ -943,9 +1317,11 @@ class LlamaCppEngine(InferenceEngine):
                 if text:
                     yield text
 
-        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER:
+        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             yield from _filter_gemma4_stream(_raw_chunks())
         else:
+            # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
+            # chunks through so the caller sees the reasoning channel.
             yield from _raw_chunks()
 
     @property

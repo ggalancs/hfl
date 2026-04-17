@@ -76,8 +76,16 @@ class ModelPool:
         self._background_eviction_interval = background_eviction_interval
         self._shutdown = False
         self._background_task: asyncio.Task | None = None
-        # Set of model names currently being loaded (to prevent duplicate loads)
-        self._loading: set[str] = set()
+        # Models currently being loaded. Keyed by model name; the value
+        # is an ``asyncio.Event`` that is set() when the load finishes
+        # (success OR failure), so waiters wake immediately instead of
+        # polling. ``in self._loading`` semantics match the old
+        # ``set[str]`` for callers that just check membership.
+        self._loading: dict[str, asyncio.Event] = {}
+        # How long a waiter will block on another coroutine's load
+        # before giving up and retrying the load itself. 5 minutes
+        # matches the old polling budget (3000 × 0.1 s).
+        self._wait_for_load_timeout: float = 300.0
 
     async def get(self, model_name: str) -> CachedModel | None:
         """Get a cached model by name.
@@ -121,6 +129,7 @@ class ModelPool:
 
         # Check if we should load (with lock) but don't load yet
         should_load = False
+        wait_event: asyncio.Event | None = None
         async with self._lock:
             # Double-check after acquiring lock
             if model_name in self._models:
@@ -131,32 +140,42 @@ class ModelPool:
 
             # Check if another coroutine is already loading this model
             if model_name in self._loading:
-                # Wait for the other coroutine to finish loading
-                pass
+                # Wait for the other coroutine to finish — capture the
+                # event now, while we hold the lock, so we can't race
+                # with the owner's ``discard`` in its ``finally``.
+                wait_event = self._loading[model_name]
             else:
-                # Mark that we're loading this model
-                self._loading.add(model_name)
+                # Mark that we're loading this model and publish an
+                # Event for any late-arriving waiters.
+                wait_event_local = asyncio.Event()
+                self._loading[model_name] = wait_event_local
                 should_load = True
 
                 # Evict if necessary before loading
                 await self._evict_if_needed_locked()
 
-        # If another coroutine is loading, poll until ready (non-recursive)
+        # If another coroutine is loading, await its completion signal
+        # (set by the owner's ``finally`` below). This replaces the
+        # old 0.1 s polling loop with a single awaitable wake-up.
         if not should_load:
-            for _ in range(3000):  # Max ~5 minutes (3000 * 0.1s)
-                await asyncio.sleep(0.1)
-                cached = await self.get(model_name)
-                if cached is not None:
-                    return cached
-                # Check if still loading
-                async with self._lock:
-                    if model_name not in self._loading:
-                        break
-            # If we get here, either it finished loading or timed out
+            assert wait_event is not None  # narrowed by the branch above
+            try:
+                await asyncio.wait_for(
+                    wait_event.wait(),
+                    timeout=self._wait_for_load_timeout,
+                )
+            except asyncio.TimeoutError:
+                # The owner is still running after the timeout — fall
+                # through to try loading ourselves (same fallback the
+                # old polling loop had when it exhausted 3000 iters).
+                pass
             cached = await self.get(model_name)
             if cached is not None:
                 return cached
-            # Retry loading ourselves
+            # Either the owner failed (event set but no cache entry)
+            # or we timed out. Retry the load ourselves — this may
+            # race back through the ``_loading`` check if yet another
+            # coroutine has since claimed the slot, which is fine.
             return await self.get_or_load(model_name, loader)
 
         # Load model OUTSIDE the lock to prevent deadlock
@@ -202,9 +221,12 @@ class ModelPool:
             raise
 
         finally:
-            # Always remove from loading set
+            # Always remove from loading dict AND set the event so any
+            # waiters wake up — whether we succeeded or failed.
             async with self._lock:
-                self._loading.discard(model_name)
+                event = self._loading.pop(model_name, None)
+            if event is not None:
+                event.set()
 
     async def evict(self, model_name: str) -> bool:
         """Evict a specific model from the cache.

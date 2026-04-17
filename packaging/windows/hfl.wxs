@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: HRUL-1.0
+  Copyright (c) 2026 Gabriel Galán Pelayo
+
+  WiX (Windows Installer XML) recipe for HFL (Phase 17 — V2 row 30).
+
+  Produces a signed MSI that installs HFL into Program Files, puts
+  ``hfl.exe`` on PATH, and registers the service under its Ollama-
+  compatible port (11434).
+
+  The ``ProductVersion`` and ``ProductCode`` placeholders are
+  patched by ``.github/workflows/windows-msi.yml`` on each v* tag.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="HFL"
+    Language="1033"
+    Version="@HFL_VERSION@"
+    Manufacturer="Gabriel Galán Pelayo"
+    UpgradeCode="F9FDE6C0-1D4C-4B7B-8C18-5AEA57F3A5C1">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Description="HFL — Run HuggingFace models locally, Ollama-compatible"
+      Comments="Licensed under HRUL-1.0" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of HFL is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/ggalancs/hfl" />
+    <Property Id="ARPCONTACT" Value="ggalancs@gmail.com" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="HFL" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="HflFiles" Directory="INSTALLFOLDER">
+      <Component Id="HflExecutable" Guid="*">
+        <File
+          Id="HflExe"
+          Source="dist\hfl.exe"
+          KeyPath="yes" />
+        <!-- Put the install dir on PATH so ``hfl`` works from any shell. -->
+        <Environment
+          Id="PathEnv"
+          Name="PATH"
+          Value="[INSTALLFOLDER]"
+          Permanent="no"
+          Part="last"
+          Action="set"
+          System="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Core" Title="HFL Core" Level="1">
+      <ComponentGroupRef Id="HflFiles" />
+    </Feature>
+
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+    </UI>
+
+    <WixVariable Id="WixUILicenseRtf" Value="packaging\windows\LICENSE.rtf" />
+  </Product>
+</Wix>

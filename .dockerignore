@@ -1,0 +1,39 @@
+# Keep image lean: exclude everything that doesn't affect the
+# wheel build. Every ignored path shrinks the build context and
+# speeds up `docker build`.
+
+.git
+.github
+.gitignore
+.venv
+.venv-ci
+venv
+env
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist
+build
+htmlcov
+.coverage
+coverage.xml
+*.log
+
+# Local dev artefacts
+node_modules
+.DS_Store
+Thumbs.db
+
+# Tests are not needed in the image
+tests
+docs
+
+# Models — never bake weights into the image
+*.gguf
+*.safetensors
+models

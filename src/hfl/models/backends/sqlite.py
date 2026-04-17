@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+from hfl.config import config as _hfl_config
 from hfl.models.backends.base import RegistryBackend
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class SQLiteBackend(RegistryBackend):
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._local.conn = sqlite3.connect(
                 str(self.db_path),
-                timeout=30.0,
+                timeout=_hfl_config.registry_sqlite_busy_timeout,
                 check_same_thread=False,
             )
             self._local.conn.row_factory = sqlite3.Row

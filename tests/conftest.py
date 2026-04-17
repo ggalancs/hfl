@@ -91,6 +91,10 @@ def temp_config(temp_dir, monkeypatch):
 
     monkeypatch.setattr(hfl.hub.downloader, "config", test_config)
 
+    import hfl.hub.blobs
+
+    monkeypatch.setattr(hfl.hub.blobs, "config", test_config)
+
     # Reset registry singleton cache so it uses the new config
     from hfl.models.registry import reset_registry
 

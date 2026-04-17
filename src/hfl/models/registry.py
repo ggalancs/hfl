@@ -352,6 +352,76 @@ class ModelRegistry:
                 return self._by_repo_id[name]
             return None
 
+    def copy(self, source: str, destination: str) -> bool:
+        """Duplicate an existing manifest under a new name (thread-safe).
+
+        Ollama-parity ``/api/copy`` + ``hfl cp``. This creates a
+        second registry entry that points at the *same* on-disk blob,
+        so the copy is nearly free (no bytes are duplicated). Delete
+        semantics follow later — deleting one entry does NOT touch
+        the shared blob; only when the last entry pointing at a path
+        is removed is the blob eligible for disk cleanup (handled at
+        the ``remove()`` layer, not here).
+
+        Args:
+            source: Existing model name / alias / repo_id.
+            destination: New name to register under.
+
+        Returns:
+            True when the copy succeeded, False when the source is
+            unknown or the destination is already taken.
+
+        Raises:
+            ValidationError: Destination name fails the registry's
+                validation rules (letters, digits, `_`, `-`, `.`, `/`).
+        """
+        from copy import deepcopy
+
+        from hfl.validators import validate_model_name
+
+        # Validate up front so the file-lock roundtrip is avoided on
+        # bad input.
+        validate_model_name(destination)
+
+        with self._lock:
+            with self._file_lock(exclusive=True):
+                self._load()
+                # After _load() the indexes are stale; force a
+                # rebuild so the by_name / by_alias / by_repo_id
+                # dicts reflect the on-disk state.
+                self._indexes_dirty = True
+                self._ensure_indexes()
+
+                # Destination must be free — neither a model name,
+                # alias, nor a known repo_id.
+                if (
+                    destination in self._by_name
+                    or destination in self._by_alias
+                    or destination in self._by_repo_id
+                ):
+                    return False
+
+                src = self._by_name.get(source) or self._by_alias.get(source)
+                if src is None:
+                    # Last resort: also try repo_id.
+                    src = self._by_repo_id.get(source)
+                if src is None:
+                    return False
+
+                new = deepcopy(src)
+                new.name = destination
+                new.alias = None  # alias is unique per model
+                # Stamp a fresh created_at so list_all() orders the
+                # copy after its parent, not as a duplicate.
+                from datetime import datetime as _dt
+
+                new.created_at = _dt.now().isoformat()
+
+                self._models.append(new)
+                self._indexes_dirty = True
+                self._save()
+                return True
+
     def set_alias(self, name: str, alias: str) -> bool:
         """Sets an alias for an existing model (thread-safe).
 

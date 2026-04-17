@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 
 if TYPE_CHECKING:
+    from datetime import datetime  # noqa: F401 — used in type comments / methods
+
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.models.manifest import ModelManifest
 
@@ -120,14 +122,21 @@ class ServerState:
     ) -> None:
         """Set LLM engine and model atomically.
 
+        Unloading the previous engine is delegated to a worker thread
+        so that GPU / Metal teardown — which can take several seconds
+        for a large model — does not block the asyncio event loop and
+        starve other endpoints (``/healthz``, ``/metrics``, etc.).
+
         Args:
             engine: New inference engine (or None to unload)
             model: Model manifest for the loaded model
         """
         async with self._llm_lock:
-            # Unload previous engine if exists
+            # Unload previous engine if exists. Run off-loop so a slow
+            # unload (GPU context cleanup, page-cache flush) doesn't
+            # freeze unrelated requests.
             if self._engine is not None and self._engine.is_loaded:
-                self._engine.unload()
+                await asyncio.to_thread(self._engine.unload)
             self._engine = engine
             self._current_model = model
 
@@ -252,14 +261,17 @@ class ServerState:
     ) -> None:
         """Set TTS engine and model atomically.
 
+        See ``set_llm_engine`` for the rationale behind the off-loop
+        unload.
+
         Args:
             engine: New audio engine (or None to unload)
             model: Model manifest for the loaded model
         """
         async with self._tts_lock:
-            # Unload previous engine if exists
+            # Unload previous engine off-loop; see set_llm_engine.
             if self._tts_engine is not None and self._tts_engine.is_loaded:
-                self._tts_engine.unload()
+                await asyncio.to_thread(self._tts_engine.unload)
             self._tts_engine = engine
             self._current_tts_model = model
 
@@ -288,18 +300,52 @@ class ServerState:
         """Check if TTS engine is loaded."""
         return self._tts_engine is not None and self._tts_engine.is_loaded
 
+    # -- keep_alive tracking -------------------------------------------
+    # Per-model keep-alive deadline, populated by request handlers
+    # (R15). ``None`` means "managed by the default idle timeout /
+    # never auto-expires". The storage is per-name rather than per
+    # engine so it survives model hot-swaps.
+    def keep_alive_deadline_for(self, model_name: str) -> "datetime | None":
+        """Return the keep-alive deadline for ``model_name`` (or None).
+
+        Consulted by ``/api/ps`` to emit the ``expires_at`` field.
+        """
+        from datetime import datetime as _dt
+
+        deadlines: dict[str, _dt] = getattr(self, "_keep_alive_deadlines", {})
+        return deadlines.get(model_name)
+
+    def set_keep_alive_deadline(self, model_name: str, deadline: "datetime | None") -> None:
+        """Set / clear the keep-alive deadline for ``model_name``.
+
+        Called from request handlers when they receive a ``keep_alive``
+        value (R15). Passing ``None`` clears the deadline.
+        """
+        from datetime import datetime as _dt
+
+        deadlines: dict[str, _dt] = self.__dict__.setdefault("_keep_alive_deadlines", {})
+        if deadline is None:
+            deadlines.pop(model_name, None)
+        else:
+            deadlines[model_name] = deadline
+
     # Cleanup
     async def cleanup(self) -> None:
-        """Cleanup all engines on shutdown."""
+        """Cleanup all engines on shutdown.
+
+        Engine ``unload()`` runs in a worker thread so shutdown does
+        not freeze the event loop — uvicorn's graceful-shutdown path
+        still needs the loop alive to finish in-flight responses.
+        """
         async with self._llm_lock:
             if self._engine is not None and self._engine.is_loaded:
-                self._engine.unload()
+                await asyncio.to_thread(self._engine.unload)
             self._engine = None
             self._current_model = None
 
         async with self._tts_lock:
             if self._tts_engine is not None and self._tts_engine.is_loaded:
-                self._tts_engine.unload()
+                await asyncio.to_thread(self._tts_engine.unload)
             self._tts_engine = None
             self._current_tts_model = None
 

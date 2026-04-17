@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hfl"
-version = "0.3.2"
+version = "0.12.2"
 description = "Run HuggingFace models locally like Ollama"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
@@ -71,7 +71,38 @@ tray = [
     "Pillow>=10.0.0",
 ]
 
-all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray]"]
+# Model Context Protocol client/server (Phase 9+)
+mcp = ["mcp>=1.0.0"]
+
+# Apple Silicon native backend (Phase 13+ — V2 row 14)
+mlx = [
+    "mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+# Speech-to-text (Whisper) — Phase 16 / V2 row 16. Prefers
+# faster-whisper (CPU+GPU); openai-whisper stays as a fallback.
+stt = [
+    "faster-whisper>=1.0.0",
+]
+
+# Image generation (SDXL / FLUX) — Phase 16 / V2 row 17. Heavy: a
+# fresh install drags in ~2 GB of wheels. Opt-in only.
+imagegen = [
+    "diffusers>=0.30.0",
+    "torch>=2.5.0",
+    "safetensors>=0.4.0",
+    "Pillow>=10.0.0",
+    "accelerate>=1.2.0",
+]
+
+# OpenTelemetry tracing — Phase 17 / V2 row 24.
+otel = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+]
+
+all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx,stt,imagegen]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0", "mypy>=1.10.0", "numpy>=1.24.0"]
 build = ["pyinstaller>=6.0"]
 
@@ -95,6 +126,8 @@ testpaths = ["tests"]
 addopts = "--cov=hfl --cov-report=term-missing --cov-report=html --cov-report=xml"
 markers = [
     "acceptance: tool-calling acceptance suite (spec §6, T1–T7)",
+    "slow: tests that take noticeable wall-clock time (sleeps, concurrency)",
+    "integration: tests that exercise filesystem, subprocesses, or system probes",
 ]
 
 [tool.coverage.run]

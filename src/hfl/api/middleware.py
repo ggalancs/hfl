@@ -109,6 +109,59 @@ class RequestLogger(BaseHTTPMiddleware):
         return response
 
 
+class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose Content-Length exceeds the configured limit.
+
+    Prevents trivial DoS via multi-gigabyte prompt bodies. Streaming
+    (chunked) requests without Content-Length are capped by reading the
+    body with a byte budget before handing off to the route.
+    """
+
+    # Paths excluded from the body limit. ``/api/blobs/`` must be
+    # excluded because GGUFs legitimately exceed any text-oriented
+    # cap (multi-GB); the blob route has its own streaming SHA-256
+    # validator so oversized uploads still fail before the bytes
+    # are promoted.
+    EXCLUDED_PREFIXES: tuple[str, ...] = ("/api/blobs/",)
+
+    def __init__(self, app: Any, max_bytes: int) -> None:
+        super().__init__(app)
+        self.max_bytes = max_bytes
+
+    def _too_large_response(self) -> JSONResponse:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": {
+                    "error": "Request body too large",
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "category": "client",
+                    "retryable": False,
+                    "details": {"max_bytes": self.max_bytes},
+                }
+            },
+        )
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
+        if self.max_bytes <= 0:
+            response: Response = await call_next(request)
+            return response
+        if request.url.path.startswith(self.EXCLUDED_PREFIXES):
+            response = await call_next(request)
+            return response
+
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_bytes:
+                    return self._too_large_response()
+            except ValueError:
+                # Malformed Content-Length — let downstream handle it
+                pass
+        response = await call_next(request)
+        return response
+
+
 # Global reference for testing - set when middleware is created
 _rate_limiter_instance: "RateLimitMiddleware | None" = None
 

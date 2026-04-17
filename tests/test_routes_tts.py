@@ -75,6 +75,48 @@ class TestOpenAITTSEndpoint:
 
         assert response.status_code == 404
 
+    def test_speech_with_llm_model_returns_400(self, client, sample_manifest):
+        """Should return 400 when the requested model exists but is an LLM.
+
+        Covers the type-mismatch branch in
+        ``routes_tts._ensure_tts_model_loaded`` (routes_tts.py line 62-66)
+        which the mocked tests in this file bypass entirely.
+        """
+        from hfl.api.state import get_state
+        from hfl.converter.formats import ModelType
+        from hfl.models.registry import ModelRegistry
+
+        # Register an LLM manifest under the name the request will use.
+        llm_manifest = sample_manifest
+        llm_manifest.name = "some-llm"
+        registry = ModelRegistry()
+        registry.add(llm_manifest)
+
+        # Ensure no TTS model is currently loaded (fast-path would skip
+        # the detection otherwise).
+        state = get_state()
+        state.tts_engine = None
+        state.current_tts_model = None
+
+        # Force detect_model_type to report LLM so we don't depend on
+        # the test manifest path resolving to a real file layout. The
+        # route imports this lazily inside ``_ensure_tts_model_loaded``,
+        # so we patch at the definition site.
+        with patch("hfl.converter.formats.detect_model_type", return_value=ModelType.LLM):
+            response = client.post(
+                "/v1/audio/speech",
+                json={
+                    "model": "some-llm",
+                    "input": "Hello world",
+                },
+            )
+
+        assert response.status_code == 400
+        # Envelope after R10 migration: {"error": "...", "code": "ModelTypeMismatchError"}
+        body = response.json()
+        assert body.get("code") == "ModelTypeMismatchError"
+        assert "not a tts model" in body["error"].lower()
+
     def test_speech_with_loaded_model(self, client_with_tts_model):
         """Should synthesize audio when model is loaded."""
         with patch("hfl.api.routes_tts._ensure_tts_model_loaded"):

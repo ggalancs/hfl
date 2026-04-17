@@ -16,6 +16,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator
 
+from hfl.config import config as _hfl_config
+
 if TYPE_CHECKING:
     from starlette.requests import Request
 
@@ -82,7 +84,8 @@ async def stream_with_backpressure(
                     break
                 # Use blocking put via run_coroutine_threadsafe for backpressure
                 future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
-                future.result(timeout=60)  # Wait for queue space with timeout
+                # Wait for queue space with configurable backpressure timeout.
+                future.result(timeout=_hfl_config.stream_queue_put_timeout)
         except Exception as e:
             if not cancelled.is_set():
                 logger.error("Error in stream producer: %s", e)

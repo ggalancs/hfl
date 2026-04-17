@@ -1,0 +1,89 @@
+# Build + push multi-arch Docker images on release tags.
+#
+# Tagging policy:
+#   v1.2.3  -> ghcr.io/ggalancs/hfl:1.2.3
+#               ghcr.io/ggalancs/hfl:1.2
+#               ghcr.io/ggalancs/hfl:latest
+#
+# Requires the ``ghcr`` package write permission on the repo's
+# GITHUB_TOKEN (set in repo settings; no secret needed).
+#
+# Signing via cosign keyless — OIDC identity is the GitHub Actions
+# workflow itself, so no private key lives in the repo.
+
+name: Docker
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # required for cosign keyless signing
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extras: [llama, all]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 cross-build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/hfl
+          flavor: |
+            suffix=${{ matrix.extras == 'all' && '-all' || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && matrix.extras == 'llama' }}
+
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            HFL_EXTRAS=${{ matrix.extras }}
+          cache-from: type=gha,scope=hfl-${{ matrix.extras }}
+          cache-to: type=gha,scope=hfl-${{ matrix.extras }},mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless)
+        if: ${{ steps.build.outputs.digest != '' }}
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          while IFS= read -r tag; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done <<< "${TAGS}"

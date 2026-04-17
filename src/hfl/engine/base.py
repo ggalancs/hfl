@@ -30,6 +30,14 @@ class ChatMessage:
     tool_calls: list[dict] | None = None
     name: str | None = None
     tool_call_id: str | None = None
+    # Vision / multimodal extension (Phase 4, P0-6).
+    # Each entry is raw, already-decoded image bytes (PNG / JPEG /
+    # WEBP / GIF). The router decodes base64 / data-URIs and runs
+    # ``image_validator.validate_image`` before populating this
+    # list, so engines can assume every entry is a bounded, sniffed
+    # raster image. ``None`` means "text-only message" — the vast
+    # majority of messages.
+    images: list[bytes] | None = None
 
 
 @dataclass
@@ -41,6 +49,65 @@ class GenerationConfig:
     stop: list[str] | None = None
     repeat_penalty: float = 1.1
     seed: int = -1
+    # Structured-output constraint (OLLAMA_PARITY_PLAN P0-5).
+    # Backends that support grammar-based constrained decoding
+    # (llama-cpp-python GBNF, vLLM GuidedDecodingParams, Transformers
+    # + outlines) honour this to force the model's output to conform
+    # to a JSON schema or a raw GBNF grammar. ``None`` means
+    # unconstrained generation.
+    #
+    # - ``"json"`` → free-form JSON object (value is the literal
+    #   string; backends compile it to their "any JSON" grammar).
+    # - ``dict`` → JSON Schema (validated at the route boundary).
+    # - ``str`` starting with ``"GBNF:"`` → raw GBNF grammar body
+    #   (advanced users; bypasses schema validation).
+    response_format: str | dict | None = None
+    # Expose the model's internal reasoning / thinking channel in the
+    # output. When False (default), architecture-specific channel
+    # filters (e.g. Gemma 4's split-pipe ``<|channel>thought...``
+    # markers) strip the reasoning from ``content``. When True, the
+    # filter is disabled and engines emit the raw channel text. The
+    # route layer is responsible for post-processing the raw text
+    # into a separate ``thinking`` field on the response envelope
+    # (OLLAMA_PARITY_PLAN P1-1, Ollama 2026 ``think=true``).
+    expose_reasoning: bool = False
+    # Multi-level thinking intensity (Phase 10 P1).
+    # - ``"off"``: reasoning suppressed (same as legacy ``expose_reasoning=False``).
+    # - ``"low"``: shortest viable chain; honoured by GPT-OSS-class models.
+    # - ``"medium"``: default "thinking on" behaviour (same as ``expose_reasoning=True``).
+    # - ``"high"``: full-depth reasoning channel.
+    # Engines that can't differentiate the levels treat ``"low"`` /
+    # ``"medium"`` / ``"high"`` all as "expose reasoning"; the
+    # route still honours ``"off"``.
+    thinking_level: str = "off"
+    # Per-request chat-template override (OLLAMA_PARITY_PLAN P2-3).
+    # When set, the engine uses this Jinja template in place of the
+    # model's default for this request only. Ignored by engines that
+    # don't expose a pluggable template (vLLM). ``None`` means "use
+    # the model's default template".
+    template_override: str | None = None
+    # Raw prompt mode (OLLAMA_PARITY_PLAN P2-3, Ollama ``raw=true``).
+    # When True the engine forwards the prompt to the model verbatim,
+    # bypassing the chat template and the BOS token. Meant for
+    # evaluation harnesses and manual prompt engineering. Only
+    # meaningful on ``/api/generate``; chat routes ignore it.
+    raw: bool = False
+    # Return the encoded ``prompt + response`` token array so clients
+    # can feed it back via Ollama's legacy ``context`` field for
+    # multi-turn continuation (OLLAMA_PARITY_PLAN P2-4). Default off
+    # because keeping token arrays in memory costs RAM and most
+    # clients now use /api/chat with role-tagged messages instead.
+    keep_context: bool = False
+    # Return per-token log probabilities (Phase 12 P1 — V2 row 7).
+    # ``0`` (default) disables; 1-20 requests that many top alternative
+    # tokens per position alongside the sampled one. Engines without
+    # logprob support silently ignore the knob.
+    logprobs: int = 0
+    # Speculative decoding (Phase 15 P2 — V2 row 11). Path or
+    # registry name of a smaller "draft" model. Empty / None
+    # disables speculation (the default). Engines that don't expose
+    # the knob silently ignore it.
+    draft_model: str | None = None
 
 
 @dataclass
@@ -53,6 +120,26 @@ class GenerationResult:
     # Populated when the engine (or a downstream parser) produced structured
     # tool calls. Shape: list of ``{"function": {"name", "arguments": dict}}``.
     tool_calls: list[dict] | None = None
+    # Nanosecond-precision timings (Ollama-parity P1-3).
+    # Engines populate as many as they can measure cleanly; unknown
+    # values stay at 0. The invariant intended by Ollama is:
+    #   total_duration ≈ load_duration + prompt_eval_duration + eval_duration
+    # with some slop for overhead. Callers should treat the field as
+    # advisory rather than exact.
+    total_duration: int = 0  # Wall-clock of the entire request (ns)
+    load_duration: int = 0  # Time to load the model (0 if already warm) (ns)
+    prompt_eval_duration: int = 0  # Time to process the prompt (ns)
+    eval_duration: int = 0  # Time spent generating tokens (ns)
+    # Encoded prompt + response tokens, for Ollama's legacy ``context``
+    # multi-turn continuation (P2-4). Only populated when
+    # ``GenerationConfig.keep_context`` is True; otherwise stays
+    # ``None`` so default payloads don't carry large int arrays.
+    context_tokens: list[int] | None = None
+    # Per-token logprobs (Phase 12 P1 — V2 row 7). Shape mirrors the
+    # OpenAI response: ``[{"token", "logprob", "top_logprobs": [{"token",
+    # "logprob"}, ...]}, ...]``. ``None`` when the caller didn't
+    # request them.
+    logprobs: list[dict] | None = None
 
 
 class InferenceEngine(ABC):

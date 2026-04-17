@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import random
 import time
 from typing import Awaitable, Callable, ParamSpec, Type, TypeVar, cast
@@ -106,7 +107,7 @@ def with_retry(
                 last_exception=last_exception,
             )
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
         return sync_wrapper
 

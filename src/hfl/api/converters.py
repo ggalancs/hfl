@@ -77,6 +77,14 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
     repeat_penalty = clamp(float(opts.get("repeat_penalty", 1.1)), 0.0, 2.0)
     seed = int(opts.get("seed", -1))
 
+    # Phase 12 P1 — V2 row 7. Clamp ``logprobs`` to [0, 20] so a
+    # malicious client can't force huge vocab top-k scans.
+    logprobs_raw = opts.get("logprobs", 0)
+    try:
+        logprobs_val = int(logprobs_raw) if logprobs_raw else 0
+    except (TypeError, ValueError):
+        logprobs_val = 0
+    logprobs_val = max(0, min(20, logprobs_val))
     return GenerationConfig(
         temperature=temperature,
         top_p=top_p,
@@ -85,6 +93,11 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
         repeat_penalty=repeat_penalty,
         seed=seed,
         stop=opts.get("stop"),
+        # Phase 7 P2-4: ``options.keep_context=true`` activates the
+        # legacy ``context`` array on the non-streaming /api/generate
+        # response. Default off — most clients use /api/chat instead.
+        keep_context=bool(opts.get("keep_context", False)),
+        logprobs=logprobs_val,
     )
 
 

@@ -7,17 +7,18 @@ Drop-in replacement for applications using the OpenAI SDK.
 
 import contextlib
 import json
+import logging
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import openai_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
-    acquire_stream_slot,
+    prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
 )
@@ -28,6 +29,8 @@ from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["OpenAI API"])
 
@@ -72,20 +75,39 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
 async def chat_completions(
     req: ChatCompletionRequest,
 ) -> dict[str, Any] | StreamingResponse | Response:
+    """OpenAI-compatible ``POST /v1/chat/completions``.
+
+    Loads the requested model (if needed), then either streams SSE
+    chunks (``req.stream=True``) or returns the full chat-completion
+    response. Concurrent requests are serialised through the inference
+    dispatcher (spec §5.3); dispatcher rejections map to 429/503.
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
 
-    messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
+    # Phase 4 P0-6: multimodal content. OpenAI allows
+    # ``content: list[ContentPart]`` with text + image parts; HFL's
+    # engine sees text + optional images bytes list. The split is
+    # done at the route boundary so engines stay simple.
+    from hfl.api.vision import split_openai_content
+
+    messages: list[ChatMessage] = []
+    for m in req.messages:
+        text, images = split_openai_content(m.content)
+        messages.append(ChatMessage(role=m.role, content=text, images=images))
     gen_config = _to_gen_config(req)
 
+    # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
+    if req.response_format is not None:
+        from hfl.api.structured_outputs import normalize_openai_response_format
+
+        gen_config.response_format = normalize_openai_response_format(req.response_format)
+
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            return slot_or_response
-        return StreamingResponse(
-            _stream_chat(req.model, messages, gen_config, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_chat(req.model, messages, gen_config, slot),
             media_type="text/event-stream",
         )
 
@@ -188,8 +210,21 @@ async def _stream_chat(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    except Exception:
+        # Don't emit ``str(exc)`` on the stream — it may leak paths
+        # or class names (CodeQL ``py/stack-trace-exposure``). Full
+        # traceback is in the server log.
+        logger.exception("openai stream failed")
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "error": "Internal server error during streaming.",
+                    "code": "STREAM_ERROR",
+                }
+            )
+            + "\n\n"
+        )
     finally:
         if slot_cm is not None:
             with contextlib.suppress(Exception):
@@ -209,6 +244,12 @@ async def _stream_chat(
     },
 )
 async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse | Response:
+    """OpenAI-compatible ``POST /v1/completions`` (legacy text completion).
+
+    Same dispatcher / streaming / error semantics as
+    ``chat_completions`` but takes a plain prompt instead of a
+    message list.
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -218,11 +259,8 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
     gen_config = _to_gen_config(req)
 
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            return slot_or_response
-        return StreamingResponse(
-            _stream_completion(req.model, prompt, gen_config, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_completion(req.model, prompt, gen_config, slot),
             media_type="text/event-stream",
         )
 
@@ -309,8 +347,21 @@ async def _stream_completion(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    except Exception:
+        # Don't emit ``str(exc)`` on the stream — it may leak paths
+        # or class names (CodeQL ``py/stack-trace-exposure``). Full
+        # traceback is in the server log.
+        logger.exception("openai stream failed")
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "error": "Internal server error during streaming.",
+                    "code": "STREAM_ERROR",
+                }
+            )
+            + "\n\n"
+        )
     finally:
         if slot_cm is not None:
             with contextlib.suppress(Exception):
@@ -319,6 +370,11 @@ async def _stream_completion(
 
 @router.get("/v1/models", tags=["OpenAI"], summary="List available models")
 async def list_models() -> dict[str, Any]:
+    """OpenAI-compatible ``GET /v1/models`` — list all registry entries.
+
+    Returns the canonical envelope ``{"object": "list", "data": [...]}``
+    where each entry carries id, created timestamp, and owned_by.
+    """
     registry = get_registry()
     models = registry.list_all()
     return {

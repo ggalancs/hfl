@@ -89,7 +89,8 @@ class AnthropicMessagesRequest(BaseModel):
     )
     stop_sequences: list[str] | None = Field(
         None,
-        description="Stop sequences",
+        max_length=10,
+        description="Stop sequences (at most 10 entries)",
     )
     stream: bool = Field(
         False,
@@ -107,6 +108,39 @@ class AnthropicMessagesRequest(BaseModel):
         total = sum(len(m.get_text()) for m in v)
         if total > 2_000_000:
             raise ValueError("Total message content exceeds 2M characters")
+        return v
+
+    @field_validator("stop_sequences")
+    @classmethod
+    def validate_stop_sequences(cls, v: list[str] | None) -> list[str] | None:
+        """Each stop sequence must be a bounded string (<=256 chars)."""
+        if v is None:
+            return v
+        for s in v:
+            if not isinstance(s, str):
+                raise ValueError("every stop_sequences entry must be a string")
+            if len(s) > 256:
+                raise ValueError("each stop sequence must be <= 256 characters")
+        return v
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Bound metadata: at most 64 keys, no value > 1024 chars.
+
+        The Anthropic API itself only recognises a small subset (user_id
+        etc.), but accepts arbitrary keys. We cap both breadth and depth
+        so a client can't DoS the JSON path with a multi-megabyte dict.
+        """
+        if v is None:
+            return v
+        if len(v) > 64:
+            raise ValueError("metadata must contain at most 64 keys")
+        for key, val in v.items():
+            if not isinstance(key, str) or len(key) > 128:
+                raise ValueError("metadata keys must be strings <= 128 characters")
+            if isinstance(val, str) and len(val) > 1024:
+                raise ValueError(f"metadata[{key!r}] string value exceeds 1024 characters")
         return v
 
     def get_system_text(self) -> str | None:

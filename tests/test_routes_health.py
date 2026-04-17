@@ -22,9 +22,21 @@ class TestHealthBasic:
     """Tests for basic health endpoint."""
 
     def test_health_returns_200(self, client):
-        """Health endpoint returns 200."""
+        """Health endpoint returns 200 with a well-formed body."""
         response = client.get("/health")
         assert response.status_code == 200
+        data = response.json()
+        # Minimal contract — every other assertion in this class is
+        # additive. These four keys are what callers rely on.
+        assert set(data.keys()) >= {
+            "status",
+            "model_loaded",
+            "current_model",
+            "tts_model_loaded",
+            "current_tts_model",
+        }
+        assert isinstance(data["status"], str)
+        assert isinstance(data["model_loaded"], bool)
 
     def test_health_returns_status(self, client):
         """Health endpoint returns status field."""
@@ -44,9 +56,15 @@ class TestHealthReady:
     """Tests for readiness endpoint."""
 
     def test_ready_returns_200(self, client):
-        """Ready endpoint returns 200."""
+        """Ready endpoint returns 200 with ready/not_ready status."""
         response = client.get("/health/ready")
         assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in {"ready", "not_ready"}
+        assert isinstance(data["checks"], dict)
+        # Caller contract: checks dict is not empty (orchestrators gate
+        # on specific keys, a silent empty dict would hide outages).
+        assert data["checks"]
 
     def test_ready_returns_checks(self, client):
         """Ready endpoint returns check results."""
@@ -61,9 +79,13 @@ class TestHealthLive:
     """Tests for liveness endpoint."""
 
     def test_live_returns_200(self, client):
-        """Live endpoint returns 200."""
+        """Live endpoint returns 200 with 'alive' status and uptime."""
         response = client.get("/health/live")
         assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "alive"
+        assert isinstance(data["uptime_seconds"], (int, float))
+        assert data["uptime_seconds"] >= 0
 
     def test_live_returns_uptime(self, client):
         """Live endpoint returns uptime."""
@@ -78,9 +100,14 @@ class TestHealthDeep:
     """Tests for deep health endpoint."""
 
     def test_deep_returns_200(self, client):
-        """Deep endpoint returns 200."""
+        """Deep endpoint returns 200 with llm and tts sections."""
         response = client.get("/health/deep")
         assert response.status_code == 200
+        data = response.json()
+        assert "llm" in data and isinstance(data["llm"], dict)
+        assert "tts" in data and isinstance(data["tts"], dict)
+        assert "loaded" in data["llm"]
+        assert "loaded" in data["tts"]
 
     def test_deep_returns_version(self, client):
         """Deep endpoint returns version."""
@@ -100,9 +127,14 @@ class TestHealthSLI:
     """Tests for SLI health endpoint."""
 
     def test_sli_returns_200(self, client):
-        """SLI endpoint returns 200."""
+        """SLI endpoint returns 200 with full SLI report structure."""
         response = client.get("/health/sli")
         assert response.status_code == 200
+        data = response.json()
+        # Top-level schema — all three are caller-facing contracts.
+        assert data["slo_version"] == "1.0"
+        assert "indicators" in data and isinstance(data["indicators"], dict)
+        assert "summary" in data and isinstance(data["summary"], dict)
 
     def test_sli_returns_status(self, client):
         """SLI endpoint returns overall status."""

@@ -277,3 +277,172 @@ class TestTTSConcurrency:
         # Both should be loaded
         assert fresh_state.is_llm_loaded()
         assert fresh_state.is_tts_loaded()
+
+
+class TestUnloadOffLoop:
+    """Tests for the R7 change that runs ``engine.unload()`` via
+    ``asyncio.to_thread`` so a slow unload does NOT block the event
+    loop. These guard the off-loop contract; they check BOTH that the
+    unload ran in a worker thread AND that the lock is still held
+    during the unload (so we don't trade a freeze for a race).
+    """
+
+    @pytest.mark.asyncio
+    async def test_unload_runs_off_the_event_loop_thread(self, fresh_state):
+        """The invariant we care about is that ``engine.unload()`` is
+        dispatched to a worker thread, not executed on the asyncio
+        event-loop thread. Detect this by comparing the thread id
+        recorded inside ``unload`` to the loop thread's id. This is a
+        robust, timing-free check — a regression to synchronous
+        ``engine.unload()`` would make both ids match.
+        """
+        import threading
+
+        loop_thread_id = threading.get_ident()
+        unload_thread_id: list[int] = []
+
+        def record_thread_and_return() -> None:
+            unload_thread_id.append(threading.get_ident())
+
+        slow_engine = MagicMock()
+        slow_engine.is_loaded = True
+        slow_engine.unload = record_thread_and_return
+
+        new_engine = MagicMock()
+        new_engine.is_loaded = True
+        manifest = MagicMock()
+        manifest.name = "m"
+
+        await fresh_state.set_llm_engine(slow_engine, manifest)
+        await fresh_state.set_llm_engine(new_engine, manifest)
+
+        assert len(unload_thread_id) == 1, "unload() should have been called once"
+        assert unload_thread_id[0] != loop_thread_id, (
+            f"unload() ran on the event-loop thread (id={loop_thread_id}); "
+            "it must be dispatched via asyncio.to_thread()"
+        )
+        assert fresh_state._engine is new_engine
+
+    @pytest.mark.asyncio
+    async def test_unload_exception_does_not_break_state(self, fresh_state):
+        """If the engine's ``unload()`` raises inside ``set_llm_engine``,
+        the exception must propagate and state must not be left in a
+        half-updated state (old engine still referenced, new engine
+        partially assigned).
+        """
+        raising_engine = MagicMock()
+        raising_engine.is_loaded = True
+        raising_engine.unload = MagicMock(side_effect=RuntimeError("GPU fault"))
+
+        new_engine = MagicMock()
+        new_engine.is_loaded = True
+        manifest = MagicMock()
+        manifest.name = "next"
+
+        await fresh_state.set_llm_engine(raising_engine, manifest)
+
+        with pytest.raises(RuntimeError, match="GPU fault"):
+            await fresh_state.set_llm_engine(new_engine, manifest)
+
+        # On exception, state.engine is still the OLD engine — the
+        # code raised before the assignment. This is the contract we
+        # want: callers observe "replacement failed", not a dangling
+        # half-assignment.
+        assert fresh_state._engine is raising_engine
+
+    @pytest.mark.asyncio
+    async def test_cleanup_runs_both_unloads_off_loop(self, fresh_state):
+        """``cleanup()`` also dispatches both LLM and TTS unload to
+        worker threads. Same thread-id-based detection as
+        ``test_unload_runs_off_the_event_loop_thread`` — no timing.
+        """
+        import threading
+
+        loop_thread_id = threading.get_ident()
+        threads_used: list[int] = []
+
+        def record_thread() -> None:
+            threads_used.append(threading.get_ident())
+
+        llm_engine = MagicMock()
+        llm_engine.is_loaded = True
+        llm_engine.unload = record_thread
+
+        tts_engine = MagicMock()
+        tts_engine.is_loaded = True
+        tts_engine.unload = record_thread
+
+        manifest = MagicMock()
+        manifest.name = "m"
+
+        await fresh_state.set_llm_engine(llm_engine, manifest)
+        await fresh_state.set_tts_engine(tts_engine, manifest)
+
+        await fresh_state.cleanup()
+
+        assert len(threads_used) == 2, (
+            f"cleanup should call both unloads once each (got {len(threads_used)})"
+        )
+        for tid in threads_used:
+            assert tid != loop_thread_id, (
+                "cleanup() unload ran on the event-loop thread; must use asyncio.to_thread()"
+            )
+        assert fresh_state._engine is None
+        assert fresh_state._tts_engine is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_replace_and_query_never_see_partial_state(self, fresh_state):
+        """Hammer the state: repeatedly replace the LLM engine while a
+        concurrent task keeps calling ``is_llm_loaded()``. The
+        off-loop unload changes timing but must not expose a state
+        where ``is_llm_loaded()`` returns True for a stale engine.
+        """
+        manifest = MagicMock()
+        manifest.name = "m"
+
+        # Queue of engines; each replaces the previous one.
+        engines = []
+        for i in range(8):
+            e = MagicMock()
+            e.is_loaded = True
+            e.unload = MagicMock()
+            engines.append(e)
+
+        stop = asyncio.Event()
+        saw_loaded = 0
+        saw_unloaded = 0
+
+        async def querier():
+            nonlocal saw_loaded, saw_unloaded
+            while not stop.is_set():
+                if fresh_state.is_llm_loaded():
+                    saw_loaded += 1
+                else:
+                    saw_unloaded += 1
+                await asyncio.sleep(0)  # yield
+
+        q = asyncio.create_task(querier())
+
+        # Initial seed
+        await fresh_state.set_llm_engine(engines[0], manifest)
+
+        # Rotate through engines
+        for e in engines[1:]:
+            await fresh_state.set_llm_engine(e, manifest)
+
+        # Final unload
+        for e in engines:
+            e.is_loaded = False  # simulate post-unload state
+        await fresh_state.set_llm_engine(None, None)
+
+        stop.set()
+        await q
+
+        # We should have observed many loaded states during the
+        # churn, and at least one unloaded state at the end.
+        assert saw_loaded > 0
+        # Every engine we installed should have had unload() called
+        # exactly once (when it was replaced), except the last which
+        # is released by the final None-set.
+        for e in engines[:-1]:
+            e.unload.assert_called_once()

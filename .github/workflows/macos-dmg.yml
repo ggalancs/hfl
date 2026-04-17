@@ -1,0 +1,128 @@
+# Build + notarize a macOS DMG on v* release tags (Phase 17 — V2 row 31).
+#
+# Pipeline:
+#   1. Build a one-file PyInstaller binary on macos-14 (Apple Silicon).
+#   2. Wrap it in a .app bundle under packaging/macos/HFL.app/.
+#   3. Sign with a Developer ID certificate (``MACOS_DEVELOPER_ID_P12``
+#      + ``..._PASSWORD``) — gated; missing secrets → skip.
+#   4. Build a .dmg with create-dmg.
+#   5. notarytool submit + staple.
+#   6. Attach the artefact to the GitHub release.
+#
+# Notarisation secrets:
+#   MACOS_APPLE_ID            — app-specific Apple ID
+#   MACOS_APPLE_ID_PASSWORD   — app-specific password
+#   MACOS_TEAM_ID             — developer team id
+
+name: macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          brew install create-dmg
+
+      - name: Build PyInstaller binary
+        run: |
+          pip install -e ".[llama]"
+          pyinstaller --onefile --name hfl --icon packaging/macos/hfl.icns \
+                      src/hfl/cli/main.py
+
+      - name: Derive version
+        id: ver
+        run: |
+          tag="$GITHUB_REF_NAME"
+          echo "version=${tag#v}" >>"$GITHUB_OUTPUT"
+
+      - name: Build .app bundle
+        run: |
+          mkdir -p build/HFL.app/Contents/MacOS
+          mkdir -p build/HFL.app/Contents/Resources
+          cp dist/hfl build/HFL.app/Contents/MacOS/hfl
+          chmod +x build/HFL.app/Contents/MacOS/hfl
+          cp packaging/macos/hfl.icns build/HFL.app/Contents/Resources/ || true
+          cat > build/HFL.app/Contents/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+              "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleIdentifier</key><string>com.ggalancs.hfl</string>
+            <key>CFBundleName</key><string>HFL</string>
+            <key>CFBundleDisplayName</key><string>HFL</string>
+            <key>CFBundleExecutable</key><string>hfl</string>
+            <key>CFBundleIconFile</key><string>hfl.icns</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>13.0</string>
+          </dict></plist>
+          PLIST
+
+      - name: Import Developer ID certificate
+        if: ${{ env.MACOS_DEVELOPER_ID_P12 != '' }}
+        env:
+          MACOS_DEVELOPER_ID_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12 }}
+          MACOS_DEVELOPER_ID_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_PASSWORD }}
+        run: |
+          echo "$MACOS_DEVELOPER_ID_P12" | base64 --decode > cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import cert.p12 -k build.keychain -P "$MACOS_DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
+
+      - name: Sign app bundle
+        if: ${{ env.MACOS_DEVELOPER_ID_P12 != '' }}
+        env:
+          MACOS_DEVELOPER_ID_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12 }}
+        run: |
+          codesign --force --deep --options runtime --timestamp \
+                   --sign "Developer ID Application" build/HFL.app
+
+      - name: Build DMG
+        run: |
+          create-dmg \
+            --volname "HFL ${{ steps.ver.outputs.version }}" \
+            --window-pos 200 120 \
+            --window-size 640 400 \
+            --icon-size 128 \
+            --icon HFL.app 160 200 \
+            --app-drop-link 480 200 \
+            dist/hfl-${{ steps.ver.outputs.version }}.dmg \
+            build/HFL.app
+
+      - name: Notarise DMG
+        if: ${{ env.MACOS_APPLE_ID != '' }}
+        env:
+          MACOS_APPLE_ID: ${{ secrets.MACOS_APPLE_ID }}
+          MACOS_APPLE_ID_PASSWORD: ${{ secrets.MACOS_APPLE_ID_PASSWORD }}
+          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          xcrun notarytool submit dist/hfl-${{ steps.ver.outputs.version }}.dmg \
+              --apple-id "$MACOS_APPLE_ID" \
+              --password "$MACOS_APPLE_ID_PASSWORD" \
+              --team-id "$MACOS_TEAM_ID" \
+              --wait
+          xcrun stapler staple dist/hfl-${{ steps.ver.outputs.version }}.dmg
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/hfl-*.dmg

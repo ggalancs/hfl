@@ -22,6 +22,7 @@ import uuid
 from queue import Empty, Queue
 from typing import Iterator
 
+from hfl.config import config as _hfl_config
 from hfl.engine.base import (
     ChatMessage,
     GenerationConfig,
@@ -114,7 +115,7 @@ class VLLMEngine(InferenceEngine):
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._loop.stop)
             if self._loop_thread is not None:
-                self._loop_thread.join(timeout=5.0)
+                self._loop_thread.join(timeout=_hfl_config.vllm_shutdown_join_timeout)
             self._loop = None
             self._loop_thread = None
         self._engine = None
@@ -204,18 +205,18 @@ class VLLMEngine(InferenceEngine):
                     for completion in output.outputs:
                         new_text = completion.text[len(prev_text) :]
                         if new_text:
-                            token_queue.put(new_text, timeout=60.0)
+                            token_queue.put(new_text, timeout=_hfl_config.stream_queue_put_timeout)
                             prev_text = completion.text
             except Exception as e:
-                token_queue.put(e, timeout=10.0)
+                token_queue.put(e, timeout=_hfl_config.vllm_error_put_timeout)
             finally:
-                token_queue.put(None, timeout=10.0)
+                token_queue.put(None, timeout=_hfl_config.vllm_error_put_timeout)
 
         asyncio.run_coroutine_threadsafe(_producer(), self._loop)
 
         while True:
             try:
-                item = token_queue.get(timeout=60.0)
+                item = token_queue.get(timeout=_hfl_config.stream_queue_put_timeout)
             except Empty:
                 raise TimeoutError("vLLM streaming timed out")
             if item is None:

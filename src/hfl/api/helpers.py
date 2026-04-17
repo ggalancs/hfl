@@ -12,27 +12,20 @@ import asyncio
 import json
 import time
 from contextlib import AbstractAsyncContextManager
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from hfl.api.state import get_state
-
-if TYPE_CHECKING:
-    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.config import config
-from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.base import GenerationConfig
-from hfl.engine.selector import select_engine, select_tts_engine
-from hfl.models.registry import get_registry
-from hfl.validators import ValidationError, validate_model_name
 
 if TYPE_CHECKING:
-    from hfl.engine.base import AudioEngine, InferenceEngine
-    from hfl.models.manifest import ModelManifest
+    from fastapi.responses import StreamingResponse
+
+    from hfl.engine.base import InferenceEngine
+    from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 T = TypeVar("T")
 
@@ -186,142 +179,117 @@ def queue_response_from_error(
     return queue_timeout(waited_seconds=exc.waited_seconds)
 
 
-async def run_async_with_timeout(
-    coro: Any,
-    timeout: float | None = None,
-    operation: str = "operation",
-) -> Any:
-    """Run an async coroutine with configurable timeout.
+def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> bool:
+    """Honour an Ollama-style ``keep_alive`` value on a request.
+
+    Records the resulting deadline on the server state so ``/api/ps``
+    reports it in the ``expires_at`` field. Returns ``True`` when the
+    caller should unload the model immediately after responding
+    (``keep_alive=0``); ``False`` otherwise.
+
+    Called from ``routes_openai`` / ``routes_native`` (chat + generate)
+    at the top of the handler — before the engine work starts — so a
+    rejected ``keep_alive`` value fails fast with a 400 instead of
+    consuming dispatcher slots.
 
     Args:
-        coro: Async coroutine to await
-        timeout: Timeout in seconds (None = use config.generation_timeout)
-        operation: Operation name for error messages
+        model_name: Name under which the model is tracked in state.
+        keep_alive: Raw value from the request body (string, number,
+            or None).
 
     Returns:
-        Result of the coroutine
+        ``True`` when post-response unload is requested; ``False`` when
+        the deadline was recorded or the field was omitted.
 
     Raises:
-        HTTPException: 504 Gateway Timeout if the operation times out
+        APIValidationError: The value can't be parsed (maps to 400).
     """
-    effective_timeout = timeout if timeout is not None else config.generation_timeout
+    from datetime import datetime, timezone
+
+    from hfl.api.state import get_state
+    from hfl.exceptions import ValidationError as APIValidationError
+    from hfl.utils.duration import (
+        InvalidKeepAliveError,
+        is_never_expire,
+        is_unload_immediately,
+        parse_keep_alive,
+    )
 
     try:
-        return await asyncio.wait_for(coro, timeout=effective_timeout)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": f"{operation} timed out",
-                "code": "TIMEOUT",
-                "timeout_seconds": effective_timeout,
-                "operation": operation,
-            },
-        )
+        delta = parse_keep_alive(keep_alive)
+    except InvalidKeepAliveError as exc:
+        raise APIValidationError(str(exc))
 
-
-async def ensure_llm_loaded(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
-    """Ensure LLM model is loaded and return engine + manifest.
-
-    This is the primary entry point for model loading in API routes.
-    Handles validation, registry lookup, type checking, and loading.
-
-    Args:
-        model_name: Name, alias, or repo_id of the model
-
-    Returns:
-        Tuple of (InferenceEngine, ModelManifest)
-
-    Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
-    """
-    # Validate input
-    try:
-        validate_model_name(model_name)
-    except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
+    if delta is None:
+        # Caller didn't pass the field — leave any previous deadline
+        # untouched (default idle timeout keeps governing).
+        return False
 
     state = get_state()
 
-    # Fast path - already loaded
-    if state.current_model and state.current_model.name == model_name:
-        if state.engine is None:
-            raise HTTPException(503, detail="Model engine not available")
-        return state.engine, state.current_model
+    if is_unload_immediately(delta):
+        # Clear any standing deadline first; the caller will unload
+        # after responding.
+        state.set_keep_alive_deadline(model_name, None)
+        return True
 
-    # Lookup in registry
-    manifest = get_registry().get(model_name)
-    if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
+    if is_never_expire(delta):
+        # No deadline — model stays forever until an explicit stop.
+        state.set_keep_alive_deadline(model_name, None)
+        return False
 
-    # Verify model type
-    model_path = Path(manifest.local_path)
-    model_type = detect_model_type(model_path)
-    if model_type != ModelType.LLM:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "llm",
-                "got": model_type.value,
-            },
-        )
-
-    # Load model
-    engine = select_engine(model_path)
-    engine.load(manifest.local_path)
-    await state.set_llm_engine(engine, manifest)
-
-    return engine, manifest
+    deadline = datetime.now(timezone.utc) + delta
+    state.set_keep_alive_deadline(model_name, deadline)
+    return False
 
 
-async def ensure_tts_loaded(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
-    """Ensure TTS model is loaded and return engine + manifest.
+async def unload_after_response(model_name: str) -> None:
+    """Background task that evicts ``model_name`` from the server.
 
-    Args:
-        model_name: Name, alias, or repo_id of the TTS model
+    Scheduled by routes when ``keep_alive=0`` is observed. Uses the
+    existing ``state.cleanup`` code path so the async-unload semantics
+    introduced in R7 are preserved (the teardown runs in a worker
+    thread; the event loop stays responsive).
 
-    Returns:
-        Tuple of (AudioEngine, ModelManifest)
-
-    Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
+    Safe to call when ``model_name`` is no longer the resident model
+    — in that case it's a no-op.
     """
-    try:
-        validate_model_name(model_name)
-    except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
+    from hfl.api.state import get_state
 
     state = get_state()
+    current = state.current_model
+    if current is not None and current.name == model_name:
+        # cleanup() evicts the LLM engine (and the TTS one, which is
+        # harmless — if nothing is loaded there it's a no-op).
+        await state.cleanup()
 
-    if state.current_tts_model and state.current_tts_model.name == model_name:
-        if state.tts_engine is None:
-            raise HTTPException(503, detail="TTS engine not available")
-        return state.tts_engine, state.current_tts_model
 
-    manifest = get_registry().get(model_name)
-    if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
+async def prepare_stream_response(
+    gen_factory: "Callable[[AbstractAsyncContextManager[None]], AsyncIterator[str]]",
+    media_type: str,
+) -> "StreamingResponse | JSONResponse":
+    """Acquire a dispatcher slot and wrap a generator in a StreamingResponse.
 
-    model_path = Path(manifest.local_path)
-    model_type = detect_model_type(model_path)
-    if model_type != ModelType.TTS:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "tts",
-                "got": model_type.value,
-            },
-        )
+    Encapsulates the three-line pattern duplicated across every
+    streaming endpoint (OpenAI, Ollama-native, Anthropic):
 
-    engine = select_tts_engine(model_path)
-    engine.load(manifest.local_path)
-    await state.set_tts_engine(engine, manifest)
+    1. Pre-acquire a dispatcher slot.
+    2. On queue rejection (full/timeout), return the pre-built 429/503
+       envelope directly.
+    3. Otherwise hand the slot context manager to the caller's generator
+       factory and wrap its output in a ``StreamingResponse`` with the
+       given media type.
 
-    return engine, manifest
+    ``gen_factory`` receives the already-entered slot context manager.
+    Its generator is responsible for ``await slot_cm.__aexit__(...)`` in
+    its own ``finally`` — matching the existing route convention.
+    """
+    from fastapi.responses import StreamingResponse
+
+    slot_or_response = await acquire_stream_slot()
+    if isinstance(slot_or_response, JSONResponse):
+        return slot_or_response
+    return StreamingResponse(gen_factory(slot_or_response), media_type=media_type)
 
 
 def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
@@ -336,7 +304,12 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     if not options:
         return GenerationConfig()
 
-    # Validate types at API boundary
+    # Validate types at API boundary. Raising the domain
+    # ``ValidationError`` (APIError, status=400) lets the global
+    # exception handler produce the standard error envelope instead of
+    # each route improvising its own.
+    from hfl.exceptions import ValidationError as APIValidationError
+
     def _validate_float(
         key: str,
         val: Any,
@@ -344,17 +317,17 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
         max_val: float = float("inf"),
     ) -> float:
         if not isinstance(val, (int, float)):
-            raise HTTPException(400, detail=f"'{key}' must be a number, got {type(val).__name__}")
+            raise APIValidationError(f"'{key}' must be a number, got {type(val).__name__}")
         fval = float(val)
         if not min_val <= fval <= max_val:
-            raise HTTPException(400, detail=f"'{key}' must be between {min_val} and {max_val}")
+            raise APIValidationError(f"'{key}' must be between {min_val} and {max_val}")
         return fval
 
     def _validate_int(key: str, val: Any, min_val: int = 0) -> int:
         if not isinstance(val, int):
-            raise HTTPException(400, detail=f"'{key}' must be an integer, got {type(val).__name__}")
+            raise APIValidationError(f"'{key}' must be an integer, got {type(val).__name__}")
         if val < min_val:
-            raise HTTPException(400, detail=f"'{key}' must be >= {min_val}")
+            raise APIValidationError(f"'{key}' must be >= {min_val}")
         return val
 
     config = GenerationConfig()
@@ -409,18 +382,20 @@ def request_to_config(
         else:
             stop_list = list(stop)
 
+    from hfl.exceptions import ValidationError as APIValidationError
+
     config = GenerationConfig()
     if temperature is not None:
         if not isinstance(temperature, (int, float)) or not 0.0 <= temperature <= 2.0:
-            raise HTTPException(400, detail="temperature must be between 0.0 and 2.0")
+            raise APIValidationError("temperature must be between 0.0 and 2.0")
         config.temperature = float(temperature)
     if top_p is not None:
         if not isinstance(top_p, (int, float)) or not 0.0 <= top_p <= 1.0:
-            raise HTTPException(400, detail="top_p must be between 0.0 and 1.0")
+            raise APIValidationError("top_p must be between 0.0 and 1.0")
         config.top_p = float(top_p)
     if max_tokens is not None:
         if not isinstance(max_tokens, int) or max_tokens < 1:
-            raise HTTPException(400, detail="max_tokens must be a positive integer")
+            raise APIValidationError("max_tokens must be a positive integer")
         config.max_tokens = max_tokens
     if stop_list is not None:
         config.stop = stop_list

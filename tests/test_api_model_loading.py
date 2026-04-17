@@ -121,7 +121,12 @@ class TestModelNotFound:
             )
 
             assert response.status_code == 404
-            assert "not found" in response.json()["detail"].lower()
+            # Envelope after R10: ``{"error": "...", "code":
+            # "ModelNotFoundError", ...}``; ``detail`` kept as a
+            # legacy-reader fallback.
+            body = response.json()
+            msg = body.get("error") or body.get("detail") or ""
+            assert "not found" in str(msg).lower()
 
     def test_completions_model_not_found(self):
         """Test completions with non-existent model."""

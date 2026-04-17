@@ -17,6 +17,7 @@ Language:
   Default: en (English)
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -556,6 +557,220 @@ def _pull_selected_model(model) -> None:
         pass  # pull raises Exit on completion
 
 
+@app.command(name="cp")
+def cp(
+    source: str = typer.Argument(help="Existing model name"),
+    destination: str = typer.Argument(help="New name to create"),
+) -> None:
+    """Copy a model to a new name (Ollama-compatible).
+
+    Creates a new registry entry pointing at the same blob as the
+    source, so the operation is nearly free. ``hfl cp`` mirrors
+    ``ollama cp`` byte-for-byte.
+    """
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    if registry.get(source) is None:
+        console.print(f"[red]Source model not found:[/] {source}")
+        raise typer.Exit(1)
+    if registry.get(destination) is not None:
+        console.print(f"[red]Destination already exists:[/] {destination}")
+        raise typer.Exit(1)
+
+    try:
+        ok = registry.copy(source, destination)
+    except Exception as exc:
+        console.print(f"[red]Copy failed:[/] {exc}")
+        raise typer.Exit(1)
+
+    if ok:
+        console.print(f"[green]Copied[/] [cyan]{source}[/] → [cyan]{destination}[/]")
+    else:
+        console.print(f"[red]Copy failed[/] (concurrent write?): {source} → {destination}")
+        raise typer.Exit(1)
+
+
+@app.command(name="stop")
+def stop(
+    model: str = typer.Argument(None, help="Model name to unload. Omit to unload all."),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+) -> None:
+    """Unload a model without restarting the server (Ollama-compatible).
+
+    Sends ``POST /api/stop`` to the running HFL server. If a model
+    name is given, only that one is evicted; otherwise every loaded
+    model (LLM + TTS) is released.
+    """
+    import httpx
+
+    url = f"http://{host}:{port}/api/stop"
+    body: dict = {}
+    if model:
+        body["model"] = model
+
+    try:
+        response = httpx.post(url, json=body, timeout=10.0)
+        response.raise_for_status()
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
+
+    data = response.json()
+    status = data.get("status")
+    target = data.get("model") or "(all)"
+    if status == "stopped":
+        console.print(f"[green]Stopped[/] [cyan]{target}[/]")
+    elif status == "not_loaded":
+        console.print(f"[yellow]{target}[/] is not currently loaded.")
+    elif status == "nothing_loaded":
+        console.print("[dim]No models were loaded; nothing to stop.[/]")
+    else:
+        console.print(f"[dim]Unexpected response:[/] {data}")
+
+
+@app.command(name="show")
+def show(
+    model: str = typer.Argument(help="Model name, alias or repo_id to inspect"),
+    modelfile: bool = typer.Option(
+        False, "--modelfile", help="Print only the rendered Modelfile body"
+    ),
+    parameters: bool = typer.Option(
+        False, "--parameters", help="Print only the PARAMETER block (one per line)"
+    ),
+    template: bool = typer.Option(False, "--template", help="Print only the chat template"),
+    license_only: bool = typer.Option(False, "--license", help="Print only the license text"),
+) -> None:
+    """Show model information (Ollama-compatible).
+
+    Mirrors ``ollama show`` — by default prints a summary with details,
+    capabilities, and the license; flags narrow the output to a single
+    section for scripting.
+    """
+    from hfl.converter.modelfile import render_modelfile
+    from hfl.models.capabilities import detect_capabilities
+    from hfl.models.registry import ModelRegistry
+
+    manifest = ModelRegistry().get(model)
+    if manifest is None:
+        console.print(f"[red]Model not found:[/] {model}")
+        raise typer.Exit(1)
+
+    # Single-section flags first (mirror ollama show --modelfile).
+    if modelfile:
+        console.print(render_modelfile(manifest), end="")
+        return
+    if parameters:
+        from hfl.api.routes_show import _format_parameters
+
+        console.print(_format_parameters(manifest))
+        return
+    if template:
+        console.print(manifest.chat_template or "")
+        return
+    if license_only:
+        console.print(manifest.license_name or manifest.license or "")
+        return
+
+    # Default: summary table — same columns ollama show prints.
+    from rich.panel import Panel
+    from rich.table import Table
+
+    summary = Table.grid(padding=(0, 2))
+    summary.add_column(style="dim", justify="right")
+    summary.add_column()
+    summary.add_row("Name", manifest.name)
+    summary.add_row("Architecture", manifest.architecture or "unknown")
+    summary.add_row("Parameters", manifest.parameters or "?")
+    summary.add_row("Quantization", manifest.quantization or "?")
+    summary.add_row("Format", manifest.format or "?")
+    if manifest.context_length:
+        summary.add_row("Context", f"{manifest.context_length} tokens")
+    summary.add_row("Size", manifest.display_size)
+    summary.add_row(
+        "Capabilities",
+        ", ".join(detect_capabilities(manifest)) or "—",
+    )
+    summary.add_row("License", manifest.license or "—")
+
+    console.print(Panel(summary, title=f"Model: {manifest.name}", expand=False))
+
+
+@app.command(name="ps")
+def ps(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-H", help="Host where the HFL server is running"
+    ),
+    port: int = typer.Option(11434, "--port", "-p", help="Port where the HFL server is running"),
+) -> None:
+    """List models currently loaded in memory (Ollama-compatible).
+
+    Hits the server's ``/api/ps`` endpoint and renders a table with
+    NAME, ID, SIZE, PROCESSOR and UNTIL — matching the output layout
+    of ``ollama ps`` so scripts written against Ollama work unchanged.
+    """
+    import httpx
+    from rich.table import Table
+
+    url = f"http://{host}:{port}/api/ps"
+    try:
+        response = httpx.get(url, timeout=5.0)
+        response.raise_for_status()
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
+
+    data = response.json()
+    models = data.get("models", [])
+
+    if not models:
+        console.print("[dim]No models loaded. Send a request to /api/chat to load one.[/]")
+        return
+
+    table = Table(title="Running models")
+    table.add_column("NAME", style="cyan")
+    table.add_column("ID", style="dim")
+    table.add_column("SIZE", justify="right")
+    table.add_column("PROCESSOR")
+    table.add_column("UNTIL")
+
+    for m in models:
+        size_gb = (m.get("size") or 0) / (1024**3)
+        size_vram = m.get("size_vram") or 0
+        # Classify processor: any VRAM usage counts as GPU-resident;
+        # pure CPU engines report 0.
+        processor = "GPU" if size_vram > 0 and size_vram != (m.get("size") or 0) else "CPU"
+        if size_vram and size_vram == (m.get("size") or 0):
+            # Engine reported size_vram but we couldn't distinguish
+            # from weights size — assume GPU (conservative; llama.cpp
+            # with n_gpu_layers=-1 on Metal puts everything on GPU).
+            processor = "GPU"
+        expires_at = m.get("expires_at") or "—"
+        digest = (m.get("digest") or "")[:12]
+        table.add_row(
+            m.get("name", "?"),
+            digest,
+            f"{size_gb:.1f} GB" if size_gb >= 0.1 else f"{(m.get('size') or 0) / (1024**2):.0f} MB",
+            processor,
+            expires_at,
+        )
+
+    console.print(table)
+
+
 @app.command()
 def search(
     query: str = typer.Argument(help=t("commands.search.args.query")),
@@ -895,6 +1110,174 @@ def logout():
         console.print(f"[green]{t('messages.token_removed')}[/]")
     except Exception as e:
         console.print(f"[yellow]Warning:[/] {e}")
+
+
+@app.command(name="create")
+def create(
+    model: str = typer.Argument(help="Name for the new model"),
+    modelfile: Path = typer.Option(
+        ...,
+        "--file",
+        "-f",
+        help="Path to the Modelfile",
+        exists=True,
+        readable=True,
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+) -> None:
+    """Create a new model from a Modelfile (Ollama-compatible).
+
+    Mirrors ``ollama create`` — sends the Modelfile body to
+    ``POST /api/create`` on a running HFL server and prints the NDJSON
+    progress events as they stream in.
+    """
+    import httpx
+
+    body = modelfile.read_text()
+    url = f"http://{host}:{port}/api/create"
+    payload: dict[str, Any] = {
+        "model": model,
+        "modelfile": body,
+        "stream": True,
+    }
+
+    try:
+        with httpx.stream("POST", url, json=payload, timeout=120.0) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    console.print(f"[dim]{line}[/]")
+                    continue
+                if "error" in event:
+                    console.print(f"[red]Error:[/] {event['error']}")
+                    raise typer.Exit(1)
+                status = event.get("status", "")
+                console.print(f"[cyan]{status}[/]")
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
+
+
+@app.command(name="mcp")
+def mcp(
+    action: str = typer.Argument(help="connect | disconnect | list | serve"),
+    server_id: str = typer.Argument(None, help="Server id (for connect/disconnect)"),
+    target: str = typer.Argument(None, help="stdio://<cmd> <args> or sse://<url>"),
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        help="For ``serve``: stdio (default) or sse.",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="SSE bind host"),
+    port: int = typer.Option(8765, "--port", "-p", help="SSE bind port"),
+    capabilities: str = typer.Option(
+        None,
+        "--capabilities",
+        help="Comma-separated subset of tools to expose when serving.",
+    ),
+) -> None:
+    """Manage Model Context Protocol (MCP) connections and run as a server.
+
+    Examples:
+
+        hfl mcp list
+        hfl mcp connect fs stdio://npx @modelcontextprotocol/server-filesystem /tmp
+        hfl mcp disconnect fs
+        hfl mcp serve --transport stdio
+        hfl mcp serve --transport sse --host 0.0.0.0 --port 8765 \
+                      --capabilities web_search,web_fetch
+    """
+    import asyncio
+
+    from hfl.mcp.client import (
+        MCPClientUnavailableError,
+        MCPConnectionError,
+        get_client,
+    )
+
+    client = get_client()
+
+    async def _run() -> None:
+        if action == "list":
+            tools = client.list_tools()
+            if not tools:
+                console.print("[dim]No MCP servers connected.[/]")
+                return
+            for tool in tools:
+                console.print(f"[cyan]{tool.qualified_name}[/]  [dim]{tool.description}[/]")
+        elif action == "connect":
+            if not server_id or not target:
+                console.print("[red]Usage:[/] hfl mcp connect <id> stdio://... or sse://...")
+                raise typer.Exit(1)
+            tools = await client.connect(server_id, target)
+            console.print(f"[green]Connected[/] {server_id} ({len(tools)} tools)")
+            for tool in tools:
+                console.print(f"  [cyan]{tool.qualified_name}[/]")
+        elif action == "disconnect":
+            if not server_id:
+                console.print("[red]Usage:[/] hfl mcp disconnect <id>")
+                raise typer.Exit(1)
+            await client.disconnect(server_id)
+            console.print(f"[green]Disconnected[/] {server_id}")
+        elif action == "serve":
+            from hfl.mcp.server import (
+                MCPServerUnavailableError,
+                serve_sse,
+                serve_stdio,
+            )
+
+            cap_list = None
+            if capabilities:
+                cap_list = [c.strip() for c in capabilities.split(",") if c.strip()]
+            try:
+                if transport == "stdio":
+                    await serve_stdio(cap_list)
+                elif transport == "sse":
+                    await serve_sse(host, port, cap_list)
+                else:
+                    console.print(f"[red]Unknown transport:[/] {transport}")
+                    raise typer.Exit(1)
+            except MCPServerUnavailableError as exc:
+                console.print(f"[red]MCP unavailable:[/] {exc}")
+                raise typer.Exit(1)
+        else:
+            console.print(f"[red]Unknown action:[/] {action}")
+            raise typer.Exit(1)
+
+    try:
+        asyncio.run(_run())
+    except MCPClientUnavailableError as exc:
+        console.print(f"[red]MCP unavailable:[/] {exc}")
+        raise typer.Exit(1)
+    except MCPConnectionError as exc:
+        console.print(f"[red]MCP error:[/] {exc}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def doctor():
+    """Diagnose the runtime environment (Phase 15 P2 — V2 row 15).
+
+    Prints detected accelerators (NVIDIA / Metal / ROCm), which HFL
+    extras are installed (llama-cpp / transformers / vllm / mlx-lm),
+    VRAM probe result + recommended ``num_ctx``, and actionable
+    follow-up suggestions.
+    """
+    from hfl.cli.commands.doctor import build_report, format_report
+
+    report = build_report()
+    console.print(format_report(report))
 
 
 @app.command()

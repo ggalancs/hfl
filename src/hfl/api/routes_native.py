@@ -7,27 +7,32 @@ Allows using hfl as a drop-in replacement for Ollama.
 
 import contextlib
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
-    acquire_stream_slot,
+    apply_keep_alive,
+    prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
+    unload_after_response,
 )
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
-from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ollama API"])
 
@@ -58,8 +63,12 @@ def _to_chat_messages(req: ChatRequest) -> list[ChatMessage]:
     """Convert an Ollama request's messages into engine-level ChatMessages.
 
     Preserves ``tool_calls``, ``name`` and ``tool_call_id`` so multi-turn
-    agent loops (spec rule C6) propagate back to the model.
+    agent loops (spec rule C6) propagate back to the model. Also
+    decodes + validates ``images`` (Phase 4, P0-6) so the engine
+    sees raw bytes.
     """
+    from hfl.api.vision import decode_ollama_images
+
     out: list[ChatMessage] = []
     for m in req.messages:
         tool_calls = None
@@ -72,6 +81,7 @@ def _to_chat_messages(req: ChatRequest) -> list[ChatMessage]:
                 tool_calls=tool_calls,
                 name=m.name,
                 tool_call_id=m.tool_call_id,
+                images=decode_ollama_images(m.images),
             )
         )
     return out
@@ -82,6 +92,105 @@ def _tools_payload(req: ChatRequest) -> list[dict] | None:
     if req.tools is None:
         return None
     return [t.model_dump() for t in req.tools]
+
+
+_VALID_THINKING_LEVELS = ("off", "low", "medium", "high")
+
+
+def _resolve_thinking_level(think: bool | str | None) -> str:
+    """Normalise ``think`` into one of ``off/low/medium/high``.
+
+    - ``None`` or ``False`` → ``"off"``.
+    - ``True`` → ``"medium"`` (back-compat with the legacy bool).
+    - ``"low"`` / ``"medium"`` / ``"high"`` pass through (case-insensitive).
+    - Anything else also maps to ``"off"`` with a warning, mirroring
+      the permissive posture we use for unknown ``HFL_WEB_SEARCH_BACKEND``
+      values.
+    """
+    if think is None or think is False:
+        return "off"
+    if think is True:
+        return "medium"
+    if isinstance(think, str):
+        level = think.lower().strip()
+        if level in _VALID_THINKING_LEVELS:
+            return level
+    logger.warning("ignoring unknown think= value: %r", think)
+    return "off"
+
+
+def _merge_mcp_tools(existing: list[dict] | None) -> list[dict] | None:
+    """Merge tools exposed by connected MCP servers into ``existing``.
+
+    Returns ``existing`` untouched when no MCP tools are active, so
+    requests that opt out of tool calling (``tools=None``) continue
+    to suppress tool calls even if MCP servers are connected — the
+    caller's intent wins.
+    """
+    try:
+        from hfl.mcp.client import get_client
+    except Exception:
+        return existing
+    try:
+        mcp_tools = get_client().list_tools()
+    except Exception:
+        logger.exception("failed to read MCP tool list")
+        return existing
+    if not mcp_tools:
+        return existing
+    mcp_payload = [t.to_ollama_tool() for t in mcp_tools]
+    if existing is None:
+        # Caller didn't declare tools and hasn't opted out (opt-out
+        # is ``tools=[]``). We treat ``None`` as "no preference" and
+        # surface MCP tools.
+        return mcp_payload
+    return existing + mcp_payload
+
+
+def _baked_messages(manifest: "Any | None") -> list[ChatMessage]:
+    """Return the manifest's Modelfile ``MESSAGE`` entries as ChatMessages.
+
+    Empty list when the manifest has none (or when ``manifest`` is
+    ``None``, which happens if the engine somehow loaded without a
+    current_model set — should never occur on the happy path but the
+    route stays defensive).
+    """
+    if manifest is None:
+        return []
+    raw = getattr(manifest, "messages", None) or []
+    out: list[ChatMessage] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            continue
+        out.append(ChatMessage(role=role, content=content))
+    return out
+
+
+def _splice_baked_messages(
+    messages: list[ChatMessage],
+    baked: list[ChatMessage],
+) -> list[ChatMessage]:
+    """Insert ``baked`` messages after any leading system block.
+
+    The contract matches Ollama's Modelfile semantics: MESSAGE entries
+    sit between the system prompt(s) and the live turn. We find the
+    first non-system message and splice the bake-in there; if the
+    caller sent only system messages, they land at the end.
+    """
+    if not baked:
+        return messages
+    split = 0
+    for i, m in enumerate(messages):
+        if m.role != "system":
+            split = i
+            break
+    else:
+        split = len(messages)
+    return messages[:split] + baked + messages[split:]
 
 
 def _build_chat_message(
@@ -139,22 +248,70 @@ def _build_chat_message(
         504: {"description": "Generation timeout"},
     },
 )
-async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse | Response:
+async def api_generate(
+    req: GenerateRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any] | StreamingResponse | Response:
+    """Ollama-compatible ``POST /api/generate`` (raw prompt completion).
+
+    Either streams NDJSON chunks (``req.stream=True``) or returns the
+    complete response envelope. Options map from Ollama's ``options``
+    dict to HFL's ``GenerationConfig`` at the route boundary. The
+    ``keep_alive`` field, if present, records a deadline on the server
+    state (surfaced by ``/api/ps``'s ``expires_at``) or queues an
+    immediate unload when set to 0.
+    """
+    unload_after = apply_keep_alive(req.model, req.keep_alive)
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
 
+    # Schedule post-response unload when the client asked for it.
+    if unload_after:
+        background_tasks.add_task(unload_after_response, req.model)
+
     gen_config = _options_to_config(req.options)
 
+    # OLLAMA_PARITY_PLAN P0-5: honour ``format`` for structured output.
+    if req.format is not None:
+        from hfl.api.structured_outputs import normalize_ollama_format
+
+        gen_config.response_format = normalize_ollama_format(req.format)
+
+    # P1-1 + Phase 10 P1: reasoning channel exposure with level
+    # support. ``think=True`` still maps to "medium"; new clients
+    # pass ``"low"`` / ``"medium"`` / ``"high"`` explicitly.
+    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    if gen_config.thinking_level != "off":
+        gen_config.expose_reasoning = True
+
+    # OLLAMA_PARITY_PLAN P2-3: per-request template override and raw
+    # prompt mode. The engine decides how to honour each — llama-cpp
+    # rewires its chat handler for ``template_override``, and falls
+    # through to ``Llama.__call__`` (no chat formatting) when
+    # ``raw=True``. Backends without plug-in templates (vLLM) ignore
+    # both flags silently.
+    if req.template is not None:
+        gen_config.template_override = req.template
+    if req.raw:
+        gen_config.raw = True
+
+    # OLLAMA_PARITY_PLAN P1-1: system-prompt override. When present,
+    # we flow it through the engine as a system-role message so the
+    # same /api/generate route can now do single-shot prompting with
+    # a custom system prompt, mirroring Ollama's behaviour. Skipped
+    # when ``raw=True`` because raw mode intentionally bypasses any
+    # prompt shaping.
+    if req.system and not req.raw:
+        system_preamble = req.system + "\n\n"
+        final_prompt = system_preamble + req.prompt
+    else:
+        final_prompt = req.prompt
+
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            # Queue rejection — ``slot_or_response`` is already a
-            # JSONResponse carrying the 429/503 envelope.
-            return slot_or_response
-        return StreamingResponse(
-            _stream_generate(req.model, req.prompt, gen_config, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_generate(req.model, final_prompt, gen_config, slot),
             media_type="application/x-ndjson",
         )
 
@@ -163,21 +320,38 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingRespon
     try:
         result = await run_dispatched(
             state.engine.generate,
-            req.prompt,
+            final_prompt,
             gen_config,
             operation="generate",
         )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
-    return {
+    # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
+    # pre-0.5.1). Clients keying off these fields now see the
+    # engine's actual measurements.
+    envelope: dict[str, Any] = {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "response": result.text,
         "done": True,
-        "total_duration": 0,
+        "total_duration": result.total_duration,
+        "load_duration": result.load_duration,
+        "prompt_eval_count": result.tokens_prompt,
+        "prompt_eval_duration": result.prompt_eval_duration,
         "eval_count": result.tokens_generated,
-        "eval_duration": 0,
+        "eval_duration": result.eval_duration,
     }
+    # Phase 7 P2-4: opt-in legacy ``context`` token array for
+    # multi-turn continuation. Only surfaces when the client sent
+    # ``options.keep_context=true``.
+    if gen_config.keep_context and result.context_tokens is not None:
+        envelope["context"] = result.context_tokens
+    # Phase 12 P1 — V2 row 7. Attach logprobs when the engine
+    # populated them (i.e. the client asked via
+    # ``options.logprobs``).
+    if result.logprobs is not None:
+        envelope["logprobs"] = result.logprobs
+    return envelope
 
 
 async def _stream_generate(
@@ -230,8 +404,17 @@ async def _stream_generate(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        error = {"model": model_name, "error": str(e), "done": True}
+    except Exception:
+        # Never forward ``str(exc)`` to the client — it may reveal
+        # paths, library class names, or line numbers (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback goes to the
+        # server log via ``logger.exception``.
+        logger.exception("ollama stream failed for model %s", model_name)
+        error = {
+            "model": model_name,
+            "error": "Internal server error during streaming.",
+            "done": True,
+        }
         yield json.dumps(error) + "\n"
     finally:
         if slot_cm is not None:
@@ -251,22 +434,70 @@ async def _stream_generate(
         504: {"description": "Generation timeout"},
     },
 )
-async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Response:
+async def api_chat(
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any] | StreamingResponse | Response:
+    """Ollama-compatible ``POST /api/chat`` (multi-turn chat).
+
+    Supports tool calls: ``req.tools`` flows into the engine; the
+    response's ``message.tool_calls`` is populated either from the
+    engine's native structure or by running the per-family tool parser
+    over the generated text (spec rule C4). Honours Ollama's
+    ``keep_alive`` field — see ``api_generate`` for semantics.
+    """
+    unload_after = apply_keep_alive(req.model, req.keep_alive)
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
 
+    if unload_after:
+        background_tasks.add_task(unload_after_response, req.model)
+
     messages = _to_chat_messages(req)
     gen_config = _options_to_config(req.options)
     tools = _tools_payload(req)
+    # Phase 9 P0: fold MCP tools into the tools list so every
+    # connected external server is reachable from the model without
+    # the client having to declare them. Best-effort — if the MCP
+    # SDK isn't installed or no servers are connected, this is a
+    # no-op.
+    tools = _merge_mcp_tools(tools)
+
+    # OLLAMA_PARITY_PLAN P0-5: structured-output constraint.
+    if req.format is not None:
+        from hfl.api.structured_outputs import normalize_ollama_format
+
+        gen_config.response_format = normalize_ollama_format(req.format)
+
+    # P1-1 + Phase 10 P1: reasoning channel w/ multi-level support.
+    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    if gen_config.thinking_level != "off":
+        gen_config.expose_reasoning = True
+
+    # P1-1: system-prompt override. Inserted as the FIRST message so
+    # the model's chat template reads it before any user / tool
+    # content. Any system message the caller already included stays
+    # in place (we don't collapse — Ollama allows multiple).
+    if req.system:
+        from hfl.engine.base import ChatMessage as _CM
+
+        messages = [_CM(role="system", content=req.system)] + messages
+
+    # Phase 8 P3-2: Modelfile ``MESSAGE`` baked-in few-shot. If the
+    # resolved manifest carries MESSAGE instructions, prepend them
+    # to the conversation after any system messages so the model
+    # sees the canonical ``user → assistant`` exemplars before the
+    # live turn. No-op when the manifest has no baked messages
+    # (the vast majority of models).
+    baked = _baked_messages(state.current_model)
+    if baked:
+        messages = _splice_baked_messages(messages, baked)
 
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            return slot_or_response
-        return StreamingResponse(
-            _stream_chat(req.model, messages, gen_config, tools, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_chat(req.model, messages, gen_config, tools, slot),
             media_type="application/x-ndjson",
         )
 
@@ -274,29 +505,116 @@ async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Res
     # the inference dispatcher (spec §5.3). ``tools`` is forwarded as a
     # kwarg so engines without tool support raise TypeError and fall
     # back via the per-engine shim.
+    trace_payload: list[dict] | None = None
     try:
-        result = await run_dispatched(
-            state.engine.chat,
-            messages,
-            gen_config,
-            tools=tools,
-            operation="chat",
-        )
+        if req.agent_loop:
+            # Phase 10 P1: native agent loop. Dispatches tool calls
+            # itself (MCP only for now) and re-submits results to the
+            # model until we get a tool-call-free reply or reach
+            # ``max_iterations``.
+            from hfl.api.agent_loop import run_agent_loop
+
+            # Snapshot the engine reference so the closure doesn't have
+            # to re-check ``state.engine`` on every iteration (mypy was
+            # right to complain about that Optional narrowing being lost
+            # inside the nested function).
+            active_engine = state.engine
+            assert active_engine is not None  # service_unavailable guard ran above
+
+            async def _chat_fn(
+                msgs: list[ChatMessage],
+                cfg: GenerationConfig,
+                tools_arg: list[dict] | None,
+            ) -> GenerationResult:
+                return await run_dispatched(
+                    active_engine.chat,
+                    msgs,
+                    cfg,
+                    tools=tools_arg,
+                    operation="chat",
+                )
+
+            mcp_caller = None
+            try:
+                from hfl.mcp.client import get_client as _get_mcp
+
+                mcp_client = _get_mcp()
+                mcp_caller = mcp_client.call_tool
+            except Exception:
+                mcp_caller = None
+
+            loop_result = await run_agent_loop(
+                messages=messages,
+                config=gen_config,
+                tools=tools,
+                chat_fn=_chat_fn,
+                mcp_caller=mcp_caller,
+                max_iterations=req.max_iterations or 6,
+            )
+            result = loop_result.final
+            trace_payload = [
+                {
+                    "iteration": entry.iteration,
+                    "name": entry.name,
+                    "arguments": entry.arguments,
+                    "result": entry.result,
+                    "error": entry.error,
+                    "call_id": entry.call_id,
+                }
+                for entry in loop_result.tool_trace
+            ]
+        else:
+            result = await run_dispatched(
+                state.engine.chat,
+                messages,
+                gen_config,
+                tools=tools,
+                operation="chat",
+            )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
 
+    # P1-1: when think=True, capture the reasoning from the RAW
+    # engine text BEFORE the tool parser runs — the per-family
+    # parsers in tool_parsers already strip ``<think>`` / channel
+    # blocks as part of their cleanup, so we'd lose the reasoning if
+    # we extracted it from the post-build message.
+    extracted_thinking: str | None = None
+    raw_for_build = result.text
+    if req.think:
+        from hfl.api.thinking import extract_thinking
+
+        _, extracted_thinking = extract_thinking(result.text)
+
     message = _build_chat_message(
-        raw_text=result.text,
+        raw_text=raw_for_build,
         model_name=req.model,
         tools=tools,
         engine_tool_calls=getattr(result, "tool_calls", None),
     )
-    return {
+
+    if extracted_thinking:
+        message["thinking"] = extracted_thinking
+
+    envelope: dict[str, Any] = {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "message": message,
         "done": True,
+        # Phase 5 P1-3: real timings. Ollama-shape fields.
+        "total_duration": result.total_duration,
+        "load_duration": result.load_duration,
+        "prompt_eval_count": result.tokens_prompt,
+        "prompt_eval_duration": result.prompt_eval_duration,
+        "eval_count": result.tokens_generated,
+        "eval_duration": result.eval_duration,
     }
+    # Phase 10 P1: replay-ready agent-loop trace for consumers that
+    # want to inspect each tool invocation the server dispatched on
+    # their behalf.
+    if trace_payload is not None:
+        envelope["tool_trace"] = trace_payload
+    return envelope
 
 
 async def _stream_chat(
@@ -330,16 +648,33 @@ async def _stream_chat(
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     accumulated: list[str] = []
+    last_partial_count = 0  # Phase 10 P1: avoid re-emitting identical partials
 
     def format_chunk(token: str) -> str:
+        nonlocal last_partial_count
         accumulated.append(token)
+        # Phase 10 P1 — streaming partial tool calls. Probe the
+        # accumulated text on every chunk; when the tool parser can
+        # already see one or more (possibly incomplete) calls, attach
+        # them to the chunk so the client can render partial state
+        # (``calling foo with {"city": "Lond...``). We only surface a
+        # fresh partial when the count or the last call's arg string
+        # length increases.
+        partial_calls = None
+        try:
+            cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
+            if calls:
+                partial_calls = calls
+                last_partial_count = len(calls)
+        except Exception:
+            partial_calls = None
         chunk = {
             "model": model_name,
             "created_at": created_at,
             "message": {
                 "role": "assistant",
                 "content": token,
-                "tool_calls": None,
+                "tool_calls": partial_calls,
             },
             "done": False,
         }
@@ -376,8 +711,17 @@ async def _stream_chat(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        error = {"model": model_name, "error": str(e), "done": True}
+    except Exception:
+        # Never forward ``str(exc)`` to the client — it may reveal
+        # paths, library class names, or line numbers (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback goes to the
+        # server log via ``logger.exception``.
+        logger.exception("ollama stream failed for model %s", model_name)
+        error = {
+            "model": model_name,
+            "error": "Internal server error during streaming.",
+            "done": True,
+        }
         yield json.dumps(error) + "\n"
     finally:
         if slot_cm is not None:

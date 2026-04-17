@@ -3,28 +3,23 @@
 """Tests for API helpers."""
 
 import json
-from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from hfl.api.helpers import (
     StreamingContext,
-    ensure_llm_loaded,
-    ensure_tts_loaded,
     format_ndjson_chunk,
     options_to_config,
+    prepare_stream_response,
     request_to_config,
-    run_async_with_timeout,
     run_with_timeout,
     stream_ollama_chat,
     stream_ollama_generate,
     stream_openai_chat,
     stream_openai_completion,
 )
-from hfl.api.state import reset_state
-from hfl.converter.formats import ModelType
 from hfl.engine.base import GenerationConfig
 
 
@@ -430,284 +425,6 @@ class TestStreamOllamaChat:
         assert final["message"]["role"] == "assistant"
 
 
-@dataclass
-class MockManifest:
-    """Mock model manifest for testing."""
-
-    name: str
-    local_path: str = "/mock/path"
-
-
-class MockEngine:
-    """Mock inference engine for testing."""
-
-    def __init__(self, name: str = "test"):
-        self.name = name
-        self._loaded = True
-
-    @property
-    def is_loaded(self) -> bool:
-        return self._loaded
-
-    def load(self, path: str, **kwargs) -> None:
-        self._loaded = True
-
-    def unload(self) -> None:
-        self._loaded = False
-
-
-class MockTTSEngine:
-    """Mock TTS engine for testing."""
-
-    def __init__(self, name: str = "test-tts"):
-        self.name = name
-        self._loaded = True
-
-    @property
-    def is_loaded(self) -> bool:
-        return self._loaded
-
-    def load(self, path: str, **kwargs) -> None:
-        self._loaded = True
-
-    def unload(self) -> None:
-        self._loaded = False
-
-
-class TestEnsureLLMLoaded:
-    """Tests for ensure_llm_loaded function."""
-
-    @pytest.fixture(autouse=True)
-    def reset(self):
-        """Reset state before each test."""
-        reset_state()
-        yield
-        reset_state()
-
-    @pytest.mark.asyncio
-    async def test_invalid_model_name_raises_400(self):
-        """Invalid model name raises HTTPException 400."""
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_llm_loaded("")
-
-        assert exc_info.value.status_code == 400
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    async def test_fast_path_returns_loaded_model(self, mock_get_state):
-        """Fast path returns already loaded model."""
-        mock_engine = MockEngine()
-        mock_manifest = MockManifest("test-model")
-
-        mock_state = MagicMock()
-        mock_state.current_model = mock_manifest
-        mock_state.engine = mock_engine
-        mock_get_state.return_value = mock_state
-
-        engine, manifest = await ensure_llm_loaded("test-model")
-
-        assert engine is mock_engine
-        assert manifest is mock_manifest
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    @patch("hfl.api.helpers.get_registry")
-    async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
-        """Model not in registry raises HTTPException 404."""
-        mock_state = MagicMock()
-        mock_state.current_model = None
-        mock_get_state.return_value = mock_state
-
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = None
-        mock_get_registry.return_value = mock_registry
-
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_llm_loaded("nonexistent-model")
-
-        assert exc_info.value.status_code == 404
-        assert "Model not found" in exc_info.value.detail
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    @patch("hfl.api.helpers.get_registry")
-    @patch("hfl.api.helpers.detect_model_type")
-    async def test_wrong_model_type_raises_400(
-        self,
-        mock_detect,
-        mock_get_registry,
-        mock_get_state,
-    ):
-        """Wrong model type raises HTTPException 400."""
-        mock_state = MagicMock()
-        mock_state.current_model = None
-        mock_get_state.return_value = mock_state
-
-        mock_manifest = MockManifest("test-model")
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = mock_manifest
-        mock_get_registry.return_value = mock_registry
-
-        mock_detect.return_value = ModelType.TTS  # Wrong type for LLM
-
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_llm_loaded("test-model")
-
-        assert exc_info.value.status_code == 400
-        assert exc_info.value.detail["code"] == "MODEL_TYPE_MISMATCH"
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.select_engine")
-    @patch("hfl.api.helpers.detect_model_type")
-    @patch("hfl.api.helpers.get_registry")
-    @patch("hfl.api.helpers.get_state")
-    async def test_loads_model_successfully(
-        self,
-        mock_get_state,
-        mock_get_registry,
-        mock_detect,
-        mock_select,
-    ):
-        """Successfully loads model through full path."""
-        mock_state = MagicMock()
-        mock_state.current_model = None
-        mock_state.set_llm_engine = AsyncMock()
-        mock_get_state.return_value = mock_state
-
-        mock_manifest = MockManifest("new-model")
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = mock_manifest
-        mock_get_registry.return_value = mock_registry
-
-        mock_detect.return_value = ModelType.LLM
-
-        mock_engine = MockEngine()
-        mock_select.return_value = mock_engine
-
-        engine, manifest = await ensure_llm_loaded("new-model")
-
-        assert engine is mock_engine
-        assert manifest is mock_manifest
-        mock_state.set_llm_engine.assert_called_once_with(mock_engine, mock_manifest)
-
-
-class TestEnsureTTSLoaded:
-    """Tests for ensure_tts_loaded function."""
-
-    @pytest.fixture(autouse=True)
-    def reset(self):
-        """Reset state before each test."""
-        reset_state()
-        yield
-        reset_state()
-
-    @pytest.mark.asyncio
-    async def test_invalid_model_name_raises_400(self):
-        """Invalid model name raises HTTPException 400."""
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_tts_loaded("")
-
-        assert exc_info.value.status_code == 400
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    async def test_fast_path_returns_loaded_tts(self, mock_get_state):
-        """Fast path returns already loaded TTS model."""
-        mock_engine = MockTTSEngine()
-        mock_manifest = MockManifest("test-tts")
-
-        mock_state = MagicMock()
-        mock_state.current_tts_model = mock_manifest
-        mock_state.tts_engine = mock_engine
-        mock_get_state.return_value = mock_state
-
-        engine, manifest = await ensure_tts_loaded("test-tts")
-
-        assert engine is mock_engine
-        assert manifest is mock_manifest
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    @patch("hfl.api.helpers.get_registry")
-    async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
-        """Model not in registry raises HTTPException 404."""
-        mock_state = MagicMock()
-        mock_state.current_tts_model = None
-        mock_get_state.return_value = mock_state
-
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = None
-        mock_get_registry.return_value = mock_registry
-
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_tts_loaded("nonexistent-tts")
-
-        assert exc_info.value.status_code == 404
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.get_state")
-    @patch("hfl.api.helpers.get_registry")
-    @patch("hfl.api.helpers.detect_model_type")
-    async def test_wrong_model_type_raises_400(
-        self,
-        mock_detect,
-        mock_get_registry,
-        mock_get_state,
-    ):
-        """Wrong model type raises HTTPException 400."""
-        mock_state = MagicMock()
-        mock_state.current_tts_model = None
-        mock_get_state.return_value = mock_state
-
-        mock_manifest = MockManifest("test-model")
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = mock_manifest
-        mock_get_registry.return_value = mock_registry
-
-        mock_detect.return_value = ModelType.LLM  # Wrong type for TTS
-
-        with pytest.raises(HTTPException) as exc_info:
-            await ensure_tts_loaded("test-model")
-
-        assert exc_info.value.status_code == 400
-        assert exc_info.value.detail["code"] == "MODEL_TYPE_MISMATCH"
-        assert exc_info.value.detail["expected"] == "tts"
-
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.select_tts_engine")
-    @patch("hfl.api.helpers.detect_model_type")
-    @patch("hfl.api.helpers.get_registry")
-    @patch("hfl.api.helpers.get_state")
-    async def test_loads_tts_successfully(
-        self,
-        mock_get_state,
-        mock_get_registry,
-        mock_detect,
-        mock_select,
-    ):
-        """Successfully loads TTS model through full path."""
-        mock_state = MagicMock()
-        mock_state.current_tts_model = None
-        mock_state.set_tts_engine = AsyncMock()
-        mock_get_state.return_value = mock_state
-
-        mock_manifest = MockManifest("new-tts")
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = mock_manifest
-        mock_get_registry.return_value = mock_registry
-
-        mock_detect.return_value = ModelType.TTS
-
-        mock_engine = MockTTSEngine()
-        mock_select.return_value = mock_engine
-
-        engine, manifest = await ensure_tts_loaded("new-tts")
-
-        assert engine is mock_engine
-        assert manifest is mock_manifest
-        mock_state.set_tts_engine.assert_called_once_with(mock_engine, mock_manifest)
-
-
 class TestRunWithTimeout:
     """Tests for run_with_timeout function."""
 
@@ -779,63 +496,79 @@ class TestRunWithTimeout:
         assert exc_info.value.status_code == 504
 
 
-class TestRunAsyncWithTimeout:
-    """Tests for run_async_with_timeout function."""
+class TestPrepareStreamResponse:
+    """Tests for the R11 helper that extracted the duplicated
+    ``acquire + error-check + StreamingResponse`` pattern from the
+    three streaming endpoints. The helper must:
+
+    - Return a ``StreamingResponse`` with the requested media_type
+      when a slot is acquired.
+    - Return the acquire_stream_slot's JSONResponse (429/503) unchanged
+      when the dispatcher rejects.
+    - Pass the acquired slot context manager to the generator factory
+      so the generator can release it in its own ``finally``.
+    """
 
     @pytest.mark.asyncio
-    async def test_successful_async_execution(self):
-        """Successful async execution returns result."""
-        import asyncio
+    async def test_returns_streaming_response_when_slot_acquired(self):
+        """Happy path: dispatcher has capacity → StreamingResponse."""
+        from contextlib import asynccontextmanager
 
-        async def async_func():
-            await asyncio.sleep(0.01)
-            return "async_done"
+        from fastapi.responses import StreamingResponse
 
-        result = await run_async_with_timeout(async_func(), operation="test_async")
-        assert result == "async_done"
+        @asynccontextmanager
+        async def fake_slot():
+            yield
+
+        cm = fake_slot()
+        await cm.__aenter__()
+
+        async def fake_acquire():
+            return cm
+
+        captured: list = []
+
+        async def gen_factory(slot):
+            captured.append(slot)
+            yield "a"
+            yield "b"
+
+        with patch("hfl.api.helpers.acquire_stream_slot", fake_acquire):
+            result = await prepare_stream_response(gen_factory, media_type="text/event-stream")
+
+        assert isinstance(result, StreamingResponse)
+        assert result.media_type == "text/event-stream"
+
+        # Drain the body so the generator actually runs and we can
+        # assert it received the slot context manager. StreamingResponse
+        # exposes ``.body_iterator`` for this.
+        async for _ in result.body_iterator:
+            pass
+        assert captured == [cm]
+
+        await cm.__aexit__(None, None, None)
 
     @pytest.mark.asyncio
-    async def test_async_timeout_raises_http_exception(self):
-        """Async timeout raises HTTPException 504."""
-        import asyncio
+    async def test_returns_json_response_on_queue_full(self):
+        """Rejection path: dispatcher returns JSONResponse → pass-through."""
+        from fastapi.responses import JSONResponse, StreamingResponse
 
-        async def slow_async():
-            await asyncio.sleep(5)
-            return "done"
+        rejection = JSONResponse(status_code=429, content={"error": "queue full"})
 
-        with pytest.raises(HTTPException) as exc_info:
-            await run_async_with_timeout(slow_async(), timeout=0.1, operation="slow_async")
+        async def fake_acquire():
+            return rejection
 
-        assert exc_info.value.status_code == 504
-        assert exc_info.value.detail["code"] == "TIMEOUT"
-        assert exc_info.value.detail["operation"] == "slow_async"
+        factory_called = False
 
-    @pytest.mark.asyncio
-    @patch("hfl.api.helpers.config")
-    async def test_async_uses_config_timeout_by_default(self, mock_config):
-        """Uses config.generation_timeout for async when timeout not specified."""
-        mock_config.generation_timeout = 300.0
+        async def gen_factory(slot):
+            nonlocal factory_called
+            factory_called = True
+            yield "x"
 
-        async def fast_async():
-            return "fast"
+        with patch("hfl.api.helpers.acquire_stream_slot", fake_acquire):
+            result = await prepare_stream_response(gen_factory, media_type="irrelevant")
 
-        result = await run_async_with_timeout(fast_async(), operation="test")
-        assert result == "fast"
-
-    @pytest.mark.asyncio
-    async def test_async_explicit_timeout_overrides_config(self):
-        """Explicit timeout parameter overrides config for async."""
-        import asyncio
-
-        async def medium_async():
-            await asyncio.sleep(0.2)
-            return "done"
-
-        # Should succeed with longer timeout
-        result = await run_async_with_timeout(medium_async(), timeout=1.0, operation="test")
-        assert result == "done"
-
-        # Should fail with shorter timeout
-        with pytest.raises(HTTPException) as exc_info:
-            await run_async_with_timeout(medium_async(), timeout=0.05, operation="test")
-        assert exc_info.value.status_code == 504
+        assert result is rejection
+        assert not isinstance(result, StreamingResponse)
+        # Factory must NOT be invoked on rejection (would leak work).
+        assert factory_called is False

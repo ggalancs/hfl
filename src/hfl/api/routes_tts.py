@@ -10,7 +10,7 @@ Implements:
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.helpers import run_with_timeout
@@ -49,7 +49,9 @@ async def _ensure_tts_model_loaded(model_name: str) -> None:
     registry = get_registry()
     manifest = registry.get(model_name)
     if not manifest:
-        raise HTTPException(404, f"TTS model not found: {model_name}")
+        from hfl.exceptions import ModelNotFoundError
+
+        raise ModelNotFoundError(model_name)
 
     # Verify it's a TTS model
     from pathlib import Path
@@ -60,10 +62,9 @@ async def _ensure_tts_model_loaded(model_name: str) -> None:
     model_type = detect_model_type(model_path)
 
     if model_type != ModelType.TTS:
-        raise HTTPException(
-            400,
-            f"Model '{model_name}' is not a TTS model (detected: {model_type.value})",
-        )
+        from hfl.exceptions import ModelTypeMismatchError
+
+        raise ModelTypeMismatchError(model_name, expected="tts", got=model_type.value)
 
     # Select and load engine
     from hfl.engine.selector import select_tts_engine
@@ -132,7 +133,9 @@ async def openai_tts(req: OpenAITTSRequest) -> Response:
     await _ensure_tts_model_loaded(req.model)
     state = _get_state()
     if state.tts_engine is None:
-        raise HTTPException(503, detail="TTS engine not available")
+        from hfl.exceptions import ModelNotReadyError
+
+        raise ModelNotReadyError(req.model)
 
     # Map OpenAI format to internal format
     audio_format = _map_openai_format(req.response_format)
@@ -198,7 +201,9 @@ async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
     await _ensure_tts_model_loaded(req.model)
     state = _get_state()
     if state.tts_engine is None:
-        raise HTTPException(503, detail="TTS engine not available")
+        from hfl.exceptions import ModelNotReadyError
+
+        raise ModelNotReadyError(req.model)
 
     config = TTSConfig(
         voice=req.voice,
@@ -250,7 +255,9 @@ async def list_voices(model: str | None = None) -> dict[str, Any]:
         await _ensure_tts_model_loaded(model)
         state = _get_state()
         if state.tts_engine is None:
-            raise HTTPException(503, detail="TTS engine not available")
+            from hfl.exceptions import ModelNotReadyError
+
+            raise ModelNotReadyError(model)
 
         return {
             "model": model,

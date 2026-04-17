@@ -12,16 +12,17 @@ Implemented endpoints:
 
 import contextlib
 import json
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import anthropic_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
-    acquire_stream_slot,
+    prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
 )
@@ -32,6 +33,8 @@ from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
     from hfl.engine.base import GenerationConfig
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Anthropic API"])
 
@@ -99,6 +102,14 @@ def _stop_reason_to_anthropic(stop_reason: str) -> str:
 async def create_message(
     req: AnthropicMessagesRequest,
 ) -> dict[str, Any] | StreamingResponse | Response:
+    """Anthropic-compatible ``POST /v1/messages``.
+
+    Accepts a Messages-API request (optionally with a provider-prefixed
+    model like ``hfl/qwen-coder``), strips the prefix, loads the model,
+    then streams SSE events (``req.stream=True``) or returns the full
+    assistant message. Returns a structured 400 when the input exceeds
+    the model's context window.
+    """
     model_name = req.resolve_model_name()
     await _ensure_model_loaded(model_name)
     state = _get_state()
@@ -109,11 +120,8 @@ async def create_message(
     gen_config = anthropic_to_generation_config(req)
 
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            return slot_or_response
-        return StreamingResponse(
-            _stream_messages(model_name, messages, gen_config, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_messages(model_name, messages, gen_config, slot),
             media_type="text/event-stream",
         )
 
@@ -128,16 +136,20 @@ async def create_message(
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
     except ValueError as e:
-        # llama_cpp raises ValueError when tokens exceed context window
+        # llama_cpp raises ValueError when tokens exceed context
+        # window. Branch on the exception text but never forward it
+        # to the client (CodeQL ``py/stack-trace-exposure`` — the raw
+        # repr may include paths / class names / line numbers).
         error_msg = str(e)
         if "exceed context window" in error_msg or "context" in error_msg.lower():
+            logger.info("/v1/messages rejected: context window exceeded")
             return Response(
                 content=json.dumps(
                     {
                         "type": "error",
                         "error": {
                             "type": "invalid_request_error",
-                            "message": error_msg,
+                            "message": "Prompt exceeds the model's context window.",
                         },
                     }
                 ),
@@ -250,11 +262,19 @@ async def _stream_messages(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
+    except Exception:
+        # Never emit ``str(exc)`` on a stream — the exception repr
+        # can leak internal paths / library names (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback lands in the
+        # server log via ``logger.exception``.
+        logger.exception("/v1/messages stream failed")
         error_payload = json.dumps(
             {
                 "type": "error",
-                "error": {"type": "server_error", "message": str(e)},
+                "error": {
+                    "type": "server_error",
+                    "message": "Internal server error during streaming.",
+                },
             }
         )
         yield f"event: error\ndata: {error_payload}\n\n"

@@ -2,4 +2,4 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """hfl - Run HuggingFace models locally like Ollama."""
 
-__version__ = "0.3.0"
+__version__ = "0.12.2"

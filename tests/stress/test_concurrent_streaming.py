@@ -39,6 +39,7 @@ def create_streaming_engine(tokens: list[str] | None = None) -> MagicMock:
     return engine
 
 
+@pytest.mark.slow
 class TestConcurrentStreaming:
     """Tests for concurrent streaming operations via AsyncEngineWrapper."""
 
