@@ -17,6 +17,7 @@ Language:
   Default: en (English)
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -1109,6 +1110,63 @@ def logout():
         console.print(f"[green]{t('messages.token_removed')}[/]")
     except Exception as e:
         console.print(f"[yellow]Warning:[/] {e}")
+
+
+@app.command(name="create")
+def create(
+    model: str = typer.Argument(help="Name for the new model"),
+    modelfile: Path = typer.Option(
+        ...,
+        "--file",
+        "-f",
+        help="Path to the Modelfile",
+        exists=True,
+        readable=True,
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+) -> None:
+    """Create a new model from a Modelfile (Ollama-compatible).
+
+    Mirrors ``ollama create`` — sends the Modelfile body to
+    ``POST /api/create`` on a running HFL server and prints the NDJSON
+    progress events as they stream in.
+    """
+    import httpx
+
+    body = modelfile.read_text()
+    url = f"http://{host}:{port}/api/create"
+    payload: dict[str, Any] = {
+        "model": model,
+        "modelfile": body,
+        "stream": True,
+    }
+
+    try:
+        with httpx.stream("POST", url, json=payload, timeout=120.0) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    console.print(f"[dim]{line}[/]")
+                    continue
+                if "error" in event:
+                    console.print(f"[red]Error:[/] {event['error']}")
+                    raise typer.Exit(1)
+                status = event.get("status", "")
+                console.print(f"[cyan]{status}[/]")
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
 
 
 @app.command()

@@ -42,6 +42,7 @@ from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_blobs import router as blobs_router
 from hfl.api.routes_copy import router as copy_router
+from hfl.api.routes_create import router as create_router
 from hfl.api.routes_embed import router as embed_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
@@ -234,6 +235,7 @@ app.include_router(openai_router)
 app.include_router(native_router)
 app.include_router(blobs_router)
 app.include_router(copy_router)
+app.include_router(create_router)
 app.include_router(embed_router)
 app.include_router(ps_router)
 app.include_router(pull_router)
