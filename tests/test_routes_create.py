@@ -134,7 +134,9 @@ class TestCreateFromBlob:
         events = [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
         assert any("error" in e for e in events)
         err = [e for e in events if "error" in e][0]
-        assert "unknown blob" in err["error"].lower()
+        # Curated error message, not leaking the specific digest
+        # (CodeQL py/stack-trace-exposure posture — 0.12.2+).
+        assert "FROM" in err["error"]
 
 
 # ----------------------------------------------------------------------
@@ -217,7 +219,8 @@ class TestStructuredFields:
             },
         )
         assert resp.status_code == 400
-        assert "from" in resp.json()["error"].lower()
+        # Post-0.12.2: curated generic message, precise detail logs.
+        assert "modelfile" in resp.json()["error"].lower()
 
     def test_invalid_modelfile_syntax_fails(self, client):
         resp = client.post(
@@ -229,7 +232,8 @@ class TestStructuredFields:
             },
         )
         assert resp.status_code == 400
-        assert "unknown instruction" in resp.json()["error"].lower()
+        # Curated error, precise detail in server log.
+        assert "modelfile parse error" in resp.json()["error"].lower()
 
 
 # ----------------------------------------------------------------------

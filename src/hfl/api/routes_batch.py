@@ -106,8 +106,12 @@ async def api_batch(
                 cfg,
                 operation="batch.generate",
             )
-        except (QueueFullError, QueueTimeoutError) as exc:
-            results.append({"error": "server busy", "retryable": True, "detail": str(exc)})
+        except (QueueFullError, QueueTimeoutError):
+            # Don't leak ``str(exc)`` into the response envelope —
+            # CodeQL py/stack-trace-exposure flags it, and the client
+            # only needs the retry semantics anyway.
+            logger.warning("batch item rejected by dispatcher (queue full or timeout)")
+            results.append({"error": "server busy", "retryable": True})
             continue
         except Exception:
             logger.exception("batch item generate failed")

@@ -119,7 +119,8 @@ class TestRouteGating:
         )
         assert resp.status_code == 400
         error = resp.json()["error"]
-        assert "requires" in error.lower() or ">=99.0.0" in error
+        # Post-0.12.2: generic curated message (CodeQL py/stack-trace-exposure).
+        assert "requires" in error.lower()
 
     def test_streaming_error_event_on_mismatch(self, client, temp_config):
         _parent(temp_config)
@@ -131,7 +132,8 @@ class TestRouteGating:
         events = [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
         assert any("error" in e for e in events)
         err = [e for e in events if "error" in e][0]
-        assert ">=99.0.0" in err["error"]
+        # Curated message; specific spec lives in the server log.
+        assert "REQUIRES" in err["error"]
 
     def test_manifest_not_written_when_requires_fails(self, client, temp_config):
         _parent(temp_config)

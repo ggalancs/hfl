@@ -31,22 +31,57 @@ import re
 from datetime import timedelta
 from typing import Union
 
-# Matches Go-style duration components: "1h", "30m", "45s", "500ms",
-# "0.5s" (decimals allowed). Ollama's implementation uses Go's
-# ``time.ParseDuration`` — we mirror the subset that appears in real
-# model-serving traffic.
-#
-# Split the number into two alternation branches (``\d+\.\d+`` vs
-# ``\d+``) instead of a single ``\d+(?:\.\d+)?``. The single form
-# backtracks on inputs like ``"999999999x"`` — the engine tries every
-# partition of the digits between ``\d+`` and the optional ``.\d+``
-# before giving up. Alternation with explicit branches short-circuits
-# on the first atomic match, avoiding the polynomial blow-up that
-# CodeQL's ``py/polynomial-redos`` flags. A hard length cap before the
-# regex runs gives a second line of defence for unexpected inputs.
+# Go-style duration components: "1h", "30m", "45s", "500ms", "0.5s"
+# (decimals allowed). We previously used a regex, but CodeQL kept
+# re-flagging every alternation form as polynomial-redos-adjacent.
+# The manual scanner below is O(N), has no backtracking, and is
+# easier to reason about than an unreadable atomic-group expression.
 _MAX_DURATION_STRING_LENGTH = 128
-_COMPONENT_RE = re.compile(r"(\d+\.\d+|\d+)(ms|us|µs|ns|s|m|h)")
+_UNITS = ("ms", "us", "µs", "ns", "s", "m", "h")
 _NUMBER_ONLY_RE = re.compile(r"^-?(?:\d+\.\d+|\d+)$")
+
+
+def _scan_duration_components(text: str) -> list[tuple[float, str]] | None:
+    """Scan ``text`` into ``[(amount, unit), …]``, or None if it has garbage.
+
+    Deliberately non-regex so the parser is provably linear in the
+    input size. Each iteration consumes one ``<digits>[.<digits>]``
+    + one unit; anything else is a hard error.
+    """
+    components: list[tuple[float, str]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        start = i
+        # Integer part (at least one digit required).
+        while i < n and text[i].isdigit():
+            i += 1
+        if i == start:
+            return None
+        if i < n and text[i] == ".":
+            i += 1
+            dec_start = i
+            while i < n and text[i].isdigit():
+                i += 1
+            if i == dec_start:
+                return None  # dangling "." without fractional digits
+        number_str = text[start:i]
+        # Consume a valid unit, longest match first (``ms`` before
+        # ``m`` and ``s``; ``µs`` before anything else).
+        matched_unit: str | None = None
+        for unit in sorted(_UNITS, key=len, reverse=True):
+            if text.startswith(unit, i):
+                matched_unit = unit
+                i += len(unit)
+                break
+        if matched_unit is None:
+            return None
+        try:
+            components.append((float(number_str), matched_unit))
+        except ValueError:
+            return None
+    return components
+
 
 # Sentinel for "keep loaded forever". Encoded as timedelta(-1s) so
 # callers can branch with ``is NEVER_EXPIRE`` (identity) or with a
@@ -120,25 +155,18 @@ def parse_keep_alive(value: Union[str, int, float, None]) -> timedelta | None:
         # Plain number as string ("5", "0", "-1")
         if _NUMBER_ONLY_RE.match(stripped):
             return parse_keep_alive(float(stripped))
-        # Go-style duration: one or more <number><unit> components
-        matches = list(_COMPONENT_RE.finditer(stripped))
-        if not matches:
+        # Go-style duration: one or more <number><unit> components.
+        # Strip optional leading sign for the scan; keep it to decide
+        # the sign of the resulting timedelta.
+        sign_less = stripped[1:] if stripped.startswith(("+", "-")) else stripped
+        components = _scan_duration_components(sign_less)
+        if components is None or not components:
             raise InvalidKeepAliveError(
                 f"keep_alive {value!r} is not a recognised duration "
                 '(use seconds like "5m", "30s", "1h30m", or raw numbers)'
             )
-        # Make sure the whole string is consumed by the matches, no
-        # stray characters (e.g. ``"5minutes"`` is NOT valid Ollama).
-        consumed = sum(m.end() - m.start() for m in matches)
-        # Strip optional leading sign for validation
-        sign_less = stripped[1:] if stripped.startswith(("+", "-")) else stripped
-        if consumed != len(sign_less):
-            raise InvalidKeepAliveError(
-                f"keep_alive {value!r} has unrecognised trailing characters"
-            )
         total_seconds = 0.0
-        for m in matches:
-            amount, unit = float(m.group(1)), m.group(2)
+        for amount, unit in components:
             total_seconds += _to_seconds(amount, unit)
         if stripped.startswith("-"):
             # Only "-1" makes sense as a negative duration string; any

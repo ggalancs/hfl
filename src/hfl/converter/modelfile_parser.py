@@ -19,7 +19,6 @@ keywords, any whitespace between tokens, comments at line start).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -413,7 +412,36 @@ def _parse_message(
 # ---------------------------------------------------------------------
 
 
-_INCLUDE_RE = re.compile(r"^\s*INCLUDE\s+(.+?)\s*(?:#.*)?$", re.IGNORECASE)
+_MAX_INCLUDE_LINE_LENGTH = 1024
+
+
+def _match_include_line(raw_line: str) -> str | None:
+    """Return the path argument of an ``INCLUDE`` line, or None.
+
+    Hand-written parser (no regex) so CodeQL's polynomial-redos pass
+    has nothing to flag. Recognises ``INCLUDE <path>`` with optional
+    leading whitespace and an optional trailing ``# comment``; the
+    keyword is case-insensitive.
+    """
+    if len(raw_line) > _MAX_INCLUDE_LINE_LENGTH:
+        return None
+    stripped = raw_line.lstrip()
+    if len(stripped) < 8:
+        return None
+    if stripped[:7].upper() != "INCLUDE":
+        return None
+    # Require whitespace (or tab) immediately after the keyword.
+    if stripped[7] not in (" ", "\t"):
+        return None
+    rest = stripped[8:]
+    # Strip an inline ``# comment`` preceded by whitespace.
+    comment_at = _find_inline_comment(rest)
+    if comment_at is not None:
+        rest = rest[:comment_at]
+    rest = rest.strip().strip('"').strip("'")
+    if not rest:
+        return None
+    return rest
 
 
 def _expand_includes(
@@ -425,29 +453,48 @@ def _expand_includes(
     """Inline ``INCLUDE <path>`` lines before parsing (Phase 14 — V2 row 21).
 
     Paths resolve relative to ``base_path``. Cycle detection via the
-    ``seen`` set; ``depth`` caps runaway chains.
+    ``seen`` set; ``depth`` caps runaway chains. A containment check
+    ensures the resolved target stays under the base path so
+    ``INCLUDE ../../etc/passwd``-style traversal is refused (CodeQL
+    ``py/path-injection``).
     """
     if base_path is None or "INCLUDE" not in text.upper():
         return text
     if depth > 16:
         raise ModelfileParseError("INCLUDE chain exceeds depth 16")
+    try:
+        root = base_path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:  # pragma: no cover — defensive
+        raise ModelfileParseError("INCLUDE base path unreadable") from exc
     seen = set(seen or ())
     out_lines: list[str] = []
     for raw_line in text.splitlines():
-        match = _INCLUDE_RE.match(raw_line)
-        if not match:
+        rel = _match_include_line(raw_line)
+        if rel is None:
             out_lines.append(raw_line)
             continue
-        rel = match.group(1).strip().strip('"').strip("'")
-        target = (base_path / rel).resolve()
+        # Reject absolute paths outright — every INCLUDE must be
+        # relative to the including file.
+        if Path(rel).is_absolute():
+            raise ModelfileParseError("INCLUDE refuses absolute paths")
+        try:
+            target = (root / rel).resolve(strict=False)
+        except (OSError, RuntimeError) as exc:
+            raise ModelfileParseError("INCLUDE target cannot be resolved") from exc
+        # Containment guard — the resolved target must stay under the
+        # including file's directory tree. Blocks ``../../escape``.
+        try:
+            target.relative_to(root)
+        except ValueError:
+            raise ModelfileParseError("INCLUDE target escapes the base directory") from None
         if target in seen:
-            raise ModelfileParseError(f"INCLUDE cycle: {target}")
+            raise ModelfileParseError("INCLUDE cycle detected")
         if not target.exists() or not target.is_file():
-            raise ModelfileParseError(f"INCLUDE target missing: {target}")
+            raise ModelfileParseError("INCLUDE target missing or not a regular file")
         try:
             included = target.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise ModelfileParseError(f"INCLUDE {target} unreadable: {exc}") from exc
+        except OSError:
+            raise ModelfileParseError("INCLUDE target unreadable") from None
         next_seen = seen | {target}
         expanded = _expand_includes(
             included,
@@ -455,9 +502,9 @@ def _expand_includes(
             seen=next_seen,
             depth=depth + 1,
         )
-        out_lines.append(f"# <<< INCLUDE {rel}")
+        out_lines.append("# <<< INCLUDE")
         out_lines.append(expanded)
-        out_lines.append(f"# >>> INCLUDE {rel}")
+        out_lines.append("# >>> INCLUDE")
     return "\n".join(out_lines)
 
 

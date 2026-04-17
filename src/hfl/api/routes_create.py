@@ -224,7 +224,12 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
         if not doc.from_:
             raise ModelfileParseError("Modelfile missing FROM instruction")
     except ModelfileParseError as exc:
-        yield _error_event(str(exc))
+        # Every message we raise is curated (see the parser
+        # source), but CodeQL can't tell — use a constant
+        # summary and log the precise error server-side so
+        # debugging stays possible.
+        logger.info("/api/create modelfile parse failed: %s", exc)
+        yield _error_event("Modelfile parse error")
         return
 
     # 1b. Honour REQUIRES (Phase 7 P3-3). A Modelfile with a
@@ -233,7 +238,8 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
         try:
             check_requires(doc.requires)
         except (RequiresNotSatisfiedError, InvalidRequiresError) as exc:
-            yield _error_event(str(exc))
+            logger.info("/api/create REQUIRES failed: %s", exc)
+            yield _error_event("Modelfile REQUIRES not satisfied")
             return
 
     # 2. Resolve FROM.
@@ -244,7 +250,8 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
             req.files,
         )
     except ValueError as exc:
-        yield _error_event(str(exc))
+        logger.info("/api/create FROM resolution failed: %s", exc)
+        yield _error_event("FROM resolution failed")
         return
 
     if parent_digest:
