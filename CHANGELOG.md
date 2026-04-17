@@ -5,6 +5,117 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-17
+
+**Phase 6 of OLLAMA_PARITY_PLAN — full Modelfile support.** The
+feature people asked for first: ``ollama create`` now works
+byte-for-byte against HFL. Derived models can be defined
+declaratively via a Modelfile, stored content-addressed via blobs,
+and downloaded / templated / coerced at request time. This release
+closes the last P2 gaps in Ollama REST coverage — HFL is now 16/16
+on the documented endpoints.
+
+### Added — Modelfile parser + ``/api/create`` (P2-1)
+
+- New module ``hfl.converter.modelfile_parser``:
+  - ``parse_modelfile(text) -> ModelfileDocument``: formal
+    tokeniser-based parser. Recognises ``FROM``, ``PARAMETER``,
+    ``TEMPLATE``, ``SYSTEM``, ``ADAPTER``, ``LICENSE``,
+    ``MESSAGE``, ``REQUIRES``.
+  - Triple-quoted multi-line blocks (``"""..."""``) and single-line
+    quoted strings with ``\\n`` / ``\\t`` / ``\\"`` / ``\\\\``
+    escapes. Parameter coercion to int / float / bool per the
+    canonical Ollama taxonomy; unknown keys are preserved as
+    strings.
+  - ``render_modelfile_document(doc)`` round-trips parsed documents
+    to deterministic text.
+  - ``ModelfileParseError`` carries a 1-based ``.line`` number so
+    ``/api/create`` can surface precise 400 diagnostics.
+- New route ``POST /api/create``:
+  - NDJSON progress stream with Ollama-parity status strings
+    (``parsing modelfile`` → ``using existing layer sha256:...`` →
+    ``creating model`` → ``writing manifest`` → ``success``).
+  - FROM resolution supports three shapes: uploaded blob
+    (``sha256:<hex>``), existing model name / alias, and local
+    file path.
+  - Accepts both the legacy ``modelfile`` text body and the newer
+    Ollama shape of structured fields (``from``, ``system``,
+    ``template``, ``license``, ``parameters``, ``adapters``,
+    ``messages``, ``files``). Structured fields override Modelfile
+    contents when both are present.
+  - ``stream=false`` mode returns a single JSON envelope (200 on
+    success, 400 on error).
+- New ``ModelManifest`` fields: ``system``,
+  ``default_parameters``, ``adapter_paths``, ``messages``,
+  ``parent_name``, ``parent_digest``. All backwards-compatible
+  with on-disk manifests from earlier versions.
+- CLI: ``hfl create <name> -f path/to/Modelfile`` streams the
+  server's NDJSON progress and prints each status. Matches
+  ``ollama create`` flag-for-flag.
+
+### Added — ``HEAD`` / ``POST /api/blobs/:digest`` (P2-2)
+
+- New module ``hfl.hub.blobs`` with content-addressed storage at
+  ``<home_dir>/blobs/sha256-<hex>``.
+- ``write_blob_stream`` streams chunks into a temp file with a
+  running SHA-256, atomically renames into place only if the
+  computed digest matches. Mismatches are surfaced as 400 with the
+  expected vs. computed prefixes in the error message.
+- ``parse_digest`` accepts ``sha256:<hex>``, ``sha256-<hex>``, and
+  bare hex; rejects anything else before ``Path.joinpath`` can see
+  it (path-traversal-safe).
+- ``HEAD /api/blobs/:digest`` returns 200/404/400; ``POST`` returns
+  201 with an ``X-Blob-Bytes`` header on success.
+- ``/api/blobs/`` is whitelisted from
+  ``RequestBodyLimitMiddleware`` so multi-GB GGUFs clear the
+  global text-oriented cap; the streaming hasher remains the
+  authoritative size check.
+
+### Added — ``template`` + ``raw`` per-request fields (P2-3)
+
+- ``GenerateRequest.template``: substitutes the model's default
+  chat template for this request. The llama-cpp engine does a
+  conservative substitution of ``{{ .Prompt }}`` (and
+  ``{{ .System }}``) so the 90% case just works without pulling
+  in a full Go-template parser.
+- ``GenerateRequest.raw``: bypasses all prompt shaping — neither
+  the template nor the ``system`` preamble is applied. Useful for
+  evaluation harnesses and manual prompt engineering.
+- Both surface on ``GenerationConfig`` as
+  ``template_override: str | None`` and ``raw: bool``.
+
+### Ollama REST coverage
+
+| # | Endpoint | Status |
+|---|---|---|
+| 1  | ``POST /api/generate`` | complete |
+| 2  | ``POST /api/chat`` | complete |
+| 3  | ``POST /api/create`` | **new** |
+| 4  | ``GET /api/tags`` | complete |
+| 5  | ``POST /api/show`` | complete |
+| 6  | ``POST /api/copy`` | complete |
+| 7  | ``DELETE /api/delete`` | complete |
+| 8  | ``POST /api/pull`` | complete |
+| 9  | ``POST /api/push`` | non-goal (local-first) |
+| 10 | ``POST /api/embed`` | complete |
+| 11 | ``GET /api/ps`` | complete |
+| 12 | ``HEAD /api/blobs/:digest`` | **new** |
+| 13 | ``POST /api/blobs/:digest`` | **new** |
+| 14 | ``GET /api/version`` | complete |
+| 15 | ``POST /api/stop`` | complete |
+| 16 | ``POST /api/embeddings`` (legacy) | complete |
+
+### Test & CI
+
+- Tests added: 106 (53 parser + 30 blobs + 11 create + 12 template/raw).
+- Total suite: 2558 passing, 28 skipped. Coverage ≈ 89%.
+- No CI/CD workflows were triggered during development — the
+  ``feat/ollama-parity-0.4.x`` branch is outside the ``main`` /
+  ``develop`` triggers. CI fires for the first time on the PR that
+  merges Phases 1-6 together.
+
+---
+
 ## [0.5.1] - 2026-04-17
 
 **Phase 5 of OLLAMA_PARITY_PLAN — the P1 polish items.** Three new

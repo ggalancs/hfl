@@ -27,7 +27,7 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 | Multi-backend | llama.cpp only | llama.cpp + Transformers + vLLM |
 | License verification | No | Yes (5 risk levels) |
 | Legal traceability | No | Yes (provenance log) |
-| Maturity | High (established) | Alpha (v0.5.1) |
+| Maturity | High (established) | Alpha (v0.6.0) |
 
 **HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
 

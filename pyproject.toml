@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hfl"
-version = "0.5.1"
+version = "0.6.0"
 description = "Run HuggingFace models locally like Ollama"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
