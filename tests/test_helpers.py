@@ -12,6 +12,7 @@ from hfl.api.helpers import (
     StreamingContext,
     format_ndjson_chunk,
     options_to_config,
+    prepare_stream_response,
     request_to_config,
     run_with_timeout,
     stream_ollama_chat,
@@ -493,3 +494,81 @@ class TestRunWithTimeout:
         with pytest.raises(HTTPException) as exc_info:
             await run_with_timeout(medium_func, timeout=0.05, operation="test")
         assert exc_info.value.status_code == 504
+
+
+class TestPrepareStreamResponse:
+    """Tests for the R11 helper that extracted the duplicated
+    ``acquire + error-check + StreamingResponse`` pattern from the
+    three streaming endpoints. The helper must:
+
+    - Return a ``StreamingResponse`` with the requested media_type
+      when a slot is acquired.
+    - Return the acquire_stream_slot's JSONResponse (429/503) unchanged
+      when the dispatcher rejects.
+    - Pass the acquired slot context manager to the generator factory
+      so the generator can release it in its own ``finally``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_streaming_response_when_slot_acquired(self):
+        """Happy path: dispatcher has capacity → StreamingResponse."""
+        from contextlib import asynccontextmanager
+
+        from fastapi.responses import StreamingResponse
+
+        @asynccontextmanager
+        async def fake_slot():
+            yield
+
+        cm = fake_slot()
+        await cm.__aenter__()
+
+        async def fake_acquire():
+            return cm
+
+        captured: list = []
+
+        async def gen_factory(slot):
+            captured.append(slot)
+            yield "a"
+            yield "b"
+
+        with patch("hfl.api.helpers.acquire_stream_slot", fake_acquire):
+            result = await prepare_stream_response(gen_factory, media_type="text/event-stream")
+
+        assert isinstance(result, StreamingResponse)
+        assert result.media_type == "text/event-stream"
+
+        # Drain the body so the generator actually runs and we can
+        # assert it received the slot context manager. StreamingResponse
+        # exposes ``.body_iterator`` for this.
+        async for _ in result.body_iterator:
+            pass
+        assert captured == [cm]
+
+        await cm.__aexit__(None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_returns_json_response_on_queue_full(self):
+        """Rejection path: dispatcher returns JSONResponse → pass-through."""
+        from fastapi.responses import JSONResponse, StreamingResponse
+
+        rejection = JSONResponse(status_code=429, content={"error": "queue full"})
+
+        async def fake_acquire():
+            return rejection
+
+        factory_called = False
+
+        async def gen_factory(slot):
+            nonlocal factory_called
+            factory_called = True
+            yield "x"
+
+        with patch("hfl.api.helpers.acquire_stream_slot", fake_acquire):
+            result = await prepare_stream_response(gen_factory, media_type="irrelevant")
+
+        assert result is rejection
+        assert not isinstance(result, StreamingResponse)
+        # Factory must NOT be invoked on rejection (would leak work).
+        assert factory_called is False

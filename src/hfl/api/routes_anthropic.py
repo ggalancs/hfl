@@ -16,12 +16,12 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import anthropic_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
-    acquire_stream_slot,
+    prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
 )
@@ -117,11 +117,8 @@ async def create_message(
     gen_config = anthropic_to_generation_config(req)
 
     if req.stream:
-        slot_or_response = await acquire_stream_slot()
-        if isinstance(slot_or_response, JSONResponse):
-            return slot_or_response
-        return StreamingResponse(
-            _stream_messages(model_name, messages, gen_config, slot_or_response),
+        return await prepare_stream_response(
+            lambda slot: _stream_messages(model_name, messages, gen_config, slot),
             media_type="text/event-stream",
         )
 

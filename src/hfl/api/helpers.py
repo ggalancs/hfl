@@ -22,6 +22,8 @@ from hfl.config import config
 from hfl.engine.base import GenerationConfig
 
 if TYPE_CHECKING:
+    from fastapi.responses import StreamingResponse
+
     from hfl.engine.base import InferenceEngine
     from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
@@ -175,6 +177,34 @@ def queue_response_from_error(
             max_queued=exc.max_queued,
         )
     return queue_timeout(waited_seconds=exc.waited_seconds)
+
+
+async def prepare_stream_response(
+    gen_factory: "Callable[[AbstractAsyncContextManager[None]], AsyncIterator[str]]",
+    media_type: str,
+) -> "StreamingResponse | JSONResponse":
+    """Acquire a dispatcher slot and wrap a generator in a StreamingResponse.
+
+    Encapsulates the three-line pattern duplicated across every
+    streaming endpoint (OpenAI, Ollama-native, Anthropic):
+
+    1. Pre-acquire a dispatcher slot.
+    2. On queue rejection (full/timeout), return the pre-built 429/503
+       envelope directly.
+    3. Otherwise hand the slot context manager to the caller's generator
+       factory and wrap its output in a ``StreamingResponse`` with the
+       given media type.
+
+    ``gen_factory`` receives the already-entered slot context manager.
+    Its generator is responsible for ``await slot_cm.__aexit__(...)`` in
+    its own ``finally`` — matching the existing route convention.
+    """
+    from fastapi.responses import StreamingResponse
+
+    slot_or_response = await acquire_stream_slot()
+    if isinstance(slot_or_response, JSONResponse):
+        return slot_or_response
+    return StreamingResponse(gen_factory(slot_or_response), media_type=media_type)
 
 
 def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
