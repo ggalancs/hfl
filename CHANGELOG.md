@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-17
+
+**Phase 8 of OLLAMA_PARITY_PLAN — final phase (LoRA + MESSAGE).**
+Closes the last optional item from the plan. All 8 phases are now
+complete.
+
+### Added — Modelfile ``MESSAGE`` baked-in few-shot (P3-2 part 1)
+
+- ``/api/chat`` splices the manifest's Modelfile MESSAGE entries
+  into every conversation between the system block and the live
+  turn. This mirrors Ollama's Modelfile semantics: MESSAGE
+  instructions are canonical few-shot exemplars, not overridable
+  by the caller.
+- Zero overhead for models without MESSAGE entries.
+
+### Added — LoRA adapter support (P3-2 part 2)
+
+- ``LlamaCppEngine.load`` accepts ``lora_paths: list[str]`` and
+  forwards the first entry to llama-cpp's ``lora_path`` kwarg at
+  Llama instantiation time. Additional entries log a WARNING until
+  llama-cpp-python exposes a stable multi-adapter surface.
+- ``load_llm_sync`` threads ``manifest.adapter_paths`` into the
+  engine's load call automatically. Derived models created via
+  ``POST /api/create`` from a Modelfile with ``ADAPTER`` lines
+  now take effect at inference time.
+
+### Plan status
+
+| Phase | Release | Scope |
+|---|---|---|
+| 1 | 0.4.0 | ps / show / pull / stop / keep_alive |
+| 2 | 0.4.1 | embeddings |
+| 3 | 0.4.2 | structured outputs (GBNF, JSON Schema) |
+| 4 | 0.5.0 | vision / multimodal |
+| 5 | 0.5.1 | system / think / copy / ns timings |
+| 6 | 0.6.0 | Modelfile + blobs + template/raw |
+| 7 | 0.6.1 | context legacy + REQUIRES + CodeQL polish |
+| **8** | **0.7.0** | **LoRA + MESSAGE few-shot** |
+
+**All planned phases complete. Only ``/api/push`` remains and is a
+documented non-goal — HFL is local-first and integrates with
+HuggingFace Hub for distribution.**
+
+### Test & CI
+
+- Total suite: 2594 passing, 28 skipped. Coverage ≈ 88%.
+- ci-local green on every commit.
+
+---
+
 ## [0.6.1] - 2026-04-17
 
 **Phase 7 of OLLAMA_PARITY_PLAN — polish.** Two small but

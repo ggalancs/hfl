@@ -144,19 +144,25 @@ class TestLlamaCppEngineLoraWiring:
         self,
         temp_config,
         fake_llama,
-        caplog,
+        monkeypatch,
     ):
         gguf = temp_config.home_dir / "m.gguf"
         gguf.write_bytes(b"fake")
 
+        from hfl.engine import llama_cpp as lc
         from hfl.engine.llama_cpp import LlamaCppEngine
 
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            lc.logger,
+            "warning",
+            lambda msg, *args, **kwargs: warnings.append(msg % args if args else msg),
+        )
+
         engine = LlamaCppEngine()
-        with caplog.at_level("WARNING"):
-            engine.load(str(gguf), lora_paths=["/abs/a.gguf", "/abs/b.gguf"])
+        engine.load(str(gguf), lora_paths=["/abs/a.gguf", "/abs/b.gguf"])
         assert fake_llama.instances[-1].get("lora_path") == "/abs/a.gguf"
-        # A warning mentions the ignored adapter count.
-        assert any("additional LoRA" in r.message for r in caplog.records)
+        assert any("additional LoRA" in w for w in warnings)
 
     def test_no_lora_paths_means_no_lora_path_kwarg(
         self,
