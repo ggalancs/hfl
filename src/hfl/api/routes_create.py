@@ -62,6 +62,11 @@ from hfl.converter.modelfile_parser import (
     ModelfileParseError,
     parse_modelfile,
 )
+from hfl.converter.requires_check import (
+    InvalidRequiresError,
+    RequiresNotSatisfiedError,
+    check_requires,
+)
 from hfl.hub.blobs import blob_exists, blob_path, parse_digest
 from hfl.models.manifest import ModelManifest
 from hfl.models.registry import get_registry
@@ -221,6 +226,15 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
     except ModelfileParseError as exc:
         yield _error_event(str(exc))
         return
+
+    # 1b. Honour REQUIRES (Phase 7 P3-3). A Modelfile with a
+    # version gate is rejected before any side-effects fire.
+    if doc.requires:
+        try:
+            check_requires(doc.requires)
+        except (RequiresNotSatisfiedError, InvalidRequiresError) as exc:
+            yield _error_event(str(exc))
+            return
 
     # 2. Resolve FROM.
     try:
