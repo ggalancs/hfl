@@ -109,6 +109,5 @@ class TestStreamingPartialToolCalls:
         # are visible.
         inter = [e for e in events if not e.get("done")]
         assert all(
-            e["message"]["tool_calls"] is None or e["message"]["tool_calls"] == []
-            for e in inter
+            e["message"]["tool_calls"] is None or e["message"]["tool_calls"] == [] for e in inter
         )

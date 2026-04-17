@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-04-17
+
+**Phase 10 of OLLAMA_PARITY_PLAN_V2 — Agentic.** Five items land
+together so an agent stack pointed at HFL can now get the same
+end-to-end behaviour it gets from Ollama.
+
+### Added — HFL as an MCP server (row 3)
+
+- New module ``hfl.mcp.server`` exposes four built-in tools
+  (``web_search``, ``web_fetch``, ``model_list``, ``model_show``)
+  over stdio and SSE.
+- Tool handlers return MCP's content-part shape; ``ValueError`` is
+  the bad-input contract, unexpected exceptions log via
+  ``logger.exception`` and surface a curated generic error.
+- ``hfl mcp serve --transport {stdio,sse} --capabilities ...`` CLI.
+
+### Added — Native agent loop on /api/chat (row 4)
+
+- New ``hfl.api.agent_loop`` helper. When the client sends
+  ``agent_loop=true``, HFL drives the tool-use cycle: call
+  model → dispatch tool calls → append ``role=tool`` results →
+  re-call → repeat until final answer or ``max_iterations``
+  (default 6). Every iteration appends to a replay-ready
+  ``tool_trace``.
+- MCP tools auto-dispatch via the Phase 9 client; other tool
+  names produce an error trace entry rather than crashing the
+  loop.
+
+### Added — Parallel tool-call dispatch (row 40)
+
+- Tool calls within the same model turn run concurrently via
+  ``asyncio.gather`` inside the agent loop. "What's the weather in
+  Madrid and Tokyo?" now fires both tools once instead of
+  serialising them.
+
+### Added — Streaming partial tool calls (row 5)
+
+- ``/api/chat`` with ``stream=true`` now probes the accumulated
+  text through the existing tool parser on every token. When the
+  parser sees one or more (possibly partial) calls, they attach
+  to the NDJSON chunk as ``message.tool_calls``. Plain-text
+  streams keep ``tool_calls: null`` on intermediates as before.
+
+### Added — Multi-level thinking (row 6)
+
+- ``think`` now accepts either the legacy bool (``True`` →
+  ``medium``) or a GPT-OSS level string (``low`` / ``medium`` /
+  ``high``). Unknown values fall back to ``off`` with a warning.
+- ``GenerationConfig.thinking_level`` surfaces the resolved level
+  to engines; legacy ``expose_reasoning`` remains for backward
+  compatibility.
+
+### Test & CI
+
+- Total suite: 2727 passing, 28 skipped. Coverage ≈ 88%.
+- ci-local green on every commit.
+
+---
+
 ## [0.8.0] - 2026-04-17
 
 **Phase 9 of OLLAMA_PARITY_PLAN_V2 — Web & MCP + Docker.** First

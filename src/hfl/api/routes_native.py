@@ -26,7 +26,7 @@ from hfl.api.helpers import (
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
-from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -509,9 +509,20 @@ async def api_chat(
             # ``max_iterations``.
             from hfl.api.agent_loop import run_agent_loop
 
-            async def _chat_fn(msgs, cfg, tools_arg):
+            # Snapshot the engine reference so the closure doesn't have
+            # to re-check ``state.engine`` on every iteration (mypy was
+            # right to complain about that Optional narrowing being lost
+            # inside the nested function).
+            active_engine = state.engine
+            assert active_engine is not None  # service_unavailable guard ran above
+
+            async def _chat_fn(
+                msgs: list[ChatMessage],
+                cfg: GenerationConfig,
+                tools_arg: list[dict] | None,
+            ) -> GenerationResult:
                 return await run_dispatched(
-                    state.engine.chat,
+                    active_engine.chat,
                     msgs,
                     cfg,
                     tools=tools_arg,
