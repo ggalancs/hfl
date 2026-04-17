@@ -160,6 +160,24 @@ class GenerateRequest(BaseModel):
             "See OLLAMA_PARITY_PLAN P0-5."
         ),
     )
+    system: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "System prompt override for this request. Inserted as the "
+            "first message with role=system regardless of what the "
+            "Modelfile defined. Ollama-parity (P1-1)."
+        ),
+    )
+    think: bool | None = Field(
+        None,
+        description=(
+            "Expose the model's reasoning / chain-of-thought channel "
+            "in the response (Ollama 2026 behaviour). Default False "
+            "for thinking-capable models (content stays clean); set "
+            "True to receive the full channel output for inspection."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
@@ -220,5 +238,24 @@ class ChatRequest(BaseModel):
         description=(
             "Structured-output constraint. Accepts 'json' (free-form "
             "JSON) or a JSON Schema object. See GenerateRequest.format."
+        ),
+    )
+    think: bool | None = Field(
+        None,
+        description=(
+            "Expose the model's reasoning channel in the response "
+            "(Ollama 2026). Default False for thinking-capable "
+            "models (content stays clean); set True to receive the "
+            "raw channel output for inspection / debugging."
+        ),
+    )
+    system: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "System prompt override for this chat. Inserted as the "
+            "FIRST message with role=system, regardless of what the "
+            "caller already included or what the Modelfile defined "
+            "(Ollama-parity P1-1)."
         ),
     )

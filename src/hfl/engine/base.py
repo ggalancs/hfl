@@ -62,6 +62,15 @@ class GenerationConfig:
     # - ``str`` starting with ``"GBNF:"`` → raw GBNF grammar body
     #   (advanced users; bypasses schema validation).
     response_format: str | dict | None = None
+    # Expose the model's internal reasoning / thinking channel in the
+    # output. When False (default), architecture-specific channel
+    # filters (e.g. Gemma 4's split-pipe ``<|channel>thought...``
+    # markers) strip the reasoning from ``content``. When True, the
+    # filter is disabled and engines emit the raw channel text. The
+    # route layer is responsible for post-processing the raw text
+    # into a separate ``thinking`` field on the response envelope
+    # (OLLAMA_PARITY_PLAN P1-1, Ollama 2026 ``think=true``).
+    expose_reasoning: bool = False
 
 
 @dataclass
@@ -74,6 +83,16 @@ class GenerationResult:
     # Populated when the engine (or a downstream parser) produced structured
     # tool calls. Shape: list of ``{"function": {"name", "arguments": dict}}``.
     tool_calls: list[dict] | None = None
+    # Nanosecond-precision timings (Ollama-parity P1-3).
+    # Engines populate as many as they can measure cleanly; unknown
+    # values stay at 0. The invariant intended by Ollama is:
+    #   total_duration ≈ load_duration + prompt_eval_duration + eval_duration
+    # with some slop for overhead. Callers should treat the field as
+    # advisory rather than exact.
+    total_duration: int = 0  # Wall-clock of the entire request (ns)
+    load_duration: int = 0  # Time to load the model (0 if already warm) (ns)
+    prompt_eval_duration: int = 0  # Time to process the prompt (ns)
+    eval_duration: int = 0  # Time spent generating tokens (ns)
 
 
 class InferenceEngine(ABC):

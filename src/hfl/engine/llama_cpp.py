@@ -842,7 +842,7 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         logger.debug("Generating with max_tokens=%s, temp=%s", cfg.max_tokens, cfg.temperature)
 
-        t0 = time.perf_counter()
+        start_ns = time.monotonic_ns()
         output = self._model(
             prompt,
             max_tokens=cfg.max_tokens,
@@ -853,20 +853,31 @@ class LlamaCppEngine(InferenceEngine):
             stop=cfg.stop,
             seed=cfg.seed if cfg.seed >= 0 else None,
         )
-        elapsed = time.perf_counter() - t0
+        total_ns = time.monotonic_ns() - start_ns
+        elapsed = total_ns / 1e9
 
         text = output["choices"][0]["text"]
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
+        n_prompt = usage.get("prompt_tokens", 0)
 
         logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen / elapsed)
+
+        # See chat() for the rationale behind this split.
+        total_tokens = max(1, n_prompt + n_gen)
+        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
+        eval_ns = total_ns - prompt_eval_ns
 
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
-            tokens_prompt=usage.get("prompt_tokens", 0),
+            tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
             stop_reason=output["choices"][0].get("finish_reason", "stop"),
+            total_duration=total_ns,
+            load_duration=0,
+            prompt_eval_duration=prompt_eval_ns,
+            eval_duration=eval_ns,
         )
 
     def generate_stream(
@@ -1013,7 +1024,11 @@ class LlamaCppEngine(InferenceEngine):
                 except ImportError:  # pragma: no cover — optional dep
                     pass
 
-        t0 = time.perf_counter()
+        # Nanosecond timings (Ollama-parity P1-3). ``monotonic_ns``
+        # is the right clock for wall-clock deltas — perf_counter_ns
+        # has the same resolution but ``monotonic_ns`` is what Ollama
+        # uses internally.
+        start_ns = time.monotonic_ns()
         try:
             output = self._model.create_chat_completion(**kwargs)
         except TypeError:
@@ -1024,15 +1039,19 @@ class LlamaCppEngine(InferenceEngine):
             kwargs.pop("response_format", None)
             kwargs.pop("grammar", None)
             output = self._model.create_chat_completion(**kwargs)
-        elapsed = time.perf_counter() - t0
+        total_ns = time.monotonic_ns() - start_ns
+        elapsed = total_ns / 1e9  # seconds, for the tokens/s ratio
 
         message = output["choices"][0].get("message", {})
         text = message.get("content") or ""
         # Post-filter channel/think/turn markers for architectures
         # whose GGUFs don't ship a proper ``tokenizer.chat_template``
         # and whose vocab contains split-pipe reasoning delimiters.
-        # No-op for architectures not in the filter set.
-        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER:
+        # No-op for architectures not in the filter set. When the
+        # caller requested ``expose_reasoning`` (Phase 5 P1-1, Ollama
+        # ``think=true``) we leave the markers IN the text so the
+        # route layer can separate reasoning from answer.
+        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             text = _strip_gemma4_channel_markers(text)
         tool_calls = message.get("tool_calls")
 
@@ -1063,13 +1082,27 @@ class LlamaCppEngine(InferenceEngine):
 
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
+        n_prompt = usage.get("prompt_tokens", 0)
+
+        # Estimate prompt_eval / eval split from token counts.
+        # llama-cpp-python doesn't surface the pre-first-token delta
+        # natively, so we apportion total_ns proportionally to
+        # prompt vs. generated tokens — the ratio is what matters
+        # for monitoring (tokens/sec stays consistent).
+        total_tokens = max(1, n_prompt + n_gen)
+        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
+        eval_ns = total_ns - prompt_eval_ns
 
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
-            tokens_prompt=usage.get("prompt_tokens", 0),
+            tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
             tool_calls=normalised_tool_calls,
+            total_duration=total_ns,
+            load_duration=0,  # Model was already loaded — this is chat, not load()
+            prompt_eval_duration=prompt_eval_ns,
+            eval_duration=eval_ns,
         )
 
     def chat_stream(
@@ -1107,9 +1140,11 @@ class LlamaCppEngine(InferenceEngine):
                 if text:
                     yield text
 
-        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER:
+        if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             yield from _filter_gemma4_stream(_raw_chunks())
         else:
+            # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
+            # chunks through so the caller sees the reasoning channel.
             yield from _raw_chunks()
 
     @property

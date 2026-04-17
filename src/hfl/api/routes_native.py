@@ -177,9 +177,23 @@ async def api_generate(
 
         gen_config.response_format = normalize_ollama_format(req.format)
 
+    # OLLAMA_PARITY_PLAN P1-1: expose reasoning channel on request.
+    if req.think:
+        gen_config.expose_reasoning = True
+
+    # OLLAMA_PARITY_PLAN P1-1: system-prompt override. When present,
+    # we flow it through the engine as a system-role message so the
+    # same /api/generate route can now do single-shot prompting with
+    # a custom system prompt, mirroring Ollama's behaviour.
+    if req.system:
+        system_preamble = req.system + "\n\n"
+        final_prompt = system_preamble + req.prompt
+    else:
+        final_prompt = req.prompt
+
     if req.stream:
         return await prepare_stream_response(
-            lambda slot: _stream_generate(req.model, req.prompt, gen_config, slot),
+            lambda slot: _stream_generate(req.model, final_prompt, gen_config, slot),
             media_type="application/x-ndjson",
         )
 
@@ -188,20 +202,26 @@ async def api_generate(
     try:
         result = await run_dispatched(
             state.engine.generate,
-            req.prompt,
+            final_prompt,
             gen_config,
             operation="generate",
         )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
+    # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
+    # pre-0.5.1). Clients keying off these fields now see the
+    # engine's actual measurements.
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "response": result.text,
         "done": True,
-        "total_duration": 0,
+        "total_duration": result.total_duration,
+        "load_duration": result.load_duration,
+        "prompt_eval_count": result.tokens_prompt,
+        "prompt_eval_duration": result.prompt_eval_duration,
         "eval_count": result.tokens_generated,
-        "eval_duration": 0,
+        "eval_duration": result.eval_duration,
     }
 
 
@@ -307,6 +327,19 @@ async def api_chat(
 
         gen_config.response_format = normalize_ollama_format(req.format)
 
+    # P1-1: expose reasoning channel if the client asked for it.
+    if req.think:
+        gen_config.expose_reasoning = True
+
+    # P1-1: system-prompt override. Inserted as the FIRST message so
+    # the model's chat template reads it before any user / tool
+    # content. Any system message the caller already included stays
+    # in place (we don't collapse — Ollama allows multiple).
+    if req.system:
+        from hfl.engine.base import ChatMessage as _CM
+
+        messages = [_CM(role="system", content=req.system)] + messages
+
     if req.stream:
         return await prepare_stream_response(
             lambda slot: _stream_chat(req.model, messages, gen_config, tools, slot),
@@ -328,17 +361,40 @@ async def api_chat(
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
 
+    # P1-1: when think=True, capture the reasoning from the RAW
+    # engine text BEFORE the tool parser runs — the per-family
+    # parsers in tool_parsers already strip ``<think>`` / channel
+    # blocks as part of their cleanup, so we'd lose the reasoning if
+    # we extracted it from the post-build message.
+    extracted_thinking: str | None = None
+    raw_for_build = result.text
+    if req.think:
+        from hfl.api.thinking import extract_thinking
+
+        _, extracted_thinking = extract_thinking(result.text)
+
     message = _build_chat_message(
-        raw_text=result.text,
+        raw_text=raw_for_build,
         model_name=req.model,
         tools=tools,
         engine_tool_calls=getattr(result, "tool_calls", None),
     )
+
+    if extracted_thinking:
+        message["thinking"] = extracted_thinking
+
     return {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "message": message,
         "done": True,
+        # Phase 5 P1-3: real timings. Ollama-shape fields.
+        "total_duration": result.total_duration,
+        "load_duration": result.load_duration,
+        "prompt_eval_count": result.tokens_prompt,
+        "prompt_eval_duration": result.prompt_eval_duration,
+        "eval_count": result.tokens_generated,
+        "eval_duration": result.eval_duration,
     }
 
 
