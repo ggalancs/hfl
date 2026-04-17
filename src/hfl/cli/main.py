@@ -1171,20 +1171,32 @@ def create(
 
 @app.command(name="mcp")
 def mcp(
-    action: str = typer.Argument(help="connect | disconnect | list"),
+    action: str = typer.Argument(help="connect | disconnect | list | serve"),
     server_id: str = typer.Argument(None, help="Server id (for connect/disconnect)"),
-    target: str = typer.Argument(
+    target: str = typer.Argument(None, help="stdio://<cmd> <args> or sse://<url>"),
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        help="For ``serve``: stdio (default) or sse.",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="SSE bind host"),
+    port: int = typer.Option(8765, "--port", "-p", help="SSE bind port"),
+    capabilities: str = typer.Option(
         None,
-        help="stdio://<cmd> <args> or sse://<url>",
+        "--capabilities",
+        help="Comma-separated subset of tools to expose when serving.",
     ),
 ) -> None:
-    """Manage Model Context Protocol (MCP) server connections.
+    """Manage Model Context Protocol (MCP) connections and run as a server.
 
     Examples:
 
         hfl mcp list
         hfl mcp connect fs stdio://npx @modelcontextprotocol/server-filesystem /tmp
         hfl mcp disconnect fs
+        hfl mcp serve --transport stdio
+        hfl mcp serve --transport sse --host 0.0.0.0 --port 8765 \
+                      --capabilities web_search,web_fetch
     """
     import asyncio
 
@@ -1218,6 +1230,27 @@ def mcp(
                 raise typer.Exit(1)
             await client.disconnect(server_id)
             console.print(f"[green]Disconnected[/] {server_id}")
+        elif action == "serve":
+            from hfl.mcp.server import (
+                MCPServerUnavailableError,
+                serve_sse,
+                serve_stdio,
+            )
+
+            cap_list = None
+            if capabilities:
+                cap_list = [c.strip() for c in capabilities.split(",") if c.strip()]
+            try:
+                if transport == "stdio":
+                    await serve_stdio(cap_list)
+                elif transport == "sse":
+                    await serve_sse(host, port, cap_list)
+                else:
+                    console.print(f"[red]Unknown transport:[/] {transport}")
+                    raise typer.Exit(1)
+            except MCPServerUnavailableError as exc:
+                console.print(f"[red]MCP unavailable:[/] {exc}")
+                raise typer.Exit(1)
         else:
             console.print(f"[red]Unknown action:[/] {action}")
             raise typer.Exit(1)
