@@ -1,0 +1,84 @@
+# Update the Homebrew tap when a new v* release lands on PyPI.
+#
+# The tap lives at github.com/ggalancs/homebrew-hfl. On every tag
+# push we:
+#
+#   1. Download the freshly-published sdist from PyPI.
+#   2. Compute its sha256.
+#   3. Patch ``packaging/homebrew/hfl.rb`` with the new version +
+#      sha256 + URL.
+#   4. Open a PR against the tap repo with the updated formula.
+#
+# Requires ``HOMEBREW_TAP_TOKEN`` — a fine-scoped PAT with
+# ``contents: write`` on the tap repo. Without it the job warns
+# and exits 0 (release shouldn't fail because the tap token is
+# absent; the formula can always be updated by hand later).
+
+name: Homebrew tap
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+
+      - name: Wait for PyPI sdist
+        id: pypi
+        run: |
+          url="https://files.pythonhosted.org/packages/source/h/hfl/hfl-${{ steps.version.outputs.version }}.tar.gz"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sfI "$url" >/dev/null; then
+              echo "url=${url}" >>"$GITHUB_OUTPUT"
+              curl -sL "$url" -o sdist.tar.gz
+              sha256=$(shasum -a 256 sdist.tar.gz | awk '{print $1}')
+              echo "sha256=${sha256}" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "sdist not up yet, retry $i/10 in 30s"
+            sleep 30
+          done
+          echo "PyPI sdist never appeared; skipping tap update" >&2
+          exit 1
+
+      - name: Render formula
+        run: |
+          sed -i \
+            -e "s|hfl-[0-9.]*\.tar\.gz|hfl-${{ steps.version.outputs.version }}.tar.gz|g" \
+            -e "s|sha256 \"0\{64\}\"|sha256 \"${{ steps.pypi.outputs.sha256 }}\"|g" \
+            packaging/homebrew/hfl.rb
+          cat packaging/homebrew/hfl.rb
+
+      - name: Open PR against homebrew-hfl
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git config user.name "hfl-release-bot"
+          git config user.email "noreply@anthropic.com"
+          tap_dir=$(mktemp -d)
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/ggalancs/homebrew-hfl.git" "$tap_dir"
+          cp packaging/homebrew/hfl.rb "$tap_dir/Formula/hfl.rb"
+          cd "$tap_dir"
+          branch="bump-${{ steps.version.outputs.version }}"
+          git checkout -b "$branch"
+          git add Formula/hfl.rb
+          git commit -m "hfl ${{ steps.version.outputs.version }}"
+          git push origin "$branch"
+          gh pr create --fill --base main --head "$branch" --repo ggalancs/homebrew-hfl
