@@ -71,6 +71,15 @@ class GenerationConfig:
     # into a separate ``thinking`` field on the response envelope
     # (OLLAMA_PARITY_PLAN P1-1, Ollama 2026 ``think=true``).
     expose_reasoning: bool = False
+    # Multi-level thinking intensity (Phase 10 P1).
+    # - ``"off"``: reasoning suppressed (same as legacy ``expose_reasoning=False``).
+    # - ``"low"``: shortest viable chain; honoured by GPT-OSS-class models.
+    # - ``"medium"``: default "thinking on" behaviour (same as ``expose_reasoning=True``).
+    # - ``"high"``: full-depth reasoning channel.
+    # Engines that can't differentiate the levels treat ``"low"`` /
+    # ``"medium"`` / ``"high"`` all as "expose reasoning"; the
+    # route still honours ``"off"``.
+    thinking_level: str = "off"
     # Per-request chat-template override (OLLAMA_PARITY_PLAN P2-3).
     # When set, the engine uses this Jinja template in place of the
     # model's default for this request only. Ignored by engines that

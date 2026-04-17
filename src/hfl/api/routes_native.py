@@ -94,6 +94,31 @@ def _tools_payload(req: ChatRequest) -> list[dict] | None:
     return [t.model_dump() for t in req.tools]
 
 
+_VALID_THINKING_LEVELS = ("off", "low", "medium", "high")
+
+
+def _resolve_thinking_level(think: bool | str | None) -> str:
+    """Normalise ``think`` into one of ``off/low/medium/high``.
+
+    - ``None`` or ``False`` → ``"off"``.
+    - ``True`` → ``"medium"`` (back-compat with the legacy bool).
+    - ``"low"`` / ``"medium"`` / ``"high"`` pass through (case-insensitive).
+    - Anything else also maps to ``"off"`` with a warning, mirroring
+      the permissive posture we use for unknown ``HFL_WEB_SEARCH_BACKEND``
+      values.
+    """
+    if think is None or think is False:
+        return "off"
+    if think is True:
+        return "medium"
+    if isinstance(think, str):
+        level = think.lower().strip()
+        if level in _VALID_THINKING_LEVELS:
+            return level
+    logger.warning("ignoring unknown think= value: %r", think)
+    return "off"
+
+
 def _merge_mcp_tools(existing: list[dict] | None) -> list[dict] | None:
     """Merge tools exposed by connected MCP servers into ``existing``.
 
@@ -254,8 +279,11 @@ async def api_generate(
 
         gen_config.response_format = normalize_ollama_format(req.format)
 
-    # OLLAMA_PARITY_PLAN P1-1: expose reasoning channel on request.
-    if req.think:
+    # P1-1 + Phase 10 P1: reasoning channel exposure with level
+    # support. ``think=True`` still maps to "medium"; new clients
+    # pass ``"low"`` / ``"medium"`` / ``"high"`` explicitly.
+    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
 
     # OLLAMA_PARITY_PLAN P2-3: per-request template override and raw
@@ -438,8 +466,9 @@ async def api_chat(
 
         gen_config.response_format = normalize_ollama_format(req.format)
 
-    # P1-1: expose reasoning channel if the client asked for it.
-    if req.think:
+    # P1-1 + Phase 10 P1: reasoning channel w/ multi-level support.
+    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
 
     # P1-1: system-prompt override. Inserted as the FIRST message so

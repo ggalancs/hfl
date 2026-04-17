@@ -169,13 +169,13 @@ class GenerateRequest(BaseModel):
             "Modelfile defined. Ollama-parity (P1-1)."
         ),
     )
-    think: bool | None = Field(
+    think: bool | str | None = Field(
         None,
         description=(
             "Expose the model's reasoning / chain-of-thought channel "
-            "in the response (Ollama 2026 behaviour). Default False "
-            "for thinking-capable models (content stays clean); set "
-            "True to receive the full channel output for inspection."
+            "in the response (Ollama 2026 behaviour). Accepts a bool "
+            "(True → medium, False → off) or one of the GPT-OSS "
+            "levels ``low`` / ``medium`` / ``high``."
         ),
     )
     template: str | None = Field(
@@ -258,13 +258,12 @@ class ChatRequest(BaseModel):
             "JSON) or a JSON Schema object. See GenerateRequest.format."
         ),
     )
-    think: bool | None = Field(
+    think: bool | str | None = Field(
         None,
         description=(
             "Expose the model's reasoning channel in the response "
-            "(Ollama 2026). Default False for thinking-capable "
-            "models (content stays clean); set True to receive the "
-            "raw channel output for inspection / debugging."
+            "(Ollama 2026). Accepts a bool (True → medium, False → off) "
+            "or a GPT-OSS level (``low`` / ``medium`` / ``high``)."
         ),
     )
     system: str | None = Field(
