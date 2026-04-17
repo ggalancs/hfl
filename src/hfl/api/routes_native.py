@@ -181,11 +181,24 @@ async def api_generate(
     if req.think:
         gen_config.expose_reasoning = True
 
+    # OLLAMA_PARITY_PLAN P2-3: per-request template override and raw
+    # prompt mode. The engine decides how to honour each — llama-cpp
+    # rewires its chat handler for ``template_override``, and falls
+    # through to ``Llama.__call__`` (no chat formatting) when
+    # ``raw=True``. Backends without plug-in templates (vLLM) ignore
+    # both flags silently.
+    if req.template is not None:
+        gen_config.template_override = req.template
+    if req.raw:
+        gen_config.raw = True
+
     # OLLAMA_PARITY_PLAN P1-1: system-prompt override. When present,
     # we flow it through the engine as a system-role message so the
     # same /api/generate route can now do single-shot prompting with
-    # a custom system prompt, mirroring Ollama's behaviour.
-    if req.system:
+    # a custom system prompt, mirroring Ollama's behaviour. Skipped
+    # when ``raw=True`` because raw mode intentionally bypasses any
+    # prompt shaping.
+    if req.system and not req.raw:
         system_preamble = req.system + "\n\n"
         final_prompt = system_preamble + req.prompt
     else:

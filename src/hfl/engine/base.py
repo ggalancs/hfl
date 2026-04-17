@@ -71,6 +71,18 @@ class GenerationConfig:
     # into a separate ``thinking`` field on the response envelope
     # (OLLAMA_PARITY_PLAN P1-1, Ollama 2026 ``think=true``).
     expose_reasoning: bool = False
+    # Per-request chat-template override (OLLAMA_PARITY_PLAN P2-3).
+    # When set, the engine uses this Jinja template in place of the
+    # model's default for this request only. Ignored by engines that
+    # don't expose a pluggable template (vLLM). ``None`` means "use
+    # the model's default template".
+    template_override: str | None = None
+    # Raw prompt mode (OLLAMA_PARITY_PLAN P2-3, Ollama ``raw=true``).
+    # When True the engine forwards the prompt to the model verbatim,
+    # bypassing the chat template and the BOS token. Meant for
+    # evaluation harnesses and manual prompt engineering. Only
+    # meaningful on ``/api/generate``; chat routes ignore it.
+    raw: bool = False
 
 
 @dataclass

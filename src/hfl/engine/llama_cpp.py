@@ -842,9 +842,25 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         logger.debug("Generating with max_tokens=%s, temp=%s", cfg.max_tokens, cfg.temperature)
 
+        # OLLAMA_PARITY_PLAN P2-3. When ``template_override`` is set
+        # and ``raw`` is False, render the Modelfile-style template
+        # against the caller's prompt before feeding it to the
+        # model. We handle the two placeholders that cover the vast
+        # majority of real Modelfiles — ``{{ .Prompt }}`` and
+        # ``{{ .System }}`` — without pulling in a full Go-template
+        # parser. Anything else passes through the template as a
+        # literal; sophisticated templates should go through
+        # ``/api/chat`` where llama-cpp's Jinja renderer is used.
+        effective_prompt = prompt
+        if cfg.template_override and not cfg.raw:
+            tmpl = cfg.template_override
+            tmpl = re.sub(r"\{\{\s*\.Prompt\s*\}\}", prompt, tmpl)
+            tmpl = re.sub(r"\{\{\s*\.System\s*\}\}", "", tmpl)
+            effective_prompt = tmpl
+
         start_ns = time.monotonic_ns()
         output = self._model(
-            prompt,
+            effective_prompt,
             max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
             top_p=cfg.top_p,

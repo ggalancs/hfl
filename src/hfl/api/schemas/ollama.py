@@ -178,6 +178,24 @@ class GenerateRequest(BaseModel):
             "True to receive the full channel output for inspection."
         ),
     )
+    template: str | None = Field(
+        None,
+        max_length=2_000_000,
+        description=(
+            "Per-request chat-template override (Jinja). Substitutes the "
+            "model's default template for this request only. Phase 6 "
+            "P2-3 — Ollama-parity."
+        ),
+    )
+    raw: bool | None = Field(
+        None,
+        description=(
+            "Raw prompt mode. When true, the prompt is forwarded to the "
+            "model verbatim (no chat template, no BOS). Useful for "
+            "evaluation harnesses or manual prompt engineering. Phase 6 "
+            "P2-3 — Ollama-parity."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
