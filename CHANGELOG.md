@@ -5,6 +5,126 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-04-17
+
+Major internal overhaul closing the full backlog of the 2026-04-15
+architecture / security / test-quality audit. Seven focused
+refactors + two targeted test rounds; 24 new tests, 0 removed
+regressions. Public behaviour is the same for well-formed clients;
+three error envelopes changed shape — see "Breaking envelope
+changes" below.
+
+### Performance / reliability
+
+- **``engine.unload()`` now runs off the event-loop thread**
+  (``src/hfl/api/state.py``). ``set_llm_engine``, ``set_tts_engine``
+  and ``cleanup`` wrap the synchronous teardown in
+  ``asyncio.to_thread`` so ``/healthz``, ``/metrics`` and in-flight
+  streams are no longer starved while a large model is being released
+  (seconds on GPU / Metal). Guarded by four new concurrency tests in
+  ``tests/test_state_concurrency.py::TestUnloadOffLoop`` — thread-id
+  based, deterministic (30/30 runs), no timing thresholds.
+- **``ModelPool.get_or_load`` polling loop replaced with
+  ``asyncio.Event``** (``src/hfl/engine/model_pool.py``).
+  ``_loading`` is now ``dict[str, asyncio.Event]`` instead of
+  ``set[str]``; waiters ``await event.wait()`` with a 300 s cap and
+  wake immediately when the owner's ``finally`` block ``set()``s the
+  event. Old behaviour (3000 × 0.1 s polling) is gone; wake-up
+  latency dropped from ~100 ms worst-case to one event-loop tick.
+  ``TestModelPoolEventBasedWait`` pins the new contract (Event type,
+  no ``asyncio.sleep(>=0.05)`` on the wait-path).
+
+### Security
+
+- **Cancel-safety stress test for the inference dispatcher**
+  (``tests/test_dispatcher.py``). 200 random cancellations sweep
+  every phase of ``InferenceDispatcher.slot()``; after the storm, a
+  fresh ``slot()`` must succeed within 2 s, else a semaphore permit
+  leaked. Confirms Python 3.10+ ``asyncio.Semaphore.acquire``
+  cancel-safety holds.
+
+### Configuration
+
+- **5 magic-number timeouts lifted to ``HFLConfig``** with env-var
+  overrides (``src/hfl/config.py``):
+  - ``HFL_STREAM_QUEUE_PUT_TIMEOUT`` (default 60 s) — was hard-coded
+    in ``async_wrapper.py``, ``vllm_engine.py``, ``streaming.py``.
+  - ``HFL_STREAM_QUEUE_GET_TIMEOUT`` (default 30 s).
+  - ``HFL_VLLM_ERROR_PUT_TIMEOUT`` (default 10 s).
+  - ``HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT`` (default 5 s).
+  - ``HFL_REGISTRY_SQLITE_TIMEOUT`` (default 30 s).
+- **HF_TOKEN platform-limitation note** added to
+  ``src/hfl/config.py`` (immutable ``str`` → cannot be zeroed in
+  memory; mitigations documented).
+
+### Refactor / cleanup
+
+- **28 ``HTTPException`` raises migrated to ``HFLError`` subclasses**
+  in ``api/model_loader.py``, ``api/routes_tts.py``, and the
+  validation paths of ``api/helpers.py``. Exception taxonomy:
+  - ``ModelNotFoundError`` (new: ``status_code=404``).
+  - ``ModelTypeMismatchError`` (new, carries ``model_name``,
+    ``expected``, ``got``).
+  - ``ModelNotReadyError`` (was already 503).
+  - ``ValidationError`` (from ``hfl.exceptions.APIError`` — 400).
+  - ``GenerationTimeoutError`` grows an optional ``operation`` label.
+  The global handler now produces the standard envelope
+  ``{"error": ..., "code": "<ExceptionClass>", "details": ...}`` for
+  all of these, ending three ad-hoc 400-body shapes.
+- **``prepare_stream_response`` helper** (``src/hfl/api/helpers.py``)
+  extracts the ``acquire-slot + 429-pass-through + StreamingResponse``
+  pattern duplicated in 5 streaming endpoints across OpenAI, Ollama
+  and Anthropic routes.
+
+### Tests
+
+- **Targeted coverage** for previously uncovered error paths:
+  - ``model_loader`` post-load cleanup (2 tests).
+  - ``middleware._get_client_ip`` with invalid X-Forwarded-For (1).
+  - ``routes_tts`` type-mismatch path (1).
+  - ``model_pool`` polling retry / double-load race / lock-guarded
+    cache hit / unload-failure logging (5).
+  - ``prepare_stream_response`` happy + rejection paths (2).
+  - CORS construction-time validator (4).
+- **Tighter contracts** in ``tests/test_routes_health.py`` — 5
+  ``*_returns_200`` tests upgraded to also assert body shape.
+- **New pytest markers** ``slow`` and ``integration`` registered in
+  ``pyproject.toml``; ``tests/stress/*`` classes annotated with
+  ``@pytest.mark.slow``.
+
+### Breaking envelope changes
+
+Three JSON responses changed from ad-hoc dicts to the standard
+envelope. If your client reads ``response.json()["detail"]``, add a
+fallback to ``response.json().get("error")``:
+
+- ``ModelNotFoundError`` (was ``{"detail": "Model not found: X"}``,
+  now ``{"error": "Model not found: X", "code": "ModelNotFoundError",
+  "details": "Use 'hfl list' ..."}``).
+- ``ModelTypeMismatchError`` (was
+  ``{"detail": {"code": "MODEL_TYPE_MISMATCH", "expected": ...,
+  "got": ...}}``, now ``{"error": "Model 'X' is not a Y model",
+  "code": "ModelTypeMismatchError", "details": "..."}``).
+- ``ValidationError`` in options/request conversion (was
+  ``{"detail": "..."}``, now standard envelope with
+  ``code="ValidationError"``).
+
+### Internal
+
+- Python 3.16-ready: no remaining ``asyncio.iscoroutinefunction``
+  callers (R1 fix in 0.3.3).
+
+### Metrics
+
+| | 0.3.4 | 0.3.5 |
+|-|-|-|
+| Tests | 2113 | 2137 |
+| Coverage | 88.18% | 89.01% |
+| `model_pool` branch coverage | 81% | 90% |
+| `engine.unload` on event-loop thread | yes | no |
+| Dispatcher cancel-safety test | no | yes (200 cycles) |
+| Magic-number timeouts tunable | no | yes (5 env vars) |
+
 ## [0.3.4] - 2026-04-17
 
 Tighter input validation and a misconfiguration guard for CORS. Closes
