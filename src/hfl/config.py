@@ -191,6 +191,17 @@ class HFLConfig:
     # PRIVACY (R6 - Legal Audit): hf_token is read ONLY from environment variable.
     # It is NEVER persisted to disk, NEVER stored in models.json or any config file.
     # Token is held in memory only for the duration of the process.
+    #
+    # Known limitation (platform, not a bug): Python strings are
+    # immutable, so once ``hf_token`` is assigned the original bytes
+    # cannot be reliably overwritten — a memory dump of a running
+    # process will still contain the secret. This is true for every
+    # Python program reading a secret into a ``str``. Mitigations:
+    # (a) prefer ``huggingface-cli login`` which writes a token file
+    # with 0600 permissions and does not require setting an env var,
+    # (b) restrict the env var's scope to the systemd unit / shell
+    # session that launches ``hfl``, (c) run HFL under an unprivileged
+    # user whose memory cannot be inspected by other processes.
     hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
     def __post_init__(self) -> None:

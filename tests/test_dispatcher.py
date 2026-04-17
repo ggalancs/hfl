@@ -317,6 +317,56 @@ class TestCancellation:
             await t
         assert d.in_flight == 0
 
+    async def test_cancellation_at_random_points_never_leaks_slots(self):
+        """Invariant check: no matter WHERE in slot()'s phases a
+        cancellation lands, after the operation the dispatcher must
+        still be usable. A leaked semaphore permit would make a fresh
+        ``slot()`` hang forever; we detect that via a hard timeout.
+
+        This catches the subtle leak path where cancellation fires in
+        the narrow window between ``await self._sem.acquire()`` and
+        the ``async with self._counter_lock`` that records the stat
+        (dispatcher.py:194-203). Existing cancel tests pin the two
+        coarse cases (waiting, holding); this one sweeps intermediate
+        points stochastically.
+        """
+        import contextlib
+        import random
+
+        random.seed(42)  # Deterministic sweep
+        d = InferenceDispatcher(max_inflight=1, max_queued=16, acquire_timeout=5.0)
+
+        async def do_work() -> None:
+            async with d.slot():
+                # Short enough to let cancellations hit any phase.
+                await asyncio.sleep(0.0005)
+
+        for _ in range(200):
+            task = asyncio.create_task(do_work())
+            await asyncio.sleep(random.uniform(0.0, 0.002))
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, BaseException):
+                await task
+
+        # Invariants after the storm: no phantom in-flight, no phantom
+        # queue depth. If the semaphore lost a permit, the next slot()
+        # will hang — guard with a 2 s timeout.
+        assert d.in_flight == 0, "in_flight leaked"
+        assert d.depth == 0, "depth leaked"
+
+        async def _check_usable() -> None:
+            async with d.slot():
+                pass
+
+        try:
+            await asyncio.wait_for(_check_usable(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pytest.fail(
+                "Dispatcher hung after cancellation storm — a semaphore permit "
+                "was leaked (likely cancel landed between sem.acquire and the "
+                "stats-bump lock)."
+            )
+
 
 # --- Snapshot & metrics --------------------------------------------------------
 
