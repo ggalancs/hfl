@@ -884,6 +884,20 @@ class LlamaCppEngine(InferenceEngine):
         prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
         eval_ns = total_ns - prompt_eval_ns
 
+        # Phase 7 P2-4: populate the legacy ``context`` array when
+        # the caller opted in via ``keep_context=True``. llama-cpp's
+        # ``tokenize`` on the concatenated prompt + response is the
+        # cheapest way to obtain the integer sequence clients feed
+        # back on the next turn.
+        context_tokens: list[int] | None = None
+        if cfg.keep_context:
+            try:
+                full = (effective_prompt + text).encode("utf-8", errors="replace")
+                context_tokens = list(self._model.tokenize(full, add_bos=False))
+            except Exception:  # noqa: BLE001
+                logger.warning("keep_context requested but tokenize() failed", exc_info=True)
+                context_tokens = []
+
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
@@ -894,6 +908,7 @@ class LlamaCppEngine(InferenceEngine):
             load_duration=0,
             prompt_eval_duration=prompt_eval_ns,
             eval_duration=eval_ns,
+            context_tokens=context_tokens,
         )
 
     def generate_stream(

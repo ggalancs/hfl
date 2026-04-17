@@ -83,6 +83,12 @@ class GenerationConfig:
     # evaluation harnesses and manual prompt engineering. Only
     # meaningful on ``/api/generate``; chat routes ignore it.
     raw: bool = False
+    # Return the encoded ``prompt + response`` token array so clients
+    # can feed it back via Ollama's legacy ``context`` field for
+    # multi-turn continuation (OLLAMA_PARITY_PLAN P2-4). Default off
+    # because keeping token arrays in memory costs RAM and most
+    # clients now use /api/chat with role-tagged messages instead.
+    keep_context: bool = False
 
 
 @dataclass
@@ -105,6 +111,11 @@ class GenerationResult:
     load_duration: int = 0  # Time to load the model (0 if already warm) (ns)
     prompt_eval_duration: int = 0  # Time to process the prompt (ns)
     eval_duration: int = 0  # Time spent generating tokens (ns)
+    # Encoded prompt + response tokens, for Ollama's legacy ``context``
+    # multi-turn continuation (P2-4). Only populated when
+    # ``GenerationConfig.keep_context`` is True; otherwise stays
+    # ``None`` so default payloads don't carry large int arrays.
+    context_tokens: list[int] | None = None
 
 
 class InferenceEngine(ABC):

@@ -227,7 +227,7 @@ async def api_generate(
     # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
     # pre-0.5.1). Clients keying off these fields now see the
     # engine's actual measurements.
-    return {
+    envelope: dict[str, Any] = {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "response": result.text,
@@ -239,6 +239,12 @@ async def api_generate(
         "eval_count": result.tokens_generated,
         "eval_duration": result.eval_duration,
     }
+    # Phase 7 P2-4: opt-in legacy ``context`` token array for
+    # multi-turn continuation. Only surfaces when the client sent
+    # ``options.keep_context=true``.
+    if gen_config.keep_context and result.context_tokens is not None:
+        envelope["context"] = result.context_tokens
+    return envelope
 
 
 async def _stream_generate(

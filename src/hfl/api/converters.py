@@ -85,6 +85,10 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
         repeat_penalty=repeat_penalty,
         seed=seed,
         stop=opts.get("stop"),
+        # Phase 7 P2-4: ``options.keep_context=true`` activates the
+        # legacy ``context`` array on the non-streaming /api/generate
+        # response. Default off — most clients use /api/chat instead.
+        keep_context=bool(opts.get("keep_context", False)),
     )
 
 
