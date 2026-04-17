@@ -937,21 +937,23 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         logger.debug("Generating with max_tokens=%s, temp=%s", cfg.max_tokens, cfg.temperature)
 
-        # OLLAMA_PARITY_PLAN P2-3. When ``template_override`` is set
-        # and ``raw`` is False, render the Modelfile-style template
-        # against the caller's prompt before feeding it to the
-        # model. We handle the two placeholders that cover the vast
-        # majority of real Modelfiles — ``{{ .Prompt }}`` and
-        # ``{{ .System }}`` — without pulling in a full Go-template
-        # parser. Anything else passes through the template as a
-        # literal; sophisticated templates should go through
-        # ``/api/chat`` where llama-cpp's Jinja renderer is used.
+        # OLLAMA_PARITY_PLAN P2-3 + Phase 11 P1 (V2 row 23). When
+        # ``template_override`` is set and ``raw`` is False, render
+        # the Modelfile's Go-template against the caller's prompt via
+        # the proper Go-template evaluator (hfl.converter.go_template).
+        # Covers ``{{ range }}``, ``{{ if }}``, ``{{- -}}`` trimming
+        # and nested field access — not just the ``{{ .Prompt }}`` /
+        # ``{{ .System }}`` placeholders the old regex handled. The
+        # evaluator falls back to the literal template on parse
+        # errors so a user's typo never crashes generation.
         effective_prompt = prompt
         if cfg.template_override and not cfg.raw:
-            tmpl = cfg.template_override
-            tmpl = re.sub(r"\{\{\s*\.Prompt\s*\}\}", prompt, tmpl)
-            tmpl = re.sub(r"\{\{\s*\.System\s*\}\}", "", tmpl)
-            effective_prompt = tmpl
+            from hfl.converter.go_template import render_go_template
+
+            effective_prompt = render_go_template(
+                cfg.template_override,
+                {"Prompt": prompt, "System": "", "Messages": []},
+            )
 
         start_ns = time.monotonic_ns()
         output = self._model(
