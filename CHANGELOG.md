@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-17
+
+**Phase 2 of OLLAMA_PARITY_PLAN is complete — embeddings are live.**
+Every RAG pipeline (LangChain, LlamaIndex, ChromaDB, pgvector) that
+speaks the Ollama or OpenAI embedding API can now point its base URL
+at HFL and just work.
+
+### Added — embedding endpoints
+
+- **``POST /api/embed``** (Ollama preferred): single string or list
+  of strings → ``{embeddings: [[...], ...], model, total_duration,
+  load_duration, prompt_eval_count}``. Accepts ``truncate``,
+  ``dimensions`` (Matryoshka), ``keep_alive``, ``options``. Input
+  bounds: ≤1024 strings per batch, ≤2 MiB per string, dimensions
+  1-8192.
+- **``POST /api/embeddings``** (legacy alias): ``{model, prompt}``
+  → ``{embedding: [...]}``. Kept for older ollama-python releases
+  and some LangChain versions.
+- **``POST /v1/embeddings``** (OpenAI-compatible): strict OpenAI
+  envelope (``object: "list"``, ``data[].object: "embedding"``,
+  ``data[].index``, ``usage.prompt_tokens``/``total_tokens``),
+  supports ``encoding_format: "base64"`` via little-endian float32
+  packing, accepts token-list inputs (``[int]`` / ``[[int]]``)
+  with documented lossy fallback to space-separated strings.
+
+### Added — embedding engine hierarchy
+
+- **``hfl.engine.embedding_engine.EmbeddingEngine``** — abstract
+  base with a single method: ``embed(inputs, *, truncate,
+  dimensions) -> EmbeddingResult``.
+- **``LlamaCppEmbeddingEngine``** — wraps llama-cpp-python with
+  ``embedding=True``. Same extra, different construction mode. Auto
+  native-dim detection via ``Llama.n_embd()``, char-count fallback
+  for token accounting when ``tokenize`` raises.
+- **``TransformersEmbeddingEngine``** — AutoModel + AutoTokenizer
+  with attention-masked mean pooling and L2-normalisation, matching
+  sentence-transformers defaults. Auto-selects CUDA / MPS / CPU.
+
+### Changed
+
+- ``SUPPORTED_MODEL_TYPES`` in ``hfl.converter.formats`` now
+  includes ``ModelType.EMBEDDING``. The existing
+  ``EMBEDDING_ARCHITECTURES`` table (BERT / Nomic / Jina / BGE /
+  GTE / E5 / MXBAI / Stella / Arctic-Embed) now grants those models
+  runnable status at ``/api/embed`` entry.
+
+### Internal
+
+- Embedding requests bypass the LLM dispatcher (``max_inflight=1``)
+  because embeds are stateless and batchable — concurrent RAG
+  queries no longer block each other.
+- Model loader keeps embed engines in a dedicated ``state._embed_engine``
+  slot so they don't collide with chat residency.
+
+### Metrics
+
+| | 0.4.0 | 0.4.1 |
+|-|-|-|
+| Tests | 2283 | 2318 (+35) |
+| Coverage | 89.05% | 88.39% |
+| Ollama REST endpoints | 10/16 | 13/16 |
+| RAG frameworks working out of the box | 0 | LangChain, LlamaIndex, ChromaDB, etc. |
+
+Remaining Ollama-parity items (P0-5 structured outputs, P0-6
+vision, Modelfile ingestion, blobs, copy) land in 0.4.x and 0.5.x
+releases — tracked in ``OLLAMA_PARITY_PLAN.md``.
+
 ## [0.4.0] - 2026-04-17
 
 **Phase 1 of OLLAMA_PARITY_PLAN is complete.** HFL now speaks the
