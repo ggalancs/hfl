@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-17 — BREAKING
+
+**Phase 4 of OLLAMA_PARITY_PLAN — vision / multimodal.** Models like
+Gemma 3, Llama 4, Qwen2-VL, LLaVA, Moondream and Pixtral can now
+serve image-grounded prompts through HFL on both the Ollama-native
+and OpenAI-compatible routes.
+
+### ⚠️ Breaking: OpenAI ``content`` is now a union
+
+``ChatCompletionMessage.content`` accepts **either** the legacy
+string shape **or** OpenAI's list-of-parts shape
+(``[{"type":"text","text":"..."},
+{"type":"image_url","image_url":{"url":"data:image/..."}}]``). Every
+existing text-only client keeps working without changes.
+
+### Added — wire contracts
+
+- **Ollama ``/api/chat`` messages gain ``images: list[str]``**
+  (base64 or data-URI). Max 32 images per message, 20 MiB each,
+  4096×4096 max dimensions.
+- **OpenAI ``content: list[ContentPart]``** with ``TextContentPart``
+  + ``ImageContentPart`` discriminated union. Only ``data:image/...``
+  URIs are honoured — HTTP(S) URLs are rejected at the route
+  boundary (SSRF guard).
+
+### Added — validator (``hfl.api.image_validator``)
+
+Four-gate validator, standalone-testable, no Pillow required:
+
+1. **Size cap** (20 MiB default, configurable).
+2. **Magic-byte sniffing** for PNG / JPEG / WEBP / GIF — SVG, HTML,
+   executables pretending to be images are rejected.
+3. **MIME whitelist** — raster formats only.
+4. **Dimension parsing** via format-specific headers (PNG IHDR, JPEG
+   SOF scan, WebP VP8/VP8L/VP8X, GIF screen descriptor) with a
+   16-megapixel total-pixel cap that catches pathological
+   aspect ratios like 8192×1.
+
+### Added — engine support
+
+- **``LlamaCppEngine`` vision wiring.** ``load()`` auto-detects an
+  adjacent ``mmproj-*.gguf`` file and builds the right
+  ``chat_handler`` (Gemma3, Qwen2.5-VL, LLaVA 1.5/1.6, Moondream).
+  An explicit ``clip_model_path`` kwarg overrides the auto-scan.
+  Import-fallback: on older llama-cpp-python installs without the
+  ``llama_cpp.llama_chat_format`` submodule the engine logs a
+  warning and loads text-only rather than crashing.
+- **``_messages_to_llama_cpp``** converts ``ChatMessage.images`` into
+  llama-cpp's native ``[{"type":"text"}, {"type":"image_url"}]``
+  content shape, sniffs each image's MIME, and emits a correctly-
+  typed ``data:`` URI — all four formats (PNG/JPEG/WEBP/GIF) are
+  detected from their actual bytes.
+
+### Added — request-to-engine translator (``hfl.api.vision``)
+
+- ``decode_ollama_images(list[str] | None) -> list[bytes] | None``
+- ``split_openai_content(str | list[ContentPart]) -> (text, images)``
+
+Both route through ``validate_image`` so engines receive clean,
+bounded bytes. Errors include the failing ``images[i]`` / 
+``content[i]`` index so clients know which attachment was bad.
+
+### Tests (+60)
+
+- ``tests/test_image_validator.py`` (28): size gate, magic bytes
+  for each supported format + SVG/HTML/ELF rejection, dimension
+  caps, base64 + data-URI round-trips, configurable limits.
+- ``tests/test_vision_routes.py`` (15): end-to-end on both Ollama
+  ``/api/chat`` and OpenAI ``/v1/chat/completions``; image bytes
+  reach the engine; multi-image ordering; invalid payload 400;
+  schema cap 422; HTTP URL rejected; OpenAI text-part concatenation;
+  unit tests of the split/decode helpers.
+- ``tests/test_llama_cpp_vision.py`` (17): ``ChatMessage.images``
+  translation, MIME-sniff-per-format, base64 round-trip, arch→handler
+  dispatch (Gemma3, Gemma4, Qwen-VL, LLaVA 1.5/1.6, Moondream,
+  unknown fallback), import fallback when multimodal module
+  missing, end-to-end load with ``mmproj-*.gguf`` auto-detection,
+  explicit ``clip_model_path`` overrides the auto-scan.
+
+### Metrics
+
+| | 0.4.2 | 0.5.0 |
+|-|-|-|
+| Tests | 2351 | 2411 (+60) |
+| Coverage | ~89% | ~89% |
+| Ollama message-level parity | tools + keep_alive + format | + images + content parts |
+| Vision models supported | 0 | Gemma 3, Gemma 4, LLaVA 1.5/1.6, Qwen2-VL, Qwen2.5-VL, Moondream (via llama-cpp) |
+
+Remaining parity items (system/think override, copy, Modelfile
+ingestion, blobs) land in 0.5.x and 0.6.x.
+
 ## [0.4.2] - 2026-04-17
 
 **Phase 3 of OLLAMA_PARITY_PLAN — structured outputs.** Every client
