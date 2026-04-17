@@ -117,9 +117,12 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
     body with a byte budget before handing off to the route.
     """
 
-    # Paths excluded from the body limit (audio uploads may exceed text limits
-    # legitimately; add here if additional large-body endpoints land).
-    EXCLUDED_PREFIXES: tuple[str, ...] = ()
+    # Paths excluded from the body limit. ``/api/blobs/`` must be
+    # excluded because GGUFs legitimately exceed any text-oriented
+    # cap (multi-GB); the blob route has its own streaming SHA-256
+    # validator so oversized uploads still fail before the bytes
+    # are promoted.
+    EXCLUDED_PREFIXES: tuple[str, ...] = ("/api/blobs/",)
 
     def __init__(self, app: Any, max_bytes: int) -> None:
         super().__init__(app)
