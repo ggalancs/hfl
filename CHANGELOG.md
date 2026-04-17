@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-04-17
+
+**Phase 12 of OLLAMA_PARITY_PLAN_V2 — Inference features.** Two
+small but high-impact additions to the inference surface.
+
+### Added — Per-token logprobs on ``/api/generate`` (V2 row 7)
+
+- New ``GenerationConfig.logprobs`` field; clamped to [0, 20] by
+  the converter. Enabled via ``options.logprobs=N``.
+- ``/api/generate`` surfaces
+  ``logprobs: [{"token","logprob","top_logprobs"}, ...]`` in the
+  non-streaming envelope when the engine populates them.
+- llama-cpp backend wires through the ``logprobs=`` kwarg and
+  normalises the parallel-array return shape into a token-major
+  list so routes don't have to re-traverse.
+
+### Added — Embedding pooling strategies (V2 row 18)
+
+- New helper ``hfl.engine.embedding_pooling.pool(...)`` with
+  ``mean`` / ``cls`` / ``last`` strategies. Numpy fast path plus
+  pure-Python fallback.
+- ``POST /api/embed`` accepts a ``pooling`` field in the request;
+  engine-level integration for each embedding backend lands next
+  to the backend it touches.
+
+### Test & CI
+
+- Total suite: 2800 passing, 28 skipped. Coverage ≈ 88%.
+
+---
+
 ## [0.9.0] - 2026-04-17
 
 **Phase 11 of OLLAMA_PARITY_PLAN_V2 — Runtime I.** Five runtime
