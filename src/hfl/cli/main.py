@@ -556,6 +556,73 @@ def _pull_selected_model(model) -> None:
         pass  # pull raises Exit on completion
 
 
+@app.command(name="show")
+def show(
+    model: str = typer.Argument(help="Model name, alias or repo_id to inspect"),
+    modelfile: bool = typer.Option(
+        False, "--modelfile", help="Print only the rendered Modelfile body"
+    ),
+    parameters: bool = typer.Option(
+        False, "--parameters", help="Print only the PARAMETER block (one per line)"
+    ),
+    template: bool = typer.Option(False, "--template", help="Print only the chat template"),
+    license_only: bool = typer.Option(False, "--license", help="Print only the license text"),
+) -> None:
+    """Show model information (Ollama-compatible).
+
+    Mirrors ``ollama show`` — by default prints a summary with details,
+    capabilities, and the license; flags narrow the output to a single
+    section for scripting.
+    """
+    from hfl.converter.modelfile import render_modelfile
+    from hfl.models.capabilities import detect_capabilities
+    from hfl.models.registry import ModelRegistry
+
+    manifest = ModelRegistry().get(model)
+    if manifest is None:
+        console.print(f"[red]Model not found:[/] {model}")
+        raise typer.Exit(1)
+
+    # Single-section flags first (mirror ollama show --modelfile).
+    if modelfile:
+        console.print(render_modelfile(manifest), end="")
+        return
+    if parameters:
+        from hfl.api.routes_show import _format_parameters
+
+        console.print(_format_parameters(manifest))
+        return
+    if template:
+        console.print(manifest.chat_template or "")
+        return
+    if license_only:
+        console.print(manifest.license_name or manifest.license or "")
+        return
+
+    # Default: summary table — same columns ollama show prints.
+    from rich.panel import Panel
+    from rich.table import Table
+
+    summary = Table.grid(padding=(0, 2))
+    summary.add_column(style="dim", justify="right")
+    summary.add_column()
+    summary.add_row("Name", manifest.name)
+    summary.add_row("Architecture", manifest.architecture or "unknown")
+    summary.add_row("Parameters", manifest.parameters or "?")
+    summary.add_row("Quantization", manifest.quantization or "?")
+    summary.add_row("Format", manifest.format or "?")
+    if manifest.context_length:
+        summary.add_row("Context", f"{manifest.context_length} tokens")
+    summary.add_row("Size", manifest.display_size)
+    summary.add_row(
+        "Capabilities",
+        ", ".join(detect_capabilities(manifest)) or "—",
+    )
+    summary.add_row("License", manifest.license or "—")
+
+    console.print(Panel(summary, title=f"Model: {manifest.name}", expand=False))
+
+
 @app.command(name="ps")
 def ps(
     host: str = typer.Option(

@@ -45,6 +45,7 @@ from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_ps import router as ps_router
+from hfl.api.routes_show import router as show_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.state import get_state
 from hfl.config import config
@@ -227,6 +228,7 @@ app.include_router(anthropic_router)
 app.include_router(openai_router)
 app.include_router(native_router)
 app.include_router(ps_router)
+app.include_router(show_router)
 app.include_router(tts_router)
 app.include_router(health_router)
 app.include_router(metrics_router)
