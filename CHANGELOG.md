@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-04-17
+
+**Phase 14 of OLLAMA_PARITY_PLAN_V2 — Modelfile v2 + audit logs.**
+
+### Added — Modelfile ``ENV`` (V2 row 19)
+
+- ``ENV KEY=VALUE`` lines parse into
+  ``ModelfileDocument.env`` and persist on
+  ``ModelManifest.env_vars``. Quoted values honour the same
+  escape set as other directives.
+
+### Added — Modelfile ``INCLUDE`` imports (V2 row 21)
+
+- ``INCLUDE ./common.modelfile`` inlines at parse time when
+  ``parse_modelfile`` is called with a ``base_path``. Cycle
+  detection, depth cap of 16, relative-path resolution.
+
+### Added — Modelfile ``CAPABILITIES`` (V2 row 22)
+
+- ``CAPABILITIES completion,tools,vision`` captured on the
+  document and persisted as
+  ``manifest.declared_capabilities`` — an explicit override of
+  auto-detection so authored Modelfiles stay authoritative.
+
+### Added — Structured audit log (V2 row 27)
+
+- New ``hfl.observability.audit`` module emits JSON-line audit
+  events for every privileged operation (model create / delete /
+  copy / pull / stop / load / unload, blob.upload, mcp.connect /
+  disconnect, api_key.mint / revoke).
+- ``HFL_AUDIT_LOG_PATH`` opt-in + ``HFL_AUDIT_LOG_MAX_BYTES`` /
+  ``HFL_AUDIT_LOG_BACKUPS`` rotation controls.
+- ``audit_event()`` is a cheap no-op when disabled, so call-sites
+  can drop it in without guards.
+
+---
+
 ## [0.10.0] - 2026-04-17
 
 **Phase 13 of OLLAMA_PARITY_PLAN_V2 — Backends.** MLX on Apple
