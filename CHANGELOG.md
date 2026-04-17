@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-04-17
+
+**Phase 16 of OLLAMA_PARITY_PLAN_V2 — Audio + Images.**
+
+### Added — Whisper transcription (V2 row 16)
+
+- ``POST /api/transcribe`` accepts multipart audio (wav/mp3/ogg,
+  100 MB cap) and returns ``{text, language, duration_s, model,
+  segments?}``.
+- New ``WhisperEngine`` adapter prefers ``faster-whisper`` and
+  falls back to ``openai-whisper``. Opt-in via
+  ``pip install 'hfl[stt]'``.
+
+### Added — Image generation (V2 row 17)
+
+- ``POST /api/images/generate`` wraps ``diffusers`` so SDXL /
+  SDXL-Turbo / FLUX / SD3 all work with one code path.
+- Auto-selects CUDA / MPS / CPU + fp16 on GPU.
+- Returns a base64-PNG with size / seed / duration metadata.
+- Opt-in via ``pip install 'hfl[imagegen]'``.
+
+---
+
 ## [0.11.0] - 2026-04-17
 
 **Phase 15 of OLLAMA_PARITY_PLAN_V2 — Runtime II.** Batched
