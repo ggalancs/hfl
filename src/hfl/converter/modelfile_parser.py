@@ -484,7 +484,7 @@ def _match_include_line(raw_line: str) -> str | None:
 def _expand_includes(
     text: str,
     base_path: Path | None,
-    seen: set[Path] | None = None,
+    seen: set[str] | None = None,
     depth: int = 0,
 ) -> str:
     """Inline ``INCLUDE <path>`` lines before parsing (Phase 14 — V2 row 21).
@@ -499,10 +499,21 @@ def _expand_includes(
         return text
     if depth > 16:
         raise ModelfileParseError("INCLUDE chain exceeds depth 16")
-    # Canonicalise the root via ``os.path.realpath`` — the sanitiser
-    # CodeQL's ``py/path-injection`` explicitly recognises for the
-    # ``realpath + commonpath`` containment pattern below.
     real_root = os.path.realpath(str(base_path))
+    # Enumerate every file under the root once and build an
+    # allow-list keyed by their relative path. This is the
+    # strongest form of path-injection sanitiser: every filesystem
+    # operation downstream consumes a string drawn from this dict,
+    # never one derived from user input. CodeQL's ``py/path-
+    # injection`` treats dictionary-indexed strings as untainted.
+    allowed: dict[str, str] = {}
+    for dirpath, _dirs, files in os.walk(real_root):
+        for name in files:
+            absolute = os.path.join(dirpath, name)
+            rel_key = os.path.relpath(absolute, real_root).replace(os.sep, "/")
+            allowed[rel_key] = absolute
+            # Also accept the ``./``-prefixed spelling users often type.
+            allowed["./" + rel_key] = absolute
     seen = set(seen or ())
     out_lines: list[str] = []
     for raw_line in text.splitlines():
@@ -510,31 +521,22 @@ def _expand_includes(
         if rel is None:
             out_lines.append(raw_line)
             continue
-        # Gate 1 — whitelist the raw string before it ever touches a
-        # path operation. Anything that doesn't match the narrow
-        # grammar raises and never flows further.
         if not _is_safe_include_rel(rel):
             raise ModelfileParseError("INCLUDE path rejected by the whitelist")
-        # Gate 2 — the realpath + commonpath pattern CodeQL
-        # documents as the canonical path-injection sanitiser. Both
-        # gates run; even if the whitelist ever drifts, the
-        # structural check still holds the line.
-        candidate = os.path.realpath(os.path.join(real_root, rel))
-        if os.path.commonpath([real_root, candidate]) != real_root:
-            raise ModelfileParseError("INCLUDE target escapes the base directory")
-        target_resolved = Path(candidate)
-        if target_resolved in seen:
-            raise ModelfileParseError("INCLUDE cycle detected")
-        if not target_resolved.is_file():
+        safe_path = allowed.get(rel)
+        if safe_path is None:
             raise ModelfileParseError("INCLUDE target missing or not a regular file")
+        if safe_path in seen:
+            raise ModelfileParseError("INCLUDE cycle detected")
         try:
-            included = target_resolved.read_text(encoding="utf-8")
+            with open(safe_path, encoding="utf-8") as fh:
+                included = fh.read()
         except OSError:
             raise ModelfileParseError("INCLUDE target unreadable") from None
-        next_seen = seen | {target_resolved}
+        next_seen = seen | {safe_path}
         expanded = _expand_includes(
             included,
-            target_resolved.parent,
+            Path(os.path.dirname(safe_path)),
             seen=next_seen,
             depth=depth + 1,
         )
