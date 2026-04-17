@@ -59,6 +59,21 @@ class ModelManifest:
     hash_algorithm: str = "sha256"  # Algorithm used for hash
     verified_at: str | None = None  # Last verification timestamp
 
+    # Modelfile / derived-model support (Phase 6 P2-1)
+    # ``system`` stores the per-model system prompt from a SYSTEM
+    # instruction; ``default_parameters`` captures Modelfile
+    # PARAMETER values (except num_ctx, which is lifted to
+    # context_length); ``adapter_paths`` holds ADAPTER entries;
+    # ``messages`` bakes in MESSAGE instructions for few-shot use;
+    # ``parent_name`` and ``parent_digest`` record the FROM source
+    # when this manifest was created via ``POST /api/create``.
+    system: str | None = None
+    default_parameters: dict = field(default_factory=dict)
+    adapter_paths: list[str] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
+    parent_name: str | None = None
+    parent_digest: str | None = None
+
     # Timestamps
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     last_used: str | None = None
