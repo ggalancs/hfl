@@ -74,7 +74,12 @@ tray = [
 # Model Context Protocol client/server (Phase 9+)
 mcp = ["mcp>=1.0.0"]
 
-all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp]"]
+# Apple Silicon native backend (Phase 13+ — V2 row 14)
+mlx = [
+    "mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0", "mypy>=1.10.0", "numpy>=1.24.0"]
 build = ["pyinstaller>=6.0"]
 
