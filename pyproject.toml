@@ -79,7 +79,23 @@ mlx = [
     "mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
-all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx]"]
+# Speech-to-text (Whisper) — Phase 16 / V2 row 16. Prefers
+# faster-whisper (CPU+GPU); openai-whisper stays as a fallback.
+stt = [
+    "faster-whisper>=1.0.0",
+]
+
+# Image generation (SDXL / FLUX) — Phase 16 / V2 row 17. Heavy: a
+# fresh install drags in ~2 GB of wheels. Opt-in only.
+imagegen = [
+    "diffusers>=0.30.0",
+    "torch>=2.5.0",
+    "safetensors>=0.4.0",
+    "Pillow>=10.0.0",
+    "accelerate>=1.2.0",
+]
+
+all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx,stt,imagegen]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0", "mypy>=1.10.0", "numpy>=1.24.0"]
 build = ["pyinstaller>=6.0"]
 

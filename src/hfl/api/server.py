@@ -46,6 +46,7 @@ from hfl.api.routes_copy import router as copy_router
 from hfl.api.routes_create import router as create_router
 from hfl.api.routes_embed import router as embed_router
 from hfl.api.routes_health import router as health_router
+from hfl.api.routes_images import router as images_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
@@ -53,6 +54,7 @@ from hfl.api.routes_ps import router as ps_router
 from hfl.api.routes_pull import router as pull_router
 from hfl.api.routes_show import router as show_router
 from hfl.api.routes_stop import router as stop_router
+from hfl.api.routes_transcribe import router as transcribe_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.routes_web import router as web_router
 from hfl.api.state import get_state
@@ -244,9 +246,11 @@ app.include_router(ps_router)
 app.include_router(pull_router)
 app.include_router(show_router)
 app.include_router(stop_router)
+app.include_router(transcribe_router)
 app.include_router(tts_router)
 app.include_router(web_router)
 app.include_router(health_router)
+app.include_router(images_router)
 app.include_router(metrics_router)
 
 
