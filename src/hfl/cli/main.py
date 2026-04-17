@@ -556,6 +556,40 @@ def _pull_selected_model(model) -> None:
         pass  # pull raises Exit on completion
 
 
+@app.command(name="cp")
+def cp(
+    source: str = typer.Argument(help="Existing model name"),
+    destination: str = typer.Argument(help="New name to create"),
+) -> None:
+    """Copy a model to a new name (Ollama-compatible).
+
+    Creates a new registry entry pointing at the same blob as the
+    source, so the operation is nearly free. ``hfl cp`` mirrors
+    ``ollama cp`` byte-for-byte.
+    """
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    if registry.get(source) is None:
+        console.print(f"[red]Source model not found:[/] {source}")
+        raise typer.Exit(1)
+    if registry.get(destination) is not None:
+        console.print(f"[red]Destination already exists:[/] {destination}")
+        raise typer.Exit(1)
+
+    try:
+        ok = registry.copy(source, destination)
+    except Exception as exc:
+        console.print(f"[red]Copy failed:[/] {exc}")
+        raise typer.Exit(1)
+
+    if ok:
+        console.print(f"[green]Copied[/] [cyan]{source}[/] → [cyan]{destination}[/]")
+    else:
+        console.print(f"[red]Copy failed[/] (concurrent write?): {source} → {destination}")
+        raise typer.Exit(1)
+
+
 @app.command(name="stop")
 def stop(
     model: str = typer.Argument(None, help="Model name to unload. Omit to unload all."),
