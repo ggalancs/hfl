@@ -94,6 +94,34 @@ def _tools_payload(req: ChatRequest) -> list[dict] | None:
     return [t.model_dump() for t in req.tools]
 
 
+def _merge_mcp_tools(existing: list[dict] | None) -> list[dict] | None:
+    """Merge tools exposed by connected MCP servers into ``existing``.
+
+    Returns ``existing`` untouched when no MCP tools are active, so
+    requests that opt out of tool calling (``tools=None``) continue
+    to suppress tool calls even if MCP servers are connected — the
+    caller's intent wins.
+    """
+    try:
+        from hfl.mcp.client import get_client
+    except Exception:
+        return existing
+    try:
+        mcp_tools = get_client().list_tools()
+    except Exception:
+        logger.exception("failed to read MCP tool list")
+        return existing
+    if not mcp_tools:
+        return existing
+    mcp_payload = [t.to_ollama_tool() for t in mcp_tools]
+    if existing is None:
+        # Caller didn't declare tools and hasn't opted out (opt-out
+        # is ``tools=[]``). We treat ``None`` as "no preference" and
+        # surface MCP tools.
+        return mcp_payload
+    return existing + mcp_payload
+
+
 def _baked_messages(manifest: "Any | None") -> list[ChatMessage]:
     """Return the manifest's Modelfile ``MESSAGE`` entries as ChatMessages.
 
@@ -397,6 +425,12 @@ async def api_chat(
     messages = _to_chat_messages(req)
     gen_config = _options_to_config(req.options)
     tools = _tools_payload(req)
+    # Phase 9 P0: fold MCP tools into the tools list so every
+    # connected external server is reachable from the model without
+    # the client having to declare them. Best-effort — if the MCP
+    # SDK isn't installed or no servers are connected, this is a
+    # no-op.
+    tools = _merge_mcp_tools(tools)
 
     # OLLAMA_PARITY_PLAN P0-5: structured-output constraint.
     if req.format is not None:

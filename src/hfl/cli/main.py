@@ -1169,6 +1169,69 @@ def create(
         raise typer.Exit(1)
 
 
+@app.command(name="mcp")
+def mcp(
+    action: str = typer.Argument(help="connect | disconnect | list"),
+    server_id: str = typer.Argument(None, help="Server id (for connect/disconnect)"),
+    target: str = typer.Argument(
+        None,
+        help="stdio://<cmd> <args> or sse://<url>",
+    ),
+) -> None:
+    """Manage Model Context Protocol (MCP) server connections.
+
+    Examples:
+
+        hfl mcp list
+        hfl mcp connect fs stdio://npx @modelcontextprotocol/server-filesystem /tmp
+        hfl mcp disconnect fs
+    """
+    import asyncio
+
+    from hfl.mcp.client import (
+        MCPClientUnavailableError,
+        MCPConnectionError,
+        get_client,
+    )
+
+    client = get_client()
+
+    async def _run() -> None:
+        if action == "list":
+            tools = client.list_tools()
+            if not tools:
+                console.print("[dim]No MCP servers connected.[/]")
+                return
+            for tool in tools:
+                console.print(f"[cyan]{tool.qualified_name}[/]  [dim]{tool.description}[/]")
+        elif action == "connect":
+            if not server_id or not target:
+                console.print("[red]Usage:[/] hfl mcp connect <id> stdio://... or sse://...")
+                raise typer.Exit(1)
+            tools = await client.connect(server_id, target)
+            console.print(f"[green]Connected[/] {server_id} ({len(tools)} tools)")
+            for tool in tools:
+                console.print(f"  [cyan]{tool.qualified_name}[/]")
+        elif action == "disconnect":
+            if not server_id:
+                console.print("[red]Usage:[/] hfl mcp disconnect <id>")
+                raise typer.Exit(1)
+            await client.disconnect(server_id)
+            console.print(f"[green]Disconnected[/] {server_id}")
+        else:
+            console.print(f"[red]Unknown action:[/] {action}")
+            raise typer.Exit(1)
+
+    try:
+        asyncio.run(_run())
+    except MCPClientUnavailableError as exc:
+        console.print(f"[red]MCP unavailable:[/] {exc}")
+        raise typer.Exit(1)
+    except MCPConnectionError as exc:
+        console.print(f"[red]MCP error:[/] {exc}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def version():
     """Show the hfl version."""
