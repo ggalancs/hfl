@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 
 if TYPE_CHECKING:
+    from datetime import datetime  # noqa: F401 — used in type comments / methods
+
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.models.manifest import ModelManifest
 
@@ -297,6 +299,35 @@ class ServerState:
     def is_tts_loaded(self) -> bool:
         """Check if TTS engine is loaded."""
         return self._tts_engine is not None and self._tts_engine.is_loaded
+
+    # -- keep_alive tracking -------------------------------------------
+    # Per-model keep-alive deadline, populated by request handlers
+    # (R15). ``None`` means "managed by the default idle timeout /
+    # never auto-expires". The storage is per-name rather than per
+    # engine so it survives model hot-swaps.
+    def keep_alive_deadline_for(self, model_name: str) -> "datetime | None":
+        """Return the keep-alive deadline for ``model_name`` (or None).
+
+        Consulted by ``/api/ps`` to emit the ``expires_at`` field.
+        """
+        from datetime import datetime as _dt
+
+        deadlines: dict[str, _dt] = getattr(self, "_keep_alive_deadlines", {})
+        return deadlines.get(model_name)
+
+    def set_keep_alive_deadline(self, model_name: str, deadline: "datetime | None") -> None:
+        """Set / clear the keep-alive deadline for ``model_name``.
+
+        Called from request handlers when they receive a ``keep_alive``
+        value (R15). Passing ``None`` clears the deadline.
+        """
+        from datetime import datetime as _dt
+
+        deadlines: dict[str, _dt] = self.__dict__.setdefault("_keep_alive_deadlines", {})
+        if deadline is None:
+            deadlines.pop(model_name, None)
+        else:
+            deadlines[model_name] = deadline
 
     # Cleanup
     async def cleanup(self) -> None:

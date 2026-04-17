@@ -556,6 +556,74 @@ def _pull_selected_model(model) -> None:
         pass  # pull raises Exit on completion
 
 
+@app.command(name="ps")
+def ps(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-H", help="Host where the HFL server is running"
+    ),
+    port: int = typer.Option(11434, "--port", "-p", help="Port where the HFL server is running"),
+) -> None:
+    """List models currently loaded in memory (Ollama-compatible).
+
+    Hits the server's ``/api/ps`` endpoint and renders a table with
+    NAME, ID, SIZE, PROCESSOR and UNTIL — matching the output layout
+    of ``ollama ps`` so scripts written against Ollama work unchanged.
+    """
+    import httpx
+    from rich.table import Table
+
+    url = f"http://{host}:{port}/api/ps"
+    try:
+        response = httpx.get(url, timeout=5.0)
+        response.raise_for_status()
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
+
+    data = response.json()
+    models = data.get("models", [])
+
+    if not models:
+        console.print("[dim]No models loaded. Send a request to /api/chat to load one.[/]")
+        return
+
+    table = Table(title="Running models")
+    table.add_column("NAME", style="cyan")
+    table.add_column("ID", style="dim")
+    table.add_column("SIZE", justify="right")
+    table.add_column("PROCESSOR")
+    table.add_column("UNTIL")
+
+    for m in models:
+        size_gb = (m.get("size") or 0) / (1024**3)
+        size_vram = m.get("size_vram") or 0
+        # Classify processor: any VRAM usage counts as GPU-resident;
+        # pure CPU engines report 0.
+        processor = "GPU" if size_vram > 0 and size_vram != (m.get("size") or 0) else "CPU"
+        if size_vram and size_vram == (m.get("size") or 0):
+            # Engine reported size_vram but we couldn't distinguish
+            # from weights size — assume GPU (conservative; llama.cpp
+            # with n_gpu_layers=-1 on Metal puts everything on GPU).
+            processor = "GPU"
+        expires_at = m.get("expires_at") or "—"
+        digest = (m.get("digest") or "")[:12]
+        table.add_row(
+            m.get("name", "?"),
+            digest,
+            f"{size_gb:.1f} GB" if size_gb >= 0.1 else f"{(m.get('size') or 0) / (1024**2):.0f} MB",
+            processor,
+            expires_at,
+        )
+
+    console.print(table)
+
+
 @app.command()
 def search(
     query: str = typer.Argument(help=t("commands.search.args.query")),
