@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-17
+
+**Phase 1 of OLLAMA_PARITY_PLAN is complete.** HFL now speaks the
+operational Ollama contract that Open WebUI, ollama-python,
+LangChain and LibreChat rely on. A client pointing its
+``OLLAMA_HOST`` at HFL gets the same endpoints, the same JSON
+shapes, and the same CLI verbs as a real Ollama server for every
+management operation (list, show, ps, pull, stop, keep_alive).
+
+Six new REST endpoints + four new CLI commands, 78 new tests, zero
+regressions on the 2137-test baseline from 0.3.5.
+
+### Added — REST endpoints
+
+- **``GET /api/ps``** — list running models with
+  ``name``/``model``/``size``/``digest``/``details``/``expires_at``/``size_vram``.
+  Reflects the server's resident LLM + TTS in the Ollama shape.
+  Digest prefers ``manifest.file_hash`` and falls back to a
+  deterministic hash over identity so the field is never empty.
+  ``size_vram`` is sourced from ``engine.memory_used_bytes()`` when
+  the backend exposes it, else from the manifest's on-disk size.
+- **``POST /api/show``** — full Ollama-parity envelope:
+  ``modelfile`` (rendered Modelfile text), ``parameters`` (multiline
+  key/value), ``template`` (chat template), ``details``,
+  ``model_info`` with GGUF-style keys (``general.architecture``,
+  ``<arch>.context_length``, …), ``capabilities`` and ``license``.
+  Unknown model → 404 ``ModelNotFoundError``.
+- **``POST /api/pull``** — real endpoint (previously only the CLI
+  had this). NDJSON progress stream matching Ollama's sequence:
+  ``pulling manifest`` → ``downloading`` (with heartbeats) →
+  ``verifying sha256 digest`` → ``writing manifest`` →
+  ``success``. ``stream=false`` returns a single JSON envelope;
+  errors collapse to ``{"status":"error","error":"..."}``.
+- **``POST /api/stop``** — graceful unload by name, or for all
+  resident engines when ``model`` is omitted. Unload runs in a
+  background task so the HTTP response is not gated on teardown.
+  Idempotent (second stop returns ``{"status":"not_loaded"}``);
+  clears the keep_alive deadline as a side effect.
+
+### Added — request fields
+
+- ``keep_alive`` on ``/api/generate`` and ``/api/chat``. Accepts
+  every Ollama-compatible form: ``"5m"``, ``"30s"``, ``"1h30m"``,
+  raw numbers (``10`` / ``10.0``), ``0`` (unload after this request),
+  ``-1`` (keep loaded indefinitely), ``null`` (default). Malformed
+  values fail fast with 400 before the dispatcher is engaged.
+  ``keep_alive=0`` schedules a background unload via
+  ``state.cleanup`` so the event loop stays responsive.
+  ``/api/ps``'s ``expires_at`` field (R13) lights up from the
+  resulting deadline.
+
+### Added — CLI
+
+- ``hfl ps`` — NAME / ID / SIZE / PROCESSOR / UNTIL table,
+  column-for-column parity with ``ollama ps``.
+- ``hfl show <model>`` — summary panel with architecture,
+  parameters, quantization, format, context, size, capabilities,
+  license. Flags ``--modelfile`` / ``--parameters`` / ``--template``
+  / ``--license`` scope the output to a single section, like
+  ``ollama show --<section>``.
+- ``hfl stop [model]`` — unload one model, or everything when the
+  argument is omitted. Connects to the running server over HTTP;
+  helpful error when the server is not up.
+
+### Added — capability detector
+
+- ``src/hfl/models/capabilities.py`` maps a manifest to Ollama's
+  taxonomy: ``completion``, ``tools``, ``insert``, ``vision``,
+  ``embedding``, ``thinking``. Parametrised tests cover 30+ real
+  model names across the Qwen, Llama, Mistral, Gemma (2/3/4),
+  Mixtral, LLaVA, Gemma-3 multimodal, Pixtral, Nomic, BGE, Jina,
+  E5, DeepSeek-R1 and GPT-OSS families.
+
+### Added — Modelfile renderer
+
+- ``src/hfl/converter/modelfile.py`` compiles a ``ModelManifest`` back
+  to a deterministic Modelfile string (``FROM`` / ``TEMPLATE`` /
+  ``SYSTEM`` / ``PARAMETER`` / ``ADAPTER`` / ``LICENSE``). Byte-stable
+  output so snapshot tests don't flake; handles stop-string escaping
+  for quotes and backslashes. Consumed by ``/api/show`` and
+  ``hfl show --modelfile``.
+
+### Added — duration parser
+
+- ``src/hfl/utils/duration.py`` implements Go-style duration parsing
+  (subset that Ollama accepts): hour/minute/second/ms/us/µs/ns
+  components, plain numbers as seconds, sentinels for "never expire"
+  (-1) and "unload immediately" (0). Rejects booleans, "1d", "5minutes"
+  and negative durations other than -1 — every one of those would be
+  a silent behaviour-divergence from Ollama.
+
+### Internal
+
+- ``ServerState.keep_alive_deadline_for()`` and
+  ``set_keep_alive_deadline()`` — per-model deadline storage keyed by
+  name so hot-swaps preserve the field.
+- All new routes wired via ``server.py`` with the existing auth +
+  rate-limit + CORS + body-size middleware stack untouched.
+
+### Metrics
+
+| | 0.3.5 | 0.4.0 |
+|-|-|-|
+| Tests | 2137 | 2283 (+146) |
+| Coverage | 89.01% | ~89% |
+| Ollama REST endpoints covered | 4/16 | 10/16 |
+| Ollama CLI commands covered | 5/11 | 8/11 |
+
+Remaining Ollama-parity items (P0-1 embeddings, P0-5 structured
+outputs, P0-6 vision, Modelfile ingestion, blobs, copy) are tracked
+in ``OLLAMA_PARITY_PLAN.md`` and land in subsequent 0.4.x / 0.5.x
+releases.
+
 ## [0.3.5] - 2026-04-17
 
 Major internal overhaul closing the full backlog of the 2026-04-15
