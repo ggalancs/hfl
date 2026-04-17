@@ -14,11 +14,17 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException
-
 from hfl.api.state import get_state
 from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.selector import select_engine, select_tts_engine
+from hfl.exceptions import (
+    ModelNotFoundError,
+    ModelNotReadyError,
+    ModelTypeMismatchError,
+)
+from hfl.exceptions import (
+    ValidationError as APIValidationError,
+)
 from hfl.models.registry import get_registry
 from hfl.validators import ValidationError, validate_model_name
 
@@ -42,40 +48,35 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
         Tuple of (InferenceEngine, ModelManifest)
 
     Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
+        APIValidationError: For malformed model names (400).
+        ModelNotFoundError: If the model is not in the registry (404).
+        ModelTypeMismatchError: If a non-LLM model was requested (400).
+        ModelNotReadyError: If the engine slot exists but is None (503).
     """
     # Validate input
     try:
         validate_model_name(model_name)
     except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
+        raise APIValidationError(str(e))
 
     state = get_state()
 
     # Fast path - already loaded
     if state.current_model and state.current_model.name == model_name:
         if state.engine is None:
-            raise HTTPException(503, detail="Model engine not available")
+            raise ModelNotReadyError(model_name)
         return state.engine, state.current_model
 
     # Lookup in registry
     manifest = get_registry().get(model_name)
     if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
+        raise ModelNotFoundError(model_name)
 
     # Verify model type
     model_path = Path(manifest.local_path)
     model_type = detect_model_type(model_path)
     if model_type != ModelType.LLM:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "llm",
-                "got": model_type.value,
-            },
-        )
+        raise ModelTypeMismatchError(model_name, expected="llm", got=model_type.value)
 
     # Load model in thread pool to avoid blocking event loop
     # context_size_override > 0 means explicit user override via --ctx flag
@@ -106,37 +107,32 @@ async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
         Tuple of (AudioEngine, ModelManifest)
 
     Raises:
-        HTTPException: 400 for validation errors, 404 if model not found
+        APIValidationError: For malformed model names (400).
+        ModelNotFoundError: If the model is not in the registry (404).
+        ModelTypeMismatchError: If a non-TTS model was requested (400).
+        ModelNotReadyError: If the TTS engine slot exists but is None (503).
     """
     try:
         validate_model_name(model_name)
     except ValidationError as e:
-        raise HTTPException(400, detail=str(e))
+        raise APIValidationError(str(e))
 
     state = get_state()
 
     # Fast path
     if state.current_tts_model and state.current_tts_model.name == model_name:
         if state.tts_engine is None:
-            raise HTTPException(503, detail="TTS engine not available")
+            raise ModelNotReadyError(model_name)
         return state.tts_engine, state.current_tts_model
 
     manifest = get_registry().get(model_name)
     if not manifest:
-        raise HTTPException(404, detail=f"Model not found: {model_name}")
+        raise ModelNotFoundError(model_name)
 
     model_path = Path(manifest.local_path)
     model_type = detect_model_type(model_path)
     if model_type != ModelType.TTS:
-        raise HTTPException(
-            400,
-            detail={
-                "error": "Model type mismatch",
-                "code": "MODEL_TYPE_MISMATCH",
-                "expected": "tts",
-                "got": model_type.value,
-            },
-        )
+        raise ModelTypeMismatchError(model_name, expected="tts", got=model_type.value)
 
     # Load model in thread pool
     engine = select_tts_engine(model_path)

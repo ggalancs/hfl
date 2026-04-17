@@ -30,6 +30,8 @@ class HFLError(Exception):
 class ModelNotFoundError(HFLError):
     """The requested model was not found in the local registry."""
 
+    status_code = 404
+
     def __init__(self, model_name: str):
         super().__init__(
             f"Model not found: {model_name}",
@@ -274,13 +276,33 @@ class GenerationTimeoutError(APIError):
 
     status_code = 504
 
-    def __init__(self, timeout_seconds: float):
+    def __init__(self, timeout_seconds: float, operation: str = "generation"):
         super().__init__(
-            "Generation timed out",
+            f"{operation} timed out",
             f"Request exceeded {timeout_seconds}s timeout."
             " Try a shorter prompt or lower max_tokens.",
         )
         self.timeout_seconds = timeout_seconds
+        self.operation = operation
+
+
+class ModelTypeMismatchError(APIError):
+    """Requested model is the wrong type for the endpoint.
+
+    E.g. a TTS endpoint was asked to load an LLM, or vice-versa.
+    Maps to HTTP 400 through the global exception handler.
+    """
+
+    status_code = 400
+
+    def __init__(self, model_name: str, expected: str, got: str):
+        super().__init__(
+            f"Model '{model_name}' is not a {expected} model",
+            f"Detected model type: {got}. Use a {expected}-compatible model.",
+        )
+        self.model_name = model_name
+        self.expected = expected
+        self.got = got
 
 
 # --- Engine-specific Errors ---

@@ -6,11 +6,18 @@ from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
 
 from hfl.api.model_loader import load_llm, load_llm_sync, load_tts
 from hfl.api.state import reset_state
 from hfl.converter.formats import ModelType
+from hfl.exceptions import (
+    ModelNotFoundError,
+    ModelNotReadyError,
+    ModelTypeMismatchError,
+)
+from hfl.exceptions import (
+    ValidationError as APIValidationError,
+)
 
 
 @dataclass
@@ -78,8 +85,8 @@ class TestLoadLLM:
 
     @pytest.mark.asyncio
     async def test_invalid_model_name_raises_400(self):
-        """Invalid model name raises HTTPException 400."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Invalid model name raises ValidationError (maps to 400)."""
+        with pytest.raises(APIValidationError) as exc_info:
             await load_llm("")
 
         assert exc_info.value.status_code == 400
@@ -104,7 +111,7 @@ class TestLoadLLM:
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.get_state")
     async def test_fast_path_engine_none_raises_503(self, mock_get_state):
-        """Fast path with engine None raises 503."""
+        """Fast path with engine None raises ModelNotReadyError (503)."""
         mock_manifest = MockManifest("test-model")
 
         mock_state = MagicMock()
@@ -112,7 +119,7 @@ class TestLoadLLM:
         mock_state.engine = None
         mock_get_state.return_value = mock_state
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelNotReadyError) as exc_info:
             await load_llm("test-model")
 
         assert exc_info.value.status_code == 503
@@ -121,7 +128,7 @@ class TestLoadLLM:
     @patch("hfl.api.model_loader.get_state")
     @patch("hfl.api.model_loader.get_registry")
     async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
-        """Model not in registry raises HTTPException 404."""
+        """Model not in registry raises ModelNotFoundError (404)."""
         mock_state = MagicMock()
         mock_state.current_model = None
         mock_get_state.return_value = mock_state
@@ -130,11 +137,12 @@ class TestLoadLLM:
         mock_registry.get.return_value = None
         mock_get_registry.return_value = mock_registry
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelNotFoundError) as exc_info:
             await load_llm("nonexistent-model")
 
         assert exc_info.value.status_code == 404
-        assert "Model not found" in exc_info.value.detail
+        assert "Model not found" in exc_info.value.message
+        assert exc_info.value.model_name == "nonexistent-model"
 
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.get_state")
@@ -146,7 +154,7 @@ class TestLoadLLM:
         mock_get_registry,
         mock_get_state,
     ):
-        """Wrong model type raises HTTPException 400."""
+        """Wrong model type raises ModelTypeMismatchError (400)."""
         mock_state = MagicMock()
         mock_state.current_model = None
         mock_get_state.return_value = mock_state
@@ -158,11 +166,12 @@ class TestLoadLLM:
 
         mock_detect.return_value = ModelType.TTS  # Wrong type for LLM
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelTypeMismatchError) as exc_info:
             await load_llm("test-model")
 
         assert exc_info.value.status_code == 400
-        assert exc_info.value.detail["code"] == "MODEL_TYPE_MISMATCH"
+        assert exc_info.value.expected == "llm"
+        assert exc_info.value.got == "tts"
 
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.asyncio.to_thread")
@@ -323,8 +332,8 @@ class TestLoadTTS:
 
     @pytest.mark.asyncio
     async def test_invalid_model_name_raises_400(self):
-        """Invalid model name raises HTTPException 400."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Invalid model name raises ValidationError (maps to 400)."""
+        with pytest.raises(APIValidationError) as exc_info:
             await load_tts("")
 
         assert exc_info.value.status_code == 400
@@ -349,7 +358,7 @@ class TestLoadTTS:
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.get_state")
     async def test_fast_path_engine_none_raises_503(self, mock_get_state):
-        """Fast path with tts_engine None raises 503."""
+        """Fast path with tts_engine None raises ModelNotReadyError (503)."""
         mock_manifest = MockManifest("test-tts")
 
         mock_state = MagicMock()
@@ -357,7 +366,7 @@ class TestLoadTTS:
         mock_state.tts_engine = None
         mock_get_state.return_value = mock_state
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelNotReadyError) as exc_info:
             await load_tts("test-tts")
 
         assert exc_info.value.status_code == 503
@@ -366,7 +375,7 @@ class TestLoadTTS:
     @patch("hfl.api.model_loader.get_state")
     @patch("hfl.api.model_loader.get_registry")
     async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
-        """Model not in registry raises HTTPException 404."""
+        """Model not in registry raises ModelNotFoundError (404)."""
         mock_state = MagicMock()
         mock_state.current_tts_model = None
         mock_get_state.return_value = mock_state
@@ -375,7 +384,7 @@ class TestLoadTTS:
         mock_registry.get.return_value = None
         mock_get_registry.return_value = mock_registry
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelNotFoundError) as exc_info:
             await load_tts("nonexistent-tts")
 
         assert exc_info.value.status_code == 404
@@ -390,7 +399,7 @@ class TestLoadTTS:
         mock_get_registry,
         mock_get_state,
     ):
-        """Wrong model type raises HTTPException 400."""
+        """Wrong model type raises ModelTypeMismatchError (400)."""
         mock_state = MagicMock()
         mock_state.current_tts_model = None
         mock_get_state.return_value = mock_state
@@ -402,12 +411,12 @@ class TestLoadTTS:
 
         mock_detect.return_value = ModelType.LLM  # Wrong type for TTS
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ModelTypeMismatchError) as exc_info:
             await load_tts("test-model")
 
         assert exc_info.value.status_code == 400
-        assert exc_info.value.detail["code"] == "MODEL_TYPE_MISMATCH"
-        assert exc_info.value.detail["expected"] == "tts"
+        assert exc_info.value.expected == "tts"
+        assert exc_info.value.got == "llm"
 
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.asyncio.to_thread")

@@ -61,9 +61,11 @@ class TestExceptionHandlers:
 
     def test_model_not_found_returns_correct_status(self, client):
         resp = client.get("/test-not-found")
-        # ModelNotFoundError doesn't have status_code attr, falls back to 500
-        assert resp.status_code == 500
+        # ModelNotFoundError now carries status_code=404 so the
+        # global handler emits the proper HTTP status.
+        assert resp.status_code == 404
         assert "Model not found" in resp.json()["error"]
+        assert resp.json()["code"] == "ModelNotFoundError"
 
     def test_not_loaded_returns_500(self, client):
         resp = client.get("/test-not-loaded")

@@ -189,7 +189,12 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     if not options:
         return GenerationConfig()
 
-    # Validate types at API boundary
+    # Validate types at API boundary. Raising the domain
+    # ``ValidationError`` (APIError, status=400) lets the global
+    # exception handler produce the standard error envelope instead of
+    # each route improvising its own.
+    from hfl.exceptions import ValidationError as APIValidationError
+
     def _validate_float(
         key: str,
         val: Any,
@@ -197,17 +202,17 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
         max_val: float = float("inf"),
     ) -> float:
         if not isinstance(val, (int, float)):
-            raise HTTPException(400, detail=f"'{key}' must be a number, got {type(val).__name__}")
+            raise APIValidationError(f"'{key}' must be a number, got {type(val).__name__}")
         fval = float(val)
         if not min_val <= fval <= max_val:
-            raise HTTPException(400, detail=f"'{key}' must be between {min_val} and {max_val}")
+            raise APIValidationError(f"'{key}' must be between {min_val} and {max_val}")
         return fval
 
     def _validate_int(key: str, val: Any, min_val: int = 0) -> int:
         if not isinstance(val, int):
-            raise HTTPException(400, detail=f"'{key}' must be an integer, got {type(val).__name__}")
+            raise APIValidationError(f"'{key}' must be an integer, got {type(val).__name__}")
         if val < min_val:
-            raise HTTPException(400, detail=f"'{key}' must be >= {min_val}")
+            raise APIValidationError(f"'{key}' must be >= {min_val}")
         return val
 
     config = GenerationConfig()
@@ -262,18 +267,20 @@ def request_to_config(
         else:
             stop_list = list(stop)
 
+    from hfl.exceptions import ValidationError as APIValidationError
+
     config = GenerationConfig()
     if temperature is not None:
         if not isinstance(temperature, (int, float)) or not 0.0 <= temperature <= 2.0:
-            raise HTTPException(400, detail="temperature must be between 0.0 and 2.0")
+            raise APIValidationError("temperature must be between 0.0 and 2.0")
         config.temperature = float(temperature)
     if top_p is not None:
         if not isinstance(top_p, (int, float)) or not 0.0 <= top_p <= 1.0:
-            raise HTTPException(400, detail="top_p must be between 0.0 and 1.0")
+            raise APIValidationError("top_p must be between 0.0 and 1.0")
         config.top_p = float(top_p)
     if max_tokens is not None:
         if not isinstance(max_tokens, int) or max_tokens < 1:
-            raise HTTPException(400, detail="max_tokens must be a positive integer")
+            raise APIValidationError("max_tokens must be a positive integer")
         config.max_tokens = max_tokens
     if stop_list is not None:
         config.stop = stop_list

@@ -112,7 +112,10 @@ class TestOpenAITTSEndpoint:
             )
 
         assert response.status_code == 400
-        assert "not a TTS model" in response.json()["detail"]
+        # Envelope after R10 migration: {"error": "...", "code": "ModelTypeMismatchError"}
+        body = response.json()
+        assert body.get("code") == "ModelTypeMismatchError"
+        assert "not a tts model" in body["error"].lower()
 
     def test_speech_with_loaded_model(self, client_with_tts_model):
         """Should synthesize audio when model is loaded."""
