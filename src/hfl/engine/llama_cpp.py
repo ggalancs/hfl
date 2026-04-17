@@ -803,6 +803,36 @@ class LlamaCppEngine(InferenceEngine):
                     flash_attn=flash_attn,
                     chat_format=chat_format,
                 )
+                # Phase 11 P1: KV cache quantisation. Maps
+                # ``"q4_0"`` / ``"q8_0"`` strings to llama-cpp's
+                # ``type_k`` / ``type_v`` integer enum. ``"f16"`` is
+                # the default and leaves the fields unset so the
+                # library picks its own default.
+                kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
+                if kv_type and kv_type != "f16":
+                    try:
+                        from llama_cpp import llama_cpp as _lcpp  # type: ignore
+                    except Exception:
+                        _lcpp = None
+                    type_map = {}
+                    if _lcpp is not None:
+                        type_map = {
+                            "q4_0": getattr(_lcpp, "GGML_TYPE_Q4_0", None),
+                            "q8_0": getattr(_lcpp, "GGML_TYPE_Q8_0", None),
+                            "f32": getattr(_lcpp, "GGML_TYPE_F32", None),
+                            "f16": getattr(_lcpp, "GGML_TYPE_F16", None),
+                        }
+                    code = type_map.get(kv_type.lower())
+                    if code is not None:
+                        llama_kwargs["type_k"] = code
+                        llama_kwargs["type_v"] = code
+                        logger.info("KV cache quantised to %s", kv_type)
+                    else:
+                        logger.warning(
+                            "kv_cache_type=%r unsupported by this llama-cpp build, "
+                            "falling back to f16",
+                            kv_type,
+                        )
                 if chat_handler is not None:
                     # When a multimodal chat_handler is supplied,
                     # ``chat_format`` must be None so llama-cpp-python

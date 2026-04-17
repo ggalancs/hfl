@@ -139,6 +139,14 @@ class HFLConfig:
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
     default_threads: int = 0  # 0 = auto-detect
 
+    # KV cache dtype (Phase 11 P1 — OLLAMA_PARITY_PLAN_V2 row 9).
+    # Quantising the KV cache halves / quarters its VRAM footprint
+    # at the cost of some accuracy, mirroring Ollama's
+    # ``OLLAMA_KV_CACHE_TYPE``. One of: ``"f16"`` (default, no
+    # quantisation), ``"q8_0"`` (half VRAM, negligible quality
+    # loss), ``"q4_0"`` (quarter VRAM, visible on small models).
+    kv_cache_type: str = field(default_factory=lambda: os.environ.get("HFL_KV_CACHE_TYPE", "f16"))
+
     # TTS defaults
     default_tts_sample_rate: int = 22050
     default_tts_format: str = "wav"  # wav, mp3, ogg
