@@ -810,6 +810,23 @@ class LlamaCppEngine(InferenceEngine):
                     # template.
                     llama_kwargs["chat_handler"] = chat_handler
                     llama_kwargs.pop("chat_format", None)
+                # Phase 8 P3-2: LoRA adapters. llama-cpp-python accepts
+                # a single ``lora_path`` at load time; we honour the
+                # first path the Modelfile declared. Stacking more
+                # than one requires a post-load ``apply_lora_from_file``
+                # call which landed in llama-cpp 0.3+. For portability
+                # we only wire the first path here and log the rest.
+                lora_paths = kwargs.get("lora_paths") or []
+                if lora_paths:
+                    primary = lora_paths[0]
+                    logger.info("Loading LoRA adapter: %s", primary)
+                    llama_kwargs["lora_path"] = primary
+                    if len(lora_paths) > 1:
+                        logger.warning(
+                            "%d additional LoRA adapter(s) ignored — "
+                            "llama-cpp's ``lora_path`` accepts only one",
+                            len(lora_paths) - 1,
+                        )
                 self._model = Llama(**llama_kwargs)
             self._model_path = model_path
             self._architecture = architecture

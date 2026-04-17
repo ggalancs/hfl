@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hfl.api.state import get_state
 from hfl.converter.formats import ModelType, detect_model_type
@@ -174,6 +174,13 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
         raise ValueError(f"Expected LLM model, got {model_type.value}")
 
     engine = select_engine(model_path)
-    engine.load(manifest.local_path, n_ctx=manifest.context_length)
+    # Phase 8 P3-2: pass LoRA adapter paths from the manifest
+    # (populated by ``POST /api/create`` when a Modelfile declared
+    # ``ADAPTER`` instructions). Engines that don't support LoRA
+    # ignore the kwarg.
+    load_kwargs: dict[str, Any] = {"n_ctx": manifest.context_length}
+    if getattr(manifest, "adapter_paths", None):
+        load_kwargs["lora_paths"] = list(manifest.adapter_paths)
+    engine.load(manifest.local_path, **load_kwargs)
 
     return engine, manifest
