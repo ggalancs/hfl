@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-17
+
+**Phase 7 of OLLAMA_PARITY_PLAN — polish.** Two small but
+long-requested items land in the same release.
+
+### Added — legacy ``context`` token array (P2-4)
+
+- ``GenerationConfig.keep_context`` (opt-in via ``options.keep_context=true``).
+- ``GenerationResult.context_tokens: list[int] | None``.
+- Non-streaming ``/api/generate`` surfaces ``context`` in the
+  response envelope when requested. Lets clients that pre-date
+  role-tagged chat loops feed the encoded tokens back on the next
+  call for multi-turn continuation.
+- Default off — keeping the array in memory costs RAM most clients
+  don't need.
+
+### Added — ``REQUIRES`` version gating (P3-3)
+
+- New module ``hfl.converter.requires_check``:
+  - ``parse_requires(spec)`` accepts both bare versions (``"0.6.0"``
+    → ``">=0.6.0"``) and PEP 440 specifier sets
+    (``">=0.6.0,<1.0"``).
+  - ``check_requires(spec, current)`` raises
+    ``RequiresNotSatisfiedError`` when the running HFL fails the
+    Modelfile's requirement.
+- ``POST /api/create`` runs the check immediately after Modelfile
+  parsing; no FROM resolution, no registry writes, no side effects
+  when the gate fails. Streaming and non-streaming responses both
+  surface the failure cleanly (NDJSON error event / 400 envelope).
+
+### Security — CodeQL baseline cleared
+
+Phase 6's PR surfaced 10 CodeQL alerts (4 net-new + 6 pre-existing).
+All are now resolved:
+
+- ``py/polynomial-redos`` in ``hfl/utils/duration.py``: rewrote the
+  Go-duration regex using explicit alternation (no backtracking) plus
+  a 128-character input cap as a second line of defence.
+- ``py/stack-trace-exposure`` × 9 across ``routes_create.py``,
+  ``routes_native.py``, ``routes_openai.py``, ``routes_anthropic.py``:
+  every user-facing error path now emits a curated generic message
+  and logs the traceback server-side via ``logger.exception``.
+
+### Test & CI
+
+- Total suite: 2578 passing, 28 skipped. Coverage ≈ 88%.
+- All fixes shipped through ``feat/ollama-parity-0.4.x`` with zero
+  regression.
+
+---
+
 ## [0.6.0] - 2026-04-17
 
 **Phase 6 of OLLAMA_PARITY_PLAN — full Modelfile support.** The
