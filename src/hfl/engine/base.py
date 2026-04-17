@@ -103,6 +103,11 @@ class GenerationConfig:
     # tokens per position alongside the sampled one. Engines without
     # logprob support silently ignore the knob.
     logprobs: int = 0
+    # Speculative decoding (Phase 15 P2 — V2 row 11). Path or
+    # registry name of a smaller "draft" model. Empty / None
+    # disables speculation (the default). Engines that don't expose
+    # the knob silently ignore it.
+    draft_model: str | None = None
 
 
 @dataclass

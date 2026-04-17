@@ -1266,6 +1266,21 @@ def mcp(
 
 
 @app.command()
+def doctor():
+    """Diagnose the runtime environment (Phase 15 P2 — V2 row 15).
+
+    Prints detected accelerators (NVIDIA / Metal / ROCm), which HFL
+    extras are installed (llama-cpp / transformers / vllm / mlx-lm),
+    VRAM probe result + recommended ``num_ctx``, and actionable
+    follow-up suggestions.
+    """
+    from hfl.cli.commands.doctor import build_report, format_report
+
+    report = build_report()
+    console.print(format_report(report))
+
+
+@app.command()
 def version():
     """Show the hfl version."""
     from hfl import __version__
