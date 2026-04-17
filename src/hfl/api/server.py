@@ -53,6 +53,7 @@ from hfl.api.routes_pull import router as pull_router
 from hfl.api.routes_show import router as show_router
 from hfl.api.routes_stop import router as stop_router
 from hfl.api.routes_tts import router as tts_router
+from hfl.api.routes_web import router as web_router
 from hfl.api.state import get_state
 from hfl.config import config
 
@@ -242,6 +243,7 @@ app.include_router(pull_router)
 app.include_router(show_router)
 app.include_router(stop_router)
 app.include_router(tts_router)
+app.include_router(web_router)
 app.include_router(health_router)
 app.include_router(metrics_router)
 
