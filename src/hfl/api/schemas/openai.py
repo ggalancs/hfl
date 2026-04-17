@@ -5,15 +5,58 @@
 These schemas match the OpenAI API specification for drop-in compatibility.
 """
 
+from typing import Literal, Union
+
 from pydantic import BaseModel, Field, field_validator
+
+# ----------------------------------------------------------------------
+# Vision / multimodal content parts (Phase 4, P0-6)
+# ----------------------------------------------------------------------
+
+
+class ImageUrl(BaseModel):
+    """Inner object of an OpenAI ``image_url`` content part.
+
+    ``url`` accepts either an http(s):// URL (NOT supported — HFL is
+    local-first and won't fetch remote assets) or a base64 data URI
+    (``data:image/...;base64,...``). Only the data-URI form is
+    honoured; http URLs are rejected at the route boundary.
+
+    ``detail`` mirrors OpenAI's hint and is accepted for
+    compatibility, though HFL currently ignores it (the vision
+    backends run their own resampling).
+    """
+
+    url: str = Field(..., min_length=1, max_length=30_000_000)
+    detail: Literal["low", "high", "auto"] = Field(default="auto")
+
+
+class TextContentPart(BaseModel):
+    """OpenAI text content part — the plain-text variant."""
+
+    type: Literal["text"] = "text"
+    text: str = Field(..., max_length=2_000_000)
+
+
+class ImageContentPart(BaseModel):
+    """OpenAI image content part."""
+
+    type: Literal["image_url"] = "image_url"
+    image_url: ImageUrl
+
+
+ContentPart = Union[TextContentPart, ImageContentPart]
 
 
 class ChatCompletionMessage(BaseModel):
     """A single message in a chat conversation.
 
     Attributes:
-        role: The role of the message author (system, user, assistant)
-        content: The content of the message
+        role: The role of the message author (system, user, assistant).
+        content: Either a plain string (text-only, classical chat) or
+            a list of content parts (vision requests, OpenAI-style).
+            The bounded-length invariant is the same in both cases:
+            total textual length ≤ 2_000_000 characters.
     """
 
     role: str = Field(
@@ -23,11 +66,33 @@ class ChatCompletionMessage(BaseModel):
         description="Role of the message author",
         examples=["user", "assistant", "system"],
     )
-    content: str = Field(
+    content: str | list[ContentPart] = Field(
         ...,
-        max_length=2_000_000,
-        description="Content of the message",
+        description="Text-only content OR a list of text/image parts (vision).",
     )
+
+    @field_validator("content")
+    @classmethod
+    def _bound_content(cls, v: str | list[ContentPart]) -> str | list[ContentPart]:
+        """Enforce size caps on both the string and list shapes."""
+        if isinstance(v, str):
+            if len(v) > 2_000_000:
+                raise ValueError("content string exceeds 2_000_000 characters")
+            return v
+        if not isinstance(v, list) or not v:
+            raise ValueError("content list must be non-empty")
+        # Cap the number of parts to prevent boundless message bloat.
+        if len(v) > 64:
+            raise ValueError("content list must have at most 64 parts")
+        # Sum only text lengths toward the 2M cap; images are bounded
+        # separately by the image validator.
+        total_text = 0
+        for part in v:
+            if isinstance(part, TextContentPart):
+                total_text += len(part.text)
+        if total_text > 2_000_000:
+            raise ValueError("total text across content parts exceeds 2_000_000 characters")
+        return v
 
 
 class ChatCompletionRequest(BaseModel):
@@ -107,8 +172,22 @@ class ChatCompletionRequest(BaseModel):
     @field_validator("messages")
     @classmethod
     def validate_total_content(cls, v: list[ChatCompletionMessage]) -> list[ChatCompletionMessage]:
-        """Validate total content length across all messages."""
-        total = sum(len(m.content) for m in v)
+        """Validate total textual content length across all messages.
+
+        With Phase 4's multimodal content ``list[ContentPart]`` shape,
+        we sum only the text parts — image parts are bounded by the
+        image validator, not by this character cap.
+        """
+        total = 0
+        for m in v:
+            if isinstance(m.content, str):
+                total += len(m.content)
+            else:
+                for part in m.content:
+                    # isinstance check would need TextContentPart
+                    # import; model_dump lookup avoids the cycle.
+                    if isinstance(part, TextContentPart):
+                        total += len(part.text)
         if total > 2_000_000:
             raise ValueError("Total message content exceeds 2M characters")
         return v

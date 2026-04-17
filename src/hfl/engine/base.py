@@ -30,6 +30,14 @@ class ChatMessage:
     tool_calls: list[dict] | None = None
     name: str | None = None
     tool_call_id: str | None = None
+    # Vision / multimodal extension (Phase 4, P0-6).
+    # Each entry is raw, already-decoded image bytes (PNG / JPEG /
+    # WEBP / GIF). The router decodes base64 / data-URIs and runs
+    # ``image_validator.validate_image`` before populating this
+    # list, so engines can assume every entry is a bounded, sniffed
+    # raster image. ``None`` means "text-only message" — the vast
+    # majority of messages.
+    images: list[bytes] | None = None
 
 
 @dataclass

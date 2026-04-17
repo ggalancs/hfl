@@ -60,8 +60,12 @@ def _to_chat_messages(req: ChatRequest) -> list[ChatMessage]:
     """Convert an Ollama request's messages into engine-level ChatMessages.
 
     Preserves ``tool_calls``, ``name`` and ``tool_call_id`` so multi-turn
-    agent loops (spec rule C6) propagate back to the model.
+    agent loops (spec rule C6) propagate back to the model. Also
+    decodes + validates ``images`` (Phase 4, P0-6) so the engine
+    sees raw bytes.
     """
+    from hfl.api.vision import decode_ollama_images
+
     out: list[ChatMessage] = []
     for m in req.messages:
         tool_calls = None
@@ -74,6 +78,7 @@ def _to_chat_messages(req: ChatRequest) -> list[ChatMessage]:
                 tool_calls=tool_calls,
                 name=m.name,
                 tool_call_id=m.tool_call_id,
+                images=decode_ollama_images(m.images),
             )
         )
     return out

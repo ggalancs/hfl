@@ -78,6 +78,19 @@ class OllamaChatMessage(BaseModel):
         max_length=256,
         description="Optional id linking a tool result to its call",
     )
+    # Vision / multimodal — Phase 4, P0-6. Each entry is either a
+    # bare base64 string OR a ``data:image/...;base64,...`` URI.
+    # The router decodes + validates via hfl.api.image_validator
+    # before forwarding to the engine.
+    images: list[str] | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "Base64-encoded images attached to this message. Accepted "
+            "formats: PNG, JPEG, WEBP, GIF. Max 32 per message, each "
+            "≤20 MiB, ≤4096x4096 pixels."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_role_fields(self) -> "OllamaChatMessage":

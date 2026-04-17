@@ -84,7 +84,16 @@ async def chat_completions(
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
 
-    messages = [ChatMessage(role=m.role, content=m.content) for m in req.messages]
+    # Phase 4 P0-6: multimodal content. OpenAI allows
+    # ``content: list[ContentPart]`` with text + image parts; HFL's
+    # engine sees text + optional images bytes list. The split is
+    # done at the route boundary so engines stay simple.
+    from hfl.api.vision import split_openai_content
+
+    messages: list[ChatMessage] = []
+    for m in req.messages:
+        text, images = split_openai_content(m.content)
+        messages.append(ChatMessage(role=m.role, content=text, images=images))
     gen_config = _to_gen_config(req)
 
     # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
