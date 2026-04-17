@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-17
+
+**Phase 9 of OLLAMA_PARITY_PLAN_V2 — Web & MCP + Docker.** First
+release of the V2 plan. Closes the two most painful adoption gaps
+identified in the post-0.7.0 audit: 2026 agent stacks assume
+``/api/web_search`` exists, assume MCP is wired up, and assume
+``docker run`` "just works".
+
+### Added — ``POST /api/web_search`` + ``POST /api/web_fetch`` (P0)
+
+- New module ``hfl.tools.web_search`` with a pluggable backend:
+  - ``DuckDuckGoBackend`` (default, no API key, HTML scrape).
+  - ``TavilyBackend`` (``TAVILY_API_KEY``).
+  - ``BraveBackend`` (``BRAVE_API_KEY``).
+  - ``SerpAPIBackend`` (``SERPAPI_API_KEY``).
+  - Backend chosen at runtime via
+    ``HFL_WEB_SEARCH_BACKEND``; unknown names warn + fall back to
+    DDG.
+- New module ``hfl.tools.web_fetch`` with a strict SSRF guard:
+  rejects non-http(s) schemes, resolves hostnames up-front, and
+  refuses private / loopback / link-local / cloud-metadata
+  (``169.254.169.254``) addresses before the socket opens.
+- Extraction uses stdlib ``html.parser.HTMLParser`` — no lxml /
+  BeautifulSoup dependency. Title, visible text, ``<a href>``
+  links.
+- Response envelopes match Ollama's shape byte-for-byte so clients
+  like Cline / Goose / LangChain drop in without adapters.
+
+### Added — Model Context Protocol client (P0)
+
+- New package ``hfl.mcp`` with an ``MCPClient`` singleton that
+  manages live ``stdio://`` and ``sse://`` sessions.
+- ``autoload_servers()`` reads an MCP topology from
+  ``HFL_MCP_AUTOLOAD`` (JSON) at startup. Broken entries log a
+  warning but never abort ``hfl serve``.
+- ``POST /api/chat`` now auto-merges tools exposed by every
+  connected MCP server. Tools are qualified as
+  ``<server_id>__<tool_name>`` so collisions between servers are
+  impossible.
+- New CLI: ``hfl mcp list`` / ``hfl mcp connect`` /
+  ``hfl mcp disconnect``.
+- New optional dep: ``pip install 'hfl[mcp]'`` (``mcp>=1.0.0``).
+  When absent, the module imports cleanly and every public call
+  is a graceful no-op.
+
+### Added — Multi-arch Docker image (P0)
+
+- ``Dockerfile`` — two-stage build on ``python:3.12-slim``. Non-
+  root user, ``tini`` as PID 1, healthcheck on ``/healthz``.
+  ``HFL_EXTRAS`` build arg (default ``llama``, use ``all`` for the
+  full surface).
+- ``docker-compose.yml`` with bind mount to persist models.
+- ``.github/workflows/docker.yml`` publishes
+  ``ghcr.io/ggalancs/hfl:{version,major.minor,latest}`` on every
+  ``v*`` tag, built for ``linux/amd64`` + ``linux/arm64``, signed
+  keyless via cosign (OIDC identity — no private key in the repo).
+
+### Added — PyPI Trusted Publisher workflow (P1)
+
+- ``.github/workflows/publish-pypi.yml`` uploads the sdist + wheel
+  to PyPI on every ``v*`` tag using OIDC (no long-lived token),
+  with a Sigstore attestation attached to each artefact.
+
+### Test & CI
+
+- Total suite: 2660 passing, 28 skipped. Coverage ≈ 88%.
+- ci-local green on every commit.
+
+---
+
 ## [0.7.0] - 2026-04-17
 
 **Phase 8 of OLLAMA_PARITY_PLAN — final phase (LoRA + MESSAGE).**

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
@@ -42,10 +41,10 @@ class TestDockerfile:
         assert "/healthz" in self.text
 
     def test_entrypoint_is_tini(self):
-        assert "ENTRYPOINT [\"/usr/bin/tini\"" in self.text
+        assert 'ENTRYPOINT ["/usr/bin/tini"' in self.text
 
     def test_default_command_is_serve(self):
-        assert "CMD [\"serve\"" in self.text
+        assert 'CMD ["serve"' in self.text
 
     def test_extras_are_parameterised(self):
         assert "ARG HFL_EXTRAS" in self.text
