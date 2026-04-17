@@ -955,9 +955,10 @@ class LlamaCppEngine(InferenceEngine):
                 {"Prompt": prompt, "System": "", "Messages": []},
             )
 
-        start_ns = time.monotonic_ns()
-        output = self._model(
-            effective_prompt,
+        # Phase 12 P1 — V2 row 7. llama-cpp's ``__call__`` accepts
+        # ``logprobs`` directly; passing 0 keeps them off (library
+        # default).
+        call_kwargs: dict = dict(
             max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
             top_p=cfg.top_p,
@@ -966,6 +967,11 @@ class LlamaCppEngine(InferenceEngine):
             stop=cfg.stop,
             seed=cfg.seed if cfg.seed >= 0 else None,
         )
+        if cfg.logprobs and cfg.logprobs > 0:
+            call_kwargs["logprobs"] = cfg.logprobs
+
+        start_ns = time.monotonic_ns()
+        output = self._model(effective_prompt, **call_kwargs)
         total_ns = time.monotonic_ns() - start_ns
         elapsed = total_ns / 1e9
 
@@ -973,6 +979,37 @@ class LlamaCppEngine(InferenceEngine):
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
         n_prompt = usage.get("prompt_tokens", 0)
+
+        # Phase 12 P1 — V2 row 7. Normalise llama-cpp's OpenAI-style
+        # logprobs block into a token-major list so routes don't have
+        # to re-traverse. Shape:
+        #   [{"token": str, "logprob": float,
+        #     "top_logprobs": [{"token", "logprob"}, ...]}, ...]
+        logprobs_list: list[dict] | None = None
+        raw_lp = output["choices"][0].get("logprobs") if cfg.logprobs else None
+        if raw_lp:
+            tokens = raw_lp.get("tokens", []) or []
+            token_lps = raw_lp.get("token_logprobs", []) or []
+            top_lps = raw_lp.get("top_logprobs", []) or []
+            logprobs_list = []
+            for i, token in enumerate(tokens):
+                lp_val = token_lps[i] if i < len(token_lps) else None
+                alternatives_raw = top_lps[i] if i < len(top_lps) else {}
+                alternatives = (
+                    [
+                        {"token": alt_tok, "logprob": alt_lp}
+                        for alt_tok, alt_lp in (alternatives_raw or {}).items()
+                    ]
+                    if isinstance(alternatives_raw, dict)
+                    else []
+                )
+                logprobs_list.append(
+                    {
+                        "token": token,
+                        "logprob": lp_val,
+                        "top_logprobs": alternatives,
+                    }
+                )
 
         logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen / elapsed)
 
@@ -1012,6 +1049,7 @@ class LlamaCppEngine(InferenceEngine):
             prompt_eval_duration=prompt_eval_ns,
             eval_duration=eval_ns,
             context_tokens=context_tokens,
+            logprobs=logprobs_list,
         )
 
     def generate_stream(

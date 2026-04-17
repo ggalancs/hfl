@@ -98,6 +98,11 @@ class GenerationConfig:
     # because keeping token arrays in memory costs RAM and most
     # clients now use /api/chat with role-tagged messages instead.
     keep_context: bool = False
+    # Return per-token log probabilities (Phase 12 P1 — V2 row 7).
+    # ``0`` (default) disables; 1-20 requests that many top alternative
+    # tokens per position alongside the sampled one. Engines without
+    # logprob support silently ignore the knob.
+    logprobs: int = 0
 
 
 @dataclass
@@ -125,6 +130,11 @@ class GenerationResult:
     # ``GenerationConfig.keep_context`` is True; otherwise stays
     # ``None`` so default payloads don't carry large int arrays.
     context_tokens: list[int] | None = None
+    # Per-token logprobs (Phase 12 P1 — V2 row 7). Shape mirrors the
+    # OpenAI response: ``[{"token", "logprob", "top_logprobs": [{"token",
+    # "logprob"}, ...]}, ...]``. ``None`` when the caller didn't
+    # request them.
+    logprobs: list[dict] | None = None
 
 
 class InferenceEngine(ABC):

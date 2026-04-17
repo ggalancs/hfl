@@ -346,6 +346,11 @@ async def api_generate(
     # ``options.keep_context=true``.
     if gen_config.keep_context and result.context_tokens is not None:
         envelope["context"] = result.context_tokens
+    # Phase 12 P1 — V2 row 7. Attach logprobs when the engine
+    # populated them (i.e. the client asked via
+    # ``options.logprobs``).
+    if result.logprobs is not None:
+        envelope["logprobs"] = result.logprobs
     return envelope
 
 
