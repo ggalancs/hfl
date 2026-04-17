@@ -13,6 +13,27 @@ import pytest
 from hfl.observability import signing
 
 
+def _have_ed25519_backend() -> bool:
+    try:
+        import nacl.signing  # type: ignore  # noqa: F401
+
+        return True
+    except ImportError:
+        pass
+    try:
+        import cryptography.hazmat.primitives.asymmetric.ed25519  # type: ignore  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+_requires_backend = pytest.mark.skipif(
+    not _have_ed25519_backend(),
+    reason="neither pynacl nor cryptography installed",
+)
+
+
 def _fresh_keypair() -> tuple[bytes, bytes]:
     """Produce a seed + public key without committing to a particular backend."""
     try:
@@ -73,6 +94,7 @@ class TestDigest:
         assert signing.manifest_digest(a) != signing.manifest_digest(_SAMPLE)
 
 
+@_requires_backend
 class TestSignVerifyRoundtrip:
     def test_happy_path(self):
         priv, pub = _fresh_keypair()

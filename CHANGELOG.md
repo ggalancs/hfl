@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-04-17
+
+**Phase 17 of OLLAMA_PARITY_PLAN_V2 — Enterprise scaffolding.**
+
+### Added — OpenTelemetry tracing (V2 row 24)
+
+- ``hfl.observability.tracing.trace_span(name, attributes)``
+  context manager. No-op when disabled; OTLP/HTTP exporter when
+  ``HFL_OTEL_ENABLED=true``.
+- ``[otel]`` extra pulls opentelemetry-api + -sdk + -exporter.
+
+### Added — Model signing (V2 row 38)
+
+- ``hfl.observability.signing`` — ed25519 sign / verify over a
+  canonical digest of the manifest's provenance fields.
+- ``TrustRoot`` loads a JSON keyring; unknown key ids / tampered
+  payloads raise ``SignatureInvalidError``.
+- Supports both pynacl and cryptography backends.
+
+### Added — Windows MSI (V2 row 30)
+
+- ``packaging/windows/hfl.wxs`` WiX recipe + signed-MSI release
+  workflow. Per-machine install, adds the install dir to PATH,
+  Authenticode signing gated on secrets.
+
+### Added — macOS notarized DMG (V2 row 31)
+
+- ``.github/workflows/macos-dmg.yml`` builds a PyInstaller .app
+  bundle, signs with Developer ID, builds the DMG with
+  ``create-dmg``, submits to ``notarytool`` and staples.
+- Codesign + notarisation gated on secrets.
+
+---
+
 ## [0.12.0] - 2026-04-17
 
 **Phase 16 of OLLAMA_PARITY_PLAN_V2 — Audio + Images.**
