@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-04-17
+
+**Phase 5 of OLLAMA_PARITY_PLAN — the P1 polish items.** Three new
+request fields, one new management endpoint, and real nanosecond
+timings on every generation response. This is the release that
+closes the gap with ``ollama-python`` for anyone keying off request
+parameters (``system``, ``think``) or response metrics
+(``total_duration``, ``prompt_eval_duration``, ``eval_duration``).
+
+### Added — ``system`` on ``/api/generate`` + ``/api/chat`` (P1-1)
+
+Override the model's default system prompt per request:
+
+- On ``/api/generate`` the string is prepended to ``prompt`` with
+  two blank lines of separation.
+- On ``/api/chat`` it's inserted as the *first* message with
+  ``role=system``, stacking with any other system message the
+  caller already supplied (Ollama allows multiple).
+
+### Added — ``think`` on ``/api/generate`` + ``/api/chat`` (P1-1)
+
+Expose the model's native reasoning / chain-of-thought channel:
+
+- ``think=False`` (default) — the Gemma-4-family channel filter
+  keeps ``content`` clean; reasoning is suppressed. Unchanged
+  behaviour.
+- ``think=True`` — filter disabled, engine returns the raw channel
+  text. The route then runs the new
+  ``hfl.api.thinking.extract_thinking`` to separate reasoning
+  blocks from the answer and emits them in a dedicated ``thinking``
+  field on the response envelope (Ollama 2026 shape).
+
+Recognised reasoning dialects: DeepSeek-R1 / Qwen3-Thinking
+``<think>...</think>``, Gemma 4
+``<|channel>thought...<channel|>`` and ``<|think>...<think|>``,
+``<thinking>...</thinking>``, ``<reasoning>...</reasoning>`` (o1-
+style).
+
+### Added — ``POST /api/copy`` + ``hfl cp`` (P1-2)
+
+Duplicate a model under a new name. The copy shares the on-disk
+blob — it's a registry-level operation, not a byte copy. Status
+codes match Ollama byte-for-byte: 200 on success, 404 when the
+source is missing, 400 when the destination is taken.
+
+``hfl cp <src> <dst>`` CLI mirrors ``ollama cp`` with identical
+output.
+
+### Added — ``ModelRegistry.copy(source, destination)``
+
+Underlying primitive. Thread-safe (file lock + RLock), validates
+the destination name, drops the source's alias on the copy to
+avoid double-booking.
+
+### Added — nanosecond timings on ``GenerationResult`` (P1-3)
+
+Four new fields — ``total_duration``, ``load_duration``,
+``prompt_eval_duration``, ``eval_duration`` — all in nanoseconds,
+Ollama-convention. ``LlamaCppEngine.chat`` and ``generate`` now
+instrument with ``time.monotonic_ns`` and apportion
+prompt-eval-vs-eval time proportionally to token counts (the
+llama-cpp API doesn't expose the pre-first-token delta natively).
+
+Ollama-native routes propagate the whole block:
+``total_duration``, ``load_duration``, ``prompt_eval_count``,
+``prompt_eval_duration``, ``eval_count``, ``eval_duration``. Pre-
+0.5.1 these fields were hard-coded to 0 — tokens/sec dashboards
+now work out of the box.
+
+### Tests (+60)
+
+- ``tests/test_thinking.py`` (14) — every reasoning dialect
+  recognised and extracted; whitespace handling; idempotent on
+  clean text.
+- ``tests/test_system_think_routes.py`` (12) — end-to-end
+  ``system`` injection on both routes; ``think`` sets
+  ``expose_reasoning``; ``thinking`` field populated when the
+  model emits markers; no field added when it doesn't; passthrough
+  when think=False.
+- ``tests/test_routes_copy.py`` (11) — registry-level copy: new
+  entry / missing source / destination collision / invalid name
+  / copy-by-alias. HTTP route: 200 on success, 404 on missing
+  source, 400 on conflict, 422 on empty fields.
+- ``tests/test_timing_metrics.py`` (7) — defaults on
+  ``GenerationResult``, ``/api/generate`` surfaces all four
+  timings, ``/api/chat`` surfaces all four, sum of phases within
+  5% of total, non-negativity guard.
+
+Plus the default-case tests adjusted — existing suites that
+asserted ``total_duration == 0`` no longer apply because the real
+value is surfaced.
+
+### Metrics
+
+| | 0.5.0 | 0.5.1 |
+|-|-|-|
+| Tests | 2411 | 2452 (+41) |
+| Ollama REST endpoints | 14/16 | 15/16 (``/api/copy`` added) |
+| ``system`` override | ❌ | ✅ on generate + chat |
+| ``think`` override | ❌ | ✅ with reasoning extraction |
+| Response timings | hard-coded 0 | real ns from engine |
+
+Remaining parity items: Modelfile ingestion + ``/api/create`` +
+blobs, and ``/api/push`` (non-goal). Those land in 0.6.x.
+
 ## [0.5.0] - 2026-04-17 — BREAKING
 
 **Phase 4 of OLLAMA_PARITY_PLAN — vision / multimodal.** Models like
