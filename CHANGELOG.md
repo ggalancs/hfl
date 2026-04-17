@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-04-17
+
+**Phase 18 of OLLAMA_PARITY_PLAN_V2 — Polish. Plan V2 complete.**
+
+### Added — Session snapshot / restore (V2 row 36)
+
+- ``hfl.core.sessions.ChatSession`` + save / load / list / delete
+  helpers persist model / options / history / system under
+  ``~/.hfl/sessions/<name>.json`` with atomic writes and strict
+  name validation (path-traversal safe).
+
+### Added — Sandboxed execution (V2 row 37)
+
+- ``hfl.core.sandbox.apply_sandbox(mode)`` — ``seccomp`` on Linux
+  via ``prctl(PR_SET_NO_NEW_PRIVS)`` + optional pyseccomp filter
+  (blocks ``ptrace`` / ``kexec_*`` / ``reboot`` / ``unshare`` /
+  ``setuid``), ``macos`` advisory hint, ``none`` no-op.
+- Never raises; failures log WARNING and return an inspectable
+  ``SandboxResult`` so health checks can surface the posture.
+
+### Plan V2 status
+
+| Phase | Release | Scope |
+|---|---|---|
+| 9  | 0.8.0  | Web + MCP + Docker + PyPI publish |
+| 10 | 0.8.1  | Agentic (server, loop, streaming, thinking levels, parallel dispatch) |
+| 11 | 0.9.0  | Runtime I (KV-cache quant, prompt cache, VRAM tiers, BOS flag, Go templates) |
+| 12 | 0.9.1  | Logprobs + embedding pooling |
+| 13 | 0.10.0 | MLX backend + Homebrew formula |
+| 14 | 0.10.1 | Modelfile v2 (ENV / INCLUDE / CAPABILITIES) + audit log |
+| 15 | 0.11.0 | /api/batch + draft_model + hfl doctor |
+| 16 | 0.12.0 | Whisper transcription + image generation |
+| 17 | 0.12.1 | OTEL + model signing + Windows MSI + macOS DMG |
+| **18** | **0.12.2** | **Session persistence + sandbox hooks** |
+
+**OLLAMA_PARITY_PLAN_V2 is now complete.** 40 / 40 tracked items
+landed across 10 phases. Remaining V2 "non-goals" (``/api/push``,
+SaaS / proprietary registry, Electron GUI, pricing metering) stay
+explicitly out of scope — documented on the plan.
+
+---
+
 ## [0.12.1] - 2026-04-17
 
 **Phase 17 of OLLAMA_PARITY_PLAN_V2 — Enterprise scaffolding.**
