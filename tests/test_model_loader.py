@@ -204,6 +204,113 @@ class TestLoadLLM:
         mock_state.set_llm_engine.assert_called_once_with(mock_engine, mock_manifest)
 
 
+class TestLoadLLMCleanupOnFailure:
+    """Tests for the cleanup path after a post-load failure."""
+
+    @pytest.fixture(autouse=True)
+    def reset(self):
+        reset_state()
+        yield
+        reset_state()
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.asyncio.to_thread")
+    @patch("hfl.api.model_loader.select_engine")
+    @patch("hfl.api.model_loader.detect_model_type")
+    @patch("hfl.api.model_loader.get_registry")
+    @patch("hfl.api.model_loader.get_state")
+    async def test_set_llm_engine_failure_unloads_engine(
+        self,
+        mock_get_state,
+        mock_get_registry,
+        mock_detect,
+        mock_select,
+        mock_to_thread,
+    ):
+        """If ``set_llm_engine`` raises after a successful load, the loaded
+        engine must be unloaded so we don't leak an orphaned model
+        (ram/GPU held with no owner). Covers model_loader.py lines 89-96.
+        """
+        mock_state = MagicMock()
+        mock_state.current_model = None
+        mock_state.context_size_override = 0
+        mock_state.set_llm_engine = AsyncMock(side_effect=RuntimeError("state broken"))
+        mock_get_state.return_value = mock_state
+
+        mock_manifest = MockManifest("new-model")
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_manifest
+        mock_get_registry.return_value = mock_registry
+
+        mock_detect.return_value = ModelType.LLM
+
+        unload_calls: list[str] = []
+
+        class TrackingEngine(MockEngine):
+            def unload(self) -> None:  # type: ignore[override]
+                unload_calls.append("unload")
+                super().unload()
+
+        mock_engine = TrackingEngine()
+        mock_select.return_value = mock_engine
+        mock_to_thread.return_value = None  # both load() and unload() short-circuited
+
+        with pytest.raises(RuntimeError, match="state broken"):
+            await load_llm("new-model")
+
+        # Both the load and the unload should have been routed through
+        # ``asyncio.to_thread``: first the load, then the cleanup unload.
+        assert mock_to_thread.call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.logger")
+    @patch("hfl.api.model_loader.asyncio.to_thread")
+    @patch("hfl.api.model_loader.select_engine")
+    @patch("hfl.api.model_loader.detect_model_type")
+    @patch("hfl.api.model_loader.get_registry")
+    @patch("hfl.api.model_loader.get_state")
+    async def test_unload_failure_is_logged_not_propagated(
+        self,
+        mock_get_state,
+        mock_get_registry,
+        mock_detect,
+        mock_select,
+        mock_to_thread,
+        mock_logger,
+    ):
+        """If the cleanup ``unload()`` itself raises, the ORIGINAL error
+        still propagates and the unload error is only logged — otherwise
+        the root cause gets masked by a cleanup failure. Covers the
+        inner try/except at model_loader.py lines 92-95.
+        """
+        mock_state = MagicMock()
+        mock_state.current_model = None
+        mock_state.context_size_override = 0
+        mock_state.set_llm_engine = AsyncMock(side_effect=RuntimeError("root cause"))
+        mock_get_state.return_value = mock_state
+
+        mock_manifest = MockManifest("new-model")
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_manifest
+        mock_get_registry.return_value = mock_registry
+
+        mock_detect.return_value = ModelType.LLM
+
+        mock_engine = MockEngine()
+        mock_select.return_value = mock_engine
+
+        # to_thread is called twice: for load (ok) and for unload (boom).
+        mock_to_thread.side_effect = [None, RuntimeError("cleanup boom")]
+
+        with pytest.raises(RuntimeError, match="root cause"):
+            await load_llm("new-model")
+
+        # The cleanup error must be logged, not re-raised.
+        assert mock_logger.error.called
+        args, _ = mock_logger.error.call_args
+        assert "cleanup" in args[0].lower()
+
+
 class TestLoadTTS:
     """Tests for load_tts async function."""
 

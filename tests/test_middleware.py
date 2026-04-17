@@ -292,6 +292,40 @@ class TestRateLimitMiddleware:
         assert middleware._is_excluded("/") is False
 
 
+class TestGetClientIPInvalidForwardedFor:
+    """Tests for the X-Forwarded-For parsing branch that the rate-limit
+    suite doesn't exercise: malformed IPs must be skipped with a warning
+    rather than propagated as a pseudo-IP (which would then become a
+    rate-limit bucket key)."""
+
+    def test_invalid_ip_is_skipped_and_next_is_used(self):
+        """A garbage entry in X-Forwarded-For is logged + skipped; the
+        *next* valid IP is used as the client identity."""
+        from unittest.mock import MagicMock
+
+        from starlette.applications import Starlette
+
+        from hfl.api.middleware import RateLimitMiddleware
+
+        middleware = RateLimitMiddleware(Starlette())
+
+        # Request arriving from a trusted proxy with a malformed IP
+        # preceding a valid untrusted client IP in the chain.
+        request = MagicMock()
+        request.client.host = "127.0.0.1"  # trusted proxy
+        request.headers = {"X-Forwarded-For": "203.0.113.5, not-an-ip"}
+
+        with patch("hfl.api.middleware.logger") as mock_logger:
+            # The chain is walked right-to-left, so "not-an-ip" is
+            # considered first; it should be skipped and logged, then
+            # 203.0.113.5 returned.
+            ip = middleware._get_client_ip(request)
+
+        assert ip == "203.0.113.5"
+        assert mock_logger.warning.called
+        assert "not-an-ip" in str(mock_logger.warning.call_args)
+
+
 class TestRequestBodyLimitMiddleware:
     """Tests for RequestBodyLimitMiddleware."""
 
