@@ -147,6 +147,18 @@ class HFLConfig:
     # loss), ``"q4_0"`` (quarter VRAM, visible on small models).
     kv_cache_type: str = field(default_factory=lambda: os.environ.get("HFL_KV_CACHE_TYPE", "f16"))
 
+    # Prefix cache across requests (Phase 11 P1 — V2 row 10). When
+    # True, the engine reuses KV-cache state when the current prompt
+    # shares a prefix with a recently-served one. Only the latest-N
+    # prefixes are retained; ``prompt_cache_max_entries`` caps the
+    # LRU.
+    prompt_cache_enabled: bool = field(
+        default_factory=lambda: os.environ.get("HFL_PROMPT_CACHE_ENABLED", "true").lower() == "true"
+    )
+    prompt_cache_max_entries: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_PROMPT_CACHE_MAX_ENTRIES", "32"))
+    )
+
     # TTS defaults
     default_tts_sample_rate: int = 22050
     default_tts_format: str = "wav"  # wav, mp3, ogg
