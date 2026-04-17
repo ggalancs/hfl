@@ -19,6 +19,7 @@ keywords, any whitespace between tokens, comments at line start).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -498,10 +499,10 @@ def _expand_includes(
         return text
     if depth > 16:
         raise ModelfileParseError("INCLUDE chain exceeds depth 16")
-    try:
-        root = base_path.resolve(strict=False)
-    except (OSError, RuntimeError) as exc:  # pragma: no cover — defensive
-        raise ModelfileParseError("INCLUDE base path unreadable") from exc
+    # Canonicalise the root via ``os.path.realpath`` — the sanitiser
+    # CodeQL's ``py/path-injection`` explicitly recognises for the
+    # ``realpath + commonpath`` containment pattern below.
+    real_root = os.path.realpath(str(base_path))
     seen = set(seen or ())
     out_lines: list[str] = []
     for raw_line in text.splitlines():
@@ -509,28 +510,22 @@ def _expand_includes(
         if rel is None:
             out_lines.append(raw_line)
             continue
-        # Validate the user-supplied fragment up-front via a pure
-        # string whitelist — at this point ``rel`` is a safe
-        # identifier-like path, and CodeQL's path-injection analysis
-        # stops propagating taint (tokenisation-level sanitiser).
+        # Gate 1 — whitelist the raw string before it ever touches a
+        # path operation. Anything that doesn't match the narrow
+        # grammar raises and never flows further.
         if not _is_safe_include_rel(rel):
             raise ModelfileParseError("INCLUDE path rejected by the whitelist")
-        # Strip the idiomatic ``./`` prefix so the join below produces
-        # a clean canonical path.
-        normalised = rel[2:] if rel.startswith("./") else rel
-        target = root.joinpath(*normalised.split("/"))
-        try:
-            target_resolved = target.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise ModelfileParseError("INCLUDE target cannot be resolved") from exc
-        # Containment guard — belt-and-braces over the whitelist.
-        try:
-            target_resolved.relative_to(root)
-        except ValueError:
-            raise ModelfileParseError("INCLUDE target escapes the base directory") from None
+        # Gate 2 — the realpath + commonpath pattern CodeQL
+        # documents as the canonical path-injection sanitiser. Both
+        # gates run; even if the whitelist ever drifts, the
+        # structural check still holds the line.
+        candidate = os.path.realpath(os.path.join(real_root, rel))
+        if os.path.commonpath([real_root, candidate]) != real_root:
+            raise ModelfileParseError("INCLUDE target escapes the base directory")
+        target_resolved = Path(candidate)
         if target_resolved in seen:
             raise ModelfileParseError("INCLUDE cycle detected")
-        if not target_resolved.exists() or not target_resolved.is_file():
+        if not target_resolved.is_file():
             raise ModelfileParseError("INCLUDE target missing or not a regular file")
         try:
             included = target_resolved.read_text(encoding="utf-8")
