@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-04-17
+
+**Phase 13 of OLLAMA_PARITY_PLAN_V2 — Backends.** MLX on Apple
+Silicon and the Homebrew tap for frictionless install.
+
+### Added — MLX backend (V2 row 14)
+
+- New ``hfl.engine.mlx_engine.MLXEngine`` implementing
+  ``InferenceEngine`` over ``mlx-lm``. Gated on darwin-arm64 plus
+  an importable SDK. Supports generate, chat, and streaming.
+- New optional extra ``[mlx]`` pulls ``mlx-lm>=0.18.0`` with a
+  platform marker so non-Darwin installs can't accidentally drag
+  it in. Folded into ``[all]``.
+
+### Added — Homebrew formula (V2 row 29)
+
+- ``packaging/homebrew/hfl.rb`` formula uses
+  ``virtualenv_install_with_resources`` so llama-cpp-python
+  builds against the user's Homebrew python@3.12.
+- ``service`` block so operators can ``brew services start hfl``.
+- ``.github/workflows/homebrew.yml`` auto-patches the formula and
+  opens a PR against the ``homebrew-hfl`` tap on every ``v*`` tag.
+
+---
+
 ## [0.9.1] - 2026-04-17
 
 **Phase 12 of OLLAMA_PARITY_PLAN_V2 — Inference features.** Two
