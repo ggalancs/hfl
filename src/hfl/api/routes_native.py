@@ -94,6 +94,52 @@ def _tools_payload(req: ChatRequest) -> list[dict] | None:
     return [t.model_dump() for t in req.tools]
 
 
+def _baked_messages(manifest: "Any | None") -> list[ChatMessage]:
+    """Return the manifest's Modelfile ``MESSAGE`` entries as ChatMessages.
+
+    Empty list when the manifest has none (or when ``manifest`` is
+    ``None``, which happens if the engine somehow loaded without a
+    current_model set — should never occur on the happy path but the
+    route stays defensive).
+    """
+    if manifest is None:
+        return []
+    raw = getattr(manifest, "messages", None) or []
+    out: list[ChatMessage] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            continue
+        out.append(ChatMessage(role=role, content=content))
+    return out
+
+
+def _splice_baked_messages(
+    messages: list[ChatMessage],
+    baked: list[ChatMessage],
+) -> list[ChatMessage]:
+    """Insert ``baked`` messages after any leading system block.
+
+    The contract matches Ollama's Modelfile semantics: MESSAGE entries
+    sit between the system prompt(s) and the live turn. We find the
+    first non-system message and splice the bake-in there; if the
+    caller sent only system messages, they land at the end.
+    """
+    if not baked:
+        return messages
+    split = 0
+    for i, m in enumerate(messages):
+        if m.role != "system":
+            split = i
+            break
+    else:
+        split = len(messages)
+    return messages[:split] + baked + messages[split:]
+
+
 def _build_chat_message(
     raw_text: str,
     model_name: str,
@@ -370,6 +416,16 @@ async def api_chat(
         from hfl.engine.base import ChatMessage as _CM
 
         messages = [_CM(role="system", content=req.system)] + messages
+
+    # Phase 8 P3-2: Modelfile ``MESSAGE`` baked-in few-shot. If the
+    # resolved manifest carries MESSAGE instructions, prepend them
+    # to the conversation after any system messages so the model
+    # sees the canonical ``user → assistant`` exemplars before the
+    # live turn. No-op when the manifest has no baked messages
+    # (the vast majority of models).
+    baked = _baked_messages(state.current_model)
+    if baked:
+        messages = _splice_baked_messages(messages, baked)
 
     if req.stream:
         return await prepare_stream_response(
