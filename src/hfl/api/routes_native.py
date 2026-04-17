@@ -603,16 +603,33 @@ async def _stream_chat(
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     accumulated: list[str] = []
+    last_partial_count = 0  # Phase 10 P1: avoid re-emitting identical partials
 
     def format_chunk(token: str) -> str:
+        nonlocal last_partial_count
         accumulated.append(token)
+        # Phase 10 P1 — streaming partial tool calls. Probe the
+        # accumulated text on every chunk; when the tool parser can
+        # already see one or more (possibly incomplete) calls, attach
+        # them to the chunk so the client can render partial state
+        # (``calling foo with {"city": "Lond...``). We only surface a
+        # fresh partial when the count or the last call's arg string
+        # length increases.
+        partial_calls = None
+        try:
+            cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
+            if calls:
+                partial_calls = calls
+                last_partial_count = len(calls)
+        except Exception:
+            partial_calls = None
         chunk = {
             "model": model_name,
             "created_at": created_at,
             "message": {
                 "role": "assistant",
                 "content": token,
-                "tool_calls": None,
+                "tool_calls": partial_calls,
             },
             "done": False,
         }
