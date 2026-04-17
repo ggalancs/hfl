@@ -7,6 +7,7 @@ Allows using hfl as a drop-in replacement for Ollama.
 
 import contextlib
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -30,6 +31,8 @@ from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ollama API"])
 
@@ -288,8 +291,17 @@ async def _stream_generate(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        error = {"model": model_name, "error": str(e), "done": True}
+    except Exception:
+        # Never forward ``str(exc)`` to the client — it may reveal
+        # paths, library class names, or line numbers (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback goes to the
+        # server log via ``logger.exception``.
+        logger.exception("ollama stream failed for model %s", model_name)
+        error = {
+            "model": model_name,
+            "error": "Internal server error during streaming.",
+            "done": True,
+        }
         yield json.dumps(error) + "\n"
     finally:
         if slot_cm is not None:
@@ -488,8 +500,17 @@ async def _stream_chat(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        error = {"model": model_name, "error": str(e), "done": True}
+    except Exception:
+        # Never forward ``str(exc)`` to the client — it may reveal
+        # paths, library class names, or line numbers (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback goes to the
+        # server log via ``logger.exception``.
+        logger.exception("ollama stream failed for model %s", model_name)
+        error = {
+            "model": model_name,
+            "error": "Internal server error during streaming.",
+            "done": True,
+        }
         yield json.dumps(error) + "\n"
     finally:
         if slot_cm is not None:

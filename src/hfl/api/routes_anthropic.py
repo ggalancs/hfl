@@ -12,6 +12,7 @@ Implemented endpoints:
 
 import contextlib
 import json
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -32,6 +33,8 @@ from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
     from hfl.engine.base import GenerationConfig
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Anthropic API"])
 
@@ -133,16 +136,20 @@ async def create_message(
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
     except ValueError as e:
-        # llama_cpp raises ValueError when tokens exceed context window
+        # llama_cpp raises ValueError when tokens exceed context
+        # window. Branch on the exception text but never forward it
+        # to the client (CodeQL ``py/stack-trace-exposure`` — the raw
+        # repr may include paths / class names / line numbers).
         error_msg = str(e)
         if "exceed context window" in error_msg or "context" in error_msg.lower():
+            logger.info("/v1/messages rejected: context window exceeded")
             return Response(
                 content=json.dumps(
                     {
                         "type": "error",
                         "error": {
                             "type": "invalid_request_error",
-                            "message": error_msg,
+                            "message": "Prompt exceeds the model's context window.",
                         },
                     }
                 ),
@@ -255,11 +262,19 @@ async def _stream_messages(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
+    except Exception:
+        # Never emit ``str(exc)`` on a stream — the exception repr
+        # can leak internal paths / library names (CodeQL
+        # ``py/stack-trace-exposure``). Full traceback lands in the
+        # server log via ``logger.exception``.
+        logger.exception("/v1/messages stream failed")
         error_payload = json.dumps(
             {
                 "type": "error",
-                "error": {"type": "server_error", "message": str(e)},
+                "error": {
+                    "type": "server_error",
+                    "message": "Internal server error during streaming.",
+                },
             }
         )
         yield f"event: error\ndata: {error_payload}\n\n"

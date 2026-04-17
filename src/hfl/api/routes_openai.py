@@ -7,6 +7,7 @@ Drop-in replacement for applications using the OpenAI SDK.
 
 import contextlib
 import json
+import logging
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
@@ -28,6 +29,8 @@ from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["OpenAI API"])
 
@@ -207,8 +210,21 @@ async def _stream_chat(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    except Exception:
+        # Don't emit ``str(exc)`` on the stream — it may leak paths
+        # or class names (CodeQL ``py/stack-trace-exposure``). Full
+        # traceback is in the server log.
+        logger.exception("openai stream failed")
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "error": "Internal server error during streaming.",
+                    "code": "STREAM_ERROR",
+                }
+            )
+            + "\n\n"
+        )
     finally:
         if slot_cm is not None:
             with contextlib.suppress(Exception):
@@ -331,8 +347,21 @@ async def _stream_completion(
             format_done=format_done,
         ):
             yield chunk
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
+    except Exception:
+        # Don't emit ``str(exc)`` on the stream — it may leak paths
+        # or class names (CodeQL ``py/stack-trace-exposure``). Full
+        # traceback is in the server log.
+        logger.exception("openai stream failed")
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "error": "Internal server error during streaming.",
+                    "code": "STREAM_ERROR",
+                }
+            )
+            + "\n\n"
+        )
     finally:
         if slot_cm is not None:
             with contextlib.suppress(Exception):

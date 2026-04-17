@@ -337,7 +337,9 @@ class TestAnthropicMessages:
         data = response.json()
         assert data["type"] == "error"
         assert data["error"]["type"] == "invalid_request_error"
-        assert "exceed context window" in data["error"]["message"]
+        # Message is now a curated generic string; never the raw
+        # llama_cpp exception text (CodeQL py/stack-trace-exposure).
+        assert "context window" in data["error"]["message"]
 
     def test_disclaimer_header_present(self):
         """Test that X-AI-Disclaimer header is added for /v1/messages."""
