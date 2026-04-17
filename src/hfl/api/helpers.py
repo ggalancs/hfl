@@ -179,6 +179,91 @@ def queue_response_from_error(
     return queue_timeout(waited_seconds=exc.waited_seconds)
 
 
+def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> bool:
+    """Honour an Ollama-style ``keep_alive`` value on a request.
+
+    Records the resulting deadline on the server state so ``/api/ps``
+    reports it in the ``expires_at`` field. Returns ``True`` when the
+    caller should unload the model immediately after responding
+    (``keep_alive=0``); ``False`` otherwise.
+
+    Called from ``routes_openai`` / ``routes_native`` (chat + generate)
+    at the top of the handler — before the engine work starts — so a
+    rejected ``keep_alive`` value fails fast with a 400 instead of
+    consuming dispatcher slots.
+
+    Args:
+        model_name: Name under which the model is tracked in state.
+        keep_alive: Raw value from the request body (string, number,
+            or None).
+
+    Returns:
+        ``True`` when post-response unload is requested; ``False`` when
+        the deadline was recorded or the field was omitted.
+
+    Raises:
+        APIValidationError: The value can't be parsed (maps to 400).
+    """
+    from datetime import datetime, timezone
+
+    from hfl.api.state import get_state
+    from hfl.exceptions import ValidationError as APIValidationError
+    from hfl.utils.duration import (
+        InvalidKeepAliveError,
+        is_never_expire,
+        is_unload_immediately,
+        parse_keep_alive,
+    )
+
+    try:
+        delta = parse_keep_alive(keep_alive)
+    except InvalidKeepAliveError as exc:
+        raise APIValidationError(str(exc))
+
+    if delta is None:
+        # Caller didn't pass the field — leave any previous deadline
+        # untouched (default idle timeout keeps governing).
+        return False
+
+    state = get_state()
+
+    if is_unload_immediately(delta):
+        # Clear any standing deadline first; the caller will unload
+        # after responding.
+        state.set_keep_alive_deadline(model_name, None)
+        return True
+
+    if is_never_expire(delta):
+        # No deadline — model stays forever until an explicit stop.
+        state.set_keep_alive_deadline(model_name, None)
+        return False
+
+    deadline = datetime.now(timezone.utc) + delta
+    state.set_keep_alive_deadline(model_name, deadline)
+    return False
+
+
+async def unload_after_response(model_name: str) -> None:
+    """Background task that evicts ``model_name`` from the server.
+
+    Scheduled by routes when ``keep_alive=0`` is observed. Uses the
+    existing ``state.cleanup`` code path so the async-unload semantics
+    introduced in R7 are preserved (the teardown runs in a worker
+    thread; the event loop stays responsive).
+
+    Safe to call when ``model_name`` is no longer the resident model
+    — in that case it's a no-op.
+    """
+    from hfl.api.state import get_state
+
+    state = get_state()
+    current = state.current_model
+    if current is not None and current.name == model_name:
+        # cleanup() evicts the LLM engine (and the TTS one, which is
+        # harmless — if nothing is loaded there it's a no-op).
+        await state.cleanup()
+
+
 async def prepare_stream_response(
     gen_factory: "Callable[[AbstractAsyncContextManager[None]], AsyncIterator[str]]",
     media_type: str,

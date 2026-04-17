@@ -130,6 +130,15 @@ class GenerateRequest(BaseModel):
         None,
         description="Optional generation parameters (temperature, top_p, etc.)",
     )
+    keep_alive: str | int | float | None = Field(
+        None,
+        description=(
+            "How long to keep the model loaded after this request. "
+            "Accepts Ollama-style values: a Go duration ('5m', '30s', "
+            "'1h30m'), raw seconds (10), 0 to unload immediately, -1 "
+            "to keep loaded indefinitely, or null for the server default."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
@@ -177,4 +186,11 @@ class ChatRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = Field(
         None,
         description="Tool-selection policy (auto, none, or a specific tool)",
+    )
+    keep_alive: str | int | float | None = Field(
+        None,
+        description=(
+            "Model residency override — see GenerateRequest.keep_alive. "
+            "Supports '5m' / 30 / 0 (unload) / -1 (keep forever) / null."
+        ),
     )

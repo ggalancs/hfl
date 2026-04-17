@@ -10,15 +10,17 @@ import json
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
+    apply_keep_alive,
     prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
+    unload_after_response,
 )
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
@@ -139,17 +141,28 @@ def _build_chat_message(
         504: {"description": "Generation timeout"},
     },
 )
-async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse | Response:
+async def api_generate(
+    req: GenerateRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any] | StreamingResponse | Response:
     """Ollama-compatible ``POST /api/generate`` (raw prompt completion).
 
     Either streams NDJSON chunks (``req.stream=True``) or returns the
     complete response envelope. Options map from Ollama's ``options``
-    dict to HFL's ``GenerationConfig`` at the route boundary.
+    dict to HFL's ``GenerationConfig`` at the route boundary. The
+    ``keep_alive`` field, if present, records a deadline on the server
+    state (surfaced by ``/api/ps``'s ``expires_at``) or queues an
+    immediate unload when set to 0.
     """
+    unload_after = apply_keep_alive(req.model, req.keep_alive)
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
+
+    # Schedule post-response unload when the client asked for it.
+    if unload_after:
+        background_tasks.add_task(unload_after_response, req.model)
 
     gen_config = _options_to_config(req.options)
 
@@ -252,18 +265,26 @@ async def _stream_generate(
         504: {"description": "Generation timeout"},
     },
 )
-async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Response:
+async def api_chat(
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any] | StreamingResponse | Response:
     """Ollama-compatible ``POST /api/chat`` (multi-turn chat).
 
     Supports tool calls: ``req.tools`` flows into the engine; the
     response's ``message.tool_calls`` is populated either from the
     engine's native structure or by running the per-family tool parser
-    over the generated text (spec rule C4).
+    over the generated text (spec rule C4). Honours Ollama's
+    ``keep_alive`` field — see ``api_generate`` for semantics.
     """
+    unload_after = apply_keep_alive(req.model, req.keep_alive)
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
+
+    if unload_after:
+        background_tasks.add_task(unload_after_response, req.model)
 
     messages = _to_chat_messages(req)
     gen_config = _options_to_config(req.options)
