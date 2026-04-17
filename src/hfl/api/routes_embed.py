@@ -81,6 +81,14 @@ class OllamaEmbedRequest(BaseModel):
             "greater than the model's native dimension → 400."
         ),
     )
+    pooling: str | None = Field(
+        None,
+        description=(
+            "Pooling strategy: ``mean`` (default), ``cls`` (first "
+            "token), ``last`` (last non-pad token). Phase 12 P1 — "
+            "V2 row 18."
+        ),
+    )
 
     @field_validator("input")
     @classmethod
