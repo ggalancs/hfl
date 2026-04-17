@@ -415,6 +415,42 @@ def _parse_message(
 _MAX_INCLUDE_LINE_LENGTH = 1024
 
 
+# Whitelist for INCLUDE path fragments. Deliberately conservative:
+# alphanum, dot, dash, underscore, and forward slash. No ``..``,
+# no leading slash (absolute paths are rejected separately), no
+# Windows-style backslashes. Applied before any Path construction
+# so CodeQL ``py/path-injection`` sees a validated string, not a
+# raw user-controlled one.
+_SAFE_INCLUDE_PART = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+
+def _is_safe_include_rel(rel: str) -> bool:
+    """Return True iff ``rel`` is a safe relative Modelfile path.
+
+    The whitelist accepts ``common.modelfile``,
+    ``subdir/common.modelfile``, ``./common.modelfile`` but refuses
+    ``../escape``, ``/abs``, ``a\\b``, embedded NUL, empty
+    components, and anything with a parent-directory segment.
+    """
+    if not rel or rel in (".", "..", "/") or len(rel) > 512:
+        return False
+    # Allow a single leading ``./`` which users write idiomatically.
+    if rel.startswith("./"):
+        rel = rel[2:]
+    if not rel:
+        return False
+    if rel.startswith("/") or "\0" in rel:
+        return False
+    parts = rel.split("/")
+    for part in parts:
+        if not part or part == "." or part == "..":
+            return False
+        for ch in part:
+            if ch not in _SAFE_INCLUDE_PART:
+                return False
+    return True
+
+
 def _match_include_line(raw_line: str) -> str | None:
     """Return the path argument of an ``INCLUDE`` line, or None.
 
@@ -473,32 +509,37 @@ def _expand_includes(
         if rel is None:
             out_lines.append(raw_line)
             continue
-        # Reject absolute paths outright — every INCLUDE must be
-        # relative to the including file.
-        if Path(rel).is_absolute():
-            raise ModelfileParseError("INCLUDE refuses absolute paths")
+        # Validate the user-supplied fragment up-front via a pure
+        # string whitelist — at this point ``rel`` is a safe
+        # identifier-like path, and CodeQL's path-injection analysis
+        # stops propagating taint (tokenisation-level sanitiser).
+        if not _is_safe_include_rel(rel):
+            raise ModelfileParseError("INCLUDE path rejected by the whitelist")
+        # Strip the idiomatic ``./`` prefix so the join below produces
+        # a clean canonical path.
+        normalised = rel[2:] if rel.startswith("./") else rel
+        target = root.joinpath(*normalised.split("/"))
         try:
-            target = (root / rel).resolve(strict=False)
+            target_resolved = target.resolve(strict=False)
         except (OSError, RuntimeError) as exc:
             raise ModelfileParseError("INCLUDE target cannot be resolved") from exc
-        # Containment guard — the resolved target must stay under the
-        # including file's directory tree. Blocks ``../../escape``.
+        # Containment guard — belt-and-braces over the whitelist.
         try:
-            target.relative_to(root)
+            target_resolved.relative_to(root)
         except ValueError:
             raise ModelfileParseError("INCLUDE target escapes the base directory") from None
-        if target in seen:
+        if target_resolved in seen:
             raise ModelfileParseError("INCLUDE cycle detected")
-        if not target.exists() or not target.is_file():
+        if not target_resolved.exists() or not target_resolved.is_file():
             raise ModelfileParseError("INCLUDE target missing or not a regular file")
         try:
-            included = target.read_text(encoding="utf-8")
+            included = target_resolved.read_text(encoding="utf-8")
         except OSError:
             raise ModelfileParseError("INCLUDE target unreadable") from None
-        next_seen = seen | {target}
+        next_seen = seen | {target_resolved}
         expanded = _expand_includes(
             included,
-            target.parent,
+            target_resolved.parent,
             seen=next_seen,
             depth=depth + 1,
         )
