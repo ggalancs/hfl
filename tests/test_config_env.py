@@ -74,6 +74,47 @@ class TestEnvConfig:
             cfg = HFLConfig()
             assert cfg.max_request_bytes == 0
 
+    def test_default_streaming_timeouts(self):
+        """Streaming timeouts have sensible defaults when unset."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_put_timeout == 60.0
+            assert cfg.stream_queue_get_timeout == 30.0
+            assert cfg.vllm_error_put_timeout == 10.0
+            assert cfg.vllm_shutdown_join_timeout == 5.0
+            assert cfg.registry_sqlite_busy_timeout == 30.0
+
+    def test_stream_queue_put_timeout_via_env(self):
+        """HFL_STREAM_QUEUE_PUT_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_STREAM_QUEUE_PUT_TIMEOUT": "15"}):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_put_timeout == 15.0
+
+    def test_stream_queue_get_timeout_via_env(self):
+        """HFL_STREAM_QUEUE_GET_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_STREAM_QUEUE_GET_TIMEOUT": "7.5"}):
+            cfg = HFLConfig()
+            assert cfg.stream_queue_get_timeout == 7.5
+
+    def test_vllm_timeouts_via_env(self):
+        """HFL_VLLM_* env vars override defaults."""
+        with patch.dict(
+            os.environ,
+            {
+                "HFL_VLLM_ERROR_PUT_TIMEOUT": "2",
+                "HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT": "1.5",
+            },
+        ):
+            cfg = HFLConfig()
+            assert cfg.vllm_error_put_timeout == 2.0
+            assert cfg.vllm_shutdown_join_timeout == 1.5
+
+    def test_registry_sqlite_timeout_via_env(self):
+        """HFL_REGISTRY_SQLITE_TIMEOUT overrides default."""
+        with patch.dict(os.environ, {"HFL_REGISTRY_SQLITE_TIMEOUT": "120"}):
+            cfg = HFLConfig()
+            assert cfg.registry_sqlite_busy_timeout == 120.0
+
     def test_dispatcher_env_overrides(self):
         with patch.dict(
             os.environ,

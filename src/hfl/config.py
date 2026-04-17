@@ -184,6 +184,34 @@ class HFLConfig:
     retry_base_delay: float = 1.0
     retry_max_delay: float = 60.0
 
+    # Streaming queue timeouts (seconds). These previously lived as
+    # magic numbers inside ``engine/async_wrapper.py``,
+    # ``engine/vllm_engine.py``, and ``api/streaming.py``. Centralising
+    # them here lets operators tune streaming backpressure without a
+    # code change.
+    stream_queue_put_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_PUT_TIMEOUT", "60"))
+    )
+    stream_queue_get_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_GET_TIMEOUT", "30"))
+    )
+    # vLLM-specific: time allowed for the error sentinel to reach the
+    # consumer when the worker thread failed. Shorter than the regular
+    # put timeout because a dying stream shouldn't wait for
+    # backpressure relief.
+    vllm_error_put_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_VLLM_ERROR_PUT_TIMEOUT", "10"))
+    )
+    # vLLM worker-thread join timeout during shutdown.
+    vllm_shutdown_join_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT", "5"))
+    )
+    # SQLite registry backend: busy-timeout (seconds) waiting for a
+    # lock before raising ``OperationalError``.
+    registry_sqlite_busy_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_REGISTRY_SQLITE_TIMEOUT", "30"))
+    )
+
     # Service Level Objectives (SLOs)
     slo: SLOConfig = field(default_factory=SLOConfig)
 
