@@ -40,6 +40,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from hfl.api.exception_handlers import register_exception_handlers
 from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
+from hfl.api.routes_embed import router as embed_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
@@ -229,6 +230,7 @@ register_exception_handlers(app)
 app.include_router(anthropic_router)
 app.include_router(openai_router)
 app.include_router(native_router)
+app.include_router(embed_router)
 app.include_router(ps_router)
 app.include_router(pull_router)
 app.include_router(show_router)

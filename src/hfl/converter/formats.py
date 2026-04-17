@@ -50,7 +50,7 @@ class ModelType(Enum):
 
 
 # Types that HFL can run
-SUPPORTED_MODEL_TYPES = {ModelType.LLM, ModelType.TTS}
+SUPPORTED_MODEL_TYPES = {ModelType.LLM, ModelType.TTS, ModelType.EMBEDDING}
 
 
 def is_model_type_supported(model_type: ModelType) -> bool:
