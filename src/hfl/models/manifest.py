@@ -73,6 +73,9 @@ class ModelManifest:
     messages: list[dict] = field(default_factory=list)
     parent_name: str | None = None
     parent_digest: str | None = None
+    # Phase 14 — V2 rows 19 / 22.
+    env_vars: dict = field(default_factory=dict)
+    declared_capabilities: list[str] = field(default_factory=list)
 
     # Timestamps
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())

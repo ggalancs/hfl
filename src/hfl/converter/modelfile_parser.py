@@ -19,7 +19,9 @@ keywords, any whitespace between tokens, comments at line start).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -128,6 +130,13 @@ class ModelfileDocument:
     license: str | None = None
     messages: list[ModelfileMessage] = field(default_factory=list)
     requires: str | None = None
+    # Phase 14 — V2 rows 19 / 22.
+    # ``env`` captures ``ENV KEY=VALUE`` lines; the engine applies them
+    # in a scoped environment during load. ``capabilities`` captures
+    # an explicit ``CAPABILITIES completion,tools,...`` declaration
+    # that overrides auto-detection.
+    env: dict[str, str] = field(default_factory=dict)
+    capabilities: list[str] = field(default_factory=list)
 
     def to_manifest_fields(self) -> dict[str, Any]:
         """Flatten the document into kwargs for ``ModelManifest``.
@@ -162,6 +171,12 @@ class ModelfileDocument:
             result["adapter_paths"] = list(self.adapters)
         if self.license is not None:
             result["license_name"] = self.license
+        if self.env:
+            result["env_vars"] = dict(self.env)
+        if self.capabilities:
+            # Preserved on the manifest under an explicit list so
+            # downstream consumers can skip auto-detection.
+            result["declared_capabilities"] = list(self.capabilities)
         return result
 
 
@@ -398,12 +413,68 @@ def _parse_message(
 # ---------------------------------------------------------------------
 
 
-def parse_modelfile(text: str) -> ModelfileDocument:
+_INCLUDE_RE = re.compile(r"^\s*INCLUDE\s+(.+?)\s*(?:#.*)?$", re.IGNORECASE)
+
+
+def _expand_includes(
+    text: str,
+    base_path: Path | None,
+    seen: set[Path] | None = None,
+    depth: int = 0,
+) -> str:
+    """Inline ``INCLUDE <path>`` lines before parsing (Phase 14 — V2 row 21).
+
+    Paths resolve relative to ``base_path``. Cycle detection via the
+    ``seen`` set; ``depth`` caps runaway chains.
+    """
+    if base_path is None or "INCLUDE" not in text.upper():
+        return text
+    if depth > 16:
+        raise ModelfileParseError("INCLUDE chain exceeds depth 16")
+    seen = set(seen or ())
+    out_lines: list[str] = []
+    for raw_line in text.splitlines():
+        match = _INCLUDE_RE.match(raw_line)
+        if not match:
+            out_lines.append(raw_line)
+            continue
+        rel = match.group(1).strip().strip('"').strip("'")
+        target = (base_path / rel).resolve()
+        if target in seen:
+            raise ModelfileParseError(f"INCLUDE cycle: {target}")
+        if not target.exists() or not target.is_file():
+            raise ModelfileParseError(f"INCLUDE target missing: {target}")
+        try:
+            included = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ModelfileParseError(f"INCLUDE {target} unreadable: {exc}") from exc
+        next_seen = seen | {target}
+        expanded = _expand_includes(
+            included,
+            target.parent,
+            seen=next_seen,
+            depth=depth + 1,
+        )
+        out_lines.append(f"# <<< INCLUDE {rel}")
+        out_lines.append(expanded)
+        out_lines.append(f"# >>> INCLUDE {rel}")
+    return "\n".join(out_lines)
+
+
+def parse_modelfile(text: str, base_path: str | Path | None = None) -> ModelfileDocument:
     """Parse ``text`` and return a validated ``ModelfileDocument``.
 
     Raises ``ModelfileParseError`` with ``.line`` pointing at the
     first failure. A Modelfile without ``FROM`` is always rejected.
+
+    ``base_path`` enables ``INCLUDE`` resolution (Phase 14 — V2 row
+    21). When ``None`` (default), ``INCLUDE`` lines parse as the
+    unknown instruction they are — inlining only happens when the
+    caller supplies a filesystem anchor.
     """
+    base = Path(base_path) if base_path is not None else None
+    if base is not None:
+        text = _expand_includes(text, base)
     doc = ModelfileDocument()
     lines = text.splitlines()
     i = 0
@@ -487,6 +558,39 @@ def parse_modelfile(text: str) -> ModelfileDocument:
             if value.startswith('"') and value.endswith('"') and len(value) >= 2:
                 value = value[1:-1]
             doc.requires = value
+            i += 1
+            continue
+
+        if instruction == "ENV":
+            # ``ENV KEY=VALUE`` — mimics Dockerfile's ENV syntax.
+            # Value can be bare, ``"quoted"``, or a raw rest-of-line.
+            raw = rest.strip()
+            if "=" not in raw:
+                raise ModelfileParseError(
+                    "ENV requires KEY=VALUE",
+                    line=i + 1,
+                )
+            key, _, rhs = raw.partition("=")
+            key = key.strip()
+            rhs = rhs.strip()
+            if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                rhs = _decode_quoted(rhs[1:-1])
+            if not key:
+                raise ModelfileParseError(
+                    "ENV KEY must not be empty",
+                    line=i + 1,
+                )
+            doc.env[key] = rhs
+            i += 1
+            continue
+
+        if instruction == "CAPABILITIES":
+            # ``CAPABILITIES completion,tools,vision`` — comma-separated.
+            tokens_csv = [t.strip() for t in rest.replace(",", " ").split() if t.strip()]
+            for token_ in tokens_csv:
+                # Preserve case for downstream comparisons but dedupe.
+                if token_ not in doc.capabilities:
+                    doc.capabilities.append(token_)
             i += 1
             continue
 
