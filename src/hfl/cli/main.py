@@ -556,6 +556,51 @@ def _pull_selected_model(model) -> None:
         pass  # pull raises Exit on completion
 
 
+@app.command(name="stop")
+def stop(
+    model: str = typer.Argument(None, help="Model name to unload. Omit to unload all."),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+) -> None:
+    """Unload a model without restarting the server (Ollama-compatible).
+
+    Sends ``POST /api/stop`` to the running HFL server. If a model
+    name is given, only that one is evicted; otherwise every loaded
+    model (LLM + TTS) is released.
+    """
+    import httpx
+
+    url = f"http://{host}:{port}/api/stop"
+    body: dict = {}
+    if model:
+        body["model"] = model
+
+    try:
+        response = httpx.post(url, json=body, timeout=10.0)
+        response.raise_for_status()
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {exc}")
+        raise typer.Exit(1)
+
+    data = response.json()
+    status = data.get("status")
+    target = data.get("model") or "(all)"
+    if status == "stopped":
+        console.print(f"[green]Stopped[/] [cyan]{target}[/]")
+    elif status == "not_loaded":
+        console.print(f"[yellow]{target}[/] is not currently loaded.")
+    elif status == "nothing_loaded":
+        console.print("[dim]No models were loaded; nothing to stop.[/]")
+    else:
+        console.print(f"[dim]Unexpected response:[/] {data}")
+
+
 @app.command(name="show")
 def show(
     model: str = typer.Argument(help="Model name, alias or repo_id to inspect"),
