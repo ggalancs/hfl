@@ -72,6 +72,13 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
 async def chat_completions(
     req: ChatCompletionRequest,
 ) -> dict[str, Any] | StreamingResponse | Response:
+    """OpenAI-compatible ``POST /v1/chat/completions``.
+
+    Loads the requested model (if needed), then either streams SSE
+    chunks (``req.stream=True``) or returns the full chat-completion
+    response. Concurrent requests are serialised through the inference
+    dispatcher (spec §5.3); dispatcher rejections map to 429/503.
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -209,6 +216,12 @@ async def _stream_chat(
     },
 )
 async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingResponse | Response:
+    """OpenAI-compatible ``POST /v1/completions`` (legacy text completion).
+
+    Same dispatcher / streaming / error semantics as
+    ``chat_completions`` but takes a plain prompt instead of a
+    message list.
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -319,6 +332,11 @@ async def _stream_completion(
 
 @router.get("/v1/models", tags=["OpenAI"], summary="List available models")
 async def list_models() -> dict[str, Any]:
+    """OpenAI-compatible ``GET /v1/models`` — list all registry entries.
+
+    Returns the canonical envelope ``{"object": "list", "data": [...]}``
+    where each entry carries id, created timestamp, and owned_by.
+    """
     registry = get_registry()
     models = registry.list_all()
     return {

@@ -140,6 +140,12 @@ def _build_chat_message(
     },
 )
 async def api_generate(req: GenerateRequest) -> dict[str, Any] | StreamingResponse | Response:
+    """Ollama-compatible ``POST /api/generate`` (raw prompt completion).
+
+    Either streams NDJSON chunks (``req.stream=True``) or returns the
+    complete response envelope. Options map from Ollama's ``options``
+    dict to HFL's ``GenerationConfig`` at the route boundary.
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
@@ -252,6 +258,13 @@ async def _stream_generate(
     },
 )
 async def api_chat(req: ChatRequest) -> dict[str, Any] | StreamingResponse | Response:
+    """Ollama-compatible ``POST /api/chat`` (multi-turn chat).
+
+    Supports tool calls: ``req.tools`` flows into the engine; the
+    response's ``message.tool_calls`` is populated either from the
+    engine's native structure or by running the per-family tool parser
+    over the generated text (spec rule C4).
+    """
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:

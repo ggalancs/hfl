@@ -99,6 +99,14 @@ def _stop_reason_to_anthropic(stop_reason: str) -> str:
 async def create_message(
     req: AnthropicMessagesRequest,
 ) -> dict[str, Any] | StreamingResponse | Response:
+    """Anthropic-compatible ``POST /v1/messages``.
+
+    Accepts a Messages-API request (optionally with a provider-prefixed
+    model like ``hfl/qwen-coder``), strips the prefix, loads the model,
+    then streams SSE events (``req.stream=True``) or returns the full
+    assistant message. Returns a structured 400 when the input exceeds
+    the model's context window.
+    """
     model_name = req.resolve_model_name()
     await _ensure_model_loaded(model_name)
     state = _get_state()

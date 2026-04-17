@@ -236,3 +236,44 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data.get("status") == "healthy"
+
+
+class TestChatCompletionsEngineNone:
+    """Defensive branch coverage for ``chat_completions`` when the loader
+    reports success but ``state.engine`` is still None (contract guard
+    at routes_openai.py:77-78). This can only fire under state
+    corruption / ultra-rare race, but the branch exists precisely for
+    that case and must produce a structured 503 envelope.
+    """
+
+    def test_chat_completions_returns_503_when_engine_is_none(self):
+        """Mock ``_ensure_model_loaded`` to no-op, leaving engine None.
+        The route must respond 503 with the standard error envelope.
+        """
+        from hfl.api.state import reset_state
+
+        reset_state()
+        state = get_state()
+        state.engine = None  # Force the defensive branch
+
+        async def _noop_ensure(_model: str) -> None:
+            # Pretend the model loader ran successfully.
+            return None
+
+        client = TestClient(app)
+
+        with patch("hfl.api.routes_openai._ensure_model_loaded", _noop_ensure):
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "phantom-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert response.status_code == 503
+        body = response.json()
+        # ``service_unavailable`` wraps the error in the standard
+        # envelope {"error": {..., "code": "SERVICE_UNAVAILABLE"}}.
+        error = body.get("error", body)
+        assert "phantom-model" in str(error) or error.get("code") == "SERVICE_UNAVAILABLE"
