@@ -111,17 +111,45 @@ class TestDockerWorkflow:
         assert push["tags"] == ["v*"]
         assert "branches" not in push
 
-    def test_builds_both_amd64_and_arm64(self):
-        jobs = self.cfg["jobs"]["build-and-push"]
-        steps = jobs["steps"]
-        build_step = next(s for s in steps if s.get("id") == "build")
-        assert "linux/amd64,linux/arm64" in build_step["with"]["platforms"]
+    def test_jobs_are_per_architecture(self):
+        """Each arch gets its own native-runner job — no QEMU, no
+        single monolithic buildx invocation that could fail one arch
+        and take the other down with it.
+        """
+        jobs = set(self.cfg["jobs"].keys())
+        assert {"build-amd64", "build-arm64", "manifest"} <= jobs
 
-    def test_has_cosign_sign_step(self):
-        steps = self.cfg["jobs"]["build-and-push"]["steps"]
-        names = {s.get("name") for s in steps}
-        assert "Sign image (keyless)" in names
+    def test_amd64_runs_on_standard_runner(self):
+        assert self.cfg["jobs"]["build-amd64"]["runs-on"] == "ubuntu-latest"
+
+    def test_arm64_runs_on_native_arm_runner(self):
+        # ``ubuntu-24.04-arm`` is the free-for-public-repos ARM runner
+        # launched in 2025; using it avoids QEMU entirely.
+        assert self.cfg["jobs"]["build-arm64"]["runs-on"] == "ubuntu-24.04-arm"
+
+    def test_each_arch_job_only_builds_its_own_platform(self):
+        amd64_build = next(
+            s for s in self.cfg["jobs"]["build-amd64"]["steps"]
+            if s.get("id") == "build"
+        )
+        arm64_build = next(
+            s for s in self.cfg["jobs"]["build-arm64"]["steps"]
+            if s.get("id") == "build"
+        )
+        assert amd64_build["with"]["platforms"] == "linux/amd64"
+        assert arm64_build["with"]["platforms"] == "linux/arm64"
+
+    def test_each_arch_job_signs_its_image(self):
+        for job_name in ("build-amd64", "build-arm64"):
+            steps = self.cfg["jobs"][job_name]["steps"]
+            names = {s.get("name") for s in steps}
+            assert "Sign image (keyless)" in names, f"{job_name} missing sign"
+
+    def test_manifest_job_depends_on_both_builds(self):
+        needs = self.cfg["jobs"]["manifest"]["needs"]
+        assert set(needs) == {"build-amd64", "build-arm64"}
 
     def test_matrix_covers_llama_and_all_extras(self):
-        matrix = self.cfg["jobs"]["build-and-push"]["strategy"]["matrix"]
-        assert matrix["extras"] == ["llama", "all"]
+        for job_name in ("build-amd64", "build-arm64", "manifest"):
+            matrix = self.cfg["jobs"][job_name]["strategy"]["matrix"]
+            assert matrix["extras"] == ["llama", "all"]
