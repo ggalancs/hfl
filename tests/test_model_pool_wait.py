@@ -378,3 +378,100 @@ class TestModelPoolUnloadFailureLogged:
 
         # Slot released even through the double-exception path.
         assert "model-unload-boom" not in pool._loading
+
+
+class TestModelPoolEventBasedWait:
+    """Covers the R8 refactor: ``_loading`` became a dict of
+    ``asyncio.Event``s so waiters wake immediately on completion
+    rather than polling at 0.1 s intervals. These tests pin the
+    contract (event-based, not poll-based) without depending on
+    fragile wall-clock timing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_loading_dict_stores_events(self):
+        """While a load is in flight, ``_loading[model]`` must be an
+        ``asyncio.Event`` (the primitive waiters block on).
+        """
+        pool = ModelPool(max_models=2, idle_timeout_seconds=60.0)
+
+        loader_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_loader():
+            loader_entered.set()
+            await release.wait()
+            engine = MagicMock()
+            engine.is_loaded = True
+            return engine, MagicMock(), 10.0
+
+        task = asyncio.create_task(pool.get_or_load("m", slow_loader))
+        await loader_entered.wait()
+
+        assert "m" in pool._loading
+        assert isinstance(pool._loading["m"], asyncio.Event)
+        assert not pool._loading["m"].is_set()
+
+        release.set()
+        await task
+
+        assert "m" not in pool._loading
+
+    @pytest.mark.asyncio
+    async def test_waiter_wakes_within_one_event_loop_tick(self):
+        """When the loader finishes, the waiter must wake on the very
+        next loop iteration — not after a 100 ms poll cycle. We prove
+        this by running the scenario with a mocked ``asyncio.sleep``
+        that fails the test if invoked with 0.1 (the old polling
+        interval).
+
+        The pool module itself no longer imports ``asyncio.sleep``
+        on the hot path; if someone re-introduces a polling loop the
+        mock will fail loudly.
+        """
+        pool = ModelPool(max_models=2, idle_timeout_seconds=60.0)
+
+        real_sleep = asyncio.sleep
+        forbidden_durations: list[float] = []
+
+        async def tripwire_sleep(delay: float):
+            if delay >= 0.05:
+                forbidden_durations.append(delay)
+            await real_sleep(delay)
+
+        loader_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_loader():
+            loader_entered.set()
+            await release.wait()
+            engine = MagicMock()
+            engine.is_loaded = True
+            return engine, MagicMock(), 10.0
+
+        with patch("hfl.engine.model_pool.asyncio.sleep", tripwire_sleep):
+            task_loader = asyncio.create_task(pool.get_or_load("m", slow_loader))
+            await loader_entered.wait()
+
+            # Second caller enters the wait-path.
+            task_waiter = asyncio.create_task(
+                pool.get_or_load("m", slow_loader)  # loader arg ignored on wait-path
+            )
+            # Yield a couple of times so the waiter is definitely
+            # blocked on ``event.wait()``.
+            await real_sleep(0)
+            await real_sleep(0)
+
+            # Complete the load.
+            release.set()
+
+            waiter_result, owner_result = await asyncio.gather(task_waiter, task_loader)
+
+        # Both callers must get the same cached entry.
+        assert waiter_result is owner_result
+        # And no ``sleep(>=0.05)`` was invoked on the wait-path —
+        # proving the wake-up was event-driven, not poll-driven.
+        assert forbidden_durations == [], (
+            f"Waiter invoked asyncio.sleep with long duration(s) "
+            f"{forbidden_durations} — polling regression?"
+        )
