@@ -43,6 +43,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from hfl.api.converters import ollama_to_generation_config
@@ -70,11 +71,11 @@ class BatchRequest(BaseModel):
     keep_alive: str | int | float | None = Field(None)
 
 
-@router.post("/api/batch")
+@router.post("/api/batch", response_model=None)
 async def api_batch(
     req: BatchRequest,
     background_tasks: BackgroundTasks,
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     """Run every prompt in ``req.requests`` against ``req.model``.
 
     Model loads once for the whole batch. Individual failures don't

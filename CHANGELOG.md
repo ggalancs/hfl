@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-04-17
+
+**Phase 15 of OLLAMA_PARITY_PLAN_V2 — Runtime II.** Batched
+generation, draft-model plumbing, and a diagnostic CLI.
+
+### Added — ``POST /api/batch`` (V2 row 8)
+
+- Accepts up to 256 prompts in a single request; loads the model
+  once and serialises through the existing dispatcher.
+- Per-item failures don't abort the batch — they surface as
+  ``{"error": "..."}`` at the matching index.
+
+### Added — ``GenerationConfig.draft_model`` (V2 row 11)
+
+- ``draft_model: str | None`` field wires through the engine for
+  llama-cpp's speculative sampler. Engines without speculation
+  silently ignore it. (Full speculative decoding lands once
+  llama-cpp-python exposes a stable API surface.)
+
+### Added — ``hfl doctor`` (V2 row 15)
+
+- New diagnostic CLI command that probes llama-cpp (incl. GPU-
+  offload flag), NVIDIA (pynvml), Apple Metal,
+  AMD ROCm, and the mlx-lm / transformers / vLLM extras.
+- Reads the VRAM tier from Phase 11 and prints the recommended
+  ``num_ctx``.
+- Synthesises actionable recommendations (missing llama-cpp,
+  no accelerator detected, Apple Silicon without mlx-lm).
+
+---
+
 ## [0.10.1] - 2026-04-17
 
 **Phase 14 of OLLAMA_PARITY_PLAN_V2 — Modelfile v2 + audit logs.**

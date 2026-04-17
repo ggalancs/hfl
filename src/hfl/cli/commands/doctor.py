@@ -64,7 +64,7 @@ class DoctorReport:
 
 def _probe_llama_cpp() -> tuple[bool, dict[str, bool]]:
     try:
-        import llama_cpp  # type: ignore
+        import llama_cpp
     except ImportError:
         return False, {}
     features: dict[str, bool] = {}
@@ -84,7 +84,7 @@ def _probe_llama_cpp() -> tuple[bool, dict[str, bool]]:
 
 def _probe_nvidia() -> list[str]:
     try:
-        import pynvml  # type: ignore
+        import pynvml
     except ImportError:
         return []
     try:
@@ -116,7 +116,7 @@ def _probe_metal() -> bool:
     if platform.machine().lower() not in ("arm64", "aarch64"):
         return False
     try:
-        import torch  # type: ignore
+        import torch
 
         if not getattr(torch.backends, "mps", None):
             return True  # Darwin-arm64 alone implies Metal.
@@ -238,9 +238,7 @@ def format_report(report: DoctorReport) -> str:
     for dev in report.rocm_devices:
         lines.append(f"                  • {dev}")
     lines.append("")
-    vram_text = (
-        f"{report.vram_gib:.1f} GiB" if report.vram_gib is not None else "unknown"
-    )
+    vram_text = f"{report.vram_gib:.1f} GiB" if report.vram_gib is not None else "unknown"
     ctx_rec = report.recommended_ctx
     lines.append(f"Detected VRAM:    {vram_text} → num_ctx recommendation: {ctx_rec}")
     if report.recommendations:

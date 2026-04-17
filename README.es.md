@@ -27,7 +27,7 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 | Multi-backend | solo llama.cpp | llama.cpp + Transformers + vLLM |
 | Verificación de licencia | No | Sí (5 niveles de riesgo) |
 | Trazabilidad legal | No | Sí (log de procedencia) |
-| Madurez | Alta (establecido) | Alpha (v0.10.1) |
+| Madurez | Alta (establecido) | Alpha (v0.11.0) |
 
 **HFL no compite con Ollama — lo complementa.** Usa Ollama para modelos curados; usa HFL cuando necesites algo del ecosistema completo de HuggingFace.
 
