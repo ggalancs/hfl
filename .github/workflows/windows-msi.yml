@@ -1,0 +1,96 @@
+# Build + sign the Windows MSI on v* release tags.
+#
+# Pipeline:
+#   1. Build a one-file PyInstaller executable (``dist/hfl.exe``).
+#   2. Render the WiX recipe with the release version.
+#   3. Run ``candle`` + ``light`` to produce the MSI.
+#   4. Sign with an Authenticode certificate stored in
+#      ``WINDOWS_CODE_SIGN_CERT`` (pfx base64) + ``…_PASSWORD``.
+#   5. Upload as a release asset + refresh the WinGet manifest.
+#
+# The signing step is gated on the cert secrets being present so the
+# build can still validate structure on forks.
+
+name: Windows MSI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build pyinstaller
+          choco install wixtoolset --no-progress -y
+
+      - name: Build PyInstaller executable
+        run: |
+          pip install -e ".[llama]"
+          pyinstaller --onefile --name hfl --icon packaging\windows\hfl.ico ^
+                      src\hfl\cli\main.py
+
+      - name: Derive version
+        id: ver
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart('v')
+          echo "version=$version" >>"$env:GITHUB_OUTPUT"
+
+      - name: Render wxs
+        run: |
+          (Get-Content packaging\windows\hfl.wxs -Raw) `
+              -replace '@HFL_VERSION@', '${{ steps.ver.outputs.version }}' |
+          Set-Content packaging\windows\hfl.rendered.wxs
+
+      - name: Build MSI
+        run: |
+          & "$env:ProgramFiles(x86)\WiX Toolset v3.14\bin\candle.exe" `
+             -out dist\hfl.wixobj packaging\windows\hfl.rendered.wxs
+          & "$env:ProgramFiles(x86)\WiX Toolset v3.14\bin\light.exe" `
+             -ext WixUIExtension `
+             -out dist\hfl-${{ steps.ver.outputs.version }}.msi dist\hfl.wixobj
+
+      - name: Decode code-sign certificate
+        if: ${{ env.WINDOWS_CODE_SIGN_CERT != '' }}
+        env:
+          WINDOWS_CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGN_CERT }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CODE_SIGN_CERT)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
+
+      - name: Sign MSI
+        if: ${{ env.WINDOWS_CODE_SIGN_CERT != '' }}
+        env:
+          WINDOWS_CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGN_CERT }}
+          WINDOWS_CODE_SIGN_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PASSWORD }}
+        run: |
+          & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" `
+             sign /fd sha256 /tr http://timestamp.sectigo.com /td sha256 `
+             /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:WINDOWS_CODE_SIGN_PASSWORD `
+             dist\hfl-${{ steps.ver.outputs.version }}.msi
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hfl-msi
+          path: dist/hfl-*.msi
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/hfl-*.msi

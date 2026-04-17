@@ -95,6 +95,13 @@ imagegen = [
     "accelerate>=1.2.0",
 ]
 
+# OpenTelemetry tracing — Phase 17 / V2 row 24.
+otel = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+]
+
 all = ["hfl[llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx,stt,imagegen]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0", "mypy>=1.10.0", "numpy>=1.24.0"]
 build = ["pyinstaller>=6.0"]
