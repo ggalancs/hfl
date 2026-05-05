@@ -41,9 +41,11 @@ from hfl.api.exception_handlers import register_exception_handlers
 from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_batch import router as batch_router
+from hfl.api.routes_benchmark import router as benchmark_router
 from hfl.api.routes_blobs import router as blobs_router
 from hfl.api.routes_copy import router as copy_router
 from hfl.api.routes_create import router as create_router
+from hfl.api.routes_discover import router as discover_router
 from hfl.api.routes_embed import router as embed_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_images import router as images_router
@@ -54,10 +56,13 @@ from hfl.api.routes_openai_responses import router as openai_responses_router
 from hfl.api.routes_ps import router as ps_router
 from hfl.api.routes_pull import router as pull_router
 from hfl.api.routes_push import router as push_router
+from hfl.api.routes_recommend import router as recommend_router
 from hfl.api.routes_show import router as show_router
+from hfl.api.routes_smart_pull import router as smart_pull_router
 from hfl.api.routes_stop import router as stop_router
 from hfl.api.routes_transcribe import router as transcribe_router
 from hfl.api.routes_tts import router as tts_router
+from hfl.api.routes_verify import router as verify_router
 from hfl.api.routes_web import router as web_router
 from hfl.api.state import get_state
 from hfl.config import config
@@ -248,6 +253,11 @@ app.include_router(embed_router)
 app.include_router(ps_router)
 app.include_router(pull_router)
 app.include_router(push_router)
+app.include_router(discover_router)
+app.include_router(recommend_router)
+app.include_router(smart_pull_router)
+app.include_router(verify_router)
+app.include_router(benchmark_router)
 app.include_router(show_router)
 app.include_router(stop_router)
 app.include_router(transcribe_router)
