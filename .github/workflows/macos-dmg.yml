@@ -29,10 +29,10 @@ jobs:
   build-dmg:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -123,6 +123,6 @@ jobs:
           xcrun stapler staple dist/hfl-${{ steps.ver.outputs.version }}.dmg
 
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/hfl-*.dmg
