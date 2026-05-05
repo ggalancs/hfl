@@ -331,14 +331,17 @@ class TestEngineSelector:
         assert isinstance(result, bool)
 
     def test_select_fallback_to_llama_cpp(self, temp_dir, mock_llama_cpp_module):
-        """Fallback to llama.cpp when CUDA is not available."""
+        """Fallback to llama.cpp when neither CUDA nor MLX is available."""
         from hfl.engine.llama_cpp import LlamaCppEngine
         from hfl.engine.selector import select_engine
 
         # Create safetensors file
         (temp_dir / "model.safetensors").write_bytes(b"ST")
 
-        with patch("hfl.engine.selector._has_cuda", return_value=False):
+        with (
+            patch("hfl.engine.selector._has_cuda", return_value=False),
+            patch("hfl.engine.selector._mlx_preferred", return_value=False),
+        ):
             engine = select_engine(temp_dir)
 
             assert isinstance(engine, LlamaCppEngine)

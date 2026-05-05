@@ -106,6 +106,47 @@ def get_model_type_display_name(model_type: ModelType) -> str:
     return display_names.get(model_type, model_type.value)
 
 
+def is_mlx_quantized_repo(repo_id: str | None, model_path: Path) -> bool:
+    """True when the repo is an MLX pre-quantized model.
+
+    These repos are NOT convertible to GGUF (llama.cpp's
+    ``convert_hf_to_gguf.py`` rejects MLX-packed architectures like
+    ``Gemma4ForConditionalGeneration``) and should be served
+    directly by the MLX backend on Apple Silicon.
+
+    Detection uses two independent signals:
+
+    1. ``"MLX"`` in the repo id (case-insensitive). Covers the
+       canonical HuggingFace orgs (``mlx-community/*``,
+       ``lmstudio-community/*-MLX-*``) with high precision.
+    2. ``config.json`` contains a ``quantization`` object with the
+       MLX-specific keys ``group_size`` + ``bits``. This is the
+       definitive marker: mlx-lm writes it on every quantised export,
+       and no other framework uses that exact shape.
+
+    Either signal is sufficient.
+    """
+    if repo_id and "mlx" in repo_id.lower():
+        return True
+
+    import json
+
+    cfg_dir = model_path if model_path.is_dir() else model_path.parent
+    config_path = cfg_dir / "config.json"
+    if not config_path.exists():
+        return False
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    quant = data.get("quantization")
+    if isinstance(quant, dict) and "group_size" in quant and "bits" in quant:
+        return True
+    return False
+
+
 def detect_format(model_path: Path) -> ModelFormat:
     """Detects the format of a model given its directory or file."""
     if model_path.is_file():

@@ -164,6 +164,104 @@ class TestDetectFormat:
         assert result == ModelFormat.GGUF
 
 
+class TestIsMLXQuantizedRepo:
+    """Tests for is_mlx_quantized_repo.
+
+    The helper gates the pull flow away from a doomed
+    convert_hf_to_gguf.py run on MLX-packed weights.
+    """
+
+    def test_detects_mlx_in_repo_id(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        assert is_mlx_quantized_repo("lmstudio-community/gemma-4-31B-it-MLX-4bit", temp_dir) is True
+
+    def test_detects_mlx_community_org(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        assert is_mlx_quantized_repo("mlx-community/Llama-3.2-8B-Instruct-4bit", temp_dir) is True
+
+    def test_case_insensitive_repo_id(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        assert is_mlx_quantized_repo("user/Some-mlx-Variant", temp_dir) is True
+
+    def test_detects_quantization_marker_in_config(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        (temp_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "llama",
+                    "architectures": ["LlamaForCausalLM"],
+                    "quantization": {"group_size": 64, "bits": 4},
+                }
+            )
+        )
+        # No MLX in repo id — must still detect via config.
+        assert is_mlx_quantized_repo("some-user/plain-name", temp_dir) is True
+
+    def test_not_mlx_when_neither_signal_present(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        (temp_dir / "config.json").write_text(
+            json.dumps({"model_type": "llama", "architectures": ["LlamaForCausalLM"]})
+        )
+        assert is_mlx_quantized_repo("meta-llama/Llama-3.2-8B-Instruct", temp_dir) is False
+
+    def test_quantization_dict_without_mlx_fields_is_not_mlx(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        # AWQ/GPTQ configs also use a quantization dict but with different keys.
+        (temp_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "llama",
+                    "quantization_config": {"quant_method": "awq", "bits": 4},
+                }
+            )
+        )
+        # "quantization_config" ≠ "quantization"; we require the exact MLX shape.
+        assert is_mlx_quantized_repo("user/awq-model", temp_dir) is False
+
+    def test_handles_missing_config(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        # No config.json present; rely solely on repo id.
+        assert is_mlx_quantized_repo("plain-user/plain-model", temp_dir) is False
+
+    def test_handles_invalid_config(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        (temp_dir / "config.json").write_text("{ broken json")
+        assert is_mlx_quantized_repo("plain/name", temp_dir) is False
+
+    def test_handles_none_repo_id(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        (temp_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "llama",
+                    "quantization": {"group_size": 64, "bits": 4},
+                }
+            )
+        )
+        # Even without a repo id, the config signal is sufficient.
+        assert is_mlx_quantized_repo(None, temp_dir) is True
+
+    def test_accepts_file_path_resolves_parent(self, temp_dir):
+        from hfl.converter.formats import is_mlx_quantized_repo
+
+        (temp_dir / "config.json").write_text(
+            json.dumps({"quantization": {"group_size": 64, "bits": 4}})
+        )
+        fake_file = temp_dir / "model-00001-of-00002.safetensors"
+        fake_file.write_bytes(b"x")
+        # Passing a file path should still resolve config via the parent dir.
+        assert is_mlx_quantized_repo(None, fake_file) is True
+
+
 class TestFindModelFile:
     """Tests for find_model_file."""
 

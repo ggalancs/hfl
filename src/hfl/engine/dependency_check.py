@@ -58,6 +58,25 @@ def check_engine_availability() -> dict[str, bool | str]:
     except ImportError as e:
         results["vllm"] = f"Not installed: {e}"
 
+    # mlx (Apple Silicon — gates on platform + mlx_lm importability)
+    try:
+        from hfl.engine import mlx_engine
+
+        if mlx_engine.is_available():
+            results["mlx"] = True
+        else:
+            import platform
+
+            if platform.system() == "Darwin" and platform.machine().lower() in (
+                "arm64",
+                "aarch64",
+            ):
+                results["mlx"] = "Not installed (pip install 'hfl[mlx]' to enable)"
+            else:
+                results["mlx"] = "Not applicable (Darwin-arm64 only)"
+    except ImportError as e:  # pragma: no cover — engine module always present
+        results["mlx"] = f"Not installed: {e}"
+
     # TTS dependencies
     try:
         import soundfile  # noqa: F401

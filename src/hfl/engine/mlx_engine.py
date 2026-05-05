@@ -131,17 +131,39 @@ class MLXEngine(InferenceEngine):
     # Generation
     # ------------------------------------------------------------------
 
+    def _build_sampling(self, cfg: GenerationConfig) -> dict[str, Any]:
+        """Translate HFL's GenerationConfig to mlx-lm 0.31+ kwargs.
+
+        mlx-lm 0.30+ moved sampling parameters off the top-level
+        ``generate()`` signature and onto a ``sampler`` callable plus a
+        list of ``logits_processors``. We build both here and return
+        them as a kwargs dict ready to splat into ``generate`` /
+        ``stream_generate``.
+        """
+        from mlx_lm.sample_utils import (  # type: ignore
+            make_logits_processors,
+            make_sampler,
+        )
+
+        sampler = make_sampler(
+            temp=cfg.temperature,
+            top_p=cfg.top_p if cfg.top_p else 0.0,
+            top_k=cfg.top_k if cfg.top_k else 0,
+        )
+        logits_processors = make_logits_processors(
+            repetition_penalty=cfg.repeat_penalty if cfg.repeat_penalty != 1.0 else None,
+        )
+        return {
+            "max_tokens": cfg.max_tokens,
+            "sampler": sampler,
+            "logits_processors": logits_processors,
+        }
+
     def _run_generate(self, prompt: str, cfg: GenerationConfig) -> tuple[str, int, int, int]:
         from mlx_lm import generate  # type: ignore
 
         start_ns = time.monotonic_ns()
-        kwargs: dict[str, Any] = {
-            "max_tokens": cfg.max_tokens,
-            "temp": cfg.temperature,
-            "top_p": cfg.top_p,
-            "repetition_penalty": cfg.repeat_penalty if cfg.repeat_penalty != 1.0 else None,
-        }
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        kwargs = self._build_sampling(cfg)
         try:
             text = generate(
                 self._model,
@@ -208,12 +230,7 @@ class MLXEngine(InferenceEngine):
             raise RuntimeError("MLX engine is not loaded")
         from mlx_lm import stream_generate  # type: ignore
 
-        kwargs: dict[str, Any] = {
-            "max_tokens": cfg.max_tokens,
-            "temp": cfg.temperature,
-            "top_p": cfg.top_p,
-        }
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        kwargs = self._build_sampling(cfg)
         for token in stream_generate(
             self._model,
             self._tokenizer,

@@ -4,10 +4,16 @@
 Automatic inference backend selection.
 
 Decision logic for LLM:
-  1. If model is GGUF -> LlamaCppEngine
-  2. If NVIDIA GPU + safetensors model -> TransformersEngine (4bit)
-  3. If vLLM installed + GPU -> vLLM for production
-  4. Fallback -> Convert to GGUF + LlamaCppEngine
+  1. If model is GGUF -> LlamaCppEngine (Metal on macOS)
+  2. On Darwin-arm64 with mlx-lm installed + safetensors/pytorch -> MLXEngine
+  3. If NVIDIA GPU + safetensors model -> TransformersEngine (4bit)
+  4. If vLLM installed + GPU -> vLLM for production
+  5. Fallback -> Convert to GGUF + LlamaCppEngine
+
+The MLX path hits raw Metal directly and outperforms llama-cpp's
+Metal path on M-series silicon for Llama-family architectures. It is
+opt-out via ``HFL_DISABLE_MLX=1`` for users who want the llama-cpp
+behaviour on Apple Silicon regardless.
 
 Decision logic for TTS:
   1. If Bark model -> BarkEngine (transformers)
@@ -15,6 +21,7 @@ Decision logic for TTS:
   3. Auto-detect based on config.json
 """
 
+import os
 from pathlib import Path
 
 from hfl.converter.formats import ModelFormat, ModelType, detect_format, detect_model_type
@@ -45,6 +52,42 @@ def _get_llama_cpp_engine():
         ) from e
 
 
+def _get_mlx_engine():
+    """Lazy import + availability gate for MLXEngine.
+
+    Raises MissingDependencyError either when the host isn't
+    Darwin-arm64 (MLX is Apple Silicon only) or when ``mlx_lm`` is
+    not installed. Callers in auto-mode should catch this and fall
+    through to the next candidate; callers requesting MLX explicitly
+    get the error surfaced.
+    """
+    from hfl.engine import mlx_engine
+
+    if not mlx_engine.is_available():
+        raise MissingDependencyError(
+            "The MLX backend requires Apple Silicon (Darwin-arm64) with "
+            "the 'mlx-lm' library installed.\n\n"
+            "Install it with:\n"
+            "  pip install 'hfl[mlx]'\n\n"
+            "Or directly:\n"
+            "  pip install mlx-lm"
+        )
+    return mlx_engine.MLXEngine()
+
+
+def _mlx_preferred() -> bool:
+    """True when MLX should be the default backend for safetensors.
+
+    Off-switch: ``HFL_DISABLE_MLX=1`` forces the legacy path on
+    Apple Silicon (useful for benchmarking parity with llama-cpp).
+    """
+    if os.environ.get("HFL_DISABLE_MLX", "").strip() in ("1", "true", "True", "yes"):
+        return False
+    from hfl.engine import mlx_engine
+
+    return mlx_engine.is_available()
+
+
 def select_engine(
     model_path: Path,
     backend: str = "auto",
@@ -55,7 +98,7 @@ def select_engine(
 
     Args:
         model_path: Path to the model
-        backend: "auto", "llama-cpp", "transformers", "vllm"
+        backend: "auto", "llama-cpp", "transformers", "vllm", "mlx"
         **kwargs: Additional parameters for the engine
     """
     fmt = detect_format(model_path)
@@ -65,7 +108,18 @@ def select_engine(
 
     # Auto-selection
     if fmt == ModelFormat.GGUF:
+        # GGUF stays on llama-cpp (Metal on macOS). MLX does not
+        # ingest GGUF, so no opportunity to route it there.
         return _get_llama_cpp_engine()
+
+    # Safetensors / pytorch weights. On Apple Silicon with mlx-lm
+    # installed, MLX is the fastest path for Llama-family models and
+    # avoids the detour through GGUF conversion.
+    if _mlx_preferred():
+        try:
+            return _get_mlx_engine()
+        except MissingDependencyError:
+            pass  # Fall through to the legacy decision tree.
 
     # For safetensors, check GPU
     if _has_cuda():
@@ -118,6 +172,8 @@ def _create_engine(name: str) -> InferenceEngine:
         return _get_transformers_engine()
     elif name == "vllm":
         return _get_vllm_engine()
+    elif name == "mlx":
+        return _get_mlx_engine()
     raise ValueError(f"Unknown backend: {name}")
 
 

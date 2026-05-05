@@ -52,7 +52,25 @@ def fake_mlx(monkeypatch):
     fake.load = _load  # type: ignore[attr-defined]
     fake.generate = _generate  # type: ignore[attr-defined]
     fake.stream_generate = _stream_generate  # type: ignore[attr-defined]
+
+    # mlx-lm 0.31+ moved sampling knobs onto a sampler callable +
+    # logits_processors list. MLXEngine._build_sampling imports these
+    # helpers; the fixture seats a stub submodule so the import chain
+    # resolves without a real mlx-lm install.
+    sample_utils = ModuleType("mlx_lm.sample_utils")
+
+    def _make_sampler(**_kwargs):
+        return lambda logits: logits
+
+    def _make_logits_processors(**_kwargs):
+        return []
+
+    sample_utils.make_sampler = _make_sampler  # type: ignore[attr-defined]
+    sample_utils.make_logits_processors = _make_logits_processors  # type: ignore[attr-defined]
+    fake.sample_utils = sample_utils  # type: ignore[attr-defined]
+
     monkeypatch.setitem(sys.modules, "mlx_lm", fake)
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
     # Force the availability gate to pass so the engine uses our fake.
     monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
     return {"texts": generated_texts}

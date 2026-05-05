@@ -168,23 +168,76 @@ def pull(
             console.print(f"[dim]{t('messages.no_conversion_needed')}[/]")
             # Keep as safetensors - no conversion needed
         else:
-            # LLM model - attempt GGUF conversion
-            from hfl.converter.gguf_converter import GGUFConverter, check_model_convertibility
+            from hfl.converter.formats import is_mlx_quantized_repo
+            from hfl.engine.selector import _mlx_preferred
 
-            is_convertible, reason = check_model_convertibility(local_path)
+            # MLX pre-quantized repos (mlx-community/*, *-MLX-4bit, etc.)
+            # cannot be converted to GGUF — llama.cpp's
+            # convert_hf_to_gguf.py rejects the packed architecture.
+            # The MLXEngine serves them natively on Apple Silicon.
+            if is_mlx_quantized_repo(resolved.repo_id, local_path):
+                if _mlx_preferred():
+                    console.print(
+                        "[cyan]MLX pre-quantized model detected — "
+                        "serving natively with the MLX backend.[/]"
+                    )
+                else:
+                    console.print(
+                        "[yellow]MLX pre-quantized model detected.[/] "
+                        "This repo is not convertible to GGUF. To serve it you "
+                        "need Apple Silicon with the MLX backend: "
+                        "`pip install 'hfl[mlx]'`."
+                    )
+                # Many MLX quantisation pipelines drop the chat_template
+                # when they re-emit the tokenizer. Without it
+                # apply_chat_template() blows up at first /api/chat.
+                # Best-effort fetch from the upstream base repo.
+                from hfl.hub.chat_template_repair import (
+                    ensure_chat_template,
+                    has_chat_template,
+                )
 
-            if not is_convertible:
-                console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
-                console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
-                console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
-                console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
-                raise typer.Exit(1)
+                if not has_chat_template(local_path):
+                    if ensure_chat_template(local_path, resolved.repo_id):
+                        console.print("[dim]Recovered missing chat_template from the base repo.[/]")
+                    else:
+                        console.print(
+                            "[yellow]Warning:[/] this repo's tokenizer has no "
+                            "chat_template and none could be recovered. "
+                            "Chat endpoints will fail until you add "
+                            "``chat_template.jinja`` manually."
+                        )
+                # Keep as safetensors — no GGUF conversion.
+            elif _mlx_preferred():
+                # Apple Silicon with mlx-lm available. Safetensors LLMs
+                # are served by MLX directly; skipping the GGUF detour
+                # saves both time and disk.
+                console.print(
+                    "[cyan]Apple Silicon + MLX available — "
+                    "keeping safetensors for the MLX backend.[/]"
+                )
+                # Keep as safetensors — no GGUF conversion.
+            else:
+                # LLM model on a platform without MLX - attempt GGUF conversion
+                from hfl.converter.gguf_converter import (
+                    GGUFConverter,
+                    check_model_convertibility,
+                )
 
-            console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
-            converter = GGUFConverter()
-            output_name = resolved.repo_id.replace("/", "--")
-            output_path = local_path.parent / output_name
-            final_path = converter.convert(local_path, output_path, quantize)
+                is_convertible, reason = check_model_convertibility(local_path)
+
+                if not is_convertible:
+                    console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
+                    console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
+                    console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
+                    console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
+                    raise typer.Exit(1)
+
+                console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
+                converter = GGUFConverter()
+                output_name = resolved.repo_id.replace("/", "--")
+                output_path = local_path.parent / output_name
+                final_path = converter.convert(local_path, output_path, quantize)
 
     # 4. Register
     size = sum(
@@ -1345,7 +1398,7 @@ def check():
     console.print("[bold cyan]Backend Availability[/]")
     availability = check_engine_availability()
 
-    for backend in ["llama-cpp", "transformers", "vllm"]:
+    for backend in ["llama-cpp", "transformers", "vllm", "mlx"]:
         status = availability.get(backend, "unknown")
         if status is True:
             console.print(f"  [green]✓[/] {backend}")

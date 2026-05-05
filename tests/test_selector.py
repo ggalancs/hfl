@@ -177,6 +177,110 @@ class TestCreateEngine:
 
         assert "Unknown backend" in str(exc_info.value)
 
+    @patch("hfl.engine.selector._get_mlx_engine")
+    def test_create_mlx(self, mock_get):
+        """_create_engine creates MLX engine when requested explicitly."""
+        from hfl.engine.selector import _create_engine as create
+
+        mock_engine = MagicMock()
+        mock_get.return_value = mock_engine
+
+        result = create("mlx")
+
+        assert result is mock_engine
+        mock_get.assert_called_once()
+
+
+class TestMLXAutoSelection:
+    """Tests for MLX auto-selection on Apple Silicon (Darwin-arm64)."""
+
+    @patch("hfl.engine.selector._get_mlx_engine")
+    @patch("hfl.engine.selector._mlx_preferred", return_value=True)
+    @patch("hfl.engine.selector.detect_format")
+    def test_auto_selects_mlx_for_safetensors_on_apple_silicon(
+        self, mock_detect, _mlx_pref, mock_get_mlx
+    ):
+        """Safetensors + Darwin-arm64 + mlx-lm installed -> MLXEngine."""
+        mock_detect.return_value = ModelFormat.SAFETENSORS
+        mock_engine = MagicMock()
+        mock_get_mlx.return_value = mock_engine
+
+        result = select_engine(Path("/model"))
+
+        assert result is mock_engine
+        mock_get_mlx.assert_called_once()
+
+    @patch("hfl.engine.selector._get_llama_cpp_engine")
+    @patch("hfl.engine.selector._mlx_preferred", return_value=True)
+    @patch("hfl.engine.selector.detect_format")
+    def test_does_not_select_mlx_for_gguf(self, mock_detect, _mlx_pref, mock_get_llama):
+        """GGUF must always route to llama-cpp, never MLX (MLX can't ingest GGUF)."""
+        mock_detect.return_value = ModelFormat.GGUF
+        mock_llama = MagicMock()
+        mock_get_llama.return_value = mock_llama
+
+        result = select_engine(Path("/model.gguf"))
+
+        assert result is mock_llama
+        mock_get_llama.assert_called_once()
+
+    @patch("hfl.engine.selector._get_llama_cpp_engine")
+    @patch("hfl.engine.selector._get_mlx_engine")
+    @patch("hfl.engine.selector._has_cuda", return_value=False)
+    @patch("hfl.engine.selector._mlx_preferred", return_value=True)
+    @patch("hfl.engine.selector.detect_format")
+    def test_falls_through_when_mlx_import_fails(
+        self, mock_detect, _mlx_pref, _cuda, mock_get_mlx, mock_get_llama
+    ):
+        """If _get_mlx_engine raises MissingDependencyError, fall through to llama-cpp."""
+        mock_detect.return_value = ModelFormat.SAFETENSORS
+        mock_get_mlx.side_effect = MissingDependencyError("mlx-lm not available")
+        mock_llama = MagicMock()
+        mock_get_llama.return_value = mock_llama
+
+        result = select_engine(Path("/model"))
+
+        assert result is mock_llama
+
+    def test_mlx_preferred_respects_disable_env(self, monkeypatch):
+        """HFL_DISABLE_MLX forces _mlx_preferred() to False even when SDK is available."""
+        from hfl.engine import mlx_engine, selector
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
+        monkeypatch.setenv("HFL_DISABLE_MLX", "1")
+
+        assert selector._mlx_preferred() is False
+
+    def test_mlx_preferred_when_sdk_available_and_not_disabled(self, monkeypatch):
+        """_mlx_preferred() is True when SDK available and env var not set."""
+        from hfl.engine import mlx_engine, selector
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
+        monkeypatch.delenv("HFL_DISABLE_MLX", raising=False)
+
+        assert selector._mlx_preferred() is True
+
+    def test_mlx_preferred_false_when_sdk_unavailable(self, monkeypatch):
+        """_mlx_preferred() is False when MLX SDK isn't importable (non-Darwin or not installed)."""
+        from hfl.engine import mlx_engine, selector
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: False)
+        monkeypatch.delenv("HFL_DISABLE_MLX", raising=False)
+
+        assert selector._mlx_preferred() is False
+
+    def test_get_mlx_engine_raises_when_unavailable(self, monkeypatch):
+        """_get_mlx_engine raises MissingDependencyError on non-Darwin / no mlx_lm."""
+        from hfl.engine import mlx_engine
+        from hfl.engine.selector import _get_mlx_engine
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: False)
+        with pytest.raises(MissingDependencyError) as exc_info:
+            _get_mlx_engine()
+
+        msg = str(exc_info.value)
+        assert "Apple Silicon" in msg or "mlx-lm" in msg
+
 
 class TestSelectEngine:
     """Tests for select_engine function."""
@@ -206,10 +310,11 @@ class TestSelectEngine:
         assert result is mock_engine
         mock_get.assert_called_once()
 
+    @patch("hfl.engine.selector._mlx_preferred", return_value=False)
     @patch("hfl.engine.selector._get_transformers_engine")
     @patch("hfl.engine.selector._has_cuda")
     @patch("hfl.engine.selector.detect_format")
-    def test_auto_selects_transformers_with_cuda(self, mock_detect, mock_cuda, mock_get):
+    def test_auto_selects_transformers_with_cuda(self, mock_detect, mock_cuda, mock_get, _mlx):
         """select_engine selects transformers when CUDA available."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
         mock_cuda.return_value = True
@@ -221,12 +326,13 @@ class TestSelectEngine:
         assert result is mock_engine
         mock_get.assert_called_once()
 
+    @patch("hfl.engine.selector._mlx_preferred", return_value=False)
     @patch("hfl.engine.selector._get_llama_cpp_engine")
     @patch("hfl.engine.selector._get_transformers_engine")
     @patch("hfl.engine.selector._has_cuda")
     @patch("hfl.engine.selector.detect_format")
     def test_fallback_to_llama_when_transformers_fails(
-        self, mock_detect, mock_cuda, mock_get_trans, mock_get_llama
+        self, mock_detect, mock_cuda, mock_get_trans, mock_get_llama, _mlx
     ):
         """select_engine falls back to llama-cpp when transformers fails."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
@@ -239,10 +345,11 @@ class TestSelectEngine:
 
         assert result is mock_llama
 
+    @patch("hfl.engine.selector._mlx_preferred", return_value=False)
     @patch("hfl.engine.selector._get_llama_cpp_engine")
     @patch("hfl.engine.selector._has_cuda")
     @patch("hfl.engine.selector.detect_format")
-    def test_fallback_to_llama_without_cuda(self, mock_detect, mock_cuda, mock_get):
+    def test_fallback_to_llama_without_cuda(self, mock_detect, mock_cuda, mock_get, _mlx):
         """select_engine uses llama-cpp without CUDA."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
         mock_cuda.return_value = False
