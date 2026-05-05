@@ -1715,5 +1715,157 @@ def help_command(
         console.print(Panel(help_text, title="[bold]hfl[/]", border_style="cyan"))
 
 
+@app.command()
+def discover(
+    query: str | None = typer.Argument(default=None, help="Free-text query"),
+    family: str | None = typer.Option(
+        None, "--family", "-f", help="Family filter (llama, qwen, ...)"
+    ),
+    task: str | None = typer.Option(None, "--task", "-t", help="HF pipeline tag"),
+    quantization: str | None = typer.Option(None, "--quant", "-q", help="gguf, mlx, awq, ..."),
+    multimodal: bool = typer.Option(False, "--multimodal", help="Vision/multimodal only"),
+    min_likes: int = typer.Option(0, "--min-likes", help="Minimum like count"),
+    license_filter: str | None = typer.Option(None, "--license", help="Exact license match"),
+    gated: bool | None = typer.Option(None, "--gated/--open", help="Gated repos only / open only"),
+    page_size: int = typer.Option(20, "--limit", "-l", help="Result count"),
+    refresh: bool = typer.Option(False, "--refresh", help="Bypass the on-disk cache"),
+):
+    """V4: filter the HuggingFace Hub catalogue by capability and popularity.
+
+    Unlike Ollama's static registry, this hits the live Hub (~1.5M
+    models) and combines filters: family + quantisation + likes +
+    license + multimodal. Cached 5 min on disk (override with
+    ``--refresh``).
+    """
+    from rich.table import Table
+
+    from hfl.api.routes_discover import _annotate_local_availability, _build_cache
+    from hfl.hub.discovery import DiscoveryQuery, format_size_human, search_hub
+
+    q = DiscoveryQuery(
+        q=query,
+        family=family,
+        task=task,
+        quantization=quantization,
+        multimodal=multimodal,
+        min_likes=min_likes,
+        license=license_filter,
+        gated=gated,
+        page_size=page_size,
+    )
+
+    cache = _build_cache()
+    entries = None if refresh else cache.get(q)
+    cached_label = "(cached)"
+    if entries is None:
+        cached_label = ""
+        try:
+            entries = search_hub(q)
+        except Exception as exc:
+            console.print(f"[red]Hub unavailable:[/] {exc}")
+            raise typer.Exit(1)
+        cache.put(q, entries)
+
+    _annotate_local_availability(entries)
+
+    if not entries:
+        console.print("[yellow]No matching models found.[/]")
+        return
+
+    table = Table(title=f"HF Hub discovery {cached_label}".strip(), show_lines=False)
+    table.add_column("repo_id", style="cyan", no_wrap=False)
+    table.add_column("family", style="magenta")
+    table.add_column("size", justify="right")
+    table.add_column("quant", style="yellow")
+    table.add_column("likes", justify="right")
+    table.add_column("downloads", justify="right")
+    table.add_column("local", justify="center")
+
+    for e in entries:
+        table.add_row(
+            e.repo_id,
+            e.family or "-",
+            format_size_human(e.parameter_estimate_b),
+            e.quantization or "-",
+            f"{e.likes:,}",
+            f"{e.downloads:,}",
+            "[green]✓[/]" if e.locally_available else "",
+        )
+    console.print(table)
+
+
+@app.command()
+def recommend(
+    task: str | None = typer.Option(
+        None, "--task", "-t", help="chat / code / vision / embeddings / tools"
+    ),
+    family: str | None = typer.Option(None, "--family", "-f", help="Family filter"),
+    quantization: str | None = typer.Option(None, "--quant", "-q", help="Quantisation filter"),
+    top_n: int = typer.Option(5, "--top", "-n", help="Number of suggestions"),
+):
+    """V4: HW-aware top-N model recommendations.
+
+    Combines the Hub catalogue, your hardware profile (RAM, VRAM,
+    MLX availability), and a capability/popularity score to pick
+    models that will actually run well on this machine.
+    """
+    from dataclasses import asdict
+
+    from rich.table import Table
+
+    from hfl.hub.hw_profile import get_hw_profile
+    from hfl.hub.recommend import recommend_models
+
+    profile = get_hw_profile()
+    valid_tasks = {"chat", "code", "vision", "embeddings", "tools"}
+    if task is not None and task not in valid_tasks:
+        console.print(f"[red]Error:[/] task must be one of {sorted(valid_tasks)}")
+        raise typer.Exit(1)
+
+    try:
+        recs = recommend_models(
+            task=task,  # type: ignore[arg-type]
+            profile=profile,
+            family=family,
+            quantization=quantization,
+            top_n=top_n,
+        )
+    except Exception as exc:
+        console.print(f"[red]Hub unavailable:[/] {exc}")
+        raise typer.Exit(1)
+
+    profile_dict = asdict(profile)
+    console.print(
+        f"[dim]Host: {profile_dict['os']}/{profile_dict['arch']} "
+        f"RAM={profile_dict['system_ram_gb']}GB GPU={profile_dict['gpu_kind']} "
+        f"VRAM={profile_dict['gpu_vram_gb'] or 'n/a'}GB[/]"
+    )
+
+    if not recs:
+        console.print(
+            "[yellow]No models fit this hardware. Try smaller params or relax filters.[/]"
+        )
+        return
+
+    table = Table(title=f"Top {len(recs)} for {task or 'general use'}", show_lines=False)
+    table.add_column("repo_id", style="cyan")
+    table.add_column("family", style="magenta")
+    table.add_column("quant", style="yellow")
+    table.add_column("est. VRAM", justify="right")
+    table.add_column("score", justify="right", style="green")
+    table.add_column("why", style="dim")
+    for r in recs:
+        why = "; ".join(r.reasoning[:2])
+        table.add_row(
+            r.repo_id,
+            r.family or "-",
+            r.quantization or "-",
+            f"{r.estimated_vram_gb:.1f} GB",
+            f"{r.score:.2f}",
+            why,
+        )
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()
