@@ -50,6 +50,7 @@ from hfl.api.routes_images import router as images_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
+from hfl.api.routes_openai_responses import router as openai_responses_router
 from hfl.api.routes_ps import router as ps_router
 from hfl.api.routes_pull import router as pull_router
 from hfl.api.routes_show import router as show_router
@@ -236,6 +237,7 @@ register_exception_handlers(app)
 
 app.include_router(anthropic_router)
 app.include_router(openai_router)
+app.include_router(openai_responses_router)
 app.include_router(native_router)
 app.include_router(batch_router)
 app.include_router(blobs_router)
