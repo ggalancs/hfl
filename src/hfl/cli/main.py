@@ -1941,5 +1941,380 @@ def lora_cmd(
     asyncio.run(_run())
 
 
+@app.command(name="pull-smart")
+def pull_smart_cmd(
+    model: str = typer.Argument(help="Base repo, e.g. meta-llama/Llama-3.1-8B-Instruct"),
+    max_vram_gb: float | None = typer.Option(
+        None, "--max-vram-gb", help="Override the detected VRAM budget"
+    ),
+):
+    """V4: pull the optimal Hub variant for the current hardware.
+
+    Inspects MLX / GGUF community forks, picks the best (repo, quant)
+    pair that fits the host budget, and downloads it. On Apple
+    Silicon resolves to ``mlx-community/<name>-4bit``; on CUDA picks
+    a ``bartowski/...-GGUF`` quant; on CPU-only falls back to the
+    smallest quant that fits.
+    """
+    import asyncio
+
+    from rich.table import Table
+
+    from hfl.hub.smart_pull import build_smart_plan
+
+    try:
+        plan = build_smart_plan(model, max_vram_gb=max_vram_gb)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    except Exception as exc:
+        console.print(f"[red]Hub unavailable:[/] {exc}")
+        raise typer.Exit(1)
+
+    table = Table(title="Smart pull plan", show_lines=False)
+    table.add_column("field", style="cyan")
+    table.add_column("value")
+    table.add_row("target_repo_id", plan.target_repo_id)
+    table.add_row("quantization", plan.quantization)
+    table.add_row("estimated_vram_gb", f"{plan.estimated_vram_gb:.1f} GB")
+    table.add_row("reason", plan.reason)
+    console.print(table)
+    if plan.fallback_chain:
+        console.print("[dim]Skipped candidates:[/]")
+        for skip in plan.fallback_chain:
+            console.print(f"  - {skip}")
+
+    # Delegate the actual byte transfer to the existing /api/pull
+    # machinery if we can reach the helper; otherwise just print
+    # the resolved plan and tell the operator to invoke ``hfl pull``.
+    try:
+        from hfl.api.routes_pull import _iter_pull_events  # type: ignore[attr-defined]
+    except ImportError:
+        console.print(
+            f"\n[yellow]Run[/] [cyan]hfl pull {plan.target_repo_id}[/] to complete the download."
+        )
+        return
+
+    console.print(f"\n[green]Now pulling[/] {plan.target_repo_id} via the existing pull command...")
+
+    async def _pull() -> None:
+        async for line in _iter_pull_events(plan.target_repo_id):
+            console.print(line.rstrip())
+
+    try:
+        asyncio.run(_pull())
+    except Exception as exc:
+        console.print(f"[red]Pull failed:[/] {exc}")
+        raise typer.Exit(1)
+
+
+@app.command(name="verify")
+def verify_cmd(
+    model: str = typer.Argument(help="Registered model name"),
+):
+    """V4: sanity-check a registered model.
+
+    Runs five probes (tokenizer round-trip, chat-template render,
+    smoke generation, tool-parser, embedding dim) and prints a pass/
+    fail report in seconds.
+    """
+    import asyncio
+
+    from rich.table import Table
+
+    from hfl.api.model_loader import load_llm
+    from hfl.engine.verifier import verify_model
+
+    async def _run() -> None:
+        try:
+            engine, manifest = await load_llm(model)
+        except FileNotFoundError as exc:
+            console.print(f"[red]Model not found:[/] {exc}")
+            raise typer.Exit(1)
+        if engine is None:
+            console.print("[red]Engine not available[/]")
+            raise typer.Exit(1)
+        result = verify_model(engine, manifest)
+        title = (
+            f"[green]VERIFY PASS[/] {result.model} ({result.duration_ms:.1f} ms)"
+            if result.overall_pass
+            else f"[red]VERIFY FAIL[/] {result.model} ({result.duration_ms:.1f} ms)"
+        )
+        console.print(title)
+        table = Table(show_lines=False)
+        table.add_column("check", style="cyan")
+        table.add_column("status")
+        table.add_column("detail", style="dim")
+        for c in result.checks:
+            badge = "[green]PASS[/]" if c.passed else "[red]FAIL[/]"
+            table.add_row(c.name, badge, c.detail)
+        console.print(table)
+        if not result.overall_pass:
+            raise typer.Exit(1)
+
+    asyncio.run(_run())
+
+
+@app.command(name="bench")
+def bench_cmd(
+    model: str = typer.Argument(help="Registered model name"),
+    runs_per_length: int = typer.Option(3, "--runs", "-n", min=1, max=20),
+    max_tokens: int = typer.Option(64, "--max-tokens", "-t", min=1, max=2048),
+    prompt_lengths: str = typer.Option(
+        "16,256,2048", "--lengths", help="Comma-separated prompt lengths"
+    ),
+):
+    """V4: benchmark TTFT + tok/s on a registered model.
+
+    Streams per-run measurements and a final p50/p95 summary. Useful
+    to validate that a freshly pulled model performs as expected on
+    your hardware.
+    """
+    import asyncio
+
+    from rich.table import Table
+
+    from hfl.api.model_loader import load_llm
+    from hfl.engine.benchmark import run_benchmark_stream
+
+    try:
+        lengths = tuple(int(v.strip()) for v in prompt_lengths.split(",") if v.strip())
+    except ValueError:
+        console.print("[red]Invalid --lengths value (use comma-separated integers)[/]")
+        raise typer.Exit(1)
+
+    async def _run() -> None:
+        try:
+            engine, _ = await load_llm(model)
+        except FileNotFoundError as exc:
+            console.print(f"[red]Model not found:[/] {exc}")
+            raise typer.Exit(1)
+        if engine is None:
+            console.print("[red]Engine not available[/]")
+            raise typer.Exit(1)
+
+        summaries = []
+        async for event in run_benchmark_stream(
+            engine,
+            model_name=model,
+            runs_per_length=runs_per_length,
+            max_tokens=max_tokens,
+            prompt_lengths=lengths,
+        ):
+            status = event.get("status")
+            if status == "starting":
+                console.print(
+                    f"[dim]Bench {event['model']}: {event['runs_per_length']} runs × "
+                    f"{event['prompt_lengths']} chars[/]"
+                )
+            elif status == "run":
+                console.print(
+                    f"  [{event['prompt_length']} chars run] "
+                    f"ttft={event['ttft_ms']:.1f}ms "
+                    f"total={event['total_ms']:.1f}ms "
+                    f"tps={event['tokens_per_second']:.2f}"
+                )
+            elif status == "summary":
+                summaries.append(event)
+            elif status == "done":
+                pass
+
+        table = Table(title=f"Benchmark — {model}", show_lines=False)
+        table.add_column("prompt", justify="right")
+        table.add_column("runs", justify="right")
+        table.add_column("ttft p50", justify="right")
+        table.add_column("ttft p95", justify="right")
+        table.add_column("tps mean", justify="right", style="green")
+        table.add_column("tps min", justify="right")
+        table.add_column("tps max", justify="right")
+        for s in summaries:
+            table.add_row(
+                str(s["prompt_length"]),
+                str(s["runs"]),
+                f"{s['ttft_p50_ms']:.1f}",
+                f"{s['ttft_p95_ms']:.1f}",
+                f"{s['tps_mean']:.2f}",
+                f"{s['tps_min']:.2f}",
+                f"{s['tps_max']:.2f}",
+            )
+        console.print(table)
+
+    asyncio.run(_run())
+
+
+@app.command(name="snapshot")
+def snapshot_cmd(
+    action: str = typer.Argument(help="save | load | list | delete"),
+    model: str = typer.Argument(default="", help="Model (save/load only)"),
+    name: str = typer.Option("", "--name", help="Snapshot name (save/load/delete)"),
+):
+    """V4: KV cache snapshot save/restore.
+
+    Save a "warm" KV cache after loading a long system prompt or
+    few-shot context, then restore it on the next server start to
+    skip the prefill.
+
+    Examples::
+
+        hfl snapshot save qwen-coder-7b --name warm-1
+        hfl snapshot list
+        hfl snapshot load qwen-coder-7b --name warm-1
+        hfl snapshot delete --name warm-1
+    """
+    import asyncio
+
+    from rich.table import Table
+
+    from hfl.engine.snapshot import (
+        delete_snapshot,
+        list_snapshots,
+        load_snapshot,
+        save_snapshot,
+    )
+
+    if action not in {"save", "load", "list", "delete"}:
+        console.print("[red]Action must be one of: save, load, list, delete[/]")
+        raise typer.Exit(1)
+
+    if action in {"save", "load"} and not model:
+        console.print("[red]Model is required for save/load[/]")
+        raise typer.Exit(1)
+    if action in {"save", "load", "delete"} and not name:
+        console.print("[red]--name is required[/]")
+        raise typer.Exit(1)
+
+    async def _run() -> None:
+        if action == "list":
+            entries = list_snapshots()
+            if not entries:
+                console.print("[dim]No snapshots saved.[/]")
+                return
+            table = Table(title="KV cache snapshots", show_lines=False)
+            table.add_column("name", style="cyan")
+            table.add_column("model")
+            table.add_column("tokens", justify="right")
+            table.add_column("bytes", justify="right")
+            for e in entries:
+                table.add_row(e.name, e.model, str(e.tokens), f"{e.bytes:,}")
+            console.print(table)
+            return
+
+        if action == "delete":
+            ok = delete_snapshot(name)
+            if ok:
+                console.print(f"[green]Deleted[/] snapshot {name!r}")
+            else:
+                console.print(f"[yellow]No snapshot named {name!r}[/]")
+                raise typer.Exit(1)
+            return
+
+        # save / load require a loaded engine.
+        from hfl.api.model_loader import load_llm
+
+        try:
+            engine, _ = await load_llm(model)
+        except FileNotFoundError as exc:
+            console.print(f"[red]Model not found:[/] {exc}")
+            raise typer.Exit(1)
+        if engine is None:
+            console.print("[red]Engine not available[/]")
+            raise typer.Exit(1)
+
+        if action == "save":
+            try:
+                meta = save_snapshot(engine, name=name, model_name=model)
+            except (ValueError, RuntimeError) as exc:
+                console.print(f"[red]{exc}[/]")
+                raise typer.Exit(1)
+            console.print(f"[green]Saved[/] {name!r} — tokens={meta.tokens} bytes={meta.bytes:,}")
+        else:  # load
+            try:
+                meta = load_snapshot(engine, name=name, model_name=model)
+            except (ValueError, FileNotFoundError, RuntimeError) as exc:
+                console.print(f"[red]{exc}[/]")
+                raise typer.Exit(1)
+            console.print(f"[green]Restored[/] {name!r} — tokens={meta.tokens}")
+
+    asyncio.run(_run())
+
+
+@app.command(name="compliance-dashboard")
+def compliance_dashboard_cmd():
+    """V4: license / EU AI Act compliance overview of the local registry.
+
+    Different from ``compliance-report`` (which produces a per-model
+    Markdown audit trail) — this is the at-a-glance dashboard:
+    counts by license risk, gated repos pending HF_TOKEN, models
+    with no declared license, EU AI Act warnings.
+    """
+    from rich.table import Table
+
+    from hfl.api.routes_compliance import _build_compliance_dashboard
+
+    snapshot = _build_compliance_dashboard()
+
+    console.print(f"\n[bold]Compliance dashboard[/]  total={snapshot['total_models']}")
+    console.print(f"[dim]HF_TOKEN configured: {snapshot['has_hf_token']}[/]\n")
+
+    risk_table = Table(title="By license risk", show_lines=False)
+    risk_table.add_column("risk", style="cyan")
+    risk_table.add_column("count", justify="right")
+    for risk, count in sorted(snapshot["by_risk"].items()):
+        risk_table.add_row(risk, str(count))
+    console.print(risk_table)
+
+    if snapshot["by_license"]:
+        lic_table = Table(title="By license id", show_lines=False)
+        lic_table.add_column("license")
+        lic_table.add_column("count", justify="right")
+        for lic, count in sorted(snapshot["by_license"].items()):
+            lic_table.add_row(lic, str(count))
+        console.print(lic_table)
+
+    if snapshot["gated_without_token"]:
+        console.print("\n[yellow]Gated models without HF_TOKEN:[/]")
+        for name in snapshot["gated_without_token"]:
+            console.print(f"  - {name}")
+
+    if snapshot["missing_license"]:
+        console.print("\n[yellow]Models without a declared license:[/]")
+        for name in snapshot["missing_license"]:
+            console.print(f"  - {name}")
+
+    if snapshot["eu_ai_act_warnings"]:
+        console.print("\n[red]EU AI Act warnings:[/]")
+        for w in snapshot["eu_ai_act_warnings"]:
+            console.print(f"  - {w['model']} ({w['license']}): {w['reason']}")
+
+
+@app.command(name="draft-recommend")
+def draft_recommend_cmd(
+    model: str = typer.Argument(help="Target repo id, e.g. meta-llama/Llama-3.1-70B-Instruct"),
+    max_ratio: float = typer.Option(0.25, "--max-ratio", min=0.01, max=1.0),
+):
+    """V4: recommend a draft model for speculative decoding.
+
+    Looks for a smaller sibling of the target on the HF Hub and
+    falls back to the canonical small reference for the family
+    (Llama-3.2-1B for Llama, Qwen2.5-1.5B for Qwen, ...) when no
+    sibling fits the ratio.
+    """
+    from hfl.hub.draft_picker import pick_draft_for
+
+    pick = pick_draft_for(model, max_ratio=max_ratio)
+    if pick is None:
+        console.print(f"[yellow]No draft candidate found for[/] {model}")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]Draft recommendation for[/] {model}")
+    console.print(f"  repo:     [cyan]{pick.repo_id}[/]")
+    console.print(f"  family:   {pick.family or '-'}")
+    if pick.parameter_estimate_b is not None:
+        console.print(f"  size:     ~{pick.parameter_estimate_b}B")
+    if pick.quantization:
+        console.print(f"  quant:    {pick.quantization}")
+    console.print(f"  rationale: [dim]{pick.rationale}[/]")
+
+
 if __name__ == "__main__":
     app()
