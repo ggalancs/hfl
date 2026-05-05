@@ -15,7 +15,7 @@ __pycache__/
 venv/
 env/
 .venv/
-.venv-ci/
+.venv-ci*/
 .env/
 
 # IDE
