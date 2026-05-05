@@ -263,3 +263,148 @@ class TestGetRecommendedBackend:
 
         backend = get_recommended_backend("safetensors")
         assert backend is None
+
+
+class TestCheckEngineAvailabilityBranches:
+    """Force every import to succeed via fake modules so the
+    happy-path branches (lines 35/43-46/48-49/57/66/76/84/91) are
+    covered without requiring the real extras to be installed."""
+
+    def test_all_backends_available(self, monkeypatch):
+        """Inject fake modules for every backend the function probes
+        and assert each branch records ``True``."""
+        import sys
+        import types
+
+        # Fake llama_cpp / transformers / vllm / soundfile / torchaudio.
+        for name in ("llama_cpp", "transformers", "vllm", "soundfile", "torchaudio"):
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+
+        # Fake torch with CUDA + MPS available.
+        fake_torch = types.ModuleType("torch")
+
+        class _Cuda:
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def get_device_name(idx):
+                return "FakeGPU"
+
+        class _Mps:
+            @staticmethod
+            def is_available():
+                return True
+
+        fake_torch.cuda = _Cuda
+        fake_backends = types.ModuleType("torch.backends")
+        fake_backends.mps = _Mps
+        fake_torch.backends = fake_backends
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        # Fake mlx_engine that reports available.
+        from hfl.engine import mlx_engine
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
+
+        result = check_engine_availability()
+        assert result["llama-cpp"] is True
+        assert result["transformers"] is True
+        assert result["torch"] is True
+        assert result["torch_cuda"] is True
+        assert result["cuda_device"] == "FakeGPU"
+        assert result["torch_mps"] is True
+        assert result["vllm"] is True
+        assert result["mlx"] is True
+        assert result["soundfile"] is True
+        assert result["torchaudio"] is True
+
+    def test_mlx_not_applicable_on_non_darwin(self, monkeypatch):
+        """When mlx_lm is missing AND host is not Darwin-arm64, the
+        message reflects "not applicable"."""
+        import platform
+
+        from hfl.engine import mlx_engine
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: False)
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
+        monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+
+        result = check_engine_availability()
+        assert "Not applicable" in result["mlx"]
+
+    def test_mlx_not_installed_message_on_apple_silicon(self, monkeypatch):
+        """When mlx_lm is missing but the host IS Darwin-arm64, the
+        message points at ``pip install 'hfl[mlx]'``."""
+        import platform
+
+        from hfl.engine import mlx_engine
+
+        monkeypatch.setattr(mlx_engine, "is_available", lambda: False)
+        monkeypatch.setattr(platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+
+        result = check_engine_availability()
+        assert "hfl[mlx]" in result["mlx"]
+
+
+class TestLogAvailableBackendsBranches:
+    """Cover the GPU + MPS log lines."""
+
+    def test_logs_mps_when_apple_silicon(self, caplog, enable_dependency_check_logger, monkeypatch):
+        """The MPS log line fires when torch is present, no CUDA, but
+        MPS is available — common on Apple Silicon dev machines."""
+        from hfl.engine import dependency_check as module
+
+        monkeypatch.setattr(
+            module,
+            "check_engine_availability",
+            lambda: {
+                "torch": True,
+                "torch_cuda": False,
+                "torch_mps": True,
+                "transformers": True,
+                "llama-cpp": True,
+                "vllm": "Not installed",
+            },
+        )
+
+        with caplog.at_level(logging.INFO, logger="hfl.engine.dependency_check"):
+            log_available_backends()
+        assert "MPS" in caplog.text
+
+    def test_logs_cuda_device_name(self, caplog, enable_dependency_check_logger, monkeypatch):
+        from hfl.engine import dependency_check as module
+
+        monkeypatch.setattr(
+            module,
+            "check_engine_availability",
+            lambda: {
+                "torch": True,
+                "torch_cuda": True,
+                "cuda_device": "NVIDIA RTX 4090",
+                "transformers": True,
+                "llama-cpp": True,
+                "vllm": True,
+            },
+        )
+
+        with caplog.at_level(logging.INFO, logger="hfl.engine.dependency_check"):
+            log_available_backends()
+        assert "RTX 4090" in caplog.text
+
+
+class TestGetRecommendedBackendGgufHappyPath:
+    """Covers ``get_recommended_backend('gguf')`` with llama-cpp
+    available — the most common path on a real install."""
+
+    def test_gguf_with_llama_cpp_returns_llama_cpp(self, monkeypatch):
+        from hfl.engine import dependency_check as module
+
+        monkeypatch.setattr(
+            module,
+            "check_engine_availability",
+            lambda: {"llama-cpp": True},
+        )
+        assert get_recommended_backend("gguf") == "llama-cpp"

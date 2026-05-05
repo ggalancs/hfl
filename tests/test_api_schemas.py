@@ -127,6 +127,96 @@ class TestCompletionRequest:
             CompletionRequest(model="test", prompt="x" * 2_000_001)
 
 
+class TestChatCompletionContentValidation:
+    """Coverage for ``ChatCompletionMessage._bound_content`` branches."""
+
+    def test_empty_content_list_rejected(self):
+        """A list with zero parts is rejected (would produce no
+        text and no images — meaningless message)."""
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionMessage(role="user", content=[])
+        assert "non-empty" in str(exc_info.value)
+
+    def test_too_many_content_parts_rejected(self):
+        """Cap at 64 parts to prevent boundless message bloat."""
+        many_parts = [{"type": "text", "text": "x"}] * 65
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionMessage(role="user", content=many_parts)
+        assert "64 parts" in str(exc_info.value)
+
+    def test_total_text_across_parts_capped(self):
+        """The 2M character cap applies across all text parts in a
+        list; one giant text part is rejected the same way as a
+        single string would be."""
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "x" * 1_500_000},
+                    {"type": "text", "text": "y" * 600_000},
+                ],
+            )
+        assert "2_000_000" in str(exc_info.value)
+
+    def test_content_string_too_long_rejected(self):
+        """The string variant of content also enforces the 2M cap."""
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionMessage(role="user", content="x" * 2_000_001)
+        assert "2_000_000" in str(exc_info.value)
+
+
+class TestStopValidation:
+    """Coverage for ``validate_stop`` branches on both
+    ChatCompletionRequest and CompletionRequest."""
+
+    def test_chat_stop_string_too_long_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionRequest(
+                model="m",
+                messages=[{"role": "user", "content": "hi"}],
+                stop="x" * 257,
+            )
+        assert "256 characters" in str(exc_info.value)
+
+    def test_chat_stop_too_many_entries_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionRequest(
+                model="m",
+                messages=[{"role": "user", "content": "hi"}],
+                stop=[f"s{i}" for i in range(11)],
+            )
+        assert "10 sequences" in str(exc_info.value)
+
+    def test_chat_stop_entry_too_long_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionRequest(
+                model="m",
+                messages=[{"role": "user", "content": "hi"}],
+                stop=["ok", "x" * 257],
+            )
+        assert "256 characters" in str(exc_info.value)
+
+    def test_completion_stop_string_too_long_rejected(self):
+        with pytest.raises(ValidationError):
+            CompletionRequest(model="m", prompt="hi", stop="x" * 257)
+
+    def test_completion_stop_too_many_entries_rejected(self):
+        with pytest.raises(ValidationError):
+            CompletionRequest(model="m", prompt="hi", stop=[f"s{i}" for i in range(11)])
+
+    def test_completion_stop_entry_too_long_rejected(self):
+        with pytest.raises(ValidationError):
+            CompletionRequest(model="m", prompt="hi", stop=["ok", "x" * 257])
+
+    def test_chat_stop_none_passes_through(self):
+        req = ChatCompletionRequest(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            stop=None,
+        )
+        assert req.stop is None
+
+
 class TestGenerateRequest:
     """Tests for GenerateRequest (Ollama-compatible) schema."""
 

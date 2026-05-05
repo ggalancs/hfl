@@ -135,6 +135,84 @@ class TestRoutesShowErrors:
         assert response.status_code == 422
 
 
+class TestRoutesShowParametersRendering:
+    """Coverage for the ``default_parameters`` rendering branches in
+    ``_render_parameters_block`` — V4 audit closeout."""
+
+    def test_default_parameters_emit_one_line_per_key(self, client, sample_manifest):
+        """Non-stop parameters should render as ``"<key> <value>"``,
+        sorted by key for stable diffs."""
+        from hfl.models.registry import ModelRegistry
+
+        sample_manifest.name = "with-params"
+        sample_manifest.architecture = "qwen"
+        sample_manifest.context_length = 4096
+        sample_manifest.default_parameters = {
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "num_predict": 256,
+        }
+        ModelRegistry().add(sample_manifest)
+
+        body = client.post("/api/show", json={"model": "with-params"}).json()
+        params = body["parameters"]
+        # All three keys appear, one per line, in alphabetical order.
+        lines = [line for line in params.splitlines() if line]
+        assert lines[0].startswith("num_ctx ")
+        non_ctx = lines[1:]
+        assert non_ctx == sorted(non_ctx)
+        assert "temperature 0.7" in params
+        assert "top_p 0.95" in params
+        assert "num_predict 256" in params
+
+    def test_stop_list_emits_one_quoted_line_per_value(self, client, sample_manifest):
+        """``stop`` is special: each list entry becomes its own
+        ``stop "<escaped>"`` line."""
+        from hfl.models.registry import ModelRegistry
+
+        sample_manifest.name = "with-stops"
+        sample_manifest.architecture = "qwen"
+        sample_manifest.default_parameters = {
+            "stop": ["<|im_end|>", "</s>", 'with "quotes"'],
+        }
+        ModelRegistry().add(sample_manifest)
+
+        body = client.post("/api/show", json={"model": "with-stops"}).json()
+        params = body["parameters"]
+        assert 'stop "<|im_end|>"' in params
+        assert 'stop "</s>"' in params
+        # Internal quotes are escaped.
+        assert r'stop "with \"quotes\""' in params
+
+    def test_stop_scalar_value_is_normalised_to_one_line(self, client, sample_manifest):
+        """A non-list ``stop`` value still renders as a single quoted
+        line — ``isinstance(..., (list, tuple))`` short-circuits."""
+        from hfl.models.registry import ModelRegistry
+
+        sample_manifest.name = "with-stop-scalar"
+        sample_manifest.architecture = "qwen"
+        sample_manifest.default_parameters = {"stop": "<|eot|>"}
+        ModelRegistry().add(sample_manifest)
+
+        body = client.post("/api/show", json={"model": "with-stop-scalar"}).json()
+        assert 'stop "<|eot|>"' in body["parameters"]
+
+
+class TestRoutesShowModelInfoDigest:
+    def test_file_hash_surfaces_as_general_digest(self, client, sample_manifest):
+        """When the manifest carries a ``file_hash``, ``model_info``
+        exposes it as ``general.digest`` (Ollama convention)."""
+        from hfl.models.registry import ModelRegistry
+
+        sample_manifest.name = "with-hash"
+        sample_manifest.architecture = "qwen"
+        sample_manifest.file_hash = "sha256:abc123"
+        ModelRegistry().add(sample_manifest)
+
+        body = client.post("/api/show", json={"model": "with-hash"}).json()
+        assert body["model_info"]["general.digest"] == "sha256:abc123"
+
+
 class TestRenderModelfile:
     """Unit tests for the Modelfile renderer itself."""
 

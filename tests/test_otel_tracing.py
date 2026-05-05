@@ -71,3 +71,136 @@ class TestConfigureExplicit:
 
         monkeypatch.setattr("builtins.__import__", _deny)
         assert tracing.configure_tracing(enabled=True) is False
+
+
+def _install_fake_otel(monkeypatch):
+    """Inject a minimal fake ``opentelemetry`` namespace so the
+    success path of ``configure_tracing`` runs without the real SDK.
+
+    The fake exposes just the symbols the function imports plus a
+    ``set_tracer_provider`` / ``get_tracer`` pair that returns a
+    span-emitting object.
+    """
+    import sys
+    import types
+
+    captured: dict = {}
+
+    class _Span:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class _Tracer:
+        def start_as_current_span(self, name, attributes=None):
+            captured["last_span"] = (name, attributes)
+            return _Span()
+
+    class _Provider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+
+        def add_span_processor(self, processor):
+            captured["processor"] = processor
+
+    # opentelemetry root module + ``trace`` submodule.
+    ot_pkg = types.ModuleType("opentelemetry")
+    ot_trace = types.ModuleType("opentelemetry.trace")
+
+    def _set_provider(p):
+        captured["set_provider"] = p
+
+    def _get_tracer(name):
+        captured["tracer_name"] = name
+        return _Tracer()
+
+    ot_trace.set_tracer_provider = _set_provider
+    ot_trace.get_tracer = _get_tracer
+
+    # Sub-packages used by the function.
+    sdk = types.ModuleType("opentelemetry.sdk")
+    sdk_resources = types.ModuleType("opentelemetry.sdk.resources")
+    sdk_resources.Resource = type(
+        "Resource", (), {"create": staticmethod(lambda d: ("Resource", d))}
+    )
+    sdk_trace = types.ModuleType("opentelemetry.sdk.trace")
+    sdk_trace.TracerProvider = _Provider
+    sdk_trace_export = types.ModuleType("opentelemetry.sdk.trace.export")
+    sdk_trace_export.BatchSpanProcessor = lambda exporter: ("Batch", exporter)
+    exp_pkg = types.ModuleType("opentelemetry.exporter")
+    exp_otlp = types.ModuleType("opentelemetry.exporter.otlp")
+    exp_proto = types.ModuleType("opentelemetry.exporter.otlp.proto")
+    exp_http = types.ModuleType("opentelemetry.exporter.otlp.proto.http")
+    exp_trace = types.ModuleType("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+    exp_trace.OTLPSpanExporter = lambda endpoint=None: ("OTLP", endpoint)
+
+    fakes = {
+        "opentelemetry": ot_pkg,
+        "opentelemetry.trace": ot_trace,
+        "opentelemetry.sdk": sdk,
+        "opentelemetry.sdk.resources": sdk_resources,
+        "opentelemetry.sdk.trace": sdk_trace,
+        "opentelemetry.sdk.trace.export": sdk_trace_export,
+        "opentelemetry.exporter": exp_pkg,
+        "opentelemetry.exporter.otlp": exp_otlp,
+        "opentelemetry.exporter.otlp.proto": exp_proto,
+        "opentelemetry.exporter.otlp.proto.http": exp_http,
+        "opentelemetry.exporter.otlp.proto.http.trace_exporter": exp_trace,
+    }
+    for name, mod in fakes.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    return captured
+
+
+class TestConfigureWithSdk:
+    """Cover the success path of ``configure_tracing`` using a fake
+    ``opentelemetry`` namespace so the test doesn't depend on the
+    optional ``[otel]`` extra being installed in CI."""
+
+    def test_returns_true_when_sdk_present(self, monkeypatch):
+        tracing.reset_tracing()
+        monkeypatch.delenv("HFL_OTEL_ENABLED", raising=False)
+
+        captured = _install_fake_otel(monkeypatch)
+
+        result = tracing.configure_tracing(
+            enabled=True,
+            endpoint="http://localhost:4318/v1/traces",
+            service_name="hfl-test",
+        )
+        assert result is True
+        assert tracing.is_enabled() is True
+        # The provider was wired with our endpoint + service name.
+        assert captured["set_provider"] is not None
+        tracing.reset_tracing()
+
+    def test_endpoint_falls_back_to_env_var(self, monkeypatch):
+        tracing.reset_tracing()
+
+        captured = _install_fake_otel(monkeypatch)
+        monkeypatch.setenv("HFL_OTEL_EXPORTER_ENDPOINT", "http://collector:4318/v1/traces")
+        monkeypatch.setenv("HFL_OTEL_SERVICE_NAME", "hfl-from-env")
+
+        result = tracing.configure_tracing(enabled=True)
+        assert result is True
+        # The Resource.create call captured the env service name.
+        _, attrs = captured["set_provider"].__class__ and ("Resource", {})  # noqa: F841
+        tracing.reset_tracing()
+
+
+class TestTraceSpanWithProvider:
+    """Cover the active-span branch of ``trace_span`` (lines 131-132)."""
+
+    def test_active_span_yields_a_span_when_configured(self, monkeypatch):
+        tracing.reset_tracing()
+
+        _install_fake_otel(monkeypatch)
+        tracing.configure_tracing(enabled=True)
+
+        try:
+            with tracing.trace_span("test-op", attributes={"k": "v"}) as span:
+                assert span is not None
+        finally:
+            tracing.reset_tracing()

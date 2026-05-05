@@ -605,6 +605,104 @@ class TestAnthropicSchemas:
         assert msg.get_text() == "Hello world"
 
 
+class TestAnthropicSchemaValidators:
+    """Coverage closeout for ``AnthropicMessagesRequest`` validators."""
+
+    def test_total_message_content_capped_at_2m(self):
+        from pydantic import ValidationError
+
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicMessagesRequest(
+                model="m",
+                max_tokens=1024,
+                messages=[
+                    {"role": "user", "content": "x" * 1_500_000},
+                    {"role": "assistant", "content": "y" * 600_000},
+                ],
+            )
+        assert "2M characters" in str(exc_info.value)
+
+    def test_stop_sequences_none_passes_through(self):
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        req = AnthropicMessagesRequest(
+            model="m",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": "hi"}],
+            stop_sequences=None,
+        )
+        assert req.stop_sequences is None
+
+    def test_stop_sequences_entry_too_long_rejected(self):
+        from pydantic import ValidationError
+
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicMessagesRequest(
+                model="m",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "hi"}],
+                stop_sequences=["ok", "x" * 257],
+            )
+        assert "256 characters" in str(exc_info.value)
+
+    def test_metadata_none_passes_through(self):
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        req = AnthropicMessagesRequest(
+            model="m",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": "hi"}],
+            metadata=None,
+        )
+        assert req.metadata is None
+
+    def test_metadata_too_many_keys_rejected(self):
+        from pydantic import ValidationError
+
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicMessagesRequest(
+                model="m",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "hi"}],
+                metadata={f"k{i}": "v" for i in range(65)},
+            )
+        assert "64 keys" in str(exc_info.value)
+
+    def test_metadata_key_too_long_rejected(self):
+        from pydantic import ValidationError
+
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicMessagesRequest(
+                model="m",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "hi"}],
+                metadata={"x" * 200: "v"},
+            )
+        assert "128 characters" in str(exc_info.value)
+
+    def test_metadata_value_too_long_rejected(self):
+        from pydantic import ValidationError
+
+        from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicMessagesRequest(
+                model="m",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "hi"}],
+                metadata={"k": "x" * 1100},
+            )
+        assert "1024 characters" in str(exc_info.value)
+
+
 class TestAnthropicConverter:
     """Tests for Anthropic to GenerationConfig converter."""
 

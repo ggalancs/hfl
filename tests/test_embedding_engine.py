@@ -252,3 +252,261 @@ class TestLlamaCppTokenAccountingFallback:
         result = engine.embed(["hello"])  # 5 chars → at least 1 token
         assert result.total_tokens >= 1
         assert len(result.embeddings) == 1
+
+
+# --------------------------------------------------------------------
+# Transformers adapter: full happy path with mocked torch + transformers
+# --------------------------------------------------------------------
+
+
+def _install_fake_torch_transformers(
+    monkeypatch,
+    *,
+    has_cuda: bool = False,
+    has_mps: bool = False,
+    hidden_size: int | None = 768,
+    config_field: str = "hidden_size",
+):
+    """Inject minimal ``torch`` + ``transformers`` modules so the
+    Transformers adapter's ``load`` and ``embed`` paths run without
+    the optional extras installed."""
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    fake_torch = types.ModuleType("torch")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return has_cuda
+
+        @staticmethod
+        def empty_cache():
+            return None
+
+    class _Mps:
+        @staticmethod
+        def is_available():
+            return has_mps
+
+    fake_torch.cuda = _Cuda
+    backends = types.ModuleType("torch.backends")
+    backends.mps = _Mps
+    fake_torch.backends = backends
+
+    class _NoGrad:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *args):
+            return False
+
+    fake_torch.no_grad = _NoGrad
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    fake_tf = types.ModuleType("transformers")
+
+    class _Tokenizer:
+        @classmethod
+        def from_pretrained(cls, path, trust_remote_code=False):
+            instance = cls()
+            instance.path = path
+            return instance
+
+        def __call__(self, inputs, **kwargs):
+            # Build a fake encoded dict whose ``attention_mask.sum().item()``
+            # reports a known token count and that round-trips through
+            # ``.to(device)`` as a no-op.
+            class _Tensor:
+                def __init__(self, value):
+                    self._value = value
+
+                def sum(self):
+                    return self
+
+                def item(self):
+                    return self._value
+
+                def unsqueeze(self, dim):
+                    return self
+
+                def float(self):
+                    return self
+
+                def __mul__(self, other):
+                    return self
+
+                def __rmul__(self, other):
+                    return self
+
+                def __truediv__(self, other):
+                    return self
+
+                def sum_axis(self):
+                    return self
+
+                def clamp(self, min=None):
+                    return self
+
+                def norm(self, **kwargs):
+                    return self
+
+                def cpu(self):
+                    return self
+
+                def tolist(self):
+                    # 2 inputs × hidden_size dimension.
+                    return [[0.1] * 768 for _ in range(2)]
+
+            class _Encoded(dict):
+                def to(self, device):
+                    return self
+
+            enc = _Encoded({"attention_mask": _Tensor(20)})
+            return enc
+
+    fake_tf.AutoTokenizer = _Tokenizer
+
+    class _ModelOutput:
+        def __init__(self):
+            class _Hidden:
+                def __mul__(self, other):
+                    return self
+
+                def __rmul__(self, other):
+                    return self
+
+                def sum(self, dim=None):
+                    return self
+
+                def clamp(self, min=None):
+                    return self
+
+                def norm(self, **kwargs):
+                    return self
+
+                def __truediv__(self, other):
+                    return self
+
+                def cpu(self):
+                    return self
+
+                def tolist(self):
+                    return [[0.1] * 768, [0.2] * 768]
+
+            self.last_hidden_state = _Hidden()
+
+    class _Model:
+        def __init__(self):
+            cfg = MagicMock()
+            for attr in ("hidden_size", "d_model", "embedding_size"):
+                setattr(cfg, attr, None)
+            if hidden_size is not None:
+                setattr(cfg, config_field, hidden_size)
+            self.config = cfg
+
+        @classmethod
+        def from_pretrained(cls, path, trust_remote_code=False):
+            return cls()
+
+        def to(self, device):
+            self.device = device
+            return self
+
+        def eval(self):
+            return self
+
+        def __call__(self, **encoded):
+            return _ModelOutput()
+
+    fake_tf.AutoModel = _Model
+    monkeypatch.setitem(sys.modules, "transformers", fake_tf)
+
+
+class TestTransformersEmbeddingEngineFullPath:
+    """Run the load → embed → unload flow end-to-end with mocked
+    torch / transformers so every branch in the file gets covered."""
+
+    def test_load_picks_cpu_when_no_accelerator(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, has_cuda=False, has_mps=False)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine.is_loaded
+        assert engine._device == "cpu"
+        assert engine._n_embd == 768
+
+    def test_load_picks_cuda_when_available(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, has_cuda=True)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine._device == "cuda"
+
+    def test_load_picks_mps_on_apple_silicon(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, has_cuda=False, has_mps=True)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine._device == "mps"
+
+    def test_explicit_device_overrides_auto(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, has_cuda=True)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model", device="cpu")
+        assert engine._device == "cpu"
+
+    def test_falls_back_to_d_model_when_hidden_size_missing(self, monkeypatch):
+        """T5-family models expose the embedding dim as ``d_model``."""
+        _install_fake_torch_transformers(monkeypatch, hidden_size=512, config_field="d_model")
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine._n_embd == 512
+
+    def test_falls_back_to_embedding_size(self, monkeypatch):
+        """Electra exposes it as ``embedding_size``."""
+        _install_fake_torch_transformers(
+            monkeypatch, hidden_size=384, config_field="embedding_size"
+        )
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine._n_embd == 384
+
+    def test_n_embd_none_when_no_size_attr(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, hidden_size=None)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        assert engine._n_embd is None
+
+    def test_embed_validates_empty_inputs(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        with pytest.raises(ValueError, match="non-empty"):
+            engine.embed([])
+
+    def test_embed_validates_dimensions_positive(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        with pytest.raises(ValueError, match="positive"):
+            engine.embed(["hello"], dimensions=0)
+
+    def test_embed_validates_dimensions_within_native(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, hidden_size=768)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        with pytest.raises(ValueError, match="exceeds"):
+            engine.embed(["hello"], dimensions=1024)
+
+    def test_embed_unloaded_raises(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch)
+        engine = TransformersEmbeddingEngine()
+        with pytest.raises(RuntimeError, match="not loaded"):
+            engine.embed(["hello"])
+
+    def test_unload_with_cuda_calls_empty_cache(self, monkeypatch):
+        _install_fake_torch_transformers(monkeypatch, has_cuda=True)
+        engine = TransformersEmbeddingEngine()
+        engine.load("dummy/model")
+        engine.unload()
+        assert not engine.is_loaded
+        assert engine._model is None

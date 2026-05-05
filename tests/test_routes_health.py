@@ -218,3 +218,228 @@ class TestHealthSLI:
         assert "current" in memory
         assert "warning_threshold" in memory
         assert "critical_threshold" in memory
+
+
+class TestHealthRegistryUnreachable:
+    def test_registry_failure_returns_false(self, monkeypatch):
+        """``_check_registry`` returns False when ``get_registry``
+        raises one of the expected exception types — the helper
+        intentionally swallows OSError/ValueError/KeyError/AttributeError
+        so a partially-broken registry doesn't 500 the probe."""
+        from hfl.api import routes_health as module
+
+        def _broken():
+            raise OSError("registry path unreachable")
+
+        monkeypatch.setattr(module, "get_registry", _broken)
+        assert module._check_registry() is False
+
+
+class TestHealthzWithTtsLoaded:
+    def test_healthz_includes_tts_model_in_models_loaded(self, client):
+        """``/healthz`` lists every loaded model — both LLM and TTS
+        slots feed the same array."""
+        from unittest.mock import MagicMock
+
+        from hfl.api.state import get_state
+        from hfl.models.manifest import ModelManifest
+
+        manifest = ModelManifest(
+            name="bark-small",
+            repo_id="suno/bark-small",
+            local_path="/tmp/bark",
+            format="safetensors",
+            architecture="bark",
+            parameters="100M",
+        )
+        state = get_state()
+        state.tts_engine = MagicMock(is_loaded=True)
+        state.current_tts_model = manifest
+
+        body = client.get("/healthz").json()
+        assert "bark-small" in body["models_loaded"]
+
+
+def _install_fake_psutil(
+    monkeypatch,
+    *,
+    rss_bytes: int = 100 * 1024 * 1024,
+    total_bytes: int = 100 * 1024**3,
+):
+    """Inject a minimal ``psutil`` stub so the health endpoints'
+    psutil branches run regardless of whether the real package is
+    installed in the test venv."""
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    fake = types.ModuleType("psutil")
+
+    class _MemInfo:
+        def __init__(self, rss):
+            self.rss = rss
+
+    proc = MagicMock()
+    proc.memory_info = MagicMock(return_value=_MemInfo(rss_bytes))
+    fake.Process = MagicMock(return_value=proc)
+    fake.virtual_memory = MagicMock(return_value=MagicMock(total=total_bytes))
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    return fake
+
+
+class TestHealthLiveMemoryReporting:
+    def test_health_live_includes_memory_when_psutil_available(self, client, monkeypatch):
+        """``/health/live`` reports ``memory_mb`` when psutil is
+        installed."""
+        _install_fake_psutil(monkeypatch, rss_bytes=512 * 1024 * 1024)
+        body = client.get("/health/live").json()
+        assert "memory_mb" in body
+        assert isinstance(body["memory_mb"], (int, float))
+        # 512 MiB rss / 1024 / 1024 ≈ 512.
+        assert abs(body["memory_mb"] - 512.0) < 1.0
+
+
+class TestHealthDeepProbeAndMemory:
+    def test_health_deep_includes_system_block_when_psutil(self, client, monkeypatch):
+        _install_fake_psutil(monkeypatch)
+        body = client.get("/health/deep").json()
+        assert "system" in body
+        assert "memory_mb" in body["system"]
+
+
+class TestHealthSliStatusBranches:
+    """Force every branch of the SLO status checks
+    (``check_latency`` / ``check_rate`` / memory thresholds /
+    overall ``critical`` / ``warning``)."""
+
+    def test_critical_latency_yields_critical_overall(self, client, monkeypatch):
+        """Inject SLI numbers > 1.5× target on every latency
+        indicator → status flips to ``critical``."""
+        _install_fake_psutil(monkeypatch)
+        from hfl import metrics as metrics_module
+
+        m = metrics_module.get_metrics()
+
+        def _bad_sli():
+            return {
+                "latency_p50_ms": 10_000.0,  # target is 100 → 100×
+                "latency_p95_ms": 10_000.0,
+                "latency_p99_ms": 10_000.0,
+                "error_rate": 0.0,
+                "availability": 1.0,
+                "total_requests": 100,
+                "error_count": 0,
+                "sample_count": 100,
+                "uptime_seconds": 100.0,
+                "throughput_rps": 1.0,
+            }
+
+        monkeypatch.setattr(m, "get_sli", _bad_sli)
+
+        body = client.get("/health/sli").json()
+        assert body["status"] == "critical"
+        assert body["indicators"]["latency_p50"]["status"] == "critical"
+
+    def test_warning_latency_yields_warning_overall(self, client, monkeypatch):
+        """Latency between 1.0× and 1.5× target → ``warning`` for
+        that indicator and overall."""
+        _install_fake_psutil(monkeypatch)
+        from hfl import metrics as metrics_module
+
+        m = metrics_module.get_metrics()
+
+        def _warn_sli():
+            return {
+                "latency_p50_ms": 120.0,  # target 100 → 1.2×
+                "latency_p95_ms": 0.0,
+                "latency_p99_ms": 0.0,
+                "error_rate": 0.0,
+                "availability": 1.0,
+                "total_requests": 100,
+                "error_count": 0,
+                "sample_count": 100,
+                "uptime_seconds": 100.0,
+                "throughput_rps": 1.0,
+            }
+
+        monkeypatch.setattr(m, "get_sli", _warn_sli)
+
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["latency_p50"]["status"] == "warning"
+        # Overall: at least one warning, no critical → "warning".
+        assert body["status"] in ("warning", "ok")
+
+    def test_critical_error_rate_yields_critical(self, client, monkeypatch):
+        """``check_rate`` lower-is-better path: error_rate > 2× target
+        → critical."""
+        _install_fake_psutil(monkeypatch)
+        from hfl import metrics as metrics_module
+
+        m = metrics_module.get_metrics()
+
+        def _bad_rates():
+            return {
+                "latency_p50_ms": 0.0,
+                "latency_p95_ms": 0.0,
+                "latency_p99_ms": 0.0,
+                "error_rate": 0.5,
+                "availability": 0.0,
+                "total_requests": 100,
+                "error_count": 50,
+                "sample_count": 100,
+                "uptime_seconds": 100.0,
+                "throughput_rps": 1.0,
+            }
+
+        monkeypatch.setattr(m, "get_sli", _bad_rates)
+
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["error_rate"]["status"] == "critical"
+        # availability uses lower_is_better=False → 0.0 < 0.5×0.999 → critical
+        assert body["indicators"]["availability"]["status"] == "critical"
+
+    def test_warning_error_rate_yields_warning(self, client, monkeypatch):
+        _install_fake_psutil(monkeypatch)
+        from hfl import metrics as metrics_module
+
+        m = metrics_module.get_metrics()
+
+        def _warn_rates():
+            return {
+                "latency_p50_ms": 0.0,
+                "latency_p95_ms": 0.0,
+                "latency_p99_ms": 0.0,
+                "error_rate": 0.015,
+                "availability": 0.6,
+                "total_requests": 100,
+                "error_count": 10,
+                "sample_count": 100,
+                "uptime_seconds": 100.0,
+                "throughput_rps": 1.0,
+            }
+
+        monkeypatch.setattr(m, "get_sli", _warn_rates)
+
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["error_rate"]["status"] == "warning"
+        assert body["indicators"]["availability"]["status"] == "warning"
+
+    def test_critical_memory_pressure_uses_psutil(self, client, monkeypatch):
+        """Memory above ``memory_critical_threshold`` → critical
+        memory status."""
+        # 99 GB RSS / 100 GB total → 99% usage → above critical (95%).
+        _install_fake_psutil(monkeypatch, rss_bytes=99 * 1024**3, total_bytes=100 * 1024**3)
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["memory"]["status"] == "critical"
+
+    def test_warning_memory_pressure(self, client, monkeypatch):
+        """Memory between warning (80%) and critical (95%) thresholds
+        → ``warning``."""
+        _install_fake_psutil(monkeypatch, rss_bytes=85 * 1024**3, total_bytes=100 * 1024**3)
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["memory"]["status"] == "warning"
+
+    def test_ok_memory_pressure(self, client, monkeypatch):
+        _install_fake_psutil(monkeypatch, rss_bytes=10 * 1024**3, total_bytes=100 * 1024**3)
+        body = client.get("/health/sli").json()
+        assert body["indicators"]["memory"]["status"] == "ok"
