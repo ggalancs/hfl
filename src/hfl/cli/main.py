@@ -1867,5 +1867,79 @@ def recommend(
     console.print(table)
 
 
+@app.command(name="lora")
+def lora_cmd(
+    action: str = typer.Argument(help="apply | remove | list"),
+    model: str = typer.Argument(default="", help="Loaded model name"),
+    lora_path: str | None = typer.Option(None, "--path", help="Adapter file (apply only)"),
+    adapter_id: str | None = typer.Option(None, "--id", help="Adapter id (remove only)"),
+    scale: float = typer.Option(1.0, "--scale", help="Mix weight 0..5"),
+    name: str | None = typer.Option(None, "--name", help="Friendly label"),
+):
+    """V4: hot-swap LoRA adapters on a loaded model.
+
+    Examples::
+
+        hfl lora apply qwen-7b --path adapters/code.safetensors --scale 0.7
+        hfl lora list qwen-7b
+        hfl lora remove qwen-7b --id <adapter-uuid>
+    """
+    import asyncio
+
+    from rich.table import Table
+
+    from hfl.api.model_loader import load_llm
+    from hfl.engine.lora import apply_lora, list_loras, remove_lora
+
+    if action not in {"apply", "remove", "list"}:
+        console.print("[red]Action must be one of: apply, remove, list[/]")
+        raise typer.Exit(1)
+
+    if action != "list" and not model:
+        console.print("[red]Model name is required for apply/remove[/]")
+        raise typer.Exit(1)
+
+    async def _run() -> None:
+        if action == "list" and not model:
+            adapters = list_loras()
+        else:
+            engine, _ = await load_llm(model)
+            if engine is None:
+                console.print("[red]Engine not available[/]")
+                raise typer.Exit(1)
+            if action == "apply":
+                if not lora_path:
+                    console.print("[red]--path is required for apply[/]")
+                    raise typer.Exit(1)
+                info = apply_lora(engine, lora_path=lora_path, scale=scale, name=name)
+                console.print(f"[green]Applied[/] adapter id=[cyan]{info.adapter_id}[/]")
+                return
+            if action == "remove":
+                if not adapter_id:
+                    console.print("[red]--id is required for remove[/]")
+                    raise typer.Exit(1)
+                ok = remove_lora(engine, adapter_id)
+                if ok:
+                    console.print("[green]Removed[/]")
+                else:
+                    console.print(f"[yellow]Adapter id unknown: {adapter_id}[/]")
+                return
+            adapters = list_loras(engine)
+
+        if not adapters:
+            console.print("[dim]No adapters active.[/]")
+            return
+        table = Table(title="Active LoRA adapters", show_lines=False)
+        table.add_column("id", style="cyan")
+        table.add_column("name")
+        table.add_column("path", style="dim")
+        table.add_column("scale", justify="right")
+        for a in adapters:
+            table.add_row(a.adapter_id, a.name or "-", a.path, f"{a.scale:.2f}")
+        console.print(table)
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     app()
