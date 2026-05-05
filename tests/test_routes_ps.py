@@ -220,3 +220,56 @@ class TestRoutesPsHelpers:
         engine.memory_used_bytes = MagicMock(side_effect=RuntimeError("broken probe"))
         got = _size_vram_estimate(llm_manifest, engine)
         assert got == llm_manifest.size_bytes
+
+
+class TestRoutesPsMultiModelFromPool:
+    """When ``HFL_MAX_LOADED_MODELS > 1`` the pool may hold multiple
+    residents. ``/api/ps`` must enumerate all of them, deduplicated
+    against the legacy ``state.current_model`` slot."""
+
+    def _make_pool_entry(self, manifest):
+        from hfl.engine.model_pool import CachedModel
+
+        engine = MagicMock(is_loaded=True)
+        return CachedModel(
+            engine=engine,
+            manifest=manifest,
+            last_used=0.0,
+            load_time_ms=12.0,
+            memory_estimate_mb=1234.0,
+        )
+
+    def test_pool_residents_are_listed(self, client, llm_manifest):
+        from hfl.engine.model_pool import get_model_pool, reset_model_pool
+
+        reset_model_pool()
+        pool = get_model_pool(max_models=4)
+        pool._models[llm_manifest.name] = self._make_pool_entry(llm_manifest)
+
+        try:
+            body = client.get("/api/ps").json()
+            names = [m["name"] for m in body["models"]]
+            assert llm_manifest.name in names
+        finally:
+            reset_model_pool()
+
+    def test_state_and_pool_dont_double_count(self, client, llm_manifest):
+        """If the same model is in both ``state.current_model`` and the
+        pool (which is normal — load() registers it everywhere), it
+        appears once."""
+        from hfl.engine.model_pool import get_model_pool, reset_model_pool
+
+        state = get_state()
+        state.engine = MagicMock(is_loaded=True)
+        state.current_model = llm_manifest
+
+        reset_model_pool()
+        pool = get_model_pool(max_models=4)
+        pool._models[llm_manifest.name] = self._make_pool_entry(llm_manifest)
+
+        try:
+            body = client.get("/api/ps").json()
+            names = [m["name"] for m in body["models"]]
+            assert names.count(llm_manifest.name) == 1
+        finally:
+            reset_model_pool()

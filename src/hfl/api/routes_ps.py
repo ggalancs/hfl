@@ -154,13 +154,45 @@ async def list_running() -> dict[str, list[dict[str, Any]]]:
     Returns the set of models HFL currently holds in memory, shaped
     for drop-in replacement of Ollama in UIs like Open WebUI and SDKs
     like ``ollama-python``.
+
+    The list now spans three sources, deduplicated by model name:
+
+    1. ``state.current_model`` — the legacy single-LLM slot.
+    2. ``state.current_tts_model`` — the TTS engine slot.
+    3. The shared ``ModelPool`` — all multi-model entries when the
+       operator opts into ``HFL_MAX_LOADED_MODELS > 1``.
+
+    Order follows the underlying registries (state slots first, then
+    pool by recency) so a single-model setup keeps emitting the same
+    shape it did before V3.
     """
     state = get_state()
     entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
 
     if state.current_model is not None:
         entries.append(_render_model(state.current_model, state.engine))
-    if state.current_tts_model is not None:
+        seen.add(state.current_model.name)
+    if state.current_tts_model is not None and state.current_tts_model.name not in seen:
         entries.append(_render_model(state.current_tts_model, state.tts_engine))
+        seen.add(state.current_tts_model.name)
+
+    # Multi-model: drain the shared pool. We avoid awaiting locks here
+    # because /api/ps is hit by liveness probes — read the snapshot
+    # via the public attribute and accept best-effort consistency.
+    try:
+        from hfl.engine.model_pool import get_model_pool
+
+        pool = get_model_pool()
+        for name in pool.cached_models:
+            if name in seen:
+                continue
+            cached = pool._models.get(name)
+            if cached is None:
+                continue
+            entries.append(_render_model(cached.manifest, cached.engine))
+            seen.add(name)
+    except Exception:  # pragma: no cover — pool unavailable in some tests
+        pass
 
     return {"models": entries}
