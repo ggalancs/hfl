@@ -289,9 +289,7 @@ class TestFlashAttnGlobalEnvOverride:
     server-level kill switch for flash-attn that complements the
     per-load kwarg and the per-architecture safety list."""
 
-    def test_global_off_disables_on_safe_arch(
-        self, monkeypatch, patched_gguf, dummy_gguf
-    ):
+    def test_global_off_disables_on_safe_arch(self, monkeypatch, patched_gguf, dummy_gguf):
         patched_gguf(arch="llama")  # Llama is otherwise on by default.
         _stub_memory_snapshot(monkeypatch, available_gb=64.0)
         monkeypatch.setenv("HFL_FLASH_ATTENTION", "0")
@@ -318,9 +316,7 @@ class TestFlashAttnGlobalEnvOverride:
 
         assert captured["flash_attn"] is False
 
-    def test_explicit_kwarg_wins_over_global(
-        self, monkeypatch, patched_gguf, dummy_gguf
-    ):
+    def test_explicit_kwarg_wins_over_global(self, monkeypatch, patched_gguf, dummy_gguf):
         patched_gguf(arch="llama")
         _stub_memory_snapshot(monkeypatch, available_gb=64.0)
         monkeypatch.setenv("HFL_FLASH_ATTENTION", "0")
@@ -334,9 +330,7 @@ class TestFlashAttnGlobalEnvOverride:
 
         assert captured["flash_attn"] is True
 
-    def test_global_on_still_respects_arch_safety_list(
-        self, monkeypatch, patched_gguf, dummy_gguf
-    ):
+    def test_global_on_still_respects_arch_safety_list(self, monkeypatch, patched_gguf, dummy_gguf):
         """Operators turning the global on must not bypass the arch
         safety list — Gemma 4 stays off."""
         patched_gguf(arch="gemma4")

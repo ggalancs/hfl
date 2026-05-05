@@ -786,8 +786,8 @@ class LlamaCppEngine(InferenceEngine):
         #      crashes on known-bad arches for free.
         #   3. Architecture-aware default (False for known-unsafe arches,
         #      True otherwise).
-        global_flash_env = (
-            os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get("OLLAMA_FLASH_ATTENTION")
+        global_flash_env = os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get(
+            "OLLAMA_FLASH_ATTENTION"
         )
         global_flash: bool | None
         if global_flash_env is None or global_flash_env == "":

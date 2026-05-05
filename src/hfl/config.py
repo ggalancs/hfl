@@ -133,12 +133,8 @@ class HFLConfig:
     # comma-separated list. ``"*"`` (the only entry, or as a member)
     # is recognised and flips ``cors_allow_all`` on. Empty / unset
     # falls back to the documented same-origin default.
-    cors_origins: list[str] = field(
-        default_factory=lambda: _parse_cors_origins_env() or []
-    )
-    cors_allow_all: bool = field(
-        default_factory=lambda: "*" in (_parse_cors_origins_env() or [])
-    )
+    cors_origins: list[str] = field(default_factory=lambda: _parse_cors_origins_env() or [])
+    cors_allow_all: bool = field(default_factory=lambda: "*" in (_parse_cors_origins_env() or []))
     cors_allow_credentials: bool = False  # Must be False with wildcard origin
     cors_allow_methods: list[str] = field(default_factory=lambda: ["GET", "POST", "OPTIONS"])
     cors_allow_headers: list[str] = field(
@@ -181,9 +177,7 @@ class HFLConfig:
     # request, not the import.
     keep_alive_default: str | None = field(
         default_factory=lambda: (
-            os.environ.get("HFL_KEEP_ALIVE")
-            or os.environ.get("OLLAMA_KEEP_ALIVE")
-            or "5m"
+            os.environ.get("HFL_KEEP_ALIVE") or os.environ.get("OLLAMA_KEEP_ALIVE") or "5m"
         )
     )
 

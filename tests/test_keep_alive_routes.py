@@ -121,9 +121,7 @@ class TestKeepAliveGlobalDefault:
     """``HFL_KEEP_ALIVE`` (and the Ollama alias) installs a server-wide
     default for requests that don't carry their own ``keep_alive``."""
 
-    def test_global_default_applied_when_request_omits_keep_alive(
-        self, client, sample_manifest
-    ):
+    def test_global_default_applied_when_request_omits_keep_alive(self, client, sample_manifest):
         from hfl.config import config as hfl_config
 
         _mock_llm_loaded(sample_manifest)
@@ -147,9 +145,7 @@ class TestKeepAliveGlobalDefault:
         finally:
             hfl_config.keep_alive_default = previous
 
-    def test_global_default_does_not_overwrite_existing_deadline(
-        self, client, sample_manifest
-    ):
+    def test_global_default_does_not_overwrite_existing_deadline(self, client, sample_manifest):
         """Once a previous request set a deadline, omitting ``keep_alive``
         on a follow-up request must NOT reset it to the global default —
         explicit decisions win."""
