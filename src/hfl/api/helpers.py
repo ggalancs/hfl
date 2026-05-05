@@ -221,9 +221,37 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
         raise APIValidationError(str(exc))
 
     if delta is None:
-        # Caller didn't pass the field — leave any previous deadline
-        # untouched (default idle timeout keeps governing).
-        return False
+        # Caller didn't pass the field. Two cases:
+        #   a) A previous request already recorded a deadline — leave it
+        #      alone so explicit per-request decisions are not silently
+        #      reset by a server default.
+        #   b) No deadline yet — apply the server-level default
+        #      (``HFL_KEEP_ALIVE`` / ``OLLAMA_KEEP_ALIVE``) so the model
+        #      gets a documented expiry instead of relying on the
+        #      pool's idle timeout, which Ollama clients don't observe.
+        from hfl.config import config as _hfl_config
+
+        existing = get_state().keep_alive_deadline_for(model_name)
+        if existing is not None:
+            return False
+
+        global_default = _hfl_config.keep_alive_default
+        if global_default is None:
+            return False
+        try:
+            delta = parse_keep_alive(global_default)
+        except InvalidKeepAliveError:
+            # A bad operator-supplied default should not break the
+            # request. Log once and behave like "no global default".
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "HFL_KEEP_ALIVE/OLLAMA_KEEP_ALIVE value %r is invalid; ignoring",
+                global_default,
+            )
+            return False
+        if delta is None:
+            return False
 
     state = get_state()
 

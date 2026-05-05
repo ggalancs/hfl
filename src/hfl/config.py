@@ -147,6 +147,22 @@ class HFLConfig:
     # loss), ``"q4_0"`` (quarter VRAM, visible on small models).
     kv_cache_type: str = field(default_factory=lambda: os.environ.get("HFL_KV_CACHE_TYPE", "f16"))
 
+    # Default keep-alive duration applied to /api/chat and /api/generate
+    # requests that did *not* set ``keep_alive`` themselves. Matches
+    # Ollama's ``OLLAMA_KEEP_ALIVE`` (default "5m"). Per-request values
+    # always win — the global only kicks in when the client omits the
+    # field. Accepts the Ollama duration grammar ("5m", "30s", "0",
+    # "-1" for never-expire, etc.); validated lazily by the existing
+    # ``parse_keep_alive`` so a bad value here fails the first
+    # request, not the import.
+    keep_alive_default: str | None = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_KEEP_ALIVE")
+            or os.environ.get("OLLAMA_KEEP_ALIVE")
+            or "5m"
+        )
+    )
+
     # Prefix cache across requests (Phase 11 P1 — V2 row 10). When
     # True, the engine reuses KV-cache state when the current prompt
     # shares a prefix with a recently-served one. Only the latest-N

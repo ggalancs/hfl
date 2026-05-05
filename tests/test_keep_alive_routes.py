@@ -117,6 +117,78 @@ class TestKeepAliveDeadlineOnGenerate:
         assert get_state().keep_alive_deadline_for(sample_manifest.name) == existing
 
 
+class TestKeepAliveGlobalDefault:
+    """``HFL_KEEP_ALIVE`` (and the Ollama alias) installs a server-wide
+    default for requests that don't carry their own ``keep_alive``."""
+
+    def test_global_default_applied_when_request_omits_keep_alive(
+        self, client, sample_manifest
+    ):
+        from hfl.config import config as hfl_config
+
+        _mock_llm_loaded(sample_manifest)
+        # No deadline yet → global default kicks in.
+        assert get_state().keep_alive_deadline_for(sample_manifest.name) is None
+
+        previous = hfl_config.keep_alive_default
+        hfl_config.keep_alive_default = "10m"
+        try:
+            before = datetime.now(timezone.utc)
+            response = client.post(
+                "/api/generate",
+                json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
+            )
+            assert response.status_code == 200
+            deadline = get_state().keep_alive_deadline_for(sample_manifest.name)
+            assert deadline is not None
+            # 10 minutes ± a few seconds slack for the round-trip.
+            expected = before + timedelta(minutes=10)
+            assert abs((deadline - expected).total_seconds()) < 30
+        finally:
+            hfl_config.keep_alive_default = previous
+
+    def test_global_default_does_not_overwrite_existing_deadline(
+        self, client, sample_manifest
+    ):
+        """Once a previous request set a deadline, omitting ``keep_alive``
+        on a follow-up request must NOT reset it to the global default —
+        explicit decisions win."""
+        from hfl.config import config as hfl_config
+
+        _mock_llm_loaded(sample_manifest)
+        sticky = datetime.now(timezone.utc) + timedelta(hours=2)
+        get_state().set_keep_alive_deadline(sample_manifest.name, sticky)
+
+        previous = hfl_config.keep_alive_default
+        hfl_config.keep_alive_default = "5m"
+        try:
+            response = client.post(
+                "/api/generate",
+                json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
+            )
+            assert response.status_code == 200
+            assert get_state().keep_alive_deadline_for(sample_manifest.name) == sticky
+        finally:
+            hfl_config.keep_alive_default = previous
+
+    def test_invalid_global_default_is_ignored_silently(self, client, sample_manifest):
+        """A misconfigured server must not break user requests."""
+        from hfl.config import config as hfl_config
+
+        _mock_llm_loaded(sample_manifest)
+        previous = hfl_config.keep_alive_default
+        hfl_config.keep_alive_default = "not-a-duration"
+        try:
+            response = client.post(
+                "/api/generate",
+                json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
+            )
+            assert response.status_code == 200
+            assert get_state().keep_alive_deadline_for(sample_manifest.name) is None
+        finally:
+            hfl_config.keep_alive_default = previous
+
+
 class TestKeepAliveDeadlineOnChat:
     def test_chat_respects_keep_alive(self, client, sample_manifest):
         _mock_llm_loaded(sample_manifest)
