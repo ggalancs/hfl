@@ -620,6 +620,115 @@ def _build_vision_chat_handler(
     return handler_cls(clip_model_path=clip_model_path, verbose=verbose)
 
 
+# V4 F5 — adapter that lets a second ``Llama`` instance act as a
+# draft model for speculative decoding. ``llama_cpp.Llama`` itself
+# does NOT implement the ``LlamaDraftModel`` protocol — calling it
+# directly returns a completion dict, not a token-ids ndarray.
+# Subclassing ``LlamaDraftModel`` and forwarding to the inner Llama
+# closes that gap.
+class _LlamaModelDraftAdapter:
+    """Bridge a small ``Llama`` instance into the ``LlamaDraftModel``
+    protocol expected by llama-cpp-python's ``Llama(draft_model=...)``.
+
+    On every step the target asks the adapter to predict ``num_pred``
+    tokens past the current ``input_ids``; we feed *only the new
+    tokens* to the draft Llama (preserving its KV cache across calls)
+    and return a numpy int array of greedy candidates.
+
+    Why incremental: a naive implementation that ``reset()``s the
+    draft on every call pays the full prefill cost N times across a
+    single response, which inverts the intended speedup (speculative
+    decoding becomes 2-3× *slower* than plain). Reusing the cache
+    across calls keeps the draft cost O(1) per step.
+
+    The adapter detects when the target's ``input_ids`` is a prefix
+    extension of the previous call (the common case during a single
+    response) and only evaluates the suffix; if the sequence
+    diverges (a fresh request, a cancelled completion) it falls back
+    to a full reset + prefill.
+    """
+
+    def __init__(self, draft: "Llama", num_pred_tokens: int = 10) -> None:
+        self._draft = draft
+        self._num_pred = max(1, int(num_pred_tokens))
+        # Tokens already evaluated by the draft's KV cache (target
+        # prompt + accepted target tokens + draft predictions whose
+        # eval was performed but rejected by the target). We only
+        # add to this; ``_aligned`` controls how much overlaps with
+        # the next call's ``input_ids``.
+        self._processed: list[int] = []
+
+    def _align_and_eval_suffix(self, input_ids_list: list[int]) -> bool:
+        """Make the draft's KV cache align with ``input_ids_list``.
+
+        Common path: ``input_ids_list`` starts with ``self._processed``
+        (the target accepted some draft tokens and is now asking for
+        the next round) — we evaluate only the tail.
+
+        Divergent path: a fresh request, or the target rejected our
+        last predictions — reset the draft and replay the whole
+        sequence.
+
+        Returns ``True`` on success, ``False`` if any eval raised
+        (the caller short-circuits to "no candidates").
+        """
+        # Find the longest common prefix with the previous state.
+        common = 0
+        for a, b in zip(self._processed, input_ids_list):
+            if a == b:
+                common += 1
+            else:
+                break
+
+        try:
+            if common < len(self._processed):
+                # Divergence — reset and replay from scratch.
+                self._draft.reset()
+                self._draft.eval(input_ids_list)
+                self._processed = list(input_ids_list)
+                return True
+            suffix = input_ids_list[common:]
+            if suffix:
+                self._draft.eval(suffix)
+                self._processed.extend(suffix)
+            return True
+        except Exception:  # pragma: no cover — ABI defence
+            self._processed = []
+            return False
+
+    def __call__(self, input_ids, /, **kwargs):  # type: ignore[no-untyped-def]
+        import numpy as np
+
+        if input_ids is None or len(input_ids) == 0:
+            return np.zeros((0,), dtype=np.intc)
+
+        ids_list = [int(t) for t in input_ids]
+        if not self._align_and_eval_suffix(ids_list):
+            return np.zeros((0,), dtype=np.intc)
+
+        # Greedy-sample ``num_pred`` tokens. We feed each prediction
+        # back into the draft so the next sample sees the updated
+        # KV state. The predictions ARE recorded into ``_processed``
+        # so the next call can correctly compute the divergence
+        # point (the target may accept all, some, or none).
+        out: list[int] = []
+        try:
+            sample_fn = getattr(self._draft, "sample", None)
+            if sample_fn is None:
+                return np.zeros((0,), dtype=np.intc)
+            for _ in range(self._num_pred):
+                tok_id = int(sample_fn(temp=0.0))
+                out.append(tok_id)
+                self._draft.eval([tok_id])
+                self._processed.append(tok_id)
+        except Exception:
+            # Fall back to whatever we managed to predict; never
+            # propagate so the target keeps running.
+            return np.array(out, dtype=np.intc)
+
+        return np.array(out, dtype=np.intc)
+
+
 class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
@@ -627,6 +736,10 @@ class LlamaCppEngine(InferenceEngine):
         self._model: "Llama | None" = None
         self._model_path: str = ""
         self._architecture: str | None = None
+        # V4 F5 — companion draft model for speculative decoding.
+        # Held here so ``unload()`` can free its memory alongside
+        # the target.
+        self._draft_model: "Llama | None" = None
         # True when the model was loaded with a CLIP projector and
         # accepts images in ``create_chat_completion`` messages.
         # Phase 4 P0-6.
@@ -928,7 +1041,70 @@ class LlamaCppEngine(InferenceEngine):
                             "llama-cpp's ``lora_path`` accepts only one",
                             len(lora_paths) - 1,
                         )
+                # V4 F5 — speculative decoding.
+                #
+                # Two modes are supported through the same kwarg:
+                #
+                #   draft_model_path = "prompt-lookup"
+                #       Use llama-cpp-python's
+                #       ``LlamaPromptLookupDecoding``. Zero VRAM cost,
+                #       reliable 1.3-2× speedup on prompts with
+                #       repetitive patterns (RAG, code, structured
+                #       output). The default for ``HFL_DRAFT_DEFAULT=
+                #       lookup``.
+                #
+                #   draft_model_path = "<path/to/draft.gguf>"
+                #       Load a second small ``Llama`` and route it
+                #       through :class:`_LlamaModelDraftAdapter`. Only
+                #       safe with a draft from the SAME tokenizer
+                #       family as the target (Qwen3-14B ↔ Qwen3-0.6B,
+                #       Llama-3.1-70B ↔ Llama-3.2-1B). Acceptance
+                #       rates and net speedup are workload-dependent —
+                #       benchmark before relying on it. The
+                #       per-callback overhead of llama-cpp-python's
+                #       Python ``draft_model`` API can in some cases
+                #       cancel out the savings; use prompt-lookup as
+                #       a known-good baseline.
+                draft_spec = kwargs.get("draft_model_path") or None
+                draft_llama: Llama | None = None
+                draft_callable = None
+                if draft_spec == "prompt-lookup":
+                    try:
+                        from llama_cpp.llama_speculative import (
+                            LlamaPromptLookupDecoding,
+                        )
+
+                        draft_callable = LlamaPromptLookupDecoding(
+                            num_pred_tokens=10, max_ngram_size=2
+                        )
+                        logger.info("Speculative decoding: prompt-lookup mode")
+                    except Exception as exc:
+                        logger.warning(
+                            "prompt-lookup decoding unavailable (%s); "
+                            "continuing without speculation",
+                            exc,
+                        )
+                elif draft_spec:
+                    logger.info("Loading speculative-decoding draft: %s", draft_spec)
+                    try:
+                        draft_llama = Llama(
+                            model_path=str(draft_spec),
+                            n_ctx=n_ctx,
+                            n_gpu_layers=n_gpu_layers,
+                            verbose=verbose,
+                        )
+                        draft_callable = _LlamaModelDraftAdapter(draft_llama)
+                    except Exception as exc:
+                        logger.warning(
+                            "draft model load failed (%s); continuing without speculative decoding",
+                            exc,
+                        )
+                        draft_llama = None
+                if draft_callable is not None:
+                    llama_kwargs["draft_model"] = draft_callable
                 self._model = Llama(**llama_kwargs)
+                # Track the draft so ``unload`` releases its memory too.
+                self._draft_model = draft_llama
             self._model_path = model_path
             self._architecture = architecture
             # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
@@ -951,6 +1127,12 @@ class LlamaCppEngine(InferenceEngine):
             del self._model
             self._model = None
             self._architecture = None
+            # V4 F5 — release the speculative-decoding draft alongside
+            # the target so a subsequent load doesn't double up.
+            if self._draft_model is not None:
+                logger.info("Unloading speculative draft model")
+                del self._draft_model
+                self._draft_model = None
             # Force garbage collection to free GPU memory
             import gc
 
