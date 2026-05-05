@@ -53,6 +53,7 @@ from hfl.api.routes_openai import router as openai_router
 from hfl.api.routes_openai_responses import router as openai_responses_router
 from hfl.api.routes_ps import router as ps_router
 from hfl.api.routes_pull import router as pull_router
+from hfl.api.routes_push import router as push_router
 from hfl.api.routes_show import router as show_router
 from hfl.api.routes_stop import router as stop_router
 from hfl.api.routes_transcribe import router as transcribe_router
@@ -246,6 +247,7 @@ app.include_router(create_router)
 app.include_router(embed_router)
 app.include_router(ps_router)
 app.include_router(pull_router)
+app.include_router(push_router)
 app.include_router(show_router)
 app.include_router(stop_router)
 app.include_router(transcribe_router)
