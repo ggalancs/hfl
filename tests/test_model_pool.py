@@ -391,6 +391,51 @@ class TestGetModelPool:
 
         assert pool1 is not pool2
 
+    def test_max_loaded_models_default_is_one(self):
+        """Default cap preserves V1 single-resident behaviour."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            for var in ("HFL_MAX_LOADED_MODELS", "OLLAMA_MAX_LOADED_MODELS"):
+                os.environ.pop(var, None)
+            reset_model_pool()
+            pool = get_model_pool()
+            assert pool._max_models == 1
+
+    def test_max_loaded_models_picks_up_hfl_env(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"HFL_MAX_LOADED_MODELS": "4"}, clear=False):
+            os.environ.pop("OLLAMA_MAX_LOADED_MODELS", None)
+            reset_model_pool()
+            pool = get_model_pool()
+            assert pool._max_models == 4
+
+    def test_max_loaded_models_picks_up_ollama_env(self):
+        """Drop-in replace: an environment with ``OLLAMA_MAX_LOADED_MODELS``
+        already set must work without changes."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"OLLAMA_MAX_LOADED_MODELS": "5"}, clear=False):
+            os.environ.pop("HFL_MAX_LOADED_MODELS", None)
+            reset_model_pool()
+            pool = get_model_pool()
+            assert pool._max_models == 5
+
+    def test_max_loaded_models_explicit_arg_wins(self):
+        """An explicit ``max_models=`` overrides any env var — tests
+        rely on this to bypass the resolution chain."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"HFL_MAX_LOADED_MODELS": "10"}, clear=False):
+            reset_model_pool()
+            pool = get_model_pool(max_models=2)
+            assert pool._max_models == 2
+
 
 class TestConcurrentLoading:
     """Tests for concurrent model loading (deadlock prevention)."""

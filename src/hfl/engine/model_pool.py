@@ -436,8 +436,31 @@ _pool: ModelPool | None = None
 _pool_lock = threading.Lock()
 
 
+def _resolve_max_loaded_models(default: int) -> int:
+    """Read the multi-model cap from env, with Ollama-fallback chain.
+
+    Priority order matches the rest of HFL's "Ollama drop-in" knobs:
+    explicit HFL var first, then HFL alias, then OLLAMA_*. Default
+    ``1`` (the function's argument) preserves the V1 single-resident
+    behaviour — operators have to opt in to multi-model caching.
+    """
+    import os as _os
+
+    raw = (
+        _os.environ.get("HFL_MAX_LOADED_MODELS")
+        or _os.environ.get("OLLAMA_MAX_LOADED_MODELS")
+        or str(default)
+    )
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid max_loaded_models value %r, falling back to %d", raw, default)
+        return default
+    return max(1, value)
+
+
 def get_model_pool(
-    max_models: int = 3,
+    max_models: int | None = None,
     idle_timeout_seconds: float = 3600.0,
 ) -> ModelPool:
     """Get or create the singleton model pool.
@@ -445,7 +468,10 @@ def get_model_pool(
     Thread-safe singleton pattern using double-checked locking.
 
     Args:
-        max_models: Maximum cached models (only used on creation)
+        max_models: Maximum cached models. ``None`` (default) reads
+            ``HFL_MAX_LOADED_MODELS`` / ``OLLAMA_MAX_LOADED_MODELS``
+            with a fallback of ``1``. Tests can pass an explicit int
+            to bypass env resolution.
         idle_timeout_seconds: Idle timeout (only used on creation)
 
     Returns:
@@ -460,8 +486,9 @@ def get_model_pool(
     with _pool_lock:
         # Double-check after acquiring lock
         if _pool is None:
+            resolved = max_models if max_models is not None else _resolve_max_loaded_models(1)
             _pool = ModelPool(
-                max_models=max_models,
+                max_models=resolved,
                 idle_timeout_seconds=idle_timeout_seconds,
             )
         return _pool
