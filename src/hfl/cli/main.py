@@ -817,13 +817,9 @@ def search(
                 "fetch_config": False,
                 "full": True,  # To get siblings and detect GGUF
             }
-            # direction parameter was removed in newer huggingface_hub versions
-            try:
-                models = list(
-                    api.list_models(**kwargs, direction=-1)  # type: ignore[call-arg,unused-ignore]
-                )
-            except TypeError:
-                models = list(api.list_models(**kwargs))
+            # ``sort="downloads"`` is already descending on hub API v1;
+            # the legacy ``direction=-1`` kwarg was removed in hub 1.0.
+            models = list(api.list_models(**kwargs))
     except Exception as e:
         console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1)

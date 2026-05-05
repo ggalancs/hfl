@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: HRUL-1.0
 """Regression guards for cross-package dependency compatibility.
 
-This file exists because of a real incident: a dev pre-release of
-``transformers`` (5.3.0.dev0) was installed in a host Python that also
-had ``huggingface_hub==0.27.1``. ``transformers`` tried to import the
-``is_offline_mode`` symbol from ``huggingface_hub`` and crashed with
-``ImportError``. HFL's ``gguf_converter`` invokes
-``convert_hf_to_gguf.py`` via ``sys.executable``, so a broken host
-Python silently breaks model conversion at runtime — and the test
-suite did not catch it because the conflicting packages aren't in the
-``[dev]`` extra that CI installs.
+HFL targets the post-2025 Hugging Face stack: ``transformers>=5`` paired
+with ``huggingface_hub>=1``. Both majors bumped together and share the
+new httpx-based hub client. Mixing the 4.x / 0.x lines with the 5.x /
+1.x lines crashes the ``convert_hf_to_gguf.py`` import chain.
 
 This module adds two layers of defence:
 
@@ -70,41 +65,36 @@ class TestStaticPyprojectPins:
     in the pin bounds is caught before merge.
     """
 
-    def test_huggingface_hub_pin_excludes_1x(self):
+    def test_huggingface_hub_pin_targets_1x(self):
         cfg = _load_pyproject()
         deps = cfg["project"]["dependencies"]
         pin = _find_pin(deps, "huggingface-hub")
-        # transformers 5.x requires huggingface_hub>=1.5.0 with a
-        # different API. We must stay on the 0.x line to keep the
-        # rest of HFL's surface working.
-        assert "<1.0" in pin or "<1," in pin, (
-            f"huggingface-hub pin must exclude 1.x: {pin!r}\n"
-            "If you need to allow 1.x, audit every transformers import "
-            "and bump the [transformers] / [tts] pins together."
+        # HFL pairs with the httpx-based hub 1.x generation so
+        # transformers 5.x can import is_offline_mode from the
+        # canonical location without blowing up.
+        assert ">=1.0" in pin or ">=1," in pin, (
+            f"huggingface-hub pin must allow 1.x: {pin!r}\n"
+            "Dropping to 0.x re-introduces the is_offline_mode "
+            "ImportError chain that crashed convert_hf_to_gguf.py."
+        )
+        assert "<2.0" in pin or "<2," in pin, (
+            f"huggingface-hub pin must cap before the next major: {pin!r}"
         )
 
     @pytest.mark.parametrize("extra_name", ["transformers", "tts"])
-    def test_transformers_extras_exclude_5x(self, extra_name):
+    def test_transformers_extras_target_5x(self, extra_name):
         cfg = _load_pyproject()
         extras = cfg["project"]["optional-dependencies"][extra_name]
         pin = _find_pin(extras, "transformers")
-        # transformers 5.x requires huggingface_hub>=1.5.0 (different
-        # API surface). Until HFL is rewritten to target that surface
-        # we must keep the [transformers] / [tts] pins on 4.x.
-        assert "<5.0" in pin or "<5," in pin, (
-            f"[{extra_name}] transformers pin must exclude 5.x: {pin!r}\n"
-            "Loosening this pin re-introduces the is_offline_mode "
-            "ImportError that crashed convert_hf_to_gguf.py."
+        # Paired with huggingface_hub 1.x above. Anything below 5.x
+        # pulls the old hub 0.x client and breaks the import chain.
+        assert ">=5.0" in pin or ">=5," in pin, (
+            f"[{extra_name}] transformers pin must target 5.x: {pin!r}\n"
+            "Dropping to the 4.x line desynchronises us from hub 1.x."
         )
-
-    def test_transformers_extras_have_minimum(self):
-        """Sanity: a lower bound is also required so users don't end
-        up on an ancient transformers that lacks features we use."""
-        cfg = _load_pyproject()
-        for extra_name in ("transformers", "tts"):
-            extras = cfg["project"]["optional-dependencies"][extra_name]
-            pin = _find_pin(extras, "transformers")
-            assert ">=4." in pin, f"[{extra_name}] transformers pin needs a >=4.x lower bound"
+        assert "<6.0" in pin or "<6," in pin, (
+            f"[{extra_name}] transformers pin must cap before the next major: {pin!r}"
+        )
 
     def test_llama_cpp_python_pin_supports_gemma4(self):
         """The ``[llama]`` extra must require a llama-cpp-python build
@@ -169,29 +159,28 @@ class TestTransformersImportChain:
 
     def test_versions_are_a_compatible_combo(self):
         """When both packages are installed, they must agree on the
-        major version axis. Specifically: transformers 4.x must coexist
-        with huggingface_hub 0.x. transformers 5.x ↔ huggingface_hub
-        1.x is also acceptable in principle but HFL doesn't support it
-        yet."""
+        major version axis. HFL's supported pairing is transformers 5.x
+        with huggingface_hub 1.x. The old 4.x / 0.x pairing is no
+        longer supported."""
         import huggingface_hub
         import transformers
 
         tx_major = int(transformers.__version__.split(".")[0])
         hh_major = int(huggingface_hub.__version__.split(".")[0])
-        if tx_major == 4:
-            assert hh_major == 0, (
-                f"transformers 4.x requires huggingface_hub 0.x, got "
+        if tx_major == 5:
+            assert hh_major == 1, (
+                f"transformers 5.x requires huggingface_hub 1.x, got "
                 f"{huggingface_hub.__version__}. Run "
                 f"``pip install --upgrade --force-reinstall "
-                f"'huggingface-hub>=0.27.0,<1.0'``."
+                f"'huggingface-hub>=1.0.0,<2.0'``."
             )
-        elif tx_major == 5:
+        elif tx_major == 4:
             pytest.fail(
-                f"transformers 5.x ({transformers.__version__}) is not "
-                "supported by HFL — its huggingface_hub contract is "
-                "incompatible with our other pins. Downgrade with "
-                "``pip install --upgrade --force-reinstall "
-                "'transformers>=4.47.0,<5.0'``."
+                f"transformers 4.x ({transformers.__version__}) is no "
+                "longer supported by HFL. Upgrade with "
+                "``pip install --upgrade "
+                "'transformers>=5.0.0,<6.0' "
+                "'huggingface-hub>=1.0.0,<2.0'``."
             )
         else:
             pytest.fail(f"unexpected transformers major: {tx_major}")

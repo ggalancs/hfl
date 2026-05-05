@@ -54,11 +54,12 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
     if "/" in model_spec:
         repo_id = model_spec
     else:
-        # Case 2: search by name
+        # Case 2: search by name. ``sort="downloads"`` already returns
+        # descending order on hub API v1; the legacy ``direction=-1``
+        # kwarg was removed in huggingface_hub 1.0.
         results = api.list_models(
             search=model_spec,
             sort="downloads",
-            direction=-1,
             limit=5,
         )
         results = list(results)

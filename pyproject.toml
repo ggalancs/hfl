@@ -12,11 +12,10 @@ dependencies = [
     # Using ~= (compatible release) for stability: allows patch updates only
     "typer>=0.15.0,<1.0",
     "rich~=13.0",
-    # Pinned to <1.0 because transformers 5.x switched its huggingface_hub
-    # contract (>=1.5.0) and is incompatible with the rest of HFL's
-    # surface, which relies on the 0.x API. See ``test_dependency_pins.py``
-    # for the static guard.
-    "huggingface-hub>=0.27.0,<1.0",
+    # HFL targets huggingface_hub 1.x (the httpx-based generation).
+    # See ``test_dependency_pins.py`` for the static guard that keeps
+    # this pin in sync with the rest of the HF ecosystem.
+    "huggingface-hub>=1.0.0,<2.0",
     "fastapi~=0.135.0",
     "starlette>=0.49.1",
     "python-multipart>=0.0.22",
@@ -33,14 +32,12 @@ dependencies = [
 # GGUFs at load time with "unknown model architecture".
 llama = ["llama-cpp-python>=0.3.20"]
 transformers = [
-    # Pinned to the 4.x line: transformers 5.x requires huggingface_hub
-    # >= 1.5.0 (different API) which is incompatible with the rest of
-    # HFL. The 4.x line targets huggingface_hub 0.x which we use in our
-    # main dependency. See ``test_dependency_pins.py`` for the static
-    # guard that prevents this pin from being widened by accident.
-    "transformers>=4.47.0,<5.0",
+    # HFL targets transformers 5.x paired with huggingface_hub 1.x.
+    # Both majors bumped together in late 2025 / early 2026 and share
+    # the new httpx-based hub client.
+    "transformers>=5.0.0,<6.0",
     "torch>=2.5.0",
-    "accelerate>=1.2.0",
+    "accelerate>=1.13.0",
     "sentencepiece>=0.2.0",
 ]
 vllm = ["vllm>=0.6.0"]
@@ -48,8 +45,8 @@ convert = ["gguf>=0.10.0"]
 
 # TTS support
 tts = [
-    # Same 4.x pin as the [transformers] extra — see comment there.
-    "transformers>=4.47.0,<5.0",
+    # Same 5.x pin as the [transformers] extra — see comment there.
+    "transformers>=5.0.0,<6.0",
     "torch>=2.5.0",
     "torchaudio>=2.2.0",
     "soundfile>=0.12.1",
@@ -74,9 +71,12 @@ tray = [
 # Model Context Protocol client/server (Phase 9+)
 mcp = ["mcp>=1.0.0"]
 
-# Apple Silicon native backend (Phase 13+ — V2 row 14)
+# Apple Silicon native backend (Phase 13+ — V2 row 14).
+# 0.31.2+ is required for the ``gemma4`` architecture; the same
+# line ships with ``transformers>=5`` as a hard dep, which matches
+# our main pin.
 mlx = [
-    "mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm>=0.31.2,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 # Speech-to-text (Whisper) — Phase 16 / V2 row 16. Prefers
