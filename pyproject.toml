@@ -31,6 +31,34 @@ dependencies = [
 # that doesn't recognise the ``gemma4`` architecture and rejects Gemma 4
 # GGUFs at load time with "unknown model architecture".
 llama = ["llama-cpp-python>=0.3.20"]
+
+# Vulkan backend — for GPUs outside the CUDA/Metal/MLX path:
+# Intel Arc, AMD GPUs without ROCm, integrated graphics with a
+# Vulkan 1.2+ driver. Requires the Vulkan SDK on the build host
+# (``apt install libvulkan-dev`` on Debian/Ubuntu, ``brew install
+# vulkan-headers vulkan-loader`` on macOS — though Metal is the
+# better path on Apple Silicon).
+#
+# Install with::
+#
+#     CMAKE_ARGS="-DGGML_VULKAN=ON" pip install 'hfl[vulkan]'
+#
+# The pin matches ``[llama]`` so Vulkan installs side-by-side with
+# the default CPU/Metal build without conflict. Wheels are not
+# pre-built; pip compiles from source on install.
+vulkan = ["llama-cpp-python>=0.3.20"]
+
+# ROCm backend — explicit AMD HIP path for Instinct/Radeon Pro
+# datacentre cards. Requires a ROCm-enabled host (``rocm-llvm``,
+# ``rocm-hip-sdk``) and the matching driver.
+#
+# Install with::
+#
+#     CMAKE_ARGS="-DGGML_HIPBLAS=ON" pip install 'hfl[rocm]'
+#
+# Same wheel as ``[llama]`` and ``[vulkan]`` — the difference is the
+# CMake flag chosen at build time, not the Python package itself.
+rocm = ["llama-cpp-python>=0.3.20"]
 transformers = [
     # HFL targets transformers 5.x paired with huggingface_hub 1.x.
     # Both majors bumped together in late 2025 / early 2026 and share
