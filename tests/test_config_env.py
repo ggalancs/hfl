@@ -186,6 +186,53 @@ class TestEnvConfig:
             assert cfg.queue_max_size == 32
 
 
+class TestCorsOriginsEnv:
+    """``HFL_ORIGINS`` / ``OLLAMA_ORIGINS`` populate ``cors_origins``
+    without code edits and flip ``cors_allow_all`` when ``*`` is in
+    the list."""
+
+    def test_unset_keeps_same_origin_default(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HFL_ORIGINS", None)
+            os.environ.pop("OLLAMA_ORIGINS", None)
+            cfg = HFLConfig()
+            assert cfg.cors_origins == []
+            assert cfg.cors_allow_all is False
+
+    def test_hfl_origins_comma_list(self):
+        with patch.dict(
+            os.environ,
+            {"HFL_ORIGINS": "https://app.example.com, https://dash.example.com"},
+            clear=False,
+        ):
+            os.environ.pop("OLLAMA_ORIGINS", None)
+            cfg = HFLConfig()
+            assert cfg.cors_origins == [
+                "https://app.example.com",
+                "https://dash.example.com",
+            ]
+            assert cfg.cors_allow_all is False
+
+    def test_wildcard_flips_allow_all(self):
+        with patch.dict(os.environ, {"HFL_ORIGINS": "*"}, clear=False):
+            os.environ.pop("OLLAMA_ORIGINS", None)
+            cfg = HFLConfig()
+            assert cfg.cors_allow_all is True
+
+    def test_ollama_alias_works(self):
+        """Drop-in ergonomics for an env that already has
+        ``OLLAMA_ORIGINS`` set — Ollama-published clients don't need to
+        relearn the variable."""
+        with patch.dict(
+            os.environ,
+            {"OLLAMA_ORIGINS": "http://localhost:5173"},
+            clear=False,
+        ):
+            os.environ.pop("HFL_ORIGINS", None)
+            cfg = HFLConfig()
+            assert cfg.cors_origins == ["http://localhost:5173"]
+
+
 class TestSLOValidation:
     def test_valid_defaults(self):
         """Default SLO config is valid."""

@@ -7,6 +7,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _parse_cors_origins_env() -> list[str] | None:
+    """Read ``HFL_ORIGINS`` / ``OLLAMA_ORIGINS`` into a clean list.
+
+    Returns ``None`` (i.e. "no env override") when neither variable is
+    set, so the defaults defined on the dataclass remain authoritative.
+    Otherwise splits on commas, strips whitespace, drops empties.
+    """
+    raw = os.environ.get("HFL_ORIGINS") or os.environ.get("OLLAMA_ORIGINS")
+    if raw is None:
+        return None
+    items = [piece.strip() for piece in raw.split(",")]
+    return [piece for piece in items if piece]
+
+
 @dataclass
 class SLOConfig:
     """Service Level Objective configuration.
@@ -113,8 +127,18 @@ class HFLConfig:
     # By default, CORS is restrictive (same-origin only).
     # Set cors_allow_all=True for development or use explicit origins.
     # NOTE: allow_credentials must be False when cors_allow_all=True
-    cors_origins: list[str] = field(default_factory=list)  # Empty = same-origin only
-    cors_allow_all: bool = False  # Explicit opt-in for "*" (all origins)
+    #
+    # Operators can override the allow-list via env without editing
+    # config: ``HFL_ORIGINS`` / ``OLLAMA_ORIGINS`` accepts a
+    # comma-separated list. ``"*"`` (the only entry, or as a member)
+    # is recognised and flips ``cors_allow_all`` on. Empty / unset
+    # falls back to the documented same-origin default.
+    cors_origins: list[str] = field(
+        default_factory=lambda: _parse_cors_origins_env() or []
+    )
+    cors_allow_all: bool = field(
+        default_factory=lambda: "*" in (_parse_cors_origins_env() or [])
+    )
     cors_allow_credentials: bool = False  # Must be False with wildcard origin
     cors_allow_methods: list[str] = field(default_factory=lambda: ["GET", "POST", "OPTIONS"])
     cors_allow_headers: list[str] = field(
