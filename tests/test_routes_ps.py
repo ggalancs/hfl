@@ -273,3 +273,26 @@ class TestRoutesPsMultiModelFromPool:
             assert names.count(llm_manifest.name) == 1
         finally:
             reset_model_pool()
+
+    def test_pool_walk_failure_does_not_500(self, client, llm_manifest, monkeypatch):
+        """``/api/ps`` is hit by liveness probes — if the pool import or
+        attribute access raises (half-initialised pool, hot-reload mid
+        cycle), the endpoint must still return the legacy state slots
+        with status 200."""
+        state = get_state()
+        state.engine = MagicMock(is_loaded=True)
+        state.current_model = llm_manifest
+
+        # Make ``get_model_pool`` blow up when /api/ps tries to drain
+        # the pool. The route's ``except Exception`` should swallow it.
+        from hfl.engine import model_pool as pool_module
+
+        def _exploding(*args, **kwargs):
+            raise RuntimeError("pool corrupted mid-request")
+
+        monkeypatch.setattr(pool_module, "get_model_pool", _exploding)
+
+        body = client.get("/api/ps").json()
+        # Legacy single-LLM slot still surfaces, ignoring the broken pool.
+        names = [m["name"] for m in body["models"]]
+        assert llm_manifest.name in names

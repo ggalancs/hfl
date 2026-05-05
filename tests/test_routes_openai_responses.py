@@ -214,3 +214,126 @@ class TestResponsesValidation:
             json={"model": "", "input": "hi"},
         )
         assert response.status_code in (400, 422)
+
+
+def _parse_sse_events(body: str) -> list[dict]:
+    """Decode a ``text/event-stream`` body into the list of ``data:``
+    payloads. Drops the ``[DONE]`` terminator so callers can assert on
+    the actual events.
+    """
+    import json
+
+    events: list[dict] = []
+    for line in body.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = line[len("data: ") :]
+        if payload == "[DONE]":
+            continue
+        events.append(json.loads(payload))
+    return events
+
+
+class TestResponsesStreaming:
+    """Cover the SSE path of ``POST /v1/responses``.
+
+    The server re-emits chat tokens as Responses-shaped events:
+    ``response.created`` once at the start, ``response.output_text.delta``
+    per chunk, ``response.completed`` with the final envelope, and a
+    final ``[DONE]`` line.
+    """
+
+    def _wire_streaming_engine(self, manifest, *, tokens):
+        """Mock a chat_stream that yields ``tokens`` then stops."""
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream = MagicMock(return_value=iter(list(tokens)))
+        state.engine = engine
+        state.current_model = manifest
+
+    def test_emits_created_then_deltas_then_completed(self, client, llm_manifest):
+        self._wire_streaming_engine(llm_manifest, tokens=["Hel", "lo", " world"])
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        events = _parse_sse_events(response.text)
+        types = [e["type"] for e in events]
+        # Required event grammar.
+        assert types[0] == "response.created"
+        # One delta per yielded token.
+        deltas = [e for e in events if e["type"] == "response.output_text.delta"]
+        assert [d["delta"] for d in deltas] == ["Hel", "lo", " world"]
+        # Last event is the completion envelope.
+        assert types[-1] == "response.completed"
+
+    def test_done_terminator_is_present(self, client, llm_manifest):
+        """The SSE stream must end with the ``[DONE]`` sentinel that
+        OpenAI SDKs key on to close the iterator cleanly."""
+        self._wire_streaming_engine(llm_manifest, tokens=["x"])
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        # Last non-empty line in the body.
+        non_empty = [line for line in response.text.splitlines() if line]
+        assert non_empty[-1] == "data: [DONE]"
+
+    def test_completed_event_carries_full_response_envelope(self, client, llm_manifest):
+        """``response.completed`` must include the same shape the
+        non-streaming endpoint returns — id/object/model/output."""
+        self._wire_streaming_engine(llm_manifest, tokens=["a", "b", "c"])
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        events = _parse_sse_events(response.text)
+        completed = next(e for e in events if e["type"] == "response.completed")
+        envelope = completed["response"]
+        assert envelope["object"] == "response"
+        assert envelope["model"] == llm_manifest.name
+        assert envelope["status"] == "completed"
+        # Reconstructed text matches the streamed tokens.
+        msg = next(item for item in envelope["output"] if item["type"] == "message")
+        assert msg["content"][0]["text"] == "abc"
+
+    def test_response_id_is_consistent_across_created_and_completed(self, client, llm_manifest):
+        """Both wrapper events must carry the SAME ``response.id`` so
+        clients can correlate them."""
+        self._wire_streaming_engine(llm_manifest, tokens=["x"])
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        events = _parse_sse_events(response.text)
+        created = next(e for e in events if e["type"] == "response.created")
+        completed = next(e for e in events if e["type"] == "response.completed")
+        assert created["response"]["id"] == completed["response"]["id"]
+        assert created["response"]["id"].startswith("resp_")
+
+    def test_engine_none_at_load_path_returns_http_error(self, client, llm_manifest):
+        """When ``state.current_model`` is set but ``state.engine`` is
+        None, ``load_llm`` raises ``ModelNotReadyError`` and the
+        endpoint returns an HTTP error envelope before the SSE stream
+        starts. This is the "model registered but failed to load" path;
+        the in-stream ``response.failed`` event is reserved for engines
+        that vanish mid-flight (covered separately by the
+        ``_get_state`` guard in ``_stream_response``)."""
+        state = get_state()
+        state.current_model = llm_manifest
+        state.engine = None
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        # ModelNotReadyError surfaces as 503; the body is JSON, not SSE.
+        assert response.status_code in (500, 503)
+        assert "text/event-stream" not in response.headers.get("content-type", "")

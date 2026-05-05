@@ -95,6 +95,55 @@ class TestMetrics:
         assert "hfl_uptime_seconds" in output
         assert "TYPE hfl_requests_total counter" in output
 
+    def test_export_prometheus_emits_inference_concurrency_gauges(self, metrics):
+        """The three V3 dispatcher gauges must show up with the right
+        TYPE lines and a numeric value sourced from the shared
+        dispatcher snapshot."""
+        output = metrics.export_prometheus()
+
+        # All three names with their TYPE declarations.
+        assert "# TYPE hfl_inference_concurrency_max gauge" in output
+        assert "# TYPE hfl_inference_concurrency_inflight gauge" in output
+        assert "# TYPE hfl_inference_queue_depth gauge" in output
+
+        # Each must have at least one numeric line (default dispatcher
+        # at boot: max_inflight=1, in_flight=0, depth=0).
+        import re
+
+        for name in (
+            "hfl_inference_concurrency_max",
+            "hfl_inference_concurrency_inflight",
+            "hfl_inference_queue_depth",
+        ):
+            assert re.search(rf"^{name} \d+", output, re.MULTILINE), (
+                f"missing numeric line for {name} in /metrics output"
+            )
+
+    def test_inference_gauges_reflect_live_dispatcher_state(self, metrics, monkeypatch):
+        """When the dispatcher reports a non-default snapshot, the
+        gauges must surface those values verbatim — they're not
+        cached at boot."""
+
+        class _FakeSnapshot:
+            max_inflight = 7
+            in_flight = 3
+            depth = 5
+            max_queued = 16
+            accepted_total = 0
+            rejected_full_total = 0
+            rejected_timeout_total = 0
+
+        class _FakeDispatcher:
+            def snapshot(self):
+                return _FakeSnapshot()
+
+        monkeypatch.setattr("hfl.core.get_dispatcher", lambda: _FakeDispatcher())
+
+        output = metrics.export_prometheus()
+        assert "hfl_inference_concurrency_max 7" in output
+        assert "hfl_inference_concurrency_inflight 3" in output
+        assert "hfl_inference_queue_depth 5" in output
+
     def test_percentile_calculation(self, metrics):
         """Should calculate percentiles correctly."""
         for i in range(100):
