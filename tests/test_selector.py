@@ -361,6 +361,79 @@ class TestSelectEngine:
         assert result is mock_engine
 
 
+class TestForcedBackendEnv:
+    """``HFL_LLM_LIBRARY`` (and the Ollama alias) overrides the auto
+    path so operators can pin a backend without editing code."""
+
+    @patch("hfl.engine.selector._create_engine")
+    @patch("hfl.engine.selector.detect_format")
+    def test_hfl_llm_library_forces_backend(
+        self, mock_detect, mock_create, monkeypatch
+    ):
+        from hfl.converter.formats import ModelFormat
+
+        monkeypatch.setenv("HFL_LLM_LIBRARY", "vllm")
+        mock_detect.return_value = ModelFormat.SAFETENSORS
+        mock_engine = MagicMock()
+        mock_create.return_value = mock_engine
+
+        result = select_engine(Path("/model"))
+
+        assert result is mock_engine
+        mock_create.assert_called_once_with("vllm")
+
+    @patch("hfl.engine.selector._create_engine")
+    @patch("hfl.engine.selector.detect_format")
+    def test_ollama_alias_is_honoured(self, mock_detect, mock_create, monkeypatch):
+        from hfl.converter.formats import ModelFormat
+
+        monkeypatch.delenv("HFL_LLM_LIBRARY", raising=False)
+        monkeypatch.setenv("OLLAMA_LLM_LIBRARY", "transformers")
+        mock_detect.return_value = ModelFormat.SAFETENSORS
+        mock_engine = MagicMock()
+        mock_create.return_value = mock_engine
+
+        result = select_engine(Path("/model"))
+
+        assert result is mock_engine
+        mock_create.assert_called_once_with("transformers")
+
+    @patch("hfl.engine.selector._create_engine")
+    @patch("hfl.engine.selector.detect_format")
+    def test_explicit_backend_arg_wins_over_env(
+        self, mock_detect, mock_create, monkeypatch
+    ):
+        """A caller passing an explicit ``backend=`` (Modelfile,
+        --backend flag) must beat the env override."""
+        from hfl.converter.formats import ModelFormat
+
+        monkeypatch.setenv("HFL_LLM_LIBRARY", "vllm")
+        mock_detect.return_value = ModelFormat.SAFETENSORS
+        mock_engine = MagicMock()
+        mock_create.return_value = mock_engine
+
+        result = select_engine(Path("/model"), backend="llama-cpp")
+
+        assert result is mock_engine
+        mock_create.assert_called_once_with("llama-cpp")
+
+    @patch("hfl.engine.selector._create_engine")
+    @patch("hfl.engine.selector.detect_format")
+    def test_unknown_value_is_ignored_silently(
+        self, mock_detect, mock_create, monkeypatch
+    ):
+        """A typo must not crash the server. Auto path takes over."""
+        from hfl.converter.formats import ModelFormat
+
+        monkeypatch.setenv("HFL_LLM_LIBRARY", "torchscript")
+        mock_detect.return_value = ModelFormat.GGUF
+
+        with patch("hfl.engine.selector._get_llama_cpp_engine") as fallback:
+            fallback.return_value = MagicMock()
+            select_engine(Path("/model"))
+            fallback.assert_called_once()
+
+
 class TestIsBarkModel:
     """Tests for _is_bark_model function."""
 

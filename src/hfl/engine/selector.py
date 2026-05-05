@@ -88,6 +88,32 @@ def _mlx_preferred() -> bool:
     return mlx_engine.is_available()
 
 
+def _resolve_forced_backend() -> str | None:
+    """Read the server-level backend override from the environment.
+
+    Resolution: ``HFL_LLM_LIBRARY`` first, then ``OLLAMA_LLM_LIBRARY``
+    (the Ollama-equivalent name). Returns ``None`` when neither is
+    set, so the per-call ``backend=`` argument keeps working.
+
+    Accepted values: ``"llama-cpp"``, ``"transformers"``, ``"vllm"``,
+    ``"mlx"``. An unrecognised value logs a warning and returns
+    ``None`` so the auto path is used — operator typos must not crash
+    the server.
+    """
+    import logging as _logging
+
+    raw = os.environ.get("HFL_LLM_LIBRARY") or os.environ.get("OLLAMA_LLM_LIBRARY")
+    if not raw:
+        return None
+    name = raw.strip().lower()
+    if name in {"llama-cpp", "transformers", "vllm", "mlx"}:
+        return name
+    _logging.getLogger(__name__).warning(
+        "HFL_LLM_LIBRARY=%r is not a recognised backend, ignoring", raw
+    )
+    return None
+
+
 def select_engine(
     model_path: Path,
     backend: str = "auto",
@@ -98,12 +124,22 @@ def select_engine(
 
     Args:
         model_path: Path to the model
-        backend: "auto", "llama-cpp", "transformers", "vllm", "mlx"
+        backend: "auto", "llama-cpp", "transformers", "vllm", "mlx".
+            Overridden by ``HFL_LLM_LIBRARY`` /
+            ``OLLAMA_LLM_LIBRARY`` when the caller passed ``"auto"``.
+            An explicit non-auto request from the caller (e.g.
+            Modelfile-driven or ``--backend`` flag) always wins so
+            per-model decisions are not silently overwritten by a
+            server default.
         **kwargs: Additional parameters for the engine
     """
     fmt = detect_format(model_path)
 
-    if backend != "auto":
+    if backend == "auto":
+        forced = _resolve_forced_backend()
+        if forced is not None:
+            return _create_engine(forced)
+    elif backend != "auto":
         return _create_engine(backend)
 
     # Auto-selection
