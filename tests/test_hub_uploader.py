@@ -215,3 +215,81 @@ class TestStreamPushFailureModes:
         assert events[-1]["status"] == "success"
         assert events[-1]["commit_url"].endswith("/commit/abc")
         assert events[-1]["revision"] == "main"  # default when not set
+
+
+class TestSecretRedaction:
+    """V6 ν4 — HF tokens never reach the client error envelope.
+
+    The HF SDK sometimes embeds the bearer token in exception
+    messages; ``stream_push`` yields ``str(exc)`` and logs it. The
+    ``redact_secrets`` helper masks anything matching
+    ``hf_[A-Za-z0-9]{20,}`` before either sink sees it.
+    """
+
+    def test_redact_secrets_masks_hf_token(self):
+        from hfl.hub.uploader import redact_secrets
+
+        msg = "401 Client Error. (Token: hf_abcdefghijklmnopqrstuvwx)"
+        out = redact_secrets(msg)
+        assert "hf_abcdefghijklmnopqrstuvwx" not in out
+        assert "hf_***REDACTED***" in out
+
+    def test_redact_secrets_handles_multiple_tokens(self):
+        from hfl.hub.uploader import redact_secrets
+
+        msg = "Tried hf_first1234567890abcdefgh and hf_secondabcdefghij1234567"
+        out = redact_secrets(msg)
+        assert "hf_first" not in out
+        assert "hf_second" not in out
+        assert out.count("hf_***REDACTED***") == 2
+
+    def test_redact_secrets_preserves_unrelated_text(self):
+        from hfl.hub.uploader import redact_secrets
+
+        msg = "uploading model.gguf to user/repo at revision main"
+        assert redact_secrets(msg) == msg
+
+    def test_redact_secrets_ignores_short_hf_prefix(self):
+        """A short ``hf_`` prefix without the 20+ char body is not a
+        real token — leave it alone (e.g. variable names like
+        ``hf_path``)."""
+        from hfl.hub.uploader import redact_secrets
+
+        msg = "set hf_path=/tmp/x for the loader"
+        assert "hf_path" in redact_secrets(msg)
+
+    @pytest.mark.asyncio
+    async def test_create_repo_failure_redacts_token_in_event(self, tmp_path, manifest_factory):
+        """When create_repo's exception carries a token, the failure
+        event the client receives must NOT contain the token."""
+        (tmp_path / "model.gguf").write_bytes(b"x")
+        plan = build_upload_plan(manifest_factory(tmp_path), target_repo_id="user/repo")
+
+        api = MagicMock()
+        api.create_repo = MagicMock(
+            side_effect=RuntimeError("401 Unauthorized: invalid token hf_leakedtoken1234567890abc")
+        )
+
+        events = [event async for event in stream_push(plan, api=api)]
+        last = events[-1]
+        assert last["status"] == "failed"
+        # The token must NOT have made it into the error string.
+        assert "hf_leakedtoken1234567890abc" not in last["error"]
+        assert "hf_***REDACTED***" in last["error"]
+
+    @pytest.mark.asyncio
+    async def test_upload_folder_failure_redacts_token_in_event(self, tmp_path, manifest_factory):
+        (tmp_path / "model.gguf").write_bytes(b"x")
+        plan = build_upload_plan(manifest_factory(tmp_path), target_repo_id="user/repo")
+
+        api = MagicMock()
+        api.create_repo = MagicMock(return_value=None)
+        api.upload_folder = MagicMock(
+            side_effect=RuntimeError("Upload failed with token=hf_secrettoken1234567890aaa")
+        )
+
+        events = [event async for event in stream_push(plan, api=api)]
+        last = events[-1]
+        assert last["status"] == "failed"
+        assert "hf_secrettoken1234567890aaa" not in last["error"]
+        assert "hf_***REDACTED***" in last["error"]

@@ -173,6 +173,26 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any]) -> None:
         producer_task.cancel()
 
     if cancelled:
+        # V6 ν2 — telemetry. The producer thread cannot be
+        # interrupted without an engine-level cancellation API
+        # (llama-cpp-python doesn't expose one), so when we cancel
+        # mid-flight the dispatcher slot stays busy until the engine
+        # returns by itself. We log a warning and bump
+        # ``hfl_ws_cancel_orphans_total`` so capacity-planning knows
+        # how often this happens.
+        producer_finished = producer_task.done()
+        try:
+            from hfl.metrics import get_metrics
+
+            get_metrics().record_ws_cancel(orphaned_slot=not producer_finished)
+        except Exception:  # pragma: no cover — defensive
+            pass
+        if not producer_finished:
+            logger.warning(
+                "ws cancel left the dispatcher slot busy: the engine "
+                "call for model %r is still running in the background",
+                model_name,
+            )
         await _send(ws, {"type": "cancelled", "tokens": tokens})
     else:
         await _send(ws, {"type": "done", "tokens": tokens})

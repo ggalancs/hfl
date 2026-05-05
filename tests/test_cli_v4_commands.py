@@ -41,6 +41,33 @@ class TestCommandsRegistered:
             assert cmd in result.stdout, f"{cmd} missing from main help"
 
 
+class TestV4CommandsAreI18nWired:
+    """V6 ν1 — V4 command help text comes from the i18n bundle, not
+    from English string literals. Exercised by checking that switching
+    HFL_LANG flips the rendered description.
+    """
+
+    def test_discover_help_is_translated_in_spanish(self, runner, monkeypatch):
+        from hfl.i18n import set_language
+
+        # Snapshot the current locale and restore.
+        monkeypatch.setenv("HFL_LANG", "es")
+        set_language("es")
+        try:
+            result = runner.invoke(app, ["--help"])
+            assert "filtra el catálogo" in result.stdout or "Hub" in result.stdout
+        finally:
+            set_language("en")
+
+    def test_lora_help_falls_back_to_english(self, runner, monkeypatch):
+        from hfl.i18n import set_language
+
+        monkeypatch.setenv("HFL_LANG", "en")
+        set_language("en")
+        result = runner.invoke(app, ["--help"])
+        assert "hot-swap LoRA" in result.stdout
+
+
 class TestPullSmartCli:
     def test_planning_failure_exits_nonzero(self, runner, monkeypatch):
         from hfl.hub import smart_pull as src

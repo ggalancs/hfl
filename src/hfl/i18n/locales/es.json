@@ -117,6 +117,93 @@
         "voice": "Voz/hablante a usar",
         "speed": "Multiplicador de velocidad (0.25-4.0)"
       }
+    },
+    "discover": {
+      "description": "V4: filtra el catálogo del HuggingFace Hub por capacidad y popularidad.",
+      "args": {
+        "query": "Texto libre de búsqueda (opcional)"
+      },
+      "options": {
+        "family": "Filtro de familia (llama, qwen, gemma, ...)",
+        "task": "Tag de pipeline de HuggingFace",
+        "quant": "Filtro de cuantización (gguf, mlx, awq, ...)",
+        "multimodal": "Solo modelos multimodales / con visión",
+        "min_likes": "Mínimo de likes",
+        "license": "Coincidencia exacta de licencia",
+        "gated": "Solo gated / solo abiertos",
+        "limit": "Número de resultados a mostrar",
+        "refresh": "Saltar la caché en disco"
+      }
+    },
+    "recommend": {
+      "description": "V4: recomendaciones top-N adaptadas al hardware.",
+      "options": {
+        "task": "Caso de uso: chat / code / vision / embeddings / tools",
+        "family": "Filtro de familia",
+        "quant": "Filtro de cuantización",
+        "top": "Número de sugerencias"
+      }
+    },
+    "lora": {
+      "description": "V4: aplica/quita adaptadores LoRA en caliente sobre un modelo cargado.",
+      "args": {
+        "action": "apply | remove | list",
+        "model": "Nombre del modelo cargado"
+      },
+      "options": {
+        "path": "Ruta del adaptador (solo apply)",
+        "id": "Identificador del adaptador (solo remove)",
+        "scale": "Peso de mezcla 0..5",
+        "name": "Etiqueta amigable"
+      }
+    },
+    "pull-smart": {
+      "description": "V4: descarga la mejor variante del Hub para el hardware actual.",
+      "args": {
+        "model": "Repo base"
+      },
+      "options": {
+        "max_vram_gb": "Sobrescribir el presupuesto de VRAM detectado"
+      }
+    },
+    "verify": {
+      "description": "V4: verificación rápida de un modelo registrado.",
+      "args": {
+        "model": "Nombre del modelo registrado"
+      }
+    },
+    "bench": {
+      "description": "V4: benchmark de TTFT y tokens-por-segundo.",
+      "args": {
+        "model": "Nombre del modelo registrado"
+      },
+      "options": {
+        "runs": "Ejecuciones por longitud de prompt",
+        "max_tokens": "Tokens a generar por ejecución",
+        "lengths": "Longitudes de prompt separadas por comas"
+      }
+    },
+    "snapshot": {
+      "description": "V4: guarda/restaura snapshots de KV cache.",
+      "args": {
+        "action": "save | load | list | delete",
+        "model": "Modelo (solo save/load)"
+      },
+      "options": {
+        "name": "Nombre del snapshot"
+      }
+    },
+    "compliance-dashboard": {
+      "description": "V4: panel de cumplimiento (licencias y EU AI Act) del registro local."
+    },
+    "draft-recommend": {
+      "description": "V4: recomienda un modelo draft para decodificación especulativa.",
+      "args": {
+        "model": "Repo objetivo"
+      },
+      "options": {
+        "max_ratio": "Ratio máximo de tamaño draft/target"
+      }
     }
   },
   "messages": {

@@ -303,6 +303,55 @@ class TestWsChatAuthAndOrigin:
             assert json.loads(ws.receive_text())["type"] == "pong"
 
 
+class TestWsChatCancelTelemetry:
+    """V6 ν2 — every cancel bumps a counter; the orphans subset is
+    flagged when the engine thread was still running at cancel time.
+
+    Note: a TestClient WS cancel runs in-process under the GIL so
+    the racing between the cancel event and the producer thread is
+    nondeterministic. We split the contract into deterministic
+    pieces:
+
+    1. ``record_ws_cancel`` itself increments the counters as
+       documented.
+    2. The Prometheus export reflects them.
+    3. The handler invokes ``record_ws_cancel`` *whenever* the
+       cancellation path runs (smoke-tested elsewhere).
+    """
+
+    def test_record_ws_cancel_increments_total(self):
+        from hfl.metrics import get_metrics, reset_metrics
+
+        reset_metrics()
+        m = get_metrics()
+        m.record_ws_cancel(orphaned_slot=False)
+        assert m.ws_cancels_total == 1
+        assert m.ws_cancel_orphans_total == 0
+
+    def test_record_ws_cancel_orphan_increments_both(self):
+        from hfl.metrics import get_metrics, reset_metrics
+
+        reset_metrics()
+        m = get_metrics()
+        m.record_ws_cancel(orphaned_slot=True)
+        assert m.ws_cancels_total == 1
+        assert m.ws_cancel_orphans_total == 1
+
+    def test_prometheus_exports_ws_cancel_metrics(self, client):
+        from hfl.metrics import get_metrics, reset_metrics
+
+        reset_metrics()
+        m = get_metrics()
+        m.record_ws_cancel(orphaned_slot=True)
+        m.record_ws_cancel(orphaned_slot=False)
+
+        body = client.get("/metrics").text
+        assert "hfl_ws_cancels_total" in body
+        assert "hfl_ws_cancel_orphans_total" in body
+        assert "hfl_ws_cancels_total 2" in body
+        assert "hfl_ws_cancel_orphans_total 1" in body
+
+
 class TestWsChatPersistentConnection:
     def test_multiple_chats_in_one_connection(self, client, llm_manifest):
         _wire_engine(llm_manifest, tokens=["a"])

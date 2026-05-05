@@ -22,6 +22,7 @@ network layer without setting up a real HF account:
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Iterable
@@ -33,7 +34,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["UploadPlan", "build_upload_plan", "stream_push"]
+__all__ = ["UploadPlan", "build_upload_plan", "stream_push", "redact_secrets"]
+
+
+# V6 ν4 — token masking. HF SDK occasionally embeds the bearer token
+# in its exception message (and we ``logger.exception`` those, plus
+# yield ``str(exc)`` to the client). Anything matching ``hf_[A-Za-z0-9]{20,}``
+# is redacted before either sink sees it.
+_HF_TOKEN_RE = _re.compile(r"hf_[A-Za-z0-9]{20,}")
+
+
+def redact_secrets(text: str) -> str:
+    """Strip anything that looks like a HuggingFace bearer token from
+    a string. Idempotent — multiple matches are all replaced.
+
+    The pattern is conservative: official HF tokens always start with
+    ``hf_`` and carry 20+ alnum chars. Personal tokens (read /
+    write / fine-grained) all conform.
+    """
+    return _HF_TOKEN_RE.sub("hf_***REDACTED***", text)
 
 
 @dataclass(frozen=True)
@@ -167,7 +186,7 @@ async def stream_push(
         )
     except Exception as exc:
         logger.exception("create_repo failed for %s", plan.repo_id)
-        yield {"status": "failed", "error": f"create_repo: {exc}"}
+        yield {"status": "failed", "error": redact_secrets(f"create_repo: {exc}")}
         return
 
     yield {
@@ -196,7 +215,7 @@ async def stream_push(
         )
     except Exception as exc:
         logger.exception("upload_folder failed for %s", plan.repo_id)
-        yield {"status": "failed", "error": f"upload_folder: {exc}"}
+        yield {"status": "failed", "error": redact_secrets(f"upload_folder: {exc}")}
         return
 
     revision = plan.revision or "main"

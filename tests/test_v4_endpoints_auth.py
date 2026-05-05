@@ -57,6 +57,42 @@ def test_v4_endpoint_requires_auth_when_key_configured(client_with_api_key, meth
     )
 
 
+@pytest.fixture
+def client_no_auth(temp_config):
+    reset_state()
+    yield TestClient(app)
+    reset_state()
+
+
+def test_v4_endpoints_are_metric_tracked(client_no_auth):
+    """V6 ν3 — every V4 GET endpoint flows through RequestLogger
+    middleware and lands in ``Metrics.requests_by_endpoint``. This
+    test pins the contract so a future routing change doesn't
+    silently lose observability for the new surface.
+    """
+    from hfl.metrics import get_metrics, reset_metrics
+
+    reset_metrics()
+
+    # Hit the read-only endpoints that don't need auth setup or
+    # complex bodies.
+    safe_gets = [
+        "/api/discover",
+        "/api/recommend",
+        "/api/compliance/dashboard",
+        "/api/snapshot",
+        "/api/lora",
+        "/api/draft/recommend?model=meta-llama/Llama-3.1-8B-Instruct",
+    ]
+    for path in safe_gets:
+        client_no_auth.get(path)
+
+    recorded = get_metrics().requests_by_endpoint
+    for path in safe_gets:
+        canonical = path.split("?")[0]
+        assert canonical in recorded, f"{canonical} not tracked in /metrics"
+
+
 @pytest.mark.parametrize("method,path", V4_ROUTES)
 def test_v4_endpoint_accepts_with_valid_bearer(client_with_api_key, method, path):
     """The same routes admit any well-formed request once auth is OK

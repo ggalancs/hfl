@@ -40,6 +40,13 @@ class Metrics:
     model_loads: int = 0
     model_unloads: int = 0
     errors_by_type: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # V6 ν2 — WebSocket cancel diagnostics. ``ws_cancels_total``
+    # counts every cancel frame received; ``ws_cancel_orphans_total``
+    # is the subset where the producer thread was still running when
+    # we abandoned it (the dispatcher slot stays busy until the
+    # engine returns by itself).
+    ws_cancels_total: int = 0
+    ws_cancel_orphans_total: int = 0
 
     # Histograms using deque for O(1) FIFO eviction (circular buffer)
     _generation_latencies_ms: deque[float] = field(
@@ -129,6 +136,20 @@ class Metrics:
         with self._lock:
             self.errors_by_type[error_type] += 1
 
+    def record_ws_cancel(self, *, orphaned_slot: bool) -> None:
+        """V6 ν2 — bookkeeping for WebSocket cancel frames.
+
+        ``orphaned_slot=True`` when the producer thread was still
+        running when we tore down the consumer — that means the
+        dispatcher slot keeps the engine occupied until the
+        generation finishes by itself, even though the client is
+        gone. Useful for capacity planning.
+        """
+        with self._lock:
+            self.ws_cancels_total += 1
+            if orphaned_slot:
+                self.ws_cancel_orphans_total += 1
+
     def _percentile(self, values: deque[float] | list[float], p: float) -> float:
         """Calculate percentile using linear interpolation.
 
@@ -196,6 +217,21 @@ class Metrics:
             lines.append("# HELP hfl_model_loads_total Total model loads")
             lines.append("# TYPE hfl_model_loads_total counter")
             lines.append(f"hfl_model_loads_total {self.model_loads}")
+
+            # V6 ν2 — WebSocket cancel telemetry. Total counts every
+            # cancel frame; orphans the subset where the producer
+            # thread was still running (dispatcher slot stays busy).
+            lines.append("")
+            lines.append("# HELP hfl_ws_cancels_total Total /ws/chat cancel frames received")
+            lines.append("# TYPE hfl_ws_cancels_total counter")
+            lines.append(f"hfl_ws_cancels_total {self.ws_cancels_total}")
+            lines.append("")
+            lines.append(
+                "# HELP hfl_ws_cancel_orphans_total Cancels that left an "
+                "engine call running in the background (dispatcher slot busy)"
+            )
+            lines.append("# TYPE hfl_ws_cancel_orphans_total counter")
+            lines.append(f"hfl_ws_cancel_orphans_total {self.ws_cancel_orphans_total}")
 
             # Inference dispatcher concurrency. Pulled from the shared
             # dispatcher snapshot so /metrics reflects the same state

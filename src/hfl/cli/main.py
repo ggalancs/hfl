@@ -1715,20 +1715,28 @@ def help_command(
         console.print(Panel(help_text, title="[bold]hfl[/]", border_style="cyan"))
 
 
-@app.command()
+@app.command(help=t("commands.discover.description"))
 def discover(
-    query: str | None = typer.Argument(default=None, help="Free-text query"),
+    query: str | None = typer.Argument(default=None, help=t("commands.discover.args.query")),
     family: str | None = typer.Option(
-        None, "--family", "-f", help="Family filter (llama, qwen, ...)"
+        None, "--family", "-f", help=t("commands.discover.options.family")
     ),
-    task: str | None = typer.Option(None, "--task", "-t", help="HF pipeline tag"),
-    quantization: str | None = typer.Option(None, "--quant", "-q", help="gguf, mlx, awq, ..."),
-    multimodal: bool = typer.Option(False, "--multimodal", help="Vision/multimodal only"),
-    min_likes: int = typer.Option(0, "--min-likes", help="Minimum like count"),
-    license_filter: str | None = typer.Option(None, "--license", help="Exact license match"),
-    gated: bool | None = typer.Option(None, "--gated/--open", help="Gated repos only / open only"),
-    page_size: int = typer.Option(20, "--limit", "-l", help="Result count"),
-    refresh: bool = typer.Option(False, "--refresh", help="Bypass the on-disk cache"),
+    task: str | None = typer.Option(None, "--task", "-t", help=t("commands.discover.options.task")),
+    quantization: str | None = typer.Option(
+        None, "--quant", "-q", help=t("commands.discover.options.quant")
+    ),
+    multimodal: bool = typer.Option(
+        False, "--multimodal", help=t("commands.discover.options.multimodal")
+    ),
+    min_likes: int = typer.Option(0, "--min-likes", help=t("commands.discover.options.min_likes")),
+    license_filter: str | None = typer.Option(
+        None, "--license", help=t("commands.discover.options.license")
+    ),
+    gated: bool | None = typer.Option(
+        None, "--gated/--open", help=t("commands.discover.options.gated")
+    ),
+    page_size: int = typer.Option(20, "--limit", "-l", help=t("commands.discover.options.limit")),
+    refresh: bool = typer.Option(False, "--refresh", help=t("commands.discover.options.refresh")),
 ):
     """V4: filter the HuggingFace Hub catalogue by capability and popularity.
 
@@ -1794,14 +1802,18 @@ def discover(
     console.print(table)
 
 
-@app.command()
+@app.command(help=t("commands.recommend.description"))
 def recommend(
     task: str | None = typer.Option(
-        None, "--task", "-t", help="chat / code / vision / embeddings / tools"
+        None, "--task", "-t", help=t("commands.recommend.options.task")
     ),
-    family: str | None = typer.Option(None, "--family", "-f", help="Family filter"),
-    quantization: str | None = typer.Option(None, "--quant", "-q", help="Quantisation filter"),
-    top_n: int = typer.Option(5, "--top", "-n", help="Number of suggestions"),
+    family: str | None = typer.Option(
+        None, "--family", "-f", help=t("commands.recommend.options.family")
+    ),
+    quantization: str | None = typer.Option(
+        None, "--quant", "-q", help=t("commands.recommend.options.quant")
+    ),
+    top_n: int = typer.Option(5, "--top", "-n", help=t("commands.recommend.options.top")),
 ):
     """V4: HW-aware top-N model recommendations.
 
@@ -1867,14 +1879,14 @@ def recommend(
     console.print(table)
 
 
-@app.command(name="lora")
+@app.command(name="lora", help=t("commands.lora.description"))
 def lora_cmd(
-    action: str = typer.Argument(help="apply | remove | list"),
-    model: str = typer.Argument(default="", help="Loaded model name"),
-    lora_path: str | None = typer.Option(None, "--path", help="Adapter file (apply only)"),
-    adapter_id: str | None = typer.Option(None, "--id", help="Adapter id (remove only)"),
-    scale: float = typer.Option(1.0, "--scale", help="Mix weight 0..5"),
-    name: str | None = typer.Option(None, "--name", help="Friendly label"),
+    action: str = typer.Argument(help=t("commands.lora.args.action")),
+    model: str = typer.Argument(default="", help=t("commands.lora.args.model")),
+    lora_path: str | None = typer.Option(None, "--path", help=t("commands.lora.options.path")),
+    adapter_id: str | None = typer.Option(None, "--id", help=t("commands.lora.options.id")),
+    scale: float = typer.Option(1.0, "--scale", help=t("commands.lora.options.scale")),
+    name: str | None = typer.Option(None, "--name", help=t("commands.lora.options.name")),
 ):
     """V4: hot-swap LoRA adapters on a loaded model.
 
@@ -1941,11 +1953,11 @@ def lora_cmd(
     asyncio.run(_run())
 
 
-@app.command(name="pull-smart")
+@app.command(name="pull-smart", help=t("commands.pull-smart.description"))
 def pull_smart_cmd(
-    model: str = typer.Argument(help="Base repo, e.g. meta-llama/Llama-3.1-8B-Instruct"),
+    model: str = typer.Argument(help=t("commands.pull-smart.args.model")),
     max_vram_gb: float | None = typer.Option(
-        None, "--max-vram-gb", help="Override the detected VRAM budget"
+        None, "--max-vram-gb", help=t("commands.pull-smart.options.max_vram_gb")
     ),
 ):
     """V4: pull the optimal Hub variant for the current hardware.
@@ -2001,9 +2013,9 @@ def pull_smart_cmd(
         raise typer.Exit(1)
 
 
-@app.command(name="verify")
+@app.command(name="verify", help=t("commands.verify.description"))
 def verify_cmd(
-    model: str = typer.Argument(help="Registered model name"),
+    model: str = typer.Argument(help=t("commands.verify.args.model")),
 ):
     """V4: sanity-check a registered model.
 
@@ -2048,13 +2060,17 @@ def verify_cmd(
     asyncio.run(_run())
 
 
-@app.command(name="bench")
+@app.command(name="bench", help=t("commands.bench.description"))
 def bench_cmd(
-    model: str = typer.Argument(help="Registered model name"),
-    runs_per_length: int = typer.Option(3, "--runs", "-n", min=1, max=20),
-    max_tokens: int = typer.Option(64, "--max-tokens", "-t", min=1, max=2048),
+    model: str = typer.Argument(help=t("commands.bench.args.model")),
+    runs_per_length: int = typer.Option(
+        3, "--runs", "-n", min=1, max=20, help=t("commands.bench.options.runs")
+    ),
+    max_tokens: int = typer.Option(
+        64, "--max-tokens", "-t", min=1, max=2048, help=t("commands.bench.options.max_tokens")
+    ),
     prompt_lengths: str = typer.Option(
-        "16,256,2048", "--lengths", help="Comma-separated prompt lengths"
+        "16,256,2048", "--lengths", help=t("commands.bench.options.lengths")
     ),
 ):
     """V4: benchmark TTFT + tok/s on a registered model.
@@ -2137,11 +2153,11 @@ def bench_cmd(
     asyncio.run(_run())
 
 
-@app.command(name="snapshot")
+@app.command(name="snapshot", help=t("commands.snapshot.description"))
 def snapshot_cmd(
-    action: str = typer.Argument(help="save | load | list | delete"),
-    model: str = typer.Argument(default="", help="Model (save/load only)"),
-    name: str = typer.Option("", "--name", help="Snapshot name (save/load/delete)"),
+    action: str = typer.Argument(help=t("commands.snapshot.args.action")),
+    model: str = typer.Argument(default="", help=t("commands.snapshot.args.model")),
+    name: str = typer.Option("", "--name", help=t("commands.snapshot.options.name")),
 ):
     """V4: KV cache snapshot save/restore.
 
@@ -2233,7 +2249,7 @@ def snapshot_cmd(
     asyncio.run(_run())
 
 
-@app.command(name="compliance-dashboard")
+@app.command(name="compliance-dashboard", help=t("commands.compliance-dashboard.description"))
 def compliance_dashboard_cmd():
     """V4: license / EU AI Act compliance overview of the local registry.
 
@@ -2282,10 +2298,12 @@ def compliance_dashboard_cmd():
             console.print(f"  - {w['model']} ({w['license']}): {w['reason']}")
 
 
-@app.command(name="draft-recommend")
+@app.command(name="draft-recommend", help=t("commands.draft-recommend.description"))
 def draft_recommend_cmd(
-    model: str = typer.Argument(help="Target repo id, e.g. meta-llama/Llama-3.1-70B-Instruct"),
-    max_ratio: float = typer.Option(0.25, "--max-ratio", min=0.01, max=1.0),
+    model: str = typer.Argument(help=t("commands.draft-recommend.args.model")),
+    max_ratio: float = typer.Option(
+        0.25, "--max-ratio", min=0.01, max=1.0, help=t("commands.draft-recommend.options.max_ratio")
+    ),
 ):
     """V4: recommend a draft model for speculative decoding.
 
