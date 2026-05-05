@@ -42,12 +42,23 @@ def app_with_handlers():
     async def raise_rate_limit():
         raise RateLimitError(retry_after=30)
 
+    @app.get("/test-runtime-error")
+    async def raise_runtime():
+        raise RuntimeError("engine crashed mid-generation")
+
+    @app.get("/test-value-error")
+    async def raise_value():
+        raise ValueError("bad sampling config")
+
     return app
 
 
 @pytest.fixture
 def client(app_with_handlers):
-    return TestClient(app_with_handlers)
+    # raise_server_exceptions=False so TestClient round-trips uncaught
+    # exceptions through the registered handlers instead of re-raising
+    # them into the test body (mirrors production behaviour).
+    return TestClient(app_with_handlers, raise_server_exceptions=False)
 
 
 class TestExceptionHandlers:
@@ -81,3 +92,74 @@ class TestExceptionHandlers:
         resp = client.get("/test-rate-limit")
         assert resp.status_code == 429
         assert "Rate limit" in resp.json()["error"]
+
+
+class TestUnhandledExceptionHandler:
+    """Tests for the Exception fallback handler.
+
+    Closes the ``"Internal Server Error"`` plain-text diagnostic gap
+    that used to surface when a non-HFLError escaped a route (e.g. an
+    engine ``RuntimeError`` after a thread-pool worker was left
+    orphaned by a cancelled request).
+    """
+
+    def test_runtime_error_returns_structured_500(self, client):
+        resp = client.get("/test-runtime-error")
+        assert resp.status_code == 500
+        body = resp.json()  # must be JSON, not plain text
+        assert body["code"] == "UnhandledError"
+        assert body["error_type"] == "RuntimeError"
+        assert "engine crashed" in body["message"]
+
+    def test_value_error_returns_structured_500(self, client):
+        resp = client.get("/test-value-error")
+        assert resp.status_code == 500
+        body = resp.json()
+        assert body["error_type"] == "ValueError"
+
+    def test_message_is_capped_to_500_chars(self, client, app_with_handlers):
+        """Don't let a pathological exception message blow up the
+        response (or leak long internals)."""
+
+        @app_with_handlers.get("/test-huge-msg")
+        async def _huge():
+            raise RuntimeError("x" * 10_000)
+
+        client2 = TestClient(app_with_handlers, raise_server_exceptions=False)
+        resp = client2.get("/test-huge-msg")
+        assert resp.status_code == 500
+        assert len(resp.json()["message"]) <= 500
+
+    def test_unhandled_handler_logs_traceback(self, client):
+        """Every 500 must produce a server-side traceback for diagnosis.
+
+        HFL's ``configure_logging`` may have set ``propagate=False`` on
+        the ``hfl`` root logger (by the time another test ran), which
+        would bypass caplog. Attach our own handler directly to dodge
+        ordering coupling.
+        """
+        import logging
+
+        target = logging.getLogger("hfl.api.exception_handlers")
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Capture(level=logging.ERROR)
+        target.addHandler(handler)
+        # Ensure level isn't suppressing the message regardless of
+        # what the ambient configuration did.
+        original_level = target.level
+        target.setLevel(logging.ERROR)
+        try:
+            client.get("/test-runtime-error")
+        finally:
+            target.removeHandler(handler)
+            target.setLevel(original_level)
+
+        assert any(
+            "unhandled exception" in rec.getMessage() and "RuntimeError" in rec.getMessage()
+            for rec in records
+        ), f"expected traceback log, got: {[r.getMessage() for r in records]}"

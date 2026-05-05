@@ -334,6 +334,11 @@ async def api_generate(
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "response": result.text,
         "done": True,
+        # Ollama-parity: non-empty ``done_reason`` on every completed
+        # reply. Mirrors the engine's ``stop_reason`` ("stop", "length",
+        # "eos", ...). Defaults to ``"stop"`` when the engine did not
+        # populate the field, so clients can always key on it.
+        "done_reason": result.stop_reason or "stop",
         "total_duration": result.total_duration,
         "load_duration": result.load_duration,
         "prompt_eval_count": result.tokens_prompt,
@@ -601,6 +606,8 @@ async def api_chat(
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "message": message,
         "done": True,
+        # Ollama-parity: non-empty ``done_reason``. See /api/generate.
+        "done_reason": result.stop_reason or "stop",
         # Phase 5 P1-3: real timings. Ollama-shape fields.
         "total_duration": result.total_duration,
         "load_duration": result.load_duration,

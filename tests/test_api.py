@@ -391,6 +391,38 @@ class TestNativeEndpoints:
         assert response.status_code == 200
         assert "application/x-ndjson" in response.headers["content-type"]
 
+    def test_api_generate_envelope_carries_done_reason(self, client_with_model):
+        """Ollama-parity: non-streaming /api/generate must return
+        ``done_reason`` mirroring the engine's stop_reason."""
+        response = client_with_model.post(
+            "/api/generate",
+            json={
+                "model": "test-model-q4_k_m",
+                "prompt": "Hello",
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # The client_with_model fixture mocks stop_reason="stop", so
+        # done_reason must surface it verbatim.
+        assert data["done_reason"] == "stop"
+
+    def test_api_chat_envelope_carries_done_reason(self, client_with_model):
+        """Ollama-parity: non-streaming /api/chat must return
+        ``done_reason`` mirroring the engine's stop_reason."""
+        response = client_with_model.post(
+            "/api/chat",
+            json={
+                "model": "test-model-q4_k_m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["done_reason"] == "stop"
+
     def test_api_generate_with_options(self, client_with_model):
         """Generate with options."""
         response = client_with_model.post(
