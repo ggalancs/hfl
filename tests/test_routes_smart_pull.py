@@ -58,8 +58,10 @@ def fake_smart_plan(monkeypatch):
 
 @pytest.fixture
 def fake_pull_iter(monkeypatch):
-    """Replace ``_iter_pull_events`` with a one-shot fake stream so we
-    can assert the route forwards chunks verbatim."""
+    """Replace ``iter_pull_events`` with a one-shot fake stream so we
+    can assert the route forwards chunks verbatim. After V5 β3 the
+    name is public; before, we patched the underscore-prefixed
+    helper instead."""
 
     async def _fake(model_name):
         yield json.dumps({"status": "downloading", "completed": 0}) + "\n"
@@ -67,7 +69,7 @@ def fake_pull_iter(monkeypatch):
 
     from hfl.api import routes_pull as module
 
-    monkeypatch.setattr(module, "_iter_pull_events", _fake, raising=False)
+    monkeypatch.setattr(module, "iter_pull_events", _fake, raising=False)
     return _fake
 
 

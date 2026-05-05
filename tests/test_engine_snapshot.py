@@ -144,6 +144,50 @@ class TestSnapshotErrors:
         with pytest.raises(ValueError, match="A"):
             load_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="B")
 
+    def test_load_rejects_foreign_format_version(self, isolated_home, fake_state):
+        """A snapshot whose sidecar declares a different format
+        version is rejected before we feed bytes into the engine."""
+        import json
+
+        from hfl.engine.snapshot import SnapshotVersionMismatch
+
+        save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="A")
+
+        # Tamper with the sidecar to claim a future version.
+        meta_path = isolated_home / "snapshots" / "warm-1.meta.json"
+        with meta_path.open() as f:
+            data = json.load(f)
+        data["version"] = 99
+        with meta_path.open("w") as f:
+            json.dump(data, f)
+
+        with pytest.raises(SnapshotVersionMismatch, match="99"):
+            load_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="A")
+
+    def test_save_stamps_current_format_version(self, isolated_home, fake_state):
+        from hfl.engine.snapshot import SNAPSHOT_FORMAT_VERSION
+
+        meta = save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="A")
+        assert meta.version == SNAPSHOT_FORMAT_VERSION
+
+    def test_legacy_snapshots_without_version_default_to_v1(self, isolated_home, fake_state):
+        """Snapshots written before the version field existed should
+        load fine — they default to format version 1."""
+        import json
+
+        save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="A")
+        meta_path = isolated_home / "snapshots" / "warm-1.meta.json"
+        with meta_path.open() as f:
+            data = json.load(f)
+        # Simulate a legacy meta file that pre-dated the version field.
+        data.pop("version", None)
+        with meta_path.open("w") as f:
+            json.dump(data, f)
+
+        # Must NOT raise.
+        meta = load_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="A")
+        assert meta.version == 1
+
 
 # --- listing & deletion -----------------------------------------------------
 

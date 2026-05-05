@@ -39,11 +39,29 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SnapshotMeta",
+    "SnapshotVersionMismatch",
     "save_snapshot",
     "load_snapshot",
     "list_snapshots",
     "delete_snapshot",
+    "SNAPSHOT_FORMAT_VERSION",
 ]
+
+
+# Snapshot format version. Bumped whenever the on-disk pickle layout
+# (the bytes ``Llama.save_state()`` returns) changes — usually driven
+# by a llama-cpp-python major release that re-shapes the KV tensors.
+# Loading a snapshot whose version doesn't match this constant raises
+# ``SnapshotVersionMismatch`` rather than corrupting memory by feeding
+# the wrong shape into ``Llama.load_state``.
+SNAPSHOT_FORMAT_VERSION = 1
+
+
+class SnapshotVersionMismatch(ValueError):
+    """Raised when a snapshot file was produced by an older / newer
+    HFL build whose on-disk format the current process can't safely
+    consume.
+    """
 
 
 @dataclass(frozen=True)
@@ -56,6 +74,10 @@ class SnapshotMeta:
     tokens: int
     created_at: float
     bytes: int
+    version: int = SNAPSHOT_FORMAT_VERSION
+    """Format-version stamp written at save time. ``load_snapshot``
+    rejects values that don't match
+    :data:`SNAPSHOT_FORMAT_VERSION`."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -166,6 +188,16 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     if meta_data.get("model") != model_name:
         raise ValueError(
             f"snapshot {name!r} was taken from model {meta_data.get('model')!r}, not {model_name!r}"
+        )
+    # Reject foreign format versions before we feed bytes into
+    # ``Llama.load_state``. Older snapshots stored without the
+    # ``version`` field default to ``1`` for backward compatibility
+    # with the initial release.
+    found_version = int(meta_data.get("version", 1))
+    if found_version != SNAPSHOT_FORMAT_VERSION:
+        raise SnapshotVersionMismatch(
+            f"snapshot {name!r} was written with format version "
+            f"{found_version}, this process expects {SNAPSHOT_FORMAT_VERSION}"
         )
 
     load_fn = getattr(engine, "load_state", None)

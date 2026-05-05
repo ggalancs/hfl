@@ -31,6 +31,48 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 
 **HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
 
+## What's new in V4
+
+V4 (2026-05) ships features that exploit HFL's HF-Hub-native nature
+— things Ollama can't structurally have because of its curated
+registry model:
+
+- **`hfl discover`** — filter the live HF Hub (1.5M+ models) by
+  family, quant, multimodal, license, popularity. Marks what you
+  already have locally.
+- **`hfl recommend`** — picks top-N models that *fit your hardware*
+  (probes RAM/VRAM/MLX, scores by hardware fit + capability +
+  popularity + recency).
+- **`hfl pull-smart`** — given a base repo, finds the best community
+  variant (`mlx-community/...-4bit` on Apple Silicon,
+  `bartowski/...-GGUF/Q5_K_M` on CUDA, smallest fitting quant on CPU).
+- **`hfl verify`** — 5 sanity probes against a freshly-pulled model
+  in seconds: tokenizer round-trip, chat-template render, smoke
+  generation, tool-parser, embedding dim.
+- **`hfl bench`** — TTFT + tok/s + p50/p95 with golden prompts
+  (16/256/2048 chars).
+- **`hfl lora apply|remove|list`** — hot-swap LoRA adapters at
+  fractional scales without reloading base weights.
+- **`hfl snapshot save|load|list|delete`** — persist KV cache to
+  disk for warm-start across restarts. Format-versioned.
+- **`hfl compliance-dashboard`** — license-risk overview of the
+  local registry, gated repos pending HF_TOKEN, EU AI Act
+  warnings.
+- **`hfl draft-recommend`** — auto-pick a small Hub sibling for
+  speculative decoding. Measured 1.33× speedup on Qwen3-14B + 0.6B
+  draft for structured prompts.
+- **REST `POST /v1/responses`** — OpenAI Responses API (2025
+  surface used by `client.responses.create()`).
+- **WebSocket `/ws/chat`** — bidirectional with frame-level
+  cancellation (vs HTTP streaming where cancel = TCP close).
+- **REST `POST /api/push`** — upload a registered model to the HF
+  Hub (closes the V1/V2 "out-of-scope" gap).
+
+See [docs/v4.md](docs/v4.md) for the full V4 guide and
+[docs/env-vars.md](docs/env-vars.md) for the env var matrix
+(every `HFL_*` knob has an `OLLAMA_*` fallback so a drop-in
+replacement of an Ollama install works without re-reading the docs).
+
 ## Features
 
 - **CLI & API**: Full CLI interface plus REST API compatible with OpenAI, Ollama, and Anthropic

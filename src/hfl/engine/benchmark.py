@@ -29,13 +29,20 @@ class BenchmarkRun:
 
     prompt_length: int
     tokens_generated: int
-    ttft_ms: float
-    """Time to first token (ms)."""
+    ttft_ms: float | None
+    """Time to first token (ms). ``None`` when the engine doesn't
+    expose ``generate_stream`` — we cannot honestly measure TTFT
+    without an incremental token signal, so the field is left blank
+    rather than aliased to ``total_ms``."""
 
     total_ms: float
     """Total wall-clock for the generate call."""
 
     tokens_per_second: float
+    measurement_mode: str = "stream"
+    """``"stream"`` when TTFT was measured against the first yielded
+    token; ``"no-stream"`` when only ``total_ms`` was timed and TTFT
+    is ``None``."""
 
 
 @dataclass
@@ -44,13 +51,18 @@ class BenchmarkSummary:
 
     prompt_length: int
     runs: int
-    ttft_p50_ms: float
-    ttft_p95_ms: float
+    ttft_p50_ms: float | None
+    """``None`` when no run produced a real TTFT measurement (engine
+    without ``generate_stream``)."""
+    ttft_p95_ms: float | None
     total_p50_ms: float
     total_p95_ms: float
     tps_mean: float
     tps_min: float
     tps_max: float
+    measurement_mode: str = "stream"
+    """``"stream"`` when at least one run produced a real TTFT;
+    ``"no-stream"`` when every run was timed via ``generate`` only."""
 
 
 @dataclass
@@ -108,11 +120,14 @@ _GOLDEN = {
 
 
 def _measure_one(engine: "InferenceEngine", prompt: str, max_tokens: int) -> BenchmarkRun:
-    """Run one generate call, deriving TTFT from a streaming pass.
+    """Run one generate call, deriving TTFT from a streaming pass
+    when available.
 
-    For engines that don't expose ``generate_stream``, we fall back
-    to ``generate`` and report TTFT == total_ms (best we can do
-    without instrumentation in the engine itself).
+    For engines that don't expose ``generate_stream``, the run falls
+    back to ``generate`` and reports ``ttft_ms=None`` plus
+    ``measurement_mode="no-stream"`` — we do NOT alias ``total_ms``
+    into the TTFT slot because that would silently inflate the
+    first-token latency percentile.
     """
     from hfl.engine.base import GenerationConfig
 
@@ -131,15 +146,16 @@ def _measure_one(engine: "InferenceEngine", prompt: str, max_tokens: int) -> Ben
         except Exception:  # pragma: no cover — fall back
             return _measure_via_generate(engine, prompt, cfg)
         end = time.perf_counter()
-        ttft_ms = (first - start) * 1000 if first is not None else 0.0
+        ttft_value = (first - start) * 1000 if first is not None else None
         total_ms = (end - start) * 1000
         tps = (tokens / (total_ms / 1000)) if total_ms > 0 else 0.0
         return BenchmarkRun(
             prompt_length=len(prompt),
             tokens_generated=tokens,
-            ttft_ms=round(ttft_ms, 2),
+            ttft_ms=round(ttft_value, 2) if ttft_value is not None else None,
             total_ms=round(total_ms, 2),
             tokens_per_second=round(tps, 2),
+            measurement_mode="stream",
         )
 
     return _measure_via_generate(engine, prompt, cfg)
@@ -155,40 +171,68 @@ def _measure_via_generate(engine: "InferenceEngine", prompt: str, cfg) -> Benchm
     return BenchmarkRun(
         prompt_length=len(prompt),
         tokens_generated=tokens,
-        ttft_ms=round(total_ms, 2),  # no TTFT signal on this path
+        # No incremental token signal on this path → TTFT cannot be
+        # honestly measured. Report ``None`` rather than aliasing to
+        # ``total_ms`` (which would silently inflate the percentile).
+        ttft_ms=None,
         total_ms=round(total_ms, 2),
         tokens_per_second=round(tps, 2),
+        measurement_mode="no-stream",
     )
 
 
 def _summarise(prompt_length: int, runs: list[BenchmarkRun]) -> BenchmarkSummary:
-    """Convert per-run measurements to p50/p95 aggregates."""
+    """Convert per-run measurements to p50/p95 aggregates.
+
+    TTFT is reported as ``None`` when no run produced an honest
+    measurement (engine has no ``generate_stream``). We do NOT
+    average ``total_ms`` into the TTFT slot — that would silently
+    overstate first-token latency.
+    """
     if not runs:
         return BenchmarkSummary(
             prompt_length=prompt_length,
             runs=0,
-            ttft_p50_ms=0.0,
-            ttft_p95_ms=0.0,
+            ttft_p50_ms=None,
+            ttft_p95_ms=None,
             total_p50_ms=0.0,
             total_p95_ms=0.0,
             tps_mean=0.0,
             tps_min=0.0,
             tps_max=0.0,
+            measurement_mode="no-stream",
         )
 
-    ttft = sorted(r.ttft_ms for r in runs)
     total = sorted(r.total_ms for r in runs)
     tps = [r.tokens_per_second for r in runs]
+
+    ttft_values = [r.ttft_ms for r in runs if r.ttft_ms is not None]
+    if ttft_values:
+        ttft_sorted = sorted(ttft_values)
+        ttft_p50 = round(statistics.median(ttft_sorted), 2)
+        ttft_p95 = round(
+            ttft_sorted[int(len(ttft_sorted) * 0.95) - 1]
+            if len(ttft_sorted) >= 2
+            else ttft_sorted[-1],
+            2,
+        )
+        mode = "stream"
+    else:
+        ttft_p50 = None
+        ttft_p95 = None
+        mode = "no-stream"
+
     return BenchmarkSummary(
         prompt_length=prompt_length,
         runs=len(runs),
-        ttft_p50_ms=round(statistics.median(ttft), 2),
-        ttft_p95_ms=round(ttft[int(len(ttft) * 0.95) - 1] if len(ttft) >= 2 else ttft[-1], 2),
+        ttft_p50_ms=ttft_p50,
+        ttft_p95_ms=ttft_p95,
         total_p50_ms=round(statistics.median(total), 2),
         total_p95_ms=round(total[int(len(total) * 0.95) - 1] if len(total) >= 2 else total[-1], 2),
         tps_mean=round(sum(tps) / len(tps), 2),
         tps_min=round(min(tps), 2),
         tps_max=round(max(tps), 2),
+        measurement_mode=mode,
     )
 
 

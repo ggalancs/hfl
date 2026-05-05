@@ -50,32 +50,47 @@ _KV_BYTES_PER_ELEMENT = {
 
 # Conservative head-dim × kv-heads product for typical LLM
 # architectures, indexed by parameter count. Values are rough
-# averages from llama.cpp's gguf metadata across published 7B/13B/
-# 70B Llama-family variants.
+# averages drawn from llama.cpp's gguf metadata across the
+# published Llama / Qwen / Gemma / Mistral / Mixtral lines.
+#
+# Numbers favour the larger of any pair when in doubt — V4
+# audit found the table was Llama-only, so adding Qwen 3, Qwen 2.5
+# and Mixtral here closes the heuristic gap. Mixtral's 8x7B uses
+# the active expert count for the KV dimension (effective ~5120).
 _KV_HIDDEN_PER_LAYER_BY_SIZE = {
     1: 1024,
+    2: 1536,  # Qwen3-1.7B / Llama-3.2-1.5B class
     3: 2048,
     7: 4096,
     8: 4096,
+    9: 4608,  # Gemma 2 9B
     13: 5120,
-    27: 5120,
+    14: 5120,  # Qwen3-14B
+    27: 5120,  # Gemma 2 27B
     32: 5120,
     34: 7168,
+    47: 5120,  # Mixtral 8x7B effective
     70: 8192,
     72: 8192,
     180: 12288,
 }
 
-# Layer count by parameter count (same source).
+# Layer count by parameter count (same source). Values reflect the
+# block_count metadata published by the canonical GGUF for each
+# bucket.
 _LAYERS_BY_SIZE = {
     1: 16,
+    2: 28,  # Qwen3-1.7B
     3: 28,
     7: 32,
     8: 32,
+    9: 42,  # Gemma 2 9B
     13: 40,
-    27: 56,
-    32: 60,
+    14: 40,  # Qwen3-14B
+    27: 46,  # Gemma 2 27B
+    32: 64,  # Qwen3-32B
     34: 64,
+    47: 32,  # Mixtral 8x7B (each layer: shared experts)
     70: 80,
     72: 80,
     180: 96,

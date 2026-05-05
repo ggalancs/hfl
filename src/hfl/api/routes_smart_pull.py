@@ -75,27 +75,11 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
         + "\n"
     )
 
-    # Delegate to the existing pull machinery. We can't easily call
-    # the FastAPI endpoint internally without an HTTP round-trip, so
-    # we re-use the handler's helper — ``_iter_pull_events`` — that
-    # produces the same NDJSON shape /api/pull emits.
-    try:
-        from hfl.api.routes_pull import _iter_pull_events  # type: ignore[attr-defined]
-    except ImportError:
-        # Fallback: emit the plan and let the client invoke /api/pull
-        # itself on the resolved repo.
-        yield (
-            json.dumps(
-                {
-                    "status": "delegated",
-                    "next": {"endpoint": "/api/pull", "model": plan.target_repo_id},
-                }
-            )
-            + "\n"
-        )
-        return
+    # Delegate to the existing pull machinery via the public helper
+    # introduced in V5 β3 — no try/except gymnastics anymore.
+    from hfl.api.routes_pull import iter_pull_events
 
-    async for chunk in _iter_pull_events(plan.target_repo_id):
+    async for chunk in iter_pull_events(plan.target_repo_id):
         yield chunk
 
 

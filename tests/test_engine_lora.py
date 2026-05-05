@@ -130,6 +130,59 @@ class TestRemoveLora:
 # --- Listing ---------------------------------------------------------------
 
 
+class TestMultiLoraComposition:
+    """V5 β4 — composition guarantee.
+
+    The user-facing claim is "multi-LoRA composition" (stack two
+    adapters at fractional scales 0.7 + 0.3). The HFL adapter only
+    forwards calls to the engine — actual *composition* is the
+    engine's job. These tests pin the *forwarding* contract: each
+    apply produces an independent engine call with the right path
+    and scale, so when the engine supports stacking, HFL exposes it.
+    """
+
+    def test_two_applies_produce_two_engine_calls(self, adapter_file):
+        engine = _engine_with_apply()
+        a = apply_lora(engine, lora_path=adapter_file, scale=0.7, name="primary")
+        b = apply_lora(engine, lora_path=adapter_file, scale=0.3, name="secondary")
+
+        assert a.adapter_id != b.adapter_id
+        # Both adapters tracked.
+        adapters = list_loras(engine)
+        assert {x.adapter_id for x in adapters} == {a.adapter_id, b.adapter_id}
+        # Engine saw two distinct calls with the requested scales.
+        assert engine.apply_lora.call_count == 2
+        scales_seen = [call.args[1] for call in engine.apply_lora.call_args_list]
+        assert sorted(scales_seen) == [0.3, 0.7]
+
+    def test_remove_one_keeps_the_other_active(self, adapter_file):
+        """Composition guarantee: removing adapter A leaves adapter B
+        in the registry and the engine sees only the matching
+        ``remove_lora(B.id)`` — A is not detached too."""
+        engine = _engine_with_apply()
+        a = apply_lora(engine, lora_path=adapter_file, scale=0.7)
+        b = apply_lora(engine, lora_path=adapter_file, scale=0.3)
+
+        ok = remove_lora(engine, a.adapter_id)
+        assert ok is True
+        engine.remove_lora.assert_called_once_with(a.adapter_id)
+
+        # b survives in the registry.
+        adapters = list_loras(engine)
+        assert [x.adapter_id for x in adapters] == [b.adapter_id]
+
+    def test_three_lora_stack_is_supported(self, adapter_file):
+        """No artificial cap on the number of adapters — operators
+        can stack as many as the engine accepts."""
+        engine = _engine_with_apply()
+        ids = []
+        for scale in (0.5, 0.3, 0.2):
+            ids.append(apply_lora(engine, lora_path=adapter_file, scale=scale).adapter_id)
+        adapters = list_loras(engine)
+        assert {x.adapter_id for x in adapters} == set(ids)
+        assert engine.apply_lora.call_count == 3
+
+
 class TestListLoras:
     def test_lists_active_adapters(self, adapter_file):
         engine = _engine_with_apply()

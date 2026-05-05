@@ -184,6 +184,125 @@ class TestWsChatValidation:
             assert "messages" in frame["message"]
 
 
+class TestWsChatAuthAndOrigin:
+    """V5 α1 + α2 — auth + origin gating on the WebSocket upgrade.
+
+    The HTTP middleware doesn't see WebSocket frames, so the route
+    enforces both policies inline before accepting frames.
+    """
+
+    def test_ws_rejects_when_api_key_required_but_missing(self, client):
+        from hfl.api.state import get_state
+
+        state = get_state()
+        state.api_key = "secret-token-1234567890"
+        try:
+            with client.websocket_connect("/ws/chat") as ws:
+                # Server accepts then closes with the reason in an
+                # ``error`` frame.
+                frame = json.loads(ws.receive_text())
+                assert frame["type"] == "error"
+                assert "unauthorized" in frame["message"]
+        finally:
+            state.api_key = None
+
+    def test_ws_accepts_with_correct_api_key_in_query(self, client, llm_manifest):
+        from hfl.api.state import get_state
+
+        _wire_engine(llm_manifest, tokens=["a"])
+        state = get_state()
+        state.api_key = "right-token-1234567890"
+        try:
+            with client.websocket_connect("/ws/chat?api_key=right-token-1234567890") as ws:
+                ws.send_text(json.dumps({"type": "ping"}))
+                frame = json.loads(ws.receive_text())
+                assert frame["type"] == "pong"
+        finally:
+            state.api_key = None
+
+    def test_ws_accepts_with_authorization_bearer(self, client):
+        from hfl.api.state import get_state
+
+        state = get_state()
+        state.api_key = "bearer-token-1234567890"
+        try:
+            with client.websocket_connect(
+                "/ws/chat",
+                headers={"authorization": "Bearer bearer-token-1234567890"},
+            ) as ws:
+                ws.send_text(json.dumps({"type": "ping"}))
+                assert json.loads(ws.receive_text())["type"] == "pong"
+        finally:
+            state.api_key = None
+
+    def test_ws_accepts_with_x_api_key_header(self, client):
+        from hfl.api.state import get_state
+
+        state = get_state()
+        state.api_key = "x-key-token-1234567890"
+        try:
+            with client.websocket_connect(
+                "/ws/chat",
+                headers={"x-api-key": "x-key-token-1234567890"},
+            ) as ws:
+                ws.send_text(json.dumps({"type": "ping"}))
+                assert json.loads(ws.receive_text())["type"] == "pong"
+        finally:
+            state.api_key = None
+
+    def test_ws_rejects_wrong_origin(self, client, monkeypatch):
+        """When ``cors_origins`` is set, an Origin header outside the
+        allow-list closes the socket with policy violation."""
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "cors_origins", ["https://app.example.com"])
+        monkeypatch.setattr(config, "cors_allow_all", False)
+
+        with client.websocket_connect(
+            "/ws/chat",
+            headers={"origin": "https://evil.example.com"},
+        ) as ws:
+            frame = json.loads(ws.receive_text())
+            assert frame["type"] == "error"
+            assert "origin not allowed" in frame["message"]
+
+    def test_ws_accepts_listed_origin(self, client, monkeypatch, llm_manifest):
+        from hfl.config import config
+
+        _wire_engine(llm_manifest, tokens=["a"])
+        monkeypatch.setattr(config, "cors_origins", ["https://app.example.com"])
+        monkeypatch.setattr(config, "cors_allow_all", False)
+
+        with client.websocket_connect(
+            "/ws/chat",
+            headers={"origin": "https://app.example.com"},
+        ) as ws:
+            ws.send_text(json.dumps({"type": "ping"}))
+            assert json.loads(ws.receive_text())["type"] == "pong"
+
+    def test_ws_wildcard_origin_accepts_anything(self, client, monkeypatch, llm_manifest):
+        from hfl.config import config
+
+        _wire_engine(llm_manifest, tokens=["a"])
+        monkeypatch.setattr(config, "cors_allow_all", True)
+        monkeypatch.setattr(config, "cors_origins", ["*"])
+
+        with client.websocket_connect(
+            "/ws/chat",
+            headers={"origin": "https://anything.example.com"},
+        ) as ws:
+            ws.send_text(json.dumps({"type": "ping"}))
+            assert json.loads(ws.receive_text())["type"] == "pong"
+
+    def test_ws_no_origin_header_passes_when_no_api_key(self, client, llm_manifest):
+        """Same-origin connections (no Origin header) are accepted by
+        default — that's how a CLI client or curl websocat looks."""
+        _wire_engine(llm_manifest, tokens=["a"])
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_text(json.dumps({"type": "ping"}))
+            assert json.loads(ws.receive_text())["type"] == "pong"
+
+
 class TestWsChatPersistentConnection:
     def test_multiple_chats_in_one_connection(self, client, llm_manifest):
         _wire_engine(llm_manifest, tokens=["a"])

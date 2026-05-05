@@ -58,6 +58,44 @@ class TestEstimateVramGb:
         assert e.total_gb > raw
 
 
+class TestExtendedFamilies:
+    """V5 ε1 — verify that the new architecture buckets land on
+    realistic VRAM estimates."""
+
+    @pytest.mark.parametrize(
+        "params_b,quant,expected_range_gb",
+        [
+            (14.0, "q4_k_m", (10.0, 16.0)),  # Qwen3-14B Q4_K_M
+            (27.0, "q4_k_m", (18.0, 30.0)),  # Gemma 2 27B Q4_K_M
+            (32.0, "q4_k_m", (22.0, 32.0)),  # Qwen3-32B Q4_K_M
+            (47.0, "q4_k_m", (28.0, 48.0)),  # Mixtral 8x7B
+            (9.0, "q4_k_m", (6.0, 11.0)),  # Gemma 2 9B
+            (1.7, "q4_k_m", (1.5, 4.0)),  # Qwen3-1.7B
+        ],
+    )
+    def test_extended_buckets_within_published_ranges(self, params_b, quant, expected_range_gb):
+        from hfl.hub.quant_table import estimate_vram_gb
+
+        estimate = estimate_vram_gb(params_b=params_b, quantization=quant)
+        low, high = expected_range_gb
+        assert low <= estimate.total_gb <= high, (
+            f"{params_b}B {quant} expected in {low}-{high} GB, got {estimate.total_gb}"
+        )
+
+    def test_qwen_14b_fits_on_24gb_cuda(self):
+        """The reference test of the V5 audit: Qwen3-14B Q4_K_M
+        was the model used for the F5 benchmark on Apple Silicon
+        and CUDA 24GB hosts."""
+        from hfl.hub.quant_table import fits_in
+
+        assert fits_in(params_b=14.0, quantization="q4_k_m", budget_gb=24.0)
+
+    def test_mixtral_does_not_fit_on_16gb_consumer(self):
+        from hfl.hub.quant_table import fits_in
+
+        assert not fits_in(params_b=47.0, quantization="q4_k_m", budget_gb=16.0)
+
+
 class TestFitsIn:
     def test_70b_q4_does_not_fit_on_8gb_gpu(self):
         assert not fits_in(params_b=70.0, quantization="q4_k_m", budget_gb=8.0)

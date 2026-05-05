@@ -183,6 +183,60 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _check_ws_auth_and_origin(ws: WebSocket) -> tuple[bool, str | None]:
+    """Pre-accept gate for ``/ws/chat``.
+
+    The HTTP ``APIKeyMiddleware`` and the ``CORSMiddleware`` only
+    apply to standard HTTP routes — WebSocket upgrades bypass them.
+    We mirror their two policies inline:
+
+    1. **API key**: when ``state.api_key`` is configured, the
+       handshake must carry it as either ``?api_key=<value>``,
+       ``Authorization: Bearer <value>``, or ``X-API-Key: <value>``.
+    2. **Origin**: when ``cors_origins`` / ``cors_allow_all`` is
+       configured, the ``Origin`` header must be in the allow-list
+       (or wildcard).
+
+    Returns ``(ok, reason)``. ``reason`` carries the reject message
+    that the close frame surfaces to the client.
+    """
+    import secrets as _secrets
+
+    from hfl.api.state import get_state
+    from hfl.config import config
+
+    state = get_state()
+
+    # Step 1: API key.
+    if state.api_key:
+        provided: str | None = ws.query_params.get("api_key")
+        if not provided:
+            auth = ws.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                provided = auth[7:]
+        if not provided:
+            provided = ws.headers.get("x-api-key")
+        expected = state.api_key.encode()
+        if not provided or not _secrets.compare_digest(provided.encode(), expected):
+            return False, "unauthorized"
+
+    # Step 2: Origin allow-list. Empty list + cors_allow_all=False
+    # means same-origin only — and a missing Origin header is treated
+    # as same-origin (the browser only sets it for cross-origin
+    # requests).
+    origin = ws.headers.get("origin")
+    if origin:
+        if config.cors_allow_all:
+            return True, None
+        if config.cors_origins and origin not in config.cors_origins:
+            return False, f"origin not allowed: {origin}"
+        if not config.cors_origins and not config.cors_allow_all:
+            # Strict same-origin: reject any Origin we cannot match.
+            return False, f"origin not allowed: {origin}"
+
+    return True, None
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """V4: bidirectional chat with cancellation.
@@ -192,6 +246,15 @@ async def ws_chat(ws: WebSocket) -> None:
     ``ping`` frame round-trips as ``pong`` so heartbeats can be
     layered without reconnecting.
     """
+    ok, reason = _check_ws_auth_and_origin(ws)
+    if not ok:
+        # Accept-then-close so the browser surfaces the reason
+        # rather than a generic handshake failure.
+        await ws.accept()
+        await _send(ws, {"type": "error", "message": reason or "rejected"})
+        await ws.close(code=1008)  # 1008 = "Policy Violation"
+        return
+
     await ws.accept()
 
     try:

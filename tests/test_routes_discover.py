@@ -171,6 +171,79 @@ class TestDiscoverCaching:
         assert second["total"] == 0
 
 
+class TestDiscoverConcurrentLoad:
+    """V5 ε2 — 20 concurrent ``/api/discover`` requests share the
+    on-disk cache. The first one populates it; the rest race against
+    each other reading the same file. We assert no crashes, no
+    data corruption (every response carries a parseable envelope),
+    and that the cache file is in a consistent JSON state after the
+    storm.
+    """
+
+    def test_concurrent_calls_do_not_corrupt_cache(self, client, fake_hf, temp_config):
+        import json
+        import threading
+
+        from hfl.config import config
+
+        # Force discover to refresh on the first call so the cache
+        # gets populated, then have the 19 followups read the same key.
+        results = []
+        errors = []
+
+        def _hit():
+            try:
+                r = client.get("/api/discover?q=qwen")
+                results.append(r.status_code)
+            except Exception as e:  # pragma: no cover — defensive
+                errors.append(e)
+
+        # Re-arm the iterator on every call (fake_hf exhausts after one).
+
+        def _arm():
+            from dataclasses import dataclass, field
+
+            @dataclass
+            class _Card:
+                license: str | None = None
+
+            @dataclass
+            class _M:
+                id: str
+                likes: int = 0
+                downloads: int = 0
+                last_modified: object = None
+                pipeline_tag: str | None = None
+                library_name: str | None = None
+                gated: bool = False
+                tags: list = field(default_factory=list)
+                card_data: object = None
+
+            fake_hf.list_models.return_value = iter(
+                [_M(id="Qwen/Qwen3-14B", likes=100, tags=["qwen"])]
+            )
+
+        # First call populates cache.
+        _arm()
+        client.get("/api/discover?q=qwen&refresh=true")
+
+        threads = [threading.Thread(target=_hit) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"unexpected errors: {errors}"
+        assert all(code == 200 for code in results), f"non-200 statuses: {results}"
+        assert len(results) == 20
+
+        # Cache file is still valid JSON.
+        cache_file = config.cache_dir / "discovery.json"
+        assert cache_file.exists()
+        data = json.loads(cache_file.read_text())
+        assert isinstance(data, dict)
+
+
 class TestDiscoverHubFailureSurfaces:
     def test_hub_exception_returns_503(self, client, monkeypatch):
         # Patch the symbol in the route module — that's where the

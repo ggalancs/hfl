@@ -57,12 +57,41 @@ class TestRunBenchmarkSync:
         assert summary.total_p50_ms >= 0
 
 
+class TestNoStreamHonestTtft:
+    """V5 β2 — engines without ``generate_stream`` must not silently
+    alias ``total_ms`` into the TTFT slot.
+    """
+
+    def test_no_stream_engine_reports_none_ttft(self):
+        """Engine without ``generate_stream`` → BenchmarkRun.ttft_ms
+        is None and measurement_mode is "no-stream"."""
+        engine = _engine()  # spec=["generate"] — no stream method
+        out = run_benchmark(
+            engine,
+            model_name="m",
+            runs_per_length=1,
+            max_tokens=4,
+            prompt_lengths=(16,),
+        )
+        assert all(r.ttft_ms is None for r in out.raw)
+        assert all(r.measurement_mode == "no-stream" for r in out.raw)
+        # And the summary surfaces this honestly.
+        assert out.summaries[0].ttft_p50_ms is None
+        assert out.summaries[0].ttft_p95_ms is None
+        assert out.summaries[0].measurement_mode == "no-stream"
+        # Total/tps still populated.
+        assert out.summaries[0].total_p50_ms > 0
+
+
 class TestSummariseEdgeCases:
     def test_empty_runs_returns_zero_summary(self):
         s = _summarise(16, [])
         assert isinstance(s, BenchmarkSummary)
         assert s.runs == 0
-        assert s.ttft_p50_ms == 0.0
+        # TTFT is honestly None when there are no measurements at
+        # all — we don't want a 0.0 sentinel that gets averaged in.
+        assert s.ttft_p50_ms is None
+        assert s.ttft_p95_ms is None
         assert s.tps_mean == 0.0
 
 

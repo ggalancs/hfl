@@ -1985,20 +1985,13 @@ def pull_smart_cmd(
             console.print(f"  - {skip}")
 
     # Delegate the actual byte transfer to the existing /api/pull
-    # machinery if we can reach the helper; otherwise just print
-    # the resolved plan and tell the operator to invoke ``hfl pull``.
-    try:
-        from hfl.api.routes_pull import _iter_pull_events  # type: ignore[attr-defined]
-    except ImportError:
-        console.print(
-            f"\n[yellow]Run[/] [cyan]hfl pull {plan.target_repo_id}[/] to complete the download."
-        )
-        return
+    # machinery via the public helper added in V5 β3.
+    from hfl.api.routes_pull import iter_pull_events
 
     console.print(f"\n[green]Now pulling[/] {plan.target_repo_id} via the existing pull command...")
 
     async def _pull() -> None:
-        async for line in _iter_pull_events(plan.target_repo_id):
+        async for line in iter_pull_events(plan.target_repo_id):
             console.print(line.rstrip())
 
     try:
@@ -2128,11 +2121,13 @@ def bench_cmd(
         table.add_column("tps min", justify="right")
         table.add_column("tps max", justify="right")
         for s in summaries:
+            ttft50 = s.get("ttft_p50_ms")
+            ttft95 = s.get("ttft_p95_ms")
             table.add_row(
                 str(s["prompt_length"]),
                 str(s["runs"]),
-                f"{s['ttft_p50_ms']:.1f}",
-                f"{s['ttft_p95_ms']:.1f}",
+                f"{ttft50:.1f}" if ttft50 is not None else "—",
+                f"{ttft95:.1f}" if ttft95 is not None else "—",
                 f"{s['tps_mean']:.2f}",
                 f"{s['tps_min']:.2f}",
                 f"{s['tps_max']:.2f}",

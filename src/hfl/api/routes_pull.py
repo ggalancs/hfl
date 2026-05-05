@@ -79,6 +79,20 @@ def _event(status: str, **extra: Any) -> str:
     return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
+async def iter_pull_events(model_name: str) -> AsyncIterator[str]:
+    """V5 β3 — public helper that drives the same NDJSON pull shape
+    as ``POST /api/pull``.
+
+    Used by :mod:`hfl.api.routes_smart_pull` to forward progress
+    events after the planning step. Exposed at module top-level so
+    consumers don't need ``try/except ImportError`` against an
+    underscore-prefixed name.
+    """
+    req = PullRequest(model=model_name, stream=True, insecure=False)
+    async for line in _run_pull_streaming(req):
+        yield line
+
+
 async def _run_pull_streaming(req: PullRequest) -> AsyncIterator[str]:
     """Async NDJSON stream mirroring Ollama's pull progress shape.
 
