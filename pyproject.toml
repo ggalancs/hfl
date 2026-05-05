@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     # Using ~= (compatible release) for stability: allows patch updates only
     "typer>=0.15.0,<1.0",
-    "rich~=13.0",
+    "rich>=13,<16",
     # HFL targets huggingface_hub 1.x (the httpx-based generation).
     # See ``test_dependency_pins.py`` for the static guard that keeps
     # this pin in sync with the rest of the HF ecosystem.
