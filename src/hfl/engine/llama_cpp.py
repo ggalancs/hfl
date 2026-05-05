@@ -774,8 +774,31 @@ class LlamaCppEngine(InferenceEngine):
         # python's flash-attn path has been historically crash-prone for
         # new arches. Force-disable for known-bad arches unless the
         # caller explicitly opted in.
+        #
+        # Resolution order:
+        #   1. Per-load ``flash_attn=`` kwarg (e.g. from a Modelfile).
+        #   2. Global server toggle ``HFL_FLASH_ATTENTION`` /
+        #      ``OLLAMA_FLASH_ATTENTION`` — accepts ``"1"``/``"0"``,
+        #      ``"true"``/``"false"`` (case-insensitive). When set to a
+        #      falsy value, flash-attn is forced off across the board.
+        #      When truthy, the per-architecture safety list still
+        #      applies — operators turning the global on don't get
+        #      crashes on known-bad arches for free.
+        #   3. Architecture-aware default (False for known-unsafe arches,
+        #      True otherwise).
+        global_flash_env = (
+            os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get("OLLAMA_FLASH_ATTENTION")
+        )
+        global_flash: bool | None
+        if global_flash_env is None or global_flash_env == "":
+            global_flash = None
+        else:
+            global_flash = global_flash_env.strip().lower() in ("1", "true", "yes", "on")
+
         if "flash_attn" in kwargs:
             flash_attn = kwargs["flash_attn"]
+        elif global_flash is False:
+            flash_attn = False
         elif architecture in _ARCHITECTURE_NO_FLASH_ATTN:
             logger.info(
                 "Disabling flash_attn for architecture %r "

@@ -284,6 +284,74 @@ class TestGemmaFlashAttnDisable:
         assert captured["flash_attn"] is True
 
 
+class TestFlashAttnGlobalEnvOverride:
+    """``HFL_FLASH_ATTENTION`` (and the Ollama alias) is a global
+    server-level kill switch for flash-attn that complements the
+    per-load kwarg and the per-architecture safety list."""
+
+    def test_global_off_disables_on_safe_arch(
+        self, monkeypatch, patched_gguf, dummy_gguf
+    ):
+        patched_gguf(arch="llama")  # Llama is otherwise on by default.
+        _stub_memory_snapshot(monkeypatch, available_gb=64.0)
+        monkeypatch.setenv("HFL_FLASH_ATTENTION", "0")
+
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+
+        engine = engine_module.LlamaCppEngine()
+        engine.load(dummy_gguf(), n_gpu_layers=0, verbose=True)
+
+        assert captured["flash_attn"] is False
+
+    def test_ollama_alias_is_honoured(self, monkeypatch, patched_gguf, dummy_gguf):
+        patched_gguf(arch="llama")
+        _stub_memory_snapshot(monkeypatch, available_gb=64.0)
+        monkeypatch.delenv("HFL_FLASH_ATTENTION", raising=False)
+        monkeypatch.setenv("OLLAMA_FLASH_ATTENTION", "false")
+
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+
+        engine = engine_module.LlamaCppEngine()
+        engine.load(dummy_gguf(), n_gpu_layers=0, verbose=True)
+
+        assert captured["flash_attn"] is False
+
+    def test_explicit_kwarg_wins_over_global(
+        self, monkeypatch, patched_gguf, dummy_gguf
+    ):
+        patched_gguf(arch="llama")
+        _stub_memory_snapshot(monkeypatch, available_gb=64.0)
+        monkeypatch.setenv("HFL_FLASH_ATTENTION", "0")
+
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+
+        engine = engine_module.LlamaCppEngine()
+        # Modelfile-level ``flash_attn=True`` must beat the global off.
+        engine.load(dummy_gguf(), n_gpu_layers=0, verbose=True, flash_attn=True)
+
+        assert captured["flash_attn"] is True
+
+    def test_global_on_still_respects_arch_safety_list(
+        self, monkeypatch, patched_gguf, dummy_gguf
+    ):
+        """Operators turning the global on must not bypass the arch
+        safety list — Gemma 4 stays off."""
+        patched_gguf(arch="gemma4")
+        _stub_memory_snapshot(monkeypatch, available_gb=64.0)
+        monkeypatch.setenv("HFL_FLASH_ATTENTION", "1")
+
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+
+        engine = engine_module.LlamaCppEngine()
+        engine.load(dummy_gguf(), n_gpu_layers=0, verbose=True)
+
+        assert captured["flash_attn"] is False
+
+
 # --- Memory preflight --------------------------------------------------------
 
 
