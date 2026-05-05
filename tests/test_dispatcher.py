@@ -453,3 +453,88 @@ class TestStreamingShape:
         stream_midpoint.set()
         await asyncio.gather(t_stream, t_other)
         assert other_done.is_set()
+
+
+# --- Cancellation / timeout leak regression ----------------------------------
+
+
+class TestWaitForCancelReleasesSlot:
+    """Regression: ``asyncio.wait_for`` cancelling an inner coroutine
+    inside ``dispatcher.run`` must still release the slot.
+
+    Scenario: ``run_dispatched`` wraps the engine call in
+    ``asyncio.wait_for(to_thread(...), timeout)``. When the timeout
+    fires, the coroutine is cancelled and converted into an
+    ``HTTPException(504)`` at the route boundary. This test checks that
+    the dispatcher still releases the slot in that path, so the next
+    request doesn't get a 500 because of a stale slot.
+    """
+
+    async def test_slot_released_when_wait_for_times_out(self):
+        d = InferenceDispatcher(max_inflight=1, max_queued=0)
+
+        async def _long():
+            # Intentionally longer than the wait_for timeout below.
+            await asyncio.sleep(5)
+
+        async def _inner():
+            await asyncio.wait_for(_long(), timeout=0.05)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await d.run(_inner)
+
+        assert d.in_flight == 0, "slot leaked after inner wait_for timeout"
+        assert d.depth == 0
+
+        async def _quick() -> int:
+            return 7
+
+        # Would block (or 500) if the slot were still held.
+        assert await d.run(_quick) == 7
+
+    async def test_slot_released_when_outer_caller_is_cancelled(self):
+        """A route task cancelled mid-flight (client disconnect, server
+        shutdown) must not leak a slot either."""
+        d = InferenceDispatcher(max_inflight=1, max_queued=0)
+        inside = asyncio.Event()
+
+        async def _running():
+            inside.set()
+            await asyncio.sleep(5)
+
+        task = asyncio.create_task(d.run(_running))
+        await inside.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Give the finally in dispatcher.slot() a chance to run.
+        await asyncio.sleep(0)
+        assert d.in_flight == 0
+        assert d.depth == 0
+
+        async def _quick() -> int:
+            return 99
+
+        assert await d.run(_quick) == 99
+
+    async def test_slot_released_when_to_thread_raises_async(self):
+        """Mimics ``run_dispatched``'s real layering: ``wait_for`` wraps
+        ``asyncio.to_thread(sync_fn)``, and the inner sync_fn raises.
+        The dispatcher must still unwind cleanly."""
+        d = InferenceDispatcher(max_inflight=1, max_queued=0)
+
+        def _sync_boom():
+            raise RuntimeError("engine crashed")
+
+        async def _inner():
+            await asyncio.wait_for(
+                asyncio.to_thread(_sync_boom),
+                timeout=1.0,
+            )
+
+        with pytest.raises(RuntimeError, match="engine crashed"):
+            await d.run(_inner)
+
+        assert d.in_flight == 0
+        assert d.depth == 0
