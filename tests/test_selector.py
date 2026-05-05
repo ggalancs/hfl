@@ -367,9 +367,7 @@ class TestForcedBackendEnv:
 
     @patch("hfl.engine.selector._create_engine")
     @patch("hfl.engine.selector.detect_format")
-    def test_hfl_llm_library_forces_backend(
-        self, mock_detect, mock_create, monkeypatch
-    ):
+    def test_hfl_llm_library_forces_backend(self, mock_detect, mock_create, monkeypatch):
         from hfl.converter.formats import ModelFormat
 
         monkeypatch.setenv("HFL_LLM_LIBRARY", "vllm")
@@ -400,9 +398,7 @@ class TestForcedBackendEnv:
 
     @patch("hfl.engine.selector._create_engine")
     @patch("hfl.engine.selector.detect_format")
-    def test_explicit_backend_arg_wins_over_env(
-        self, mock_detect, mock_create, monkeypatch
-    ):
+    def test_explicit_backend_arg_wins_over_env(self, mock_detect, mock_create, monkeypatch):
         """A caller passing an explicit ``backend=`` (Modelfile,
         --backend flag) must beat the env override."""
         from hfl.converter.formats import ModelFormat
@@ -419,9 +415,7 @@ class TestForcedBackendEnv:
 
     @patch("hfl.engine.selector._create_engine")
     @patch("hfl.engine.selector.detect_format")
-    def test_unknown_value_is_ignored_silently(
-        self, mock_detect, mock_create, monkeypatch
-    ):
+    def test_unknown_value_is_ignored_silently(self, mock_detect, mock_create, monkeypatch):
         """A typo must not crash the server. Auto path takes over."""
         from hfl.converter.formats import ModelFormat
 
