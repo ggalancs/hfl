@@ -43,12 +43,15 @@ from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_batch import router as batch_router
 from hfl.api.routes_benchmark import router as benchmark_router
 from hfl.api.routes_blobs import router as blobs_router
+from hfl.api.routes_compliance import router as compliance_router
 from hfl.api.routes_copy import router as copy_router
 from hfl.api.routes_create import router as create_router
 from hfl.api.routes_discover import router as discover_router
+from hfl.api.routes_draft import router as draft_router
 from hfl.api.routes_embed import router as embed_router
 from hfl.api.routes_health import router as health_router
 from hfl.api.routes_images import router as images_router
+from hfl.api.routes_lora import router as lora_router
 from hfl.api.routes_metrics import router as metrics_router
 from hfl.api.routes_native import router as native_router
 from hfl.api.routes_openai import router as openai_router
@@ -59,11 +62,13 @@ from hfl.api.routes_push import router as push_router
 from hfl.api.routes_recommend import router as recommend_router
 from hfl.api.routes_show import router as show_router
 from hfl.api.routes_smart_pull import router as smart_pull_router
+from hfl.api.routes_snapshot import router as snapshot_router
 from hfl.api.routes_stop import router as stop_router
 from hfl.api.routes_transcribe import router as transcribe_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.routes_verify import router as verify_router
 from hfl.api.routes_web import router as web_router
+from hfl.api.routes_ws import router as ws_router
 from hfl.api.state import get_state
 from hfl.config import config
 
@@ -258,6 +263,11 @@ app.include_router(recommend_router)
 app.include_router(smart_pull_router)
 app.include_router(verify_router)
 app.include_router(benchmark_router)
+app.include_router(compliance_router)
+app.include_router(ws_router)
+app.include_router(snapshot_router)
+app.include_router(lora_router)
+app.include_router(draft_router)
 app.include_router(show_router)
 app.include_router(stop_router)
 app.include_router(transcribe_router)
