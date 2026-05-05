@@ -38,6 +38,40 @@ def reset_logging_state():
     hfl_logger.propagate = original_propagate
 
 
+class TestDebugEnvOverride:
+    """``HFL_DEBUG`` / ``OLLAMA_DEBUG`` flip the hfl logger to DEBUG
+    without code changes."""
+
+    def test_hfl_debug_truthy_forces_debug(self, monkeypatch):
+        monkeypatch.setenv("HFL_DEBUG", "1")
+        configure_logging(level="INFO")
+        assert logging.getLogger("hfl").level == logging.DEBUG
+
+    def test_hfl_debug_alias_values(self, monkeypatch):
+        for value in ("true", "TRUE", "yes", "on"):
+            monkeypatch.setenv("HFL_DEBUG", value)
+            configure_logging(level="WARNING")
+            assert logging.getLogger("hfl").level == logging.DEBUG
+
+    def test_ollama_debug_alias(self, monkeypatch):
+        monkeypatch.delenv("HFL_DEBUG", raising=False)
+        monkeypatch.setenv("OLLAMA_DEBUG", "1")
+        configure_logging(level="ERROR")
+        assert logging.getLogger("hfl").level == logging.DEBUG
+
+    def test_unset_keeps_explicit_level(self, monkeypatch):
+        monkeypatch.delenv("HFL_DEBUG", raising=False)
+        monkeypatch.delenv("OLLAMA_DEBUG", raising=False)
+        configure_logging(level="WARNING")
+        assert logging.getLogger("hfl").level == logging.WARNING
+
+    def test_falsy_values_do_not_force_debug(self, monkeypatch):
+        for value in ("0", "false", "no", "off", ""):
+            monkeypatch.setenv("HFL_DEBUG", value)
+            configure_logging(level="INFO")
+            assert logging.getLogger("hfl").level == logging.INFO
+
+
 class TestRequestIdTracing:
     """Tests for request ID context variable."""
 

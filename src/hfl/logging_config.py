@@ -118,6 +118,19 @@ class PrettyFormatter(logging.Formatter):
         return formatted
 
 
+def _resolve_debug_env() -> bool:
+    """Read ``HFL_DEBUG`` / ``OLLAMA_DEBUG`` as a boolean.
+
+    Either being truthy (``1``/``true``/``yes``/``on``,
+    case-insensitive) flips the server logger to DEBUG. Empty / unset
+    yields ``False`` so the explicit ``level=`` argument wins.
+    """
+    import os as _os
+
+    raw = _os.environ.get("HFL_DEBUG") or _os.environ.get("OLLAMA_DEBUG") or ""
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def configure_logging(
     level: str = "INFO",
     json_format: bool = False,
@@ -126,10 +139,18 @@ def configure_logging(
     """Configure logging for the application.
 
     Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+            Overridden to ``"DEBUG"`` when ``HFL_DEBUG`` (or its
+            Ollama-equivalent ``OLLAMA_DEBUG``) is truthy.
         json_format: Use JSON structured logging (for production)
         log_file: Optional file path for file logging
     """
+    # Env override: HFL_DEBUG / OLLAMA_DEBUG = 1 forces DEBUG, beating
+    # any default ``level=`` the caller passed. An explicit
+    # ``level="DEBUG"`` is a no-op (same outcome).
+    if _resolve_debug_env():
+        level = "DEBUG"
+
     # Get root logger for hfl
     logger = logging.getLogger("hfl")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
