@@ -131,6 +131,60 @@ class TestEnvConfig:
             assert cfg.queue_max_size == 100
             assert cfg.queue_acquire_timeout_seconds == 30.0
 
+    def test_num_parallel_alias_picks_up_hfl_var(self):
+        """``HFL_NUM_PARALLEL`` is the Ollama-equivalent name and must
+        feed ``queue_max_inflight`` when the explicit
+        ``HFL_QUEUE_MAX_INFLIGHT`` is absent."""
+        with patch.dict(
+            os.environ,
+            {"HFL_NUM_PARALLEL": "8"},
+            clear=False,
+        ):
+            os.environ.pop("HFL_QUEUE_MAX_INFLIGHT", None)
+            os.environ.pop("OLLAMA_NUM_PARALLEL", None)
+            cfg = HFLConfig()
+            assert cfg.queue_max_inflight == 8
+
+    def test_num_parallel_alias_picks_up_ollama_var(self):
+        """Drop-in replacement: an environment that already has
+        ``OLLAMA_NUM_PARALLEL`` set should keep working."""
+        with patch.dict(
+            os.environ,
+            {"OLLAMA_NUM_PARALLEL": "5"},
+            clear=False,
+        ):
+            os.environ.pop("HFL_QUEUE_MAX_INFLIGHT", None)
+            os.environ.pop("HFL_NUM_PARALLEL", None)
+            cfg = HFLConfig()
+            assert cfg.queue_max_inflight == 5
+
+    def test_num_parallel_explicit_wins_over_aliases(self):
+        """The explicit ``HFL_QUEUE_MAX_INFLIGHT`` must take precedence
+        over both alias names — operators reaching for the documented
+        variable should always win."""
+        with patch.dict(
+            os.environ,
+            {
+                "HFL_QUEUE_MAX_INFLIGHT": "2",
+                "HFL_NUM_PARALLEL": "10",
+                "OLLAMA_NUM_PARALLEL": "20",
+            },
+            clear=False,
+        ):
+            cfg = HFLConfig()
+            assert cfg.queue_max_inflight == 2
+
+    def test_max_queue_alias_picks_up_ollama_var(self):
+        with patch.dict(
+            os.environ,
+            {"OLLAMA_MAX_QUEUE": "32"},
+            clear=False,
+        ):
+            os.environ.pop("HFL_QUEUE_MAX_SIZE", None)
+            os.environ.pop("HFL_MAX_QUEUE", None)
+            cfg = HFLConfig()
+            assert cfg.queue_max_size == 32
+
 
 class TestSLOValidation:
     def test_valid_defaults(self):

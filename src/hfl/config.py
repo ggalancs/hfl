@@ -189,11 +189,31 @@ class HFLConfig:
     queue_enabled: bool = field(
         default_factory=lambda: os.environ.get("HFL_QUEUE_ENABLED", "true").lower() == "true"
     )
+    # Resolution order for the in-flight slot count, in priority:
+    #   1. ``HFL_QUEUE_MAX_INFLIGHT`` (explicit, the original key)
+    #   2. ``HFL_NUM_PARALLEL`` (Ollama-equivalent name; what most
+    #      operators reach for first, since Ollama exposes the same
+    #      knob as ``OLLAMA_NUM_PARALLEL``)
+    #   3. ``OLLAMA_NUM_PARALLEL`` (drop-in replacement of an Ollama
+    #      install whose env vars are already set)
+    #   4. Default ``1`` — preserves V1 behaviour (single-flight).
     queue_max_inflight: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_INFLIGHT", "1"))
+        default_factory=lambda: int(
+            os.environ.get("HFL_QUEUE_MAX_INFLIGHT")
+            or os.environ.get("HFL_NUM_PARALLEL")
+            or os.environ.get("OLLAMA_NUM_PARALLEL")
+            or "1"
+        )
     )
+    # Max queue depth, with the same Ollama-fallback chain as the
+    # in-flight cap.
     queue_max_size: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_QUEUE_MAX_SIZE", "16"))
+        default_factory=lambda: int(
+            os.environ.get("HFL_QUEUE_MAX_SIZE")
+            or os.environ.get("HFL_MAX_QUEUE")
+            or os.environ.get("OLLAMA_MAX_QUEUE")
+            or "16"
+        )
     )
     queue_acquire_timeout_seconds: float = field(
         default_factory=lambda: float(os.environ.get("HFL_QUEUE_ACQUIRE_TIMEOUT", "60"))

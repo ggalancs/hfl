@@ -197,6 +197,37 @@ class Metrics:
             lines.append("# TYPE hfl_model_loads_total counter")
             lines.append(f"hfl_model_loads_total {self.model_loads}")
 
+            # Inference dispatcher concurrency. Pulled from the shared
+            # dispatcher snapshot so /metrics reflects the same state
+            # /healthz uses. Read-only — exporting these every scrape
+            # is cheap because ``DispatcherSnapshot`` is just six ints.
+            try:
+                from hfl.core import get_dispatcher
+
+                snap = get_dispatcher().snapshot()
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_concurrency_max "
+                    "Configured max in-flight inference requests"
+                )
+                lines.append("# TYPE hfl_inference_concurrency_max gauge")
+                lines.append(f"hfl_inference_concurrency_max {snap.max_inflight}")
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_concurrency_inflight "
+                    "Inference requests currently executing"
+                )
+                lines.append("# TYPE hfl_inference_concurrency_inflight gauge")
+                lines.append(f"hfl_inference_concurrency_inflight {snap.in_flight}")
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_queue_depth Inference requests waiting for a slot"
+                )
+                lines.append("# TYPE hfl_inference_queue_depth gauge")
+                lines.append(f"hfl_inference_queue_depth {snap.depth}")
+            except Exception:  # pragma: no cover — config not loaded in some tests
+                pass
+
             # Per-endpoint requests
             if self.requests_by_endpoint:
                 lines.append("")
