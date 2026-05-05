@@ -129,12 +129,10 @@ class TestDockerWorkflow:
 
     def test_each_arch_job_only_builds_its_own_platform(self):
         amd64_build = next(
-            s for s in self.cfg["jobs"]["build-amd64"]["steps"]
-            if s.get("id") == "build"
+            s for s in self.cfg["jobs"]["build-amd64"]["steps"] if s.get("id") == "build"
         )
         arm64_build = next(
-            s for s in self.cfg["jobs"]["build-arm64"]["steps"]
-            if s.get("id") == "build"
+            s for s in self.cfg["jobs"]["build-arm64"]["steps"] if s.get("id") == "build"
         )
         assert amd64_build["with"]["platforms"] == "linux/amd64"
         assert arm64_build["with"]["platforms"] == "linux/arm64"

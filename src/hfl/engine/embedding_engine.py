@@ -216,7 +216,7 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
             if isinstance(raw, list) and raw and isinstance(raw[0], list):
                 vec = raw[0]
             else:
-                vec = list(raw)  # type: ignore[arg-type]
+                vec = list(raw)
 
             if dimensions is not None and len(vec) > dimensions:
                 vec = vec[:dimensions]
