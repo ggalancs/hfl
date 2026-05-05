@@ -137,6 +137,10 @@ class ModelfileDocument:
     # that overrides auto-detection.
     env: dict[str, str] = field(default_factory=dict)
     capabilities: list[str] = field(default_factory=list)
+    # V4 F5 — speculative decoding draft model. Path or repo id of a
+    # smaller sibling model used as the draft predictor. Empty string
+    # disables speculation (the default).
+    draft: str | None = None
 
     def to_manifest_fields(self) -> dict[str, Any]:
         """Flatten the document into kwargs for ``ModelManifest``.
@@ -177,6 +181,10 @@ class ModelfileDocument:
             # Preserved on the manifest under an explicit list so
             # downstream consumers can skip auto-detection.
             result["declared_capabilities"] = list(self.capabilities)
+        if self.draft is not None:
+            # V4 F5 — surfaced on the manifest as ``draft_model_path``
+            # so the engine layer can wire it without re-parsing.
+            result["draft_model_path"] = self.draft
         return result
 
 
@@ -628,6 +636,17 @@ def parse_modelfile(text: str, base_path: str | Path | None = None) -> Modelfile
 
         if instruction == "ADAPTER":
             doc.adapters.append(rest.strip())
+            i += 1
+            continue
+
+        if instruction == "DRAFT":
+            # V4 F5 — speculative decoding sibling model. ``DRAFT`` is
+            # idempotent: repeated declarations overwrite (last wins),
+            # since llama-cpp-python only supports a single draft.
+            value = rest.strip()
+            if value.startswith('"') and value.endswith('"') and len(value) >= 2:
+                value = _decode_quoted(value[1:-1])
+            doc.draft = value or None
             i += 1
             continue
 
