@@ -7,6 +7,42 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _parse_ollama_host_env() -> tuple[str | None, int | None]:
+    """Parse the Ollama-compatible ``OLLAMA_HOST`` value.
+
+    Ollama documents three accepted shapes for the variable:
+
+    - ``"0.0.0.0"`` — host only (port stays at the default)
+    - ``"0.0.0.0:11434"`` — explicit ``host:port``
+    - ``":11434"`` — port only (host stays at the default)
+
+    HFL respects all three so a drop-in replacement of an Ollama
+    install works without re-reading the docs. Returns
+    ``(host_or_None, port_or_None)``: the corresponding HFL setting
+    overrides only the components actually present in the env value.
+    A value that doesn't parse cleanly (``"abc:xyz"``) yields
+    ``(None, None)`` and the caller falls back to defaults.
+    """
+    raw = os.environ.get("OLLAMA_HOST")
+    if not raw:
+        return None, None
+    raw = raw.strip()
+    if not raw:
+        return None, None
+
+    if ":" in raw:
+        host_part, _, port_part = raw.rpartition(":")
+        host = host_part or None
+        try:
+            port: int | None = int(port_part) if port_part else None
+        except ValueError:
+            return None, None
+        return host, port
+
+    # No colon — treat as host (the most common Ollama usage).
+    return raw, None
+
+
 def _parse_cors_origins_env() -> list[str] | None:
     """Read ``HFL_ORIGINS`` / ``OLLAMA_ORIGINS`` into a clean list.
 
@@ -119,9 +155,29 @@ class HFLConfig:
         """Directory where llama.cpp is cloned/compiled for conversion."""
         return self.home_dir / "tools" / "llama.cpp"
 
-    # Server (configurable via HFL_HOST / HFL_PORT env vars)
-    host: str = field(default_factory=lambda: os.environ.get("HFL_HOST", "127.0.0.1"))
-    port: int = field(default_factory=lambda: int(os.environ.get("HFL_PORT", "11434")))
+    # Server bind address. Resolution order:
+    #   1. ``HFL_HOST`` (explicit)
+    #   2. host part of ``OLLAMA_HOST`` ("0.0.0.0" or "0.0.0.0:11434"
+    #      or ":11434" — the host slot may be empty)
+    #   3. Default ``"127.0.0.1"``
+    host: str = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_HOST") or _parse_ollama_host_env()[0] or "127.0.0.1"
+        )
+    )
+    # Server port. Resolution order:
+    #   1. ``HFL_PORT`` (explicit)
+    #   2. port part of ``OLLAMA_HOST``
+    #   3. ``OLLAMA_PORT`` (some Ollama deployments split host/port)
+    #   4. Default ``11434``
+    port: int = field(
+        default_factory=lambda: int(
+            os.environ.get("HFL_PORT")
+            or (str(_parse_ollama_host_env()[1]) if _parse_ollama_host_env()[1] else "")
+            or os.environ.get("OLLAMA_PORT")
+            or "11434"
+        )
+    )
 
     # Security - CORS
     # By default, CORS is restrictive (same-origin only).

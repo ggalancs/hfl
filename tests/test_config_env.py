@@ -233,6 +233,65 @@ class TestCorsOriginsEnv:
             assert cfg.cors_origins == ["http://localhost:5173"]
 
 
+class TestOllamaHostAliasOnServer:
+    """``OLLAMA_HOST`` is the canonical variable Ollama operators
+    already have set. HFL must accept its three documented shapes so a
+    drop-in replacement works without changing the env."""
+
+    def _clean(self):
+        for var in ("HFL_HOST", "HFL_PORT", "OLLAMA_HOST", "OLLAMA_PORT"):
+            os.environ.pop(var, None)
+
+    def test_explicit_hfl_wins(self):
+        with patch.dict(
+            os.environ,
+            {"HFL_HOST": "10.0.0.1", "HFL_PORT": "9000", "OLLAMA_HOST": "0.0.0.0:1234"},
+            clear=False,
+        ):
+            cfg = HFLConfig()
+            assert cfg.host == "10.0.0.1"
+            assert cfg.port == 9000
+
+    def test_ollama_host_only(self):
+        with patch.dict(os.environ, {"OLLAMA_HOST": "0.0.0.0"}, clear=False):
+            self._clean()
+            os.environ["OLLAMA_HOST"] = "0.0.0.0"
+            cfg = HFLConfig()
+            assert cfg.host == "0.0.0.0"
+            assert cfg.port == 11434
+
+    def test_ollama_host_with_port(self):
+        with patch.dict(os.environ, {"OLLAMA_HOST": "0.0.0.0:11500"}, clear=False):
+            self._clean()
+            os.environ["OLLAMA_HOST"] = "0.0.0.0:11500"
+            cfg = HFLConfig()
+            assert cfg.host == "0.0.0.0"
+            assert cfg.port == 11500
+
+    def test_ollama_host_port_only(self):
+        with patch.dict(os.environ, {"OLLAMA_HOST": ":11500"}, clear=False):
+            self._clean()
+            os.environ["OLLAMA_HOST"] = ":11500"
+            cfg = HFLConfig()
+            assert cfg.host == "127.0.0.1"
+            assert cfg.port == 11500
+
+    def test_ollama_port_split_var(self):
+        with patch.dict(os.environ, {"OLLAMA_PORT": "11600"}, clear=False):
+            self._clean()
+            os.environ["OLLAMA_PORT"] = "11600"
+            cfg = HFLConfig()
+            assert cfg.port == 11600
+
+    def test_invalid_ollama_host_falls_back_to_defaults(self):
+        with patch.dict(os.environ, {"OLLAMA_HOST": "abc:xyz"}, clear=False):
+            self._clean()
+            os.environ["OLLAMA_HOST"] = "abc:xyz"
+            cfg = HFLConfig()
+            assert cfg.host == "127.0.0.1"
+            assert cfg.port == 11434
+
+
 class TestSLOValidation:
     def test_valid_defaults(self):
         """Default SLO config is valid."""
