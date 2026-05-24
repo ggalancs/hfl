@@ -104,4 +104,4 @@ def ensure_auth(repo_id: str) -> str | None:
             f"Cannot access {repo_id}. "
             f"Verify that you have accepted the license at huggingface.co/{repo_id} "
             f"and that your token has read permissions.\nError ({error_type}): {safe_msg}"
-        )
+        ) from e

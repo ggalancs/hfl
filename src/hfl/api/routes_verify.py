@@ -49,7 +49,7 @@ async def api_verify(model: str) -> dict[str, Any]:
     try:
         engine, manifest = await load_llm(model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")

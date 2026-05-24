@@ -70,7 +70,7 @@ async def head_blob(digest: str) -> Response:
     try:
         parse_digest(digest)
     except InvalidBlobDigestError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not blob_exists(digest):
         return Response(status_code=404)
     return Response(status_code=200)
@@ -89,12 +89,12 @@ async def post_blob(digest: str, request: Request) -> Response:
     try:
         bytes_written = await write_blob_stream(digest, _request_chunks(request))
     except InvalidBlobDigestError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DigestMismatchError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         logger.exception("blob upload failed")
-        raise HTTPException(status_code=500, detail="blob upload failed")
+        raise HTTPException(status_code=500, detail="blob upload failed") from None
 
     return Response(
         status_code=201,

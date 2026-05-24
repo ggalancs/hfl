@@ -54,16 +54,16 @@ async def api_snapshot_save(req: SnapshotRequest) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
         meta = save_snapshot(engine, name=req.name, model_name=req.model)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return asdict(meta)
 
@@ -83,18 +83,18 @@ async def api_snapshot_load(req: SnapshotRequest) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
         meta = load_snapshot(engine, name=req.name, model_name=req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return asdict(meta)
 
@@ -118,7 +118,7 @@ async def api_snapshot_delete(name: str) -> dict[str, Any]:
     try:
         deleted = delete_snapshot(name)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail=f"snapshot {name!r} not found")
     return {"deleted": True, "name": name}

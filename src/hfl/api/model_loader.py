@@ -57,7 +57,7 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
     try:
         validate_model_name(model_name)
     except ValidationError as e:
-        raise APIValidationError(str(e))
+        raise APIValidationError(str(e)) from e
 
     state = get_state()
 
@@ -115,7 +115,7 @@ async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
     try:
         validate_model_name(model_name)
     except ValidationError as e:
-        raise APIValidationError(str(e))
+        raise APIValidationError(str(e)) from e
 
     state = get_state()
 

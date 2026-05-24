@@ -279,7 +279,9 @@ def sanitize_path(base_dir: Path, user_path: str) -> Path:
     try:
         target.relative_to(base_dir)
     except ValueError:
-        raise PathTraversalError(f"Path '{user_path}' would escape base directory '{base_dir}'")
+        raise PathTraversalError(
+            f"Path '{user_path}' would escape base directory '{base_dir}'"
+        ) from None
 
     return target
 

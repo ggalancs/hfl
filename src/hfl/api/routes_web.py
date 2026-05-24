@@ -72,10 +72,10 @@ async def api_web_search(req: WebSearchRequest) -> dict:
     try:
         return await search(req.query, req.max_results)
     except WebSearchError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         logger.exception("web_search crashed")
-        raise HTTPException(status_code=500, detail="internal web_search error")
+        raise HTTPException(status_code=500, detail="internal web_search error") from None
 
 
 @router.post("/api/web_fetch")
@@ -88,10 +88,10 @@ async def api_web_fetch(req: WebFetchRequest) -> dict:
     try:
         return await fetch(req.url)
     except WebFetchError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         logger.exception("web_fetch crashed")
-        raise HTTPException(status_code=500, detail="internal web_fetch error")
+        raise HTTPException(status_code=500, detail="internal web_fetch error") from None
 
 
 __all__ = ["router", "WebSearchRequest", "WebFetchRequest"]

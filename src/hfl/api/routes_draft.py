@@ -56,7 +56,7 @@ async def api_draft_recommend(
         pick = pick_draft_for(model, max_ratio=max_ratio)
     except Exception as exc:  # pragma: no cover — Hub failure is upstream
         logger.exception("draft recommender failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}")
+        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
 
     return {
         "target": model,

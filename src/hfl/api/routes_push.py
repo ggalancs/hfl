@@ -142,7 +142,7 @@ async def api_push(req: PushRequest) -> StreamingResponse | JSONResponse:
             revision=req.revision,
         )
     except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     api = _build_api()
     events = stream_push(plan, api=api, private=req.private, token=token)

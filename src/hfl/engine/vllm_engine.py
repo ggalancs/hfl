@@ -218,7 +218,7 @@ class VLLMEngine(InferenceEngine):
             try:
                 item = token_queue.get(timeout=_hfl_config.stream_queue_put_timeout)
             except Empty:
-                raise TimeoutError("vLLM streaming timed out")
+                raise TimeoutError("vLLM streaming timed out") from None
             if item is None:
                 break
             if isinstance(item, Exception):

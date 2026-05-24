@@ -209,7 +209,7 @@ async def _load_embedding_model(model_name: str) -> Any:
     try:
         validate_model_name(model_name)
     except ValidationError as e:
-        raise APIValidationError(str(e))
+        raise APIValidationError(str(e)) from e
 
     state = get_state()
 

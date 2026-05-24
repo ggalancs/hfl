@@ -177,7 +177,7 @@ class AsyncEngineWrapper:
                     )
                 except asyncio.TimeoutError:
                     producer_task.cancel()
-                    raise TimeoutError("Token stream timed out")
+                    raise TimeoutError("Token stream timed out") from None
                 if item is None:
                     break
                 if isinstance(item, Exception):
@@ -253,7 +253,7 @@ class AsyncEngineWrapper:
                     )
                 except asyncio.TimeoutError:
                     producer_task.cancel()
-                    raise TimeoutError("Token stream timed out")
+                    raise TimeoutError("Token stream timed out") from None
                 if item is None:
                     break
                 if isinstance(item, Exception):

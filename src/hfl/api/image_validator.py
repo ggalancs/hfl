@@ -190,7 +190,7 @@ def _parse_dimensions(data: bytes, mime: str) -> tuple[int, int]:
         if mime == "image/gif":
             return _parse_gif_dimensions(data)
     except (IndexError, struct.error) as exc:
-        raise APIValidationError(f"Malformed {mime}: {exc}")
+        raise APIValidationError(f"Malformed {mime}: {exc}") from exc
     return 0, 0
 
 
@@ -212,7 +212,7 @@ def decode_base64_image(raw: str) -> bytes:
         try:
             header, payload = payload.split(",", 1)
         except ValueError:
-            raise APIValidationError("Malformed data URI: missing comma separator")
+            raise APIValidationError("Malformed data URI: missing comma separator") from None
         header_lower = header.lower()
         if not header_lower.startswith("data:image/"):
             raise APIValidationError(f"Data URI MIME must be image/*; got {header!r}")
@@ -222,7 +222,7 @@ def decode_base64_image(raw: str) -> bytes:
         # ``validate=True`` rejects whitespace + non-base64 chars.
         decoded = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise APIValidationError(f"Invalid base64 payload: {exc}")
+        raise APIValidationError(f"Invalid base64 payload: {exc}") from exc
     return decoded
 
 

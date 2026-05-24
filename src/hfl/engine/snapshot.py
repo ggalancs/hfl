@@ -148,7 +148,7 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     try:
         state = save_fn()
     except Exception as exc:
-        raise RuntimeError(f"engine.save_state() failed: {exc}")
+        raise RuntimeError(f"engine.save_state() failed: {exc}") from exc
 
     state_path = _state_path(name)
     with state_path.open("wb") as f:
@@ -214,7 +214,7 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     try:
         load_fn(state)
     except Exception as exc:
-        raise RuntimeError(f"engine.load_state() failed: {exc}")
+        raise RuntimeError(f"engine.load_state() failed: {exc}") from exc
 
     return SnapshotMeta(**meta_data)
 
