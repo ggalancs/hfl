@@ -131,9 +131,7 @@ class ChatCompletionMessage(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def _bound_content(
-        cls, v: str | list[ContentPart] | None
-    ) -> str | list[ContentPart] | None:
+    def _bound_content(cls, v: str | list[ContentPart] | None) -> str | list[ContentPart] | None:
         """Enforce size caps on both the string and list shapes."""
         if v is None:
             return v

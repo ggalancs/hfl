@@ -225,9 +225,7 @@ class TestOpenAIToolCalling:
             delta = c["choices"][0]["delta"]
             assert "tool_call" not in (delta.get("content") or "")
 
-        tool_deltas = [
-            c for c in chunks if c["choices"][0]["delta"].get("tool_calls")
-        ]
+        tool_deltas = [c for c in chunks if c["choices"][0]["delta"].get("tool_calls")]
         assert tool_deltas, "expected a tool_calls delta in the stream"
         tc = tool_deltas[0]["choices"][0]["delta"]["tool_calls"][0]
         assert tc["function"]["name"] == "write_wiki"
