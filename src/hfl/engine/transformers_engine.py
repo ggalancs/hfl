@@ -45,11 +45,17 @@ class TransformersEngine(InferenceEngine):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
+        from hfl.security import remote_code_allowed
+
         quant = kwargs.get("quantization")
+        # trust_remote_code executes Python shipped in the model repo. Honour
+        # the request only when the operator opted in via HFL_ALLOW_REMOTE_CODE,
+        # so an untrusted caller can never turn model loading into RCE.
         load_kwargs = {
             "device_map": kwargs.get("device_map", "auto"),
             "torch_dtype": kwargs.get("torch_dtype", "auto"),
-            "trust_remote_code": kwargs.get("trust_remote_code", False),
+            "trust_remote_code": bool(kwargs.get("trust_remote_code", False))
+            and remote_code_allowed(),
         }
 
         if quant == "4bit":

@@ -133,14 +133,35 @@ class TestTransformersEngine:
             call_kwargs = mock_transformers.AutoModelForCausalLM.from_pretrained.call_args[1]
             assert call_kwargs["device_map"] == "cpu"
 
-    def test_load_model_with_trust_remote_code(self, mock_torch, mock_transformers):
-        """Test loading with trust_remote_code."""
+    def test_trust_remote_code_gated_off_by_default(
+        self, mock_torch, mock_transformers, monkeypatch
+    ):
+        """trust_remote_code=True from a caller is forced off without operator opt-in.
+
+        Executing model-repo Python is RCE; the request must not be able to
+        enable it, only the operator via HFL_ALLOW_REMOTE_CODE.
+        """
+        monkeypatch.delenv("HFL_ALLOW_REMOTE_CODE", raising=False)
         with patch.dict(
             sys.modules,
-            {
-                "torch": mock_torch,
-                "transformers": mock_transformers,
-            },
+            {"torch": mock_torch, "transformers": mock_transformers},
+        ):
+            from hfl.engine.transformers_engine import TransformersEngine
+
+            engine = TransformersEngine()
+            engine.load("/path/to/model", trust_remote_code=True)
+
+            call_kwargs = mock_transformers.AutoModelForCausalLM.from_pretrained.call_args[1]
+            assert call_kwargs["trust_remote_code"] is False
+
+    def test_trust_remote_code_honoured_with_operator_optin(
+        self, mock_torch, mock_transformers, monkeypatch
+    ):
+        """With HFL_ALLOW_REMOTE_CODE set, the operator's opt-in is honoured."""
+        monkeypatch.setenv("HFL_ALLOW_REMOTE_CODE", "1")
+        with patch.dict(
+            sys.modules,
+            {"torch": mock_torch, "transformers": mock_transformers},
         ):
             from hfl.engine.transformers_engine import TransformersEngine
 

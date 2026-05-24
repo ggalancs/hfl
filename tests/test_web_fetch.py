@@ -193,3 +193,68 @@ class TestErrorPropagation:
 
         doc = await wf.fetch("https://example.com/")
         assert doc["content"] == "Not found."
+
+
+def _host_aware_getaddrinfo(host, port, *args, **kwargs):
+    """IP literals resolve to themselves; named hosts resolve public.
+
+    Lets a redirect to a literal metadata/loopback IP be classified
+    correctly while named hosts stay public.
+    """
+    try:
+        socket.inet_aton(host)
+        ip = host
+    except OSError:
+        ip = "93.184.216.34"
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+
+class TestRedirectRevalidation:
+    """Redirects must be re-validated per hop (no SSRF via 302)."""
+
+    def _install(self, monkeypatch, handler):
+        monkeypatch.setattr(wf.socket, "getaddrinfo", _host_aware_getaddrinfo)
+        transport = httpx.MockTransport(handler)
+        original = httpx.AsyncClient
+
+        def _factory(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(wf.httpx, "AsyncClient", _factory)
+
+    async def test_redirect_to_metadata_rejected(self, monkeypatch):
+        def handler(req):
+            return httpx.Response(
+                302, headers={"location": "http://169.254.169.254/latest/meta-data"}
+            )
+
+        self._install(monkeypatch, handler)
+        with pytest.raises(wf.WebFetchError, match="private or reserved"):
+            await wf.fetch("https://example.com/start")
+
+    async def test_redirect_to_loopback_rejected(self, monkeypatch):
+        def handler(req):
+            return httpx.Response(301, headers={"location": "http://127.0.0.1:8000/admin"})
+
+        self._install(monkeypatch, handler)
+        with pytest.raises(wf.WebFetchError, match="private or reserved"):
+            await wf.fetch("https://example.com/start")
+
+    async def test_legit_public_redirect_is_followed(self, monkeypatch):
+        def handler(req):
+            if req.url.path == "/start":
+                return httpx.Response(302, headers={"location": "https://example.com/final"})
+            return httpx.Response(200, text=SAMPLE_HTML)
+
+        self._install(monkeypatch, handler)
+        doc = await wf.fetch("https://example.com/start")
+        assert doc["title"] == "Example Page"
+
+    async def test_redirect_loop_rejected(self, monkeypatch):
+        def handler(req):
+            return httpx.Response(302, headers={"location": "https://example.com/again"})
+
+        self._install(monkeypatch, handler)
+        with pytest.raises(wf.WebFetchError, match="too many redirects"):
+            await wf.fetch("https://example.com/start")

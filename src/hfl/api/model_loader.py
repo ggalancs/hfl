@@ -180,7 +180,20 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
     # ignore the kwarg.
     load_kwargs: dict[str, Any] = {"n_ctx": manifest.context_length}
     if getattr(manifest, "adapter_paths", None):
-        load_kwargs["lora_paths"] = list(manifest.adapter_paths)
+        # ADAPTER paths come from a Modelfile via POST /api/create — untrusted.
+        # Contain each to the HFL data dir so a manifest can't make the engine
+        # read arbitrary files (e.g. ../../etc/passwd) as a "LoRA adapter".
+        import hfl.config
+        from hfl.security import PathTraversalError, sanitize_path
+
+        base = hfl.config.config.home_dir
+        safe_adapters: list[str] = []
+        for adapter in manifest.adapter_paths:
+            try:
+                safe_adapters.append(str(sanitize_path(base, str(adapter))))
+            except PathTraversalError as exc:
+                raise ValueError(f"adapter path rejected: {exc}") from exc
+        load_kwargs["lora_paths"] = safe_adapters
     engine.load(manifest.local_path, **load_kwargs)
 
     return engine, manifest
