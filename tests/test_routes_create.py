@@ -170,6 +170,31 @@ class TestCreateNonStreaming:
         assert resp.status_code == 400
         assert "error" in resp.json()
 
+    def test_from_local_path_outside_home_rejected(self, client):
+        # FROM an arbitrary local file outside the HFL data dir must be refused
+        # so a request can't register/load /etc/passwd (etc.) as a "model".
+        resp = client.post(
+            "/api/create",
+            json={"model": "evil", "modelfile": "FROM /etc/passwd\n", "stream": False},
+        )
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+        assert get_registry().get("evil") is None
+
+    def test_from_local_path_inside_home_allowed(self, client, temp_config):
+        # A local GGUF under the HFL data dir is still a valid FROM source.
+        gguf = temp_config.home_dir / "models" / "local.gguf"
+        gguf.parent.mkdir(parents=True, exist_ok=True)
+        gguf.write_bytes(b"GGUF\x00")
+        resp = client.post(
+            "/api/create",
+            json={"model": "loc", "modelfile": f"FROM {gguf}\n", "stream": False},
+        )
+        assert resp.status_code == 200
+        created = get_registry().get("loc")
+        assert created is not None
+        assert created.local_path == str(gguf.resolve())
+
 
 # ----------------------------------------------------------------------
 # Structured fields
