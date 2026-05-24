@@ -56,7 +56,7 @@ def decode_ollama_images(images: list[str] | None) -> list[bytes] | None:
         try:
             info = validate_image(raw)
         except APIValidationError as exc:
-            raise APIValidationError(f"images[{index}]: {exc}")
+            raise APIValidationError(f"images[{index}]: {exc}") from exc
         decoded.append(info.data)
     return decoded
 
@@ -129,7 +129,7 @@ def split_openai_content(
             try:
                 info = validate_image(url)
             except APIValidationError as exc:
-                raise APIValidationError(f"content[{index}]: {exc}")
+                raise APIValidationError(f"content[{index}]: {exc}") from exc
             images.append(info.data)
             continue
 

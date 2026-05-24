@@ -76,7 +76,7 @@ async def run_with_timeout(
                 "timeout_seconds": effective_timeout,
                 "operation": operation,
             },
-        )
+        ) from None
 
 
 async def run_dispatched(
@@ -122,7 +122,7 @@ async def run_dispatched(
                     "timeout_seconds": effective_timeout,
                     "operation": operation,
                 },
-            )
+            ) from None
 
     # ``dispatcher.run`` is generic and mypy loses the concrete ``T``
     # across the boundary; cast back so route handlers keep their
@@ -218,7 +218,7 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
     try:
         delta = parse_keep_alive(keep_alive)
     except InvalidKeepAliveError as exc:
-        raise APIValidationError(str(exc))
+        raise APIValidationError(str(exc)) from exc
 
     if delta is None:
         # Caller didn't pass the field. Two cases:

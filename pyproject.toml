@@ -147,8 +147,10 @@ target-version = "py310"
 [tool.ruff.lint]
 # E/F/W/I: pycodestyle, pyflakes, warnings, import sorting.
 # C4: flake8-comprehensions, PIE: flake8-pie — catch comprehension and
-# misc antipatterns. The codebase is clean under all of these.
-select = ["E", "F", "W", "I", "C4", "PIE"]
+# misc antipatterns. B904: require explicit exception chaining
+# (`raise ... from exc` / `from None`) so error causes aren't silently lost.
+# The codebase is clean under all of these.
+select = ["E", "F", "W", "I", "C4", "PIE", "B904"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

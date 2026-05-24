@@ -59,7 +59,7 @@ async def copy_model(req: CopyRequest) -> dict[str, str]:
     try:
         validate_model_name(req.destination)
     except RegistryValidationError as exc:
-        raise APIValidationError(f"destination: {exc}")
+        raise APIValidationError(f"destination: {exc}") from exc
 
     registry = get_registry()
     if registry.get(req.source) is None:

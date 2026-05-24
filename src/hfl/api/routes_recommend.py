@@ -63,7 +63,7 @@ async def api_recommend(
         )
     except Exception as exc:
         logger.exception("recommendation failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}")
+        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
 
     return {
         "hardware_profile": asdict(profile),

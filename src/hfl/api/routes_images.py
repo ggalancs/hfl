@@ -48,7 +48,7 @@ async def api_images_generate(req: ImageRequest) -> dict[str, Any] | JSONRespons
         width = int(width_str)
         height = int(height_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"bad size: {req.size!r}")
+        raise HTTPException(status_code=400, detail=f"bad size: {req.size!r}") from None
     if width <= 0 or height <= 0:
         raise HTTPException(status_code=400, detail="size must be positive")
 
@@ -57,7 +57,7 @@ async def api_images_generate(req: ImageRequest) -> dict[str, Any] | JSONRespons
         engine.load(req.model)
     except Exception:
         logger.exception("image engine load failed for %s", req.model)
-        raise HTTPException(status_code=500, detail="image engine load failed")
+        raise HTTPException(status_code=500, detail="image engine load failed") from None
     try:
         result = engine.generate(
             req.prompt,
@@ -70,7 +70,7 @@ async def api_images_generate(req: ImageRequest) -> dict[str, Any] | JSONRespons
         )
     except Exception:
         logger.exception("image generation failed")
-        raise HTTPException(status_code=500, detail="image generation failed")
+        raise HTTPException(status_code=500, detail="image generation failed") from None
     finally:
         engine.unload()
 

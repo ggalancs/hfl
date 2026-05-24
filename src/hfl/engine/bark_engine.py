@@ -336,7 +336,7 @@ class BarkEngine(AudioEngine):
                 "MP3 encoding requires pydub.\n"
                 "Install with: pip install pydub\n"
                 "Also requires ffmpeg to be installed."
-            )
+            ) from None
 
     def _encode_ogg(self, audio: np.ndarray, sample_rate: int) -> bytes:
         """Encode audio to OGG format."""
@@ -350,4 +350,4 @@ class BarkEngine(AudioEngine):
         except ImportError:
             raise ImportError(
                 "OGG encoding requires soundfile.\nInstall with: pip install soundfile"
-            )
+            ) from None

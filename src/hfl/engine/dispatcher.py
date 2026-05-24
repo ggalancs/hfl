@@ -208,7 +208,7 @@ class InferenceDispatcher:
                 async with self._counter_lock:
                     self._depth -= 1
                     self._rejected_timeout_total += 1
-                raise QueueTimeoutError(waited_seconds=time.monotonic() - start)
+                raise QueueTimeoutError(waited_seconds=time.monotonic() - start) from None
             except BaseException:
                 async with self._counter_lock:
                     self._depth -= 1

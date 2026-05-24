@@ -116,7 +116,7 @@ async def api_discover(
         entries = search_hub(query)
     except Exception as exc:
         logger.exception("Hub discovery failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}")
+        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
 
     cache.put(query, entries)
     _annotate_local_availability(entries)

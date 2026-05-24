@@ -61,7 +61,7 @@ def with_timeout(timeout_seconds: float | None = None) -> Callable:
                 raise timeout_error(
                     operation=func.__qualname__,
                     timeout_seconds=effective_timeout,
-                )
+                ) from None
 
         return wrapper
 
@@ -104,4 +104,4 @@ async def run_with_timeout(
         raise timeout_error(
             operation=operation_name,
             timeout_seconds=effective_timeout,
-        )
+        ) from None

@@ -61,23 +61,23 @@ async def api_lora_apply(req: ApplyLoraRequest) -> dict[str, Any]:
     try:
         safe_lora_path = str(sanitize_path(hfl.config.config.home_dir, req.lora_path))
     except PathTraversalError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
         info = apply_lora(engine, lora_path=safe_lora_path, scale=req.scale, name=req.name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return asdict(info)
 
@@ -96,14 +96,14 @@ async def api_lora_remove(req: RemoveLoraRequest) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
         ok = remove_lora(engine, req.adapter_id)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if not ok:
         raise HTTPException(status_code=404, detail=f"adapter id unknown: {req.adapter_id!r}")
@@ -125,7 +125,7 @@ async def api_lora_list_for_model(model: str) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
     return {"model": model, "adapters": [asdict(a) for a in list_loras(engine)]}

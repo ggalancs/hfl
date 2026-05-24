@@ -92,7 +92,7 @@ def pull(
             console.print(f"[dim]{t('errors.check_name_or_search')}[/]")
         else:
             console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Detect model type from pipeline_tag (before download)
     from hfl.converter.formats import (
@@ -131,7 +131,7 @@ def pull(
         except Exception as e:
             console.print(f"[yellow]{t('warnings.could_not_verify_license')}:[/] {e}")
             if not typer.confirm(t("warnings.continue_without_license"), default=False):
-                raise typer.Exit(0)
+                raise typer.Exit(0) from e
 
     # 3. Download
     local_path = pull_model(resolved)
@@ -338,7 +338,7 @@ def run(
         engine.load(manifest.local_path, n_ctx=ctx, verbose=verbose)
     except MissingDependencyError as e:
         console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.model_loaded')}[/]\n")
 
     # R9 - Legal disclaimer before starting chat
@@ -439,7 +439,7 @@ def serve(
                 "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
                 "Install with: [cyan]pip install hfl[tray][/]"
             )
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     # R6 - Privacy warning when exposing to the network
     if host == "0.0.0.0":
@@ -473,7 +473,7 @@ def serve(
                 state.current_model = manifest
             except MissingDependencyError as e:
                 console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from e
 
     console.print(f"[bold green]{t('messages.server_at', host=host, port=port)}[/]")
     console.print("  OpenAI:    POST /v1/chat/completions")
@@ -635,7 +635,7 @@ def cp(
         ok = registry.copy(source, destination)
     except Exception as exc:
         console.print(f"[red]Copy failed:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if ok:
         console.print(f"[green]Copied[/] [cyan]{source}[/] → [cyan]{destination}[/]")
@@ -671,10 +671,10 @@ def stop(
             f"[red]Cannot reach HFL server at {url}[/]\n"
             f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except httpx.HTTPError as exc:
         console.print(f"[red]Server error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     data = response.json()
     status = data.get("status")
@@ -781,10 +781,10 @@ def ps(
             f"[red]Cannot reach HFL server at {url}[/]\n"
             f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except httpx.HTTPError as exc:
         console.print(f"[red]Server error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     data = response.json()
     models = data.get("models", [])
@@ -875,7 +875,7 @@ def search(
             models = list(api.list_models(**kwargs))
     except Exception as e:
         console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     if not models:
         console.print(f"[yellow]{t('errors.no_models_found', query=query)}[/]")
@@ -1145,7 +1145,7 @@ def login(
         console.print(f"[dim]{t('messages.token_saved')}[/]")
     except Exception as e:
         console.print(f"[red]{t('errors.error_authenticating')}:[/] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -1211,10 +1211,10 @@ def create(
             f"[red]Cannot reach HFL server at {url}[/]\n"
             f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except httpx.HTTPError as exc:
         console.print(f"[red]Server error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 @app.command(name="mcp")
@@ -1298,7 +1298,7 @@ def mcp(
                     raise typer.Exit(1)
             except MCPServerUnavailableError as exc:
                 console.print(f"[red]MCP unavailable:[/] {exc}")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from exc
         else:
             console.print(f"[red]Unknown action:[/] {action}")
             raise typer.Exit(1)
@@ -1307,10 +1307,10 @@ def mcp(
         asyncio.run(_run())
     except MCPClientUnavailableError as exc:
         console.print(f"[red]MCP unavailable:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     except MCPConnectionError as exc:
         console.print(f"[red]MCP error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -1770,7 +1770,7 @@ def discover(
             entries = search_hub(q)
         except Exception as exc:
             console.print(f"[red]Hub unavailable:[/] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         cache.put(q, entries)
 
     _annotate_local_availability(entries)
@@ -1843,7 +1843,7 @@ def recommend(
         )
     except Exception as exc:
         console.print(f"[red]Hub unavailable:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     profile_dict = asdict(profile)
     console.print(
@@ -1977,10 +1977,10 @@ def pull_smart_cmd(
         plan = build_smart_plan(model, max_vram_gb=max_vram_gb)
     except ValueError as exc:
         console.print(f"[red]{exc}[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     except Exception as exc:
         console.print(f"[red]Hub unavailable:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     table = Table(title="Smart pull plan", show_lines=False)
     table.add_column("field", style="cyan")
@@ -2009,7 +2009,7 @@ def pull_smart_cmd(
         asyncio.run(_pull())
     except Exception as exc:
         console.print(f"[red]Pull failed:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 @app.command(name="verify", help=t("commands.verify.description"))
@@ -2034,7 +2034,7 @@ def verify_cmd(
             engine, manifest = await load_llm(model)
         except FileNotFoundError as exc:
             console.print(f"[red]Model not found:[/] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if engine is None:
             console.print("[red]Engine not available[/]")
             raise typer.Exit(1)
@@ -2089,14 +2089,14 @@ def bench_cmd(
         lengths = tuple(int(v.strip()) for v in prompt_lengths.split(",") if v.strip())
     except ValueError:
         console.print("[red]Invalid --lengths value (use comma-separated integers)[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     async def _run() -> None:
         try:
             engine, _ = await load_llm(model)
         except FileNotFoundError as exc:
             console.print(f"[red]Model not found:[/] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if engine is None:
             console.print("[red]Engine not available[/]")
             raise typer.Exit(1)
@@ -2225,7 +2225,7 @@ def snapshot_cmd(
             engine, _ = await load_llm(model)
         except FileNotFoundError as exc:
             console.print(f"[red]Model not found:[/] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if engine is None:
             console.print("[red]Engine not available[/]")
             raise typer.Exit(1)
@@ -2235,14 +2235,14 @@ def snapshot_cmd(
                 meta = save_snapshot(engine, name=name, model_name=model)
             except (ValueError, RuntimeError) as exc:
                 console.print(f"[red]{exc}[/]")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from exc
             console.print(f"[green]Saved[/] {name!r} — tokens={meta.tokens} bytes={meta.bytes:,}")
         else:  # load
             try:
                 meta = load_snapshot(engine, name=name, model_name=model)
             except (ValueError, FileNotFoundError, RuntimeError) as exc:
                 console.print(f"[red]{exc}[/]")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from exc
             console.print(f"[green]Restored[/] {name!r} — tokens={meta.tokens}")
 
     asyncio.run(_run())

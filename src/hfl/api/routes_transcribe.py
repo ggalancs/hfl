@@ -53,7 +53,7 @@ async def api_transcribe(
         engine.load(model)
     except Exception:
         logger.exception("Whisper load failed: %s", model)
-        raise HTTPException(status_code=500, detail="whisper load failed")
+        raise HTTPException(status_code=500, detail="whisper load failed") from None
 
     try:
         result = engine.transcribe(
@@ -63,7 +63,7 @@ async def api_transcribe(
         )
     except Exception:
         logger.exception("Whisper transcribe failed")
-        raise HTTPException(status_code=500, detail="transcription failed")
+        raise HTTPException(status_code=500, detail="transcription failed") from None
     finally:
         engine.unload()
 
