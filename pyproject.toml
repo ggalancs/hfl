@@ -145,7 +145,10 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+# E/F/W/I: pycodestyle, pyflakes, warnings, import sorting.
+# C4: flake8-comprehensions, PIE: flake8-pie — catch comprehension and
+# misc antipatterns. The codebase is clean under all of these.
+select = ["E", "F", "W", "I", "C4", "PIE"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -149,7 +149,7 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any]) -> None:
     try:
         while True:
             getter = asyncio.create_task(queue.get())
-            done, pending = await asyncio.wait(
+            done, _pending = await asyncio.wait(
                 {getter, cancel_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )

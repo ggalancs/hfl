@@ -142,12 +142,9 @@ def estimate_model_size(params_str: str | None, quantization: str = "Q4") -> str
         bits = bits_per_param.get(quantization[:2].upper(), 4.5)
         size_gb = (params * 1e9 * bits / 8) / (1024**3)
 
-        if size_gb >= 100:
+        if size_gb >= 100 or size_gb >= 10:
             return f"{size_gb:.0f}GB"
-        elif size_gb >= 10:
-            return f"{size_gb:.0f}GB"
-        else:
-            return f"{size_gb:.1f}GB"
+        return f"{size_gb:.1f}GB"
     except Exception:
         return "?"
 

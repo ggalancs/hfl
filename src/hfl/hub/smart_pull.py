@@ -99,7 +99,7 @@ def _candidate_repos(base_repo_id: str, profile: HardwareProfile) -> list[str]:
     """
     if "/" not in base_repo_id:
         return [base_repo_id]
-    org, name = base_repo_id.split("/", 1)
+    _org, name = base_repo_id.split("/", 1)
     candidates: list[str] = []
     if profile.has_mlx:
         # mlx-community uses the bare model name (no org prefix).

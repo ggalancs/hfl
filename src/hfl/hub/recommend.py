@@ -76,9 +76,12 @@ def _hardware_fit(
 
     # Pick a budget. CUDA: VRAM. Apple Silicon: 70% of unified RAM.
     # CPU-only / unknown: 70% of system RAM.
-    if profile.gpu_kind == "cuda" and profile.gpu_vram_gb:
-        budget = profile.gpu_vram_gb
-    elif profile.gpu_kind == "metal" and profile.gpu_vram_gb:
+    if (
+        profile.gpu_kind == "cuda"
+        and profile.gpu_vram_gb
+        or profile.gpu_kind == "metal"
+        and profile.gpu_vram_gb
+    ):
         budget = profile.gpu_vram_gb
     else:
         budget = round((profile.system_ram_gb or 8.0) * 0.7, 1)

@@ -152,25 +152,24 @@ def pull_model(resolved: ResolvedModel) -> Path:
             local_dir=model_dir,
             token=token,
         )
-    else:
-        # Complete snapshot download with retry
-        # Filter only the necessary files
-        allow_patterns = []
-        if resolved.format == "safetensors":
-            allow_patterns = [
-                "*.safetensors",
-                "config.json",
-                "tokenizer.json",
-                "tokenizer_config.json",
-                "special_tokens_map.json",
-                "tokenizer.model",  # SentencePiece
-                "generation_config.json",
-            ]
+    # Complete snapshot download with retry
+    # Filter only the necessary files
+    allow_patterns = []
+    if resolved.format == "safetensors":
+        allow_patterns = [
+            "*.safetensors",
+            "config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "tokenizer.model",  # SentencePiece
+            "generation_config.json",
+        ]
 
-        return _download_snapshot(
-            repo_id=resolved.repo_id,
-            revision=resolved.revision,
-            local_dir=model_dir,
-            token=token,
-            allow_patterns=allow_patterns or None,
-        )
+    return _download_snapshot(
+        repo_id=resolved.repo_id,
+        revision=resolved.revision,
+        local_dir=model_dir,
+        token=token,
+        allow_patterns=allow_patterns or None,
+    )

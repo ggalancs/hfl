@@ -122,7 +122,7 @@ def validate_model_name(name: str) -> str:
             field="model",
         )
 
-    if name.startswith("/") or name.startswith("~"):
+    if name.startswith(("/", "~")):
         raise ValidationError(
             f"Absolute paths not allowed in model name: {name}",
             field="model",

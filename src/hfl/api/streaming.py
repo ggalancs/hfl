@@ -32,13 +32,9 @@ DEFAULT_HEARTBEAT_INTERVAL = 30.0  # Seconds between heartbeats
 class StreamTimeoutError(Exception):
     """Raised when a stream operation times out."""
 
-    pass
-
 
 class StreamCancelledError(Exception):
     """Raised when a stream is cancelled (e.g., client disconnect)."""
-
-    pass
 
 
 async def stream_with_backpressure(

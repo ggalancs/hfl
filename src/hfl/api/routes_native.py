@@ -488,7 +488,7 @@ async def api_chat(
     if req.system:
         from hfl.engine.base import ChatMessage as _CM
 
-        messages = [_CM(role="system", content=req.system)] + messages
+        messages = [_CM(role="system", content=req.system), *messages]
 
     # Phase 8 P3-2: Modelfile ``MESSAGE`` baked-in few-shot. If the
     # resolved manifest carries MESSAGE instructions, prepend them
@@ -669,7 +669,7 @@ async def _stream_chat(
         # length increases.
         partial_calls = None
         try:
-            cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
+            _cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
             if calls:
                 partial_calls = calls
                 last_partial_count = len(calls)
@@ -689,7 +689,7 @@ async def _stream_chat(
 
     def format_done() -> str:
         full_text = "".join(accumulated)
-        cleaned, calls = parse_tool_calls(full_text, model_name, tools)
+        _cleaned, calls = parse_tool_calls(full_text, model_name, tools)
         final_message: dict = {"role": "assistant", "content": "", "tool_calls": []}
         if calls:
             final_message["tool_calls"] = calls

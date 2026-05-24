@@ -757,7 +757,7 @@ def render_modelfile_document(doc: ModelfileDocument) -> str:
 
     # PARAMETER block. Sort alphabetically for stable output; ``stop``
     # goes last so it's visually grouped at the bottom of the block.
-    param_keys = sorted(k for k in doc.parameters.keys() if k != "stop")
+    param_keys = sorted(k for k in doc.parameters if k != "stop")
     if param_keys or doc.stop_sequences:
         lines.append("")
         for key in param_keys:

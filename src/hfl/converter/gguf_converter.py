@@ -50,8 +50,6 @@ _conversion_locks_guard = threading.Lock()
 class UnsupportedModelError(Exception):
     """Raised when a model cannot be converted to GGUF format."""
 
-    pass
-
 
 # Model types that CANNOT be converted to GGUF
 UNSUPPORTED_MODEL_TYPES = {

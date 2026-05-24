@@ -142,9 +142,7 @@ def is_mlx_quantized_repo(repo_id: str | None, model_path: Path) -> bool:
         return False
 
     quant = data.get("quantization")
-    if isinstance(quant, dict) and "group_size" in quant and "bits" in quant:
-        return True
-    return False
+    return bool(isinstance(quant, dict) and "group_size" in quant and "bits" in quant)
 
 
 def detect_format(model_path: Path) -> ModelFormat:
@@ -152,9 +150,9 @@ def detect_format(model_path: Path) -> ModelFormat:
     if model_path.is_file():
         if model_path.suffix == ".gguf":
             return ModelFormat.GGUF
-        elif model_path.suffix == ".safetensors":
+        if model_path.suffix == ".safetensors":
             return ModelFormat.SAFETENSORS
-        elif model_path.suffix in (".pt", ".pth", ".bin"):
+        if model_path.suffix in (".pt", ".pth", ".bin"):
             return ModelFormat.PYTORCH
 
     if model_path.is_dir():
@@ -163,9 +161,9 @@ def detect_format(model_path: Path) -> ModelFormat:
 
         if ".gguf" in extensions:
             return ModelFormat.GGUF
-        elif ".safetensors" in extensions:
+        if ".safetensors" in extensions:
             return ModelFormat.SAFETENSORS
-        elif ".bin" in extensions or ".pt" in extensions:
+        if ".bin" in extensions or ".pt" in extensions:
             return ModelFormat.PYTORCH
 
     return ModelFormat.UNKNOWN
@@ -679,12 +677,12 @@ def detect_model_type(model_path: Path) -> ModelType:
         # 2b. Pattern matching for model_type field (catches brand-specific types)
         if model_type_field:
             # TTS patterns: *_tts, *tts, speech*, etc.
-            if model_type_field.endswith("_tts") or model_type_field.endswith("tts"):
+            if model_type_field.endswith(("_tts", "tts")):
                 return ModelType.TTS
             if "speech" in model_type_field and "to_text" not in model_type_field:
                 return ModelType.TTS
             # STT patterns: *_asr, *_stt, *speech_to_text*, whisper*, etc.
-            if model_type_field.endswith("_asr") or model_type_field.endswith("_stt"):
+            if model_type_field.endswith(("_asr", "_stt")):
                 return ModelType.STT
             if "speech_to_text" in model_type_field or "asr" in model_type_field:
                 return ModelType.STT

@@ -277,12 +277,11 @@ class CoquiEngine(AudioEngine):
 
         if fmt == "wav":
             return self._encode_wav(audio, sample_rate)
-        elif fmt == "mp3":
+        if fmt == "mp3":
             return self._encode_mp3(audio, sample_rate)
-        elif fmt == "ogg":
+        if fmt == "ogg":
             return self._encode_ogg(audio, sample_rate)
-        else:
-            return self._encode_wav(audio, sample_rate)
+        return self._encode_wav(audio, sample_rate)
 
     def _encode_wav(self, audio: np.ndarray, sample_rate: int) -> bytes:
         """Encode audio to WAV format."""

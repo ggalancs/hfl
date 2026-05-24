@@ -270,7 +270,7 @@ class PromptBuilder:
             "one, respond with a single JSON object of the form "
             '{"name": "<tool_name>", "arguments": {...}} and nothing else.',
             "Tools:",
-            _json.dumps([t for t in tools], ensure_ascii=False),
+            _json.dumps(list(tools), ensure_ascii=False),
         ]
         preamble = _CM(role="system", content="\n".join(lines))
         return [preamble, *messages]
