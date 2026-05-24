@@ -59,15 +59,36 @@ def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> Gene
 
 
 def _tools_payload(req: ChatCompletionRequest) -> list[dict] | None:
-    """OpenAI ``tools[]`` as plain dicts for the engine / chat template.
+    """OpenAI ``tools[]`` (honouring ``tool_choice``) as plain dicts.
 
     ``None`` (no preference) and ``[]`` (explicit opt-out) both collapse to
     ``None`` so plain chat is never accidentally routed through the
     tool-aware template.
+
+    ``tool_choice`` is honoured to the extent a parse-based backend can:
+
+    - ``"none"`` -> tools are dropped entirely, so the chat template never
+      advertises them and the output is never scanned for tool-call markers.
+      This is a hard guarantee: the response cannot contain ``tool_calls``.
+    - ``{"type": "function", "function": {"name": "X"}}`` -> only tool ``X``
+      is forwarded, narrowing the model's choice to the requested function.
+    - ``"auto"`` / ``"required"`` / unset -> all declared tools are forwarded.
+      ("required" cannot be hard-enforced without constrained decoding, so it
+      behaves like "auto" here.)
     """
     if not req.tools:
         return None
-    return [t.model_dump() for t in req.tools]
+    choice = req.tool_choice
+    if isinstance(choice, str) and choice.strip().lower() == "none":
+        return None
+    tools = [t.model_dump() for t in req.tools]
+    if isinstance(choice, dict):
+        name = (choice.get("function") or {}).get("name")
+        if name:
+            narrowed = [t for t in tools if t.get("function", {}).get("name") == name]
+            if narrowed:
+                return narrowed
+    return tools
 
 
 def _openai_messages_to_chat(req: ChatCompletionRequest) -> list[ChatMessage]:
@@ -167,6 +188,10 @@ async def chat_completions(
     # stay simple.
     messages = _openai_messages_to_chat(req)
     tools = _tools_payload(req)
+    # "none" is a hard opt-out: never scan the output for tool-call markers,
+    # not even the per-family parser (which fires on markers regardless of
+    # whether tools were forwarded).
+    tools_disabled = isinstance(req.tool_choice, str) and req.tool_choice.strip().lower() == "none"
     gen_config = _to_gen_config(req)
 
     # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
@@ -200,9 +225,12 @@ async def chat_completions(
     # tool call is present, ``content`` is null and finish_reason flips to
     # ``tool_calls`` so OpenAI-SDK agent loops dispatch instead of stopping.
     engine_tool_calls = getattr(result, "tool_calls", None)
-    if isinstance(engine_tool_calls, list) and engine_tool_calls:
+    if tools_disabled:
+        canonical: list[dict] = []
+        content_out: str | None = result.text
+    elif isinstance(engine_tool_calls, list) and engine_tool_calls:
         canonical = engine_tool_calls
-        content_out: str | None = ""
+        content_out = ""
     else:
         cleaned, canonical = parse_tool_calls(result.text, req.model, tools)
         content_out = cleaned if not canonical else ""
