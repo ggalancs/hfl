@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for KV cache quantisation wiring (Phase 11 P1)."""
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Unit tests for the dialect-agnostic chat resolution core.
 
 This is the single decision point shared by the OpenAI / Ollama / Anthropic

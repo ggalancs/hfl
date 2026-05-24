@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Unit tests for ``hfl.engine.llama_cpp._detect_chat_format_from_gguf``.
 
 Newer Gemma family GGUFs (released after Gemma 4) ship without an

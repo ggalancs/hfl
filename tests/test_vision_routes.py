@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """End-to-end tests for vision / multimodal routes (Phase 4, P0-6).
 

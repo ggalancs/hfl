@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Schema tests for Ollama-compatible tool-calling fields.
 
 Covers the additions made to ``hfl.api.schemas.ollama`` so the wire contract

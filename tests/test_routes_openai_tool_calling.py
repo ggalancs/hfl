@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Tool-calling on the OpenAI-compatible /v1/chat/completions route.
 
 Mirrors the acceptance suite in ``hfl-tool-calling-spec.md`` (T2-T5) but for

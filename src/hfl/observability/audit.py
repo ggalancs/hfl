@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Structured audit log for privileged events (Phase 14 P2 — V2 row 27).
 

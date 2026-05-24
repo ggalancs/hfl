@@ -1,6 +1,6 @@
 # hfl
 
-[![Licencia: HRUL v1.0](https://img.shields.io/badge/Licencia-HRUL%20v1.0-blue.svg)](LICENSE)
+[![Licencia: Apache 2.0](https://img.shields.io/badge/Licencia-Apache%202.0-green.svg)](LICENSE) [![Salvaguardas](https://img.shields.io/badge/Salvaguardas-pol%C3%ADtica-informational.svg)](SAFEGUARDS.md)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ggalancs/hfl/branch/main/graph/badge.svg)](https://codecov.io/gh/ggalancs/hfl)
@@ -554,12 +554,16 @@ Los modelos de IA pueden generar contenido inexacto, sesgado o inapropiado. Los 
 
 ## Licencia
 
-hfl se distribuye como source-available bajo la **hfl Responsible Use License (HRUL) v1.0**.
+hfl se publica bajo la **Apache License 2.0** — uso, modificación y
+distribución libres, incluido uso comercial. Ver [LICENSE](LICENSE).
 
-Esta licencia permite uso libre, modificación y distribución comercial con una condición: los trabajos derivados que se distribuyan públicamente deben mantener las características de cumplimiento legal (verificación de licencias, descargos de IA, seguimiento de procedencia, protecciones de privacidad y respeto de restricciones).
+Las cinco **Salvaguardas** de uso responsable (verificación de licencias,
+procedencia, descargo de IA, protección de privacidad y respeto del gating)
+se protegen mediante la política de marca del proyecto: puedes hacer con el
+código todo lo que permite Apache, pero una distribución presentada *como*
+"hfl" debe mantener las Salvaguardas activas. Un fork que las elimine es libre
+de hacerlo bajo Apache — simplemente no puede usar el nombre hfl. Ver
+[SAFEGUARDS.md](SAFEGUARDS.md).
 
-Eres libre de reescribir, extender, renombrar y vender derivados — simplemente no puedes eliminar las características de seguridad.
-
-**Nota:** La HRUL no es una licencia open-source aprobada por la OSI. Es una licencia source-available con requisitos de uso responsable, inspirada en Apache 2.0, el copyleft de GPL, y la familia de licencias RAIL para IA.
-
-Ver [LICENSE](LICENSE) para el texto completo y [LICENSE-FAQ.md](LICENSE-FAQ.md) para preguntas frecuentes.
+> hfl se distribuía antes como source-available bajo HRUL v1.0; el texto
+> histórico se conserva en [LICENSE-HRUL-1.0.txt](LICENSE-HRUL-1.0.txt).

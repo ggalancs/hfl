@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Unit tests for ``hfl/hub/draft_picker.py`` — V4 F5."""
 

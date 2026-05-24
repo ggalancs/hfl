@@ -28,6 +28,7 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
