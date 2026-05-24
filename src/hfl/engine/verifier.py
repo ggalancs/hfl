@@ -147,7 +147,7 @@ def _check_tool_parser(manifest: "ModelManifest") -> Check:
         from hfl.api.tool_parsers import dispatch as parse_tool_calls
 
         sample = '<tool_call>\n{"name": "x", "arguments": {}}\n</tool_call>'
-        cleaned, calls = parse_tool_calls(sample, manifest.name, [])
+        _cleaned, calls = parse_tool_calls(sample, manifest.name, [])
         # The parser may return zero calls (no tool registered for
         # the model name); we only fail when it raises.
         return Check(

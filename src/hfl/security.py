@@ -247,10 +247,7 @@ def is_safe_filename(name: str) -> bool:
         return False
 
     # Check for control characters
-    if _CONTROL_CHARS_PATTERN.search(name):
-        return False
-
-    return True
+    return not _CONTROL_CHARS_PATTERN.search(name)
 
 
 def sanitize_path(base_dir: Path, user_path: str) -> Path:

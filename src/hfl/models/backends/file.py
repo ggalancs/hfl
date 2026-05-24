@@ -105,39 +105,36 @@ class FileBackend(RegistryBackend):
 
     def save(self, models: list["ModelManifest"]) -> None:
         """Save all models to the JSON file."""
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                data = [m.to_dict() for m in models]
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.path.write_text(json.dumps(data, indent=2))
+        with self._lock, self._file_lock(exclusive=True):
+            data = [m.to_dict() for m in models]
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, indent=2))
 
     def add(self, manifest: "ModelManifest") -> None:
         """Add or update a model."""
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                models = self.load()
-                # Remove existing with same name
-                models = [m for m in models if m.name != manifest.name]
-                models.append(manifest)
-                # Save atomically
-                data = [m.to_dict() for m in models]
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.path.write_text(json.dumps(data, indent=2))
+        with self._lock, self._file_lock(exclusive=True):
+            models = self.load()
+            # Remove existing with same name
+            models = [m for m in models if m.name != manifest.name]
+            models.append(manifest)
+            # Save atomically
+            data = [m.to_dict() for m in models]
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, indent=2))
 
     def remove(self, name: str) -> bool:
         """Remove a model by name."""
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                models = self.load()
-                initial_count = len(models)
-                models = [m for m in models if m.name != name]
+        with self._lock, self._file_lock(exclusive=True):
+            models = self.load()
+            initial_count = len(models)
+            models = [m for m in models if m.name != name]
 
-                if len(models) == initial_count:
-                    return False
+            if len(models) == initial_count:
+                return False
 
-                data = [m.to_dict() for m in models]
-                self.path.write_text(json.dumps(data, indent=2))
-                return True
+            data = [m.to_dict() for m in models]
+            self.path.write_text(json.dumps(data, indent=2))
+            return True
 
     def get(self, name: str) -> "ModelManifest | None":
         """Get a model by name."""
@@ -150,25 +147,23 @@ class FileBackend(RegistryBackend):
 
     def update_alias(self, name: str, alias: str) -> bool:
         """Update the alias for a model."""
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                models = self.load()
+        with self._lock, self._file_lock(exclusive=True):
+            models = self.load()
 
-                # Check if alias already in use
-                for model in models:
-                    if model.alias == alias or model.name == alias:
-                        return False
+            # Check if alias already in use
+            for model in models:
+                if model.alias == alias or model.name == alias:
+                    return False
 
-                # Find and update the model
-                for model in models:
-                    if model.name == name:
-                        model.alias = alias
-                        data = [m.to_dict() for m in models]
-                        self.path.write_text(json.dumps(data, indent=2))
-                        return True
+            # Find and update the model
+            for model in models:
+                if model.name == name:
+                    model.alias = alias
+                    data = [m.to_dict() for m in models]
+                    self.path.write_text(json.dumps(data, indent=2))
+                    return True
 
-                return False
+            return False
 
     def close(self) -> None:
         """No resources to close for file backend."""
-        pass

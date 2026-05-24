@@ -322,17 +322,16 @@ class ModelRegistry:
         If a model with the same name exists, it is replaced.
         Uses file locking for multi-process safety.
         """
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                # Reload from disk to avoid stale data
-                self._load()
+        with self._lock, self._file_lock(exclusive=True):
+            # Reload from disk to avoid stale data
+            self._load()
 
-                # Remove existing model with same name (if any)
-                if manifest.name in self._by_name:
-                    self._models = [m for m in self._models if m.name != manifest.name]
-                self._models.append(manifest)
-                self._indexes_dirty = True
-                self._save()
+            # Remove existing model with same name (if any)
+            if manifest.name in self._by_name:
+                self._models = [m for m in self._models if m.name != manifest.name]
+            self._models.append(manifest)
+            self._indexes_dirty = True
+            self._save()
 
     def get(self, name: str) -> ModelManifest | None:
         """Finds a model by name, alias, or repo_id (thread-safe).
@@ -383,44 +382,43 @@ class ModelRegistry:
         # bad input.
         validate_model_name(destination)
 
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                self._load()
-                # After _load() the indexes are stale; force a
-                # rebuild so the by_name / by_alias / by_repo_id
-                # dicts reflect the on-disk state.
-                self._indexes_dirty = True
-                self._ensure_indexes()
+        with self._lock, self._file_lock(exclusive=True):
+            self._load()
+            # After _load() the indexes are stale; force a
+            # rebuild so the by_name / by_alias / by_repo_id
+            # dicts reflect the on-disk state.
+            self._indexes_dirty = True
+            self._ensure_indexes()
 
-                # Destination must be free — neither a model name,
-                # alias, nor a known repo_id.
-                if (
-                    destination in self._by_name
-                    or destination in self._by_alias
-                    or destination in self._by_repo_id
-                ):
-                    return False
+            # Destination must be free — neither a model name,
+            # alias, nor a known repo_id.
+            if (
+                destination in self._by_name
+                or destination in self._by_alias
+                or destination in self._by_repo_id
+            ):
+                return False
 
-                src = self._by_name.get(source) or self._by_alias.get(source)
-                if src is None:
-                    # Last resort: also try repo_id.
-                    src = self._by_repo_id.get(source)
-                if src is None:
-                    return False
+            src = self._by_name.get(source) or self._by_alias.get(source)
+            if src is None:
+                # Last resort: also try repo_id.
+                src = self._by_repo_id.get(source)
+            if src is None:
+                return False
 
-                new = deepcopy(src)
-                new.name = destination
-                new.alias = None  # alias is unique per model
-                # Stamp a fresh created_at so list_all() orders the
-                # copy after its parent, not as a duplicate.
-                from datetime import datetime as _dt
+            new = deepcopy(src)
+            new.name = destination
+            new.alias = None  # alias is unique per model
+            # Stamp a fresh created_at so list_all() orders the
+            # copy after its parent, not as a duplicate.
+            from datetime import datetime as _dt
 
-                new.created_at = _dt.now().isoformat()
+            new.created_at = _dt.now().isoformat()
 
-                self._models.append(new)
-                self._indexes_dirty = True
-                self._save()
-                return True
+            self._models.append(new)
+            self._indexes_dirty = True
+            self._save()
+            return True
 
     def set_alias(self, name: str, alias: str) -> bool:
         """Sets an alias for an existing model (thread-safe).
@@ -438,23 +436,22 @@ class ModelRegistry:
         # Validate alias format first (raises ValidationError if invalid)
         validate_alias(alias)
 
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                # Reload from disk to avoid stale data
-                self._load()
+        with self._lock, self._file_lock(exclusive=True):
+            # Reload from disk to avoid stale data
+            self._load()
 
-                # Verify the alias is not already in use (O(1) check)
-                if alias in self._by_alias or alias in self._by_name:
-                    return False
+            # Verify the alias is not already in use (O(1) check)
+            if alias in self._by_alias or alias in self._by_name:
+                return False
 
-                model = self._by_name.get(name)
-                if model is None:
-                    return False
+            model = self._by_name.get(name)
+            if model is None:
+                return False
 
-                model.alias = alias
-                self._indexes_dirty = True
-                self._save()
-                return True
+            model.alias = alias
+            self._indexes_dirty = True
+            self._save()
+            return True
 
     def list_all(self) -> list[ModelManifest]:
         """Lists all registered models, sorted by creation date (thread-safe)."""
@@ -468,18 +465,17 @@ class ModelRegistry:
         Does not delete files, only registry entry.
         Returns True if a model was removed, False otherwise.
         """
-        with self._lock:
-            with self._file_lock(exclusive=True):
-                # Reload from disk to avoid stale data
-                self._load()
+        with self._lock, self._file_lock(exclusive=True):
+            # Reload from disk to avoid stale data
+            self._load()
 
-                if name not in self._by_name:
-                    return False
+            if name not in self._by_name:
+                return False
 
-                self._models = [m for m in self._models if m.name != name]
-                self._indexes_dirty = True
-                self._save()
-                return True
+            self._models = [m for m in self._models if m.name != name]
+            self._indexes_dirty = True
+            self._save()
+            return True
 
     def __len__(self) -> int:
         """Return the number of registered models (thread-safe)."""
@@ -495,9 +491,8 @@ class ModelRegistry:
 
         Useful when models may have been added/removed by external processes.
         """
-        with self._lock:
-            with self._file_lock(exclusive=False):
-                self._load()
+        with self._lock, self._file_lock(exclusive=False):
+            self._load()
 
 
 # Singleton access delegated to container for unified management

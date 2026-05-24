@@ -31,8 +31,6 @@ from hfl.engine.base import AudioEngine, InferenceEngine
 class MissingDependencyError(Exception):
     """Error when an optional dependency is missing."""
 
-    pass
-
 
 def _get_llama_cpp_engine():
     """Lazy import of LlamaCppEngine."""
@@ -204,11 +202,11 @@ def _get_vllm_engine():
 def _create_engine(name: str) -> InferenceEngine:
     if name == "llama-cpp":
         return _get_llama_cpp_engine()
-    elif name == "transformers":
+    if name == "transformers":
         return _get_transformers_engine()
-    elif name == "vllm":
+    if name == "vllm":
         return _get_vllm_engine()
-    elif name == "mlx":
+    if name == "mlx":
         return _get_mlx_engine()
     raise ValueError(f"Unknown backend: {name}")
 
@@ -325,7 +323,7 @@ def select_tts_engine(
     # Explicit backend selection
     if backend == "bark":
         return _get_bark_engine()
-    elif backend == "coqui":
+    if backend == "coqui":
         return _get_coqui_engine()
 
     # Auto-detection

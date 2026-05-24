@@ -89,33 +89,30 @@ class SQLiteBackend(RegistryBackend):
 
     def save(self, models: list["ModelManifest"]) -> None:
         """Save all models to the database (replace all)."""
-        with self._lock:
-            with self._transaction() as cursor:
-                cursor.execute("DELETE FROM models")
-                for model in models:
-                    cursor.execute(
-                        "INSERT INTO models (name, alias, data) VALUES (?, ?, ?)",
-                        (model.name, model.alias, json.dumps(model.to_dict())),
-                    )
+        with self._lock, self._transaction() as cursor:
+            cursor.execute("DELETE FROM models")
+            for model in models:
+                cursor.execute(
+                    "INSERT INTO models (name, alias, data) VALUES (?, ?, ?)",
+                    (model.name, model.alias, json.dumps(model.to_dict())),
+                )
 
     def add(self, manifest: "ModelManifest") -> None:
         """Add or update a model."""
-        with self._lock:
-            with self._transaction() as cursor:
-                cursor.execute(
-                    """
+        with self._lock, self._transaction() as cursor:
+            cursor.execute(
+                """
                     INSERT OR REPLACE INTO models (name, alias, data)
                     VALUES (?, ?, ?)
                     """,
-                    (manifest.name, manifest.alias, json.dumps(manifest.to_dict())),
-                )
+                (manifest.name, manifest.alias, json.dumps(manifest.to_dict())),
+            )
 
     def remove(self, name: str) -> bool:
         """Remove a model by name."""
-        with self._lock:
-            with self._transaction() as cursor:
-                cursor.execute("DELETE FROM models WHERE name = ?", (name,))
-                return cursor.rowcount > 0
+        with self._lock, self._transaction() as cursor:
+            cursor.execute("DELETE FROM models WHERE name = ?", (name,))
+            return cursor.rowcount > 0
 
     def get(self, name: str) -> "ModelManifest | None":
         """Get a model by name."""

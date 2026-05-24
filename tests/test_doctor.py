@@ -17,15 +17,15 @@ class TestBuildReport:
     def test_records_at_least_one_accelerator_on_darwin(self, monkeypatch):
         monkeypatch.setattr(doctor.platform, "system", lambda: "Darwin")
         monkeypatch.setattr(doctor.platform, "machine", lambda: "arm64")
-        monkeypatch.setattr(doctor, "_probe_nvidia", lambda: [])
-        monkeypatch.setattr(doctor, "_probe_rocm", lambda: [])
+        monkeypatch.setattr(doctor, "_probe_nvidia", list)
+        monkeypatch.setattr(doctor, "_probe_rocm", list)
         monkeypatch.setattr(doctor, "_probe_metal", lambda: True)
         report = doctor.build_report()
         assert report.metal_available is True
 
     def test_no_accelerator_emits_recommendation(self, monkeypatch):
-        monkeypatch.setattr(doctor, "_probe_nvidia", lambda: [])
-        monkeypatch.setattr(doctor, "_probe_rocm", lambda: [])
+        monkeypatch.setattr(doctor, "_probe_nvidia", list)
+        monkeypatch.setattr(doctor, "_probe_rocm", list)
         monkeypatch.setattr(doctor, "_probe_metal", lambda: False)
         report = doctor.build_report()
         assert any("CPU-only" in rec for rec in report.recommendations)

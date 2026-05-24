@@ -86,20 +86,19 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
             quantization=_detect_quant(target_file),
             pipeline_tag=pipeline_tag,
         )
-    elif safetensor_files:
+    if safetensor_files:
         return ResolvedModel(
             repo_id=repo_id,
             format="safetensors",
             quantization=quantization,
             pipeline_tag=pipeline_tag,
         )
-    else:
-        return ResolvedModel(
-            repo_id=repo_id,
-            format="pytorch",
-            quantization=quantization,
-            pipeline_tag=pipeline_tag,
-        )
+    return ResolvedModel(
+        repo_id=repo_id,
+        format="pytorch",
+        quantization=quantization,
+        pipeline_tag=pipeline_tag,
+    )
 
 
 def _select_gguf(files: list[str], quant: str | None) -> str:
@@ -174,6 +173,4 @@ def _is_quantization(s: str) -> bool:
         if upper == q or upper == q.replace("_", ""):
             return True
     # Generic pattern: Q followed by number, or F16/F32, or IQ
-    if upper.startswith(("Q", "F", "IQ")) and any(c.isdigit() for c in upper):
-        return True
-    return False
+    return bool(upper.startswith(("Q", "F", "IQ")) and any(c.isdigit() for c in upper))

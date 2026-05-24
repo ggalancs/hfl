@@ -29,20 +29,20 @@ from hfl.hub.recommend import (
 def _entry(**overrides) -> DiscoveryEntry:
     """Build a DiscoveryEntry with reasonable defaults for the field
     not exercised by the test under hand."""
-    base = dict(
-        repo_id="user/model",
-        likes=100,
-        downloads=10_000,
-        last_modified=None,
-        pipeline_tag=None,
-        library=None,
-        license=None,
-        gated=False,
-        tags=[],
-        family=None,
-        quantization=None,
-        parameter_estimate_b=7.0,
-    )
+    base = {
+        "repo_id": "user/model",
+        "likes": 100,
+        "downloads": 10_000,
+        "last_modified": None,
+        "pipeline_tag": None,
+        "library": None,
+        "license": None,
+        "gated": False,
+        "tags": [],
+        "family": None,
+        "quantization": None,
+        "parameter_estimate_b": 7.0,
+    }
     base.update(overrides)
     return DiscoveryEntry(**base)
 

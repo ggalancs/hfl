@@ -31,14 +31,14 @@ WRITE_WIKI_TOOL = {
 
 
 def _result(text: str, **over):
-    base = dict(
-        text=text,
-        tokens_generated=5,
-        tokens_prompt=10,
-        tokens_per_second=50.0,
-        stop_reason="stop",
-        tool_calls=None,
-    )
+    base = {
+        "text": text,
+        "tokens_generated": 5,
+        "tokens_prompt": 10,
+        "tokens_per_second": 50.0,
+        "stop_reason": "stop",
+        "tool_calls": None,
+    }
     base.update(over)
     return MagicMock(**base)
 

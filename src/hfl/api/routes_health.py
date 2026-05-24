@@ -223,12 +223,11 @@ async def health_sli() -> dict[str, Any]:
             if current <= target * 2:
                 return "warning"
             return "critical"
-        else:
-            if current >= target:
-                return "ok"
-            if current >= target * 0.5:
-                return "warning"
-            return "critical"
+        if current >= target:
+            return "ok"
+        if current >= target * 0.5:
+            return "warning"
+        return "critical"
 
     # Memory usage check
     memory_usage = 0.0

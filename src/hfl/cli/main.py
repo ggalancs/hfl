@@ -979,7 +979,7 @@ def search(
                     f"\n[dim]{t('messages.search_finished', shown=end_idx, total=total)}[/]"
                 )
                 break
-            elif key == "p" and current_page > 0:
+            if key == "p" and current_page > 0:
                 current_page -= 1
                 console.print()  # New line before previous page
             elif key.isdigit():
@@ -990,8 +990,7 @@ def search(
                     console.print()
                     _pull_selected_model(selected_model)
                     return
-                else:
-                    console.print()  # Invalid selection, continue
+                console.print()  # Invalid selection, continue
             else:
                 current_page += 1
                 console.print()  # New line before next page

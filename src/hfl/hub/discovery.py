@@ -232,9 +232,7 @@ def _matches_filters(entry: DiscoveryEntry, query: DiscoveryQuery) -> bool:
         return False
     if query.gated is not None and entry.gated != query.gated:
         return False
-    if query.license and (entry.license or "").lower() != query.license.lower():
-        return False
-    return True
+    return not (query.license and (entry.license or "").lower() != query.license.lower())
 
 
 def _entry_from_model_info(info: "ModelInfo") -> DiscoveryEntry:

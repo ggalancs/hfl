@@ -107,8 +107,6 @@ class ToolNotFoundError(ConversionError):
 class LicenseError(HFLError):
     """Error related to model licenses."""
 
-    pass
-
 
 class LicenseNotAcceptedError(LicenseError):
     """The user did not accept the model license."""
@@ -139,8 +137,6 @@ class GatedModelError(LicenseError):
 
 class EngineError(HFLError):
     """Inference engine error."""
-
-    pass
 
 
 class ModelNotLoadedError(EngineError):
@@ -185,8 +181,6 @@ class OutOfMemoryError(EngineError):
 class AuthenticationError(HFLError):
     """Authentication error with HuggingFace."""
 
-    pass
-
 
 class InvalidTokenError(AuthenticationError):
     """Invalid HuggingFace token."""
@@ -215,8 +209,6 @@ class TokenRequiredError(AuthenticationError):
 
 class ConfigurationError(HFLError):
     """Configuration error."""
-
-    pass
 
 
 class InvalidConfigError(ConfigurationError):

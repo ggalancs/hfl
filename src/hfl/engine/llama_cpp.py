@@ -788,7 +788,7 @@ class LlamaCppEngine(InferenceEngine):
         from hfl.config import config as hfl_config
 
         verbose = kwargs.get("verbose", False)
-        user_n_ctx = kwargs.get("n_ctx", None)
+        user_n_ctx = kwargs.get("n_ctx")
         explicit_n_ctx = user_n_ctx is not None and user_n_ctx > 0
         n_ctx = user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size
         # Phase 11 P1 — V2 row 13 VRAM auto-sizing moved *after* the
@@ -978,15 +978,15 @@ class LlamaCppEngine(InferenceEngine):
             # Suppress Metal/CUDA initialization messages if verbose=False
             context = _suppress_stderr if not verbose else _nullcontext
             with context():
-                llama_kwargs: dict = dict(
-                    model_path=model_path,
-                    n_ctx=n_ctx,
-                    n_gpu_layers=n_gpu_layers,
-                    n_threads=kwargs.get("n_threads", 0) or None,
-                    verbose=verbose,
-                    flash_attn=flash_attn,
-                    chat_format=chat_format,
-                )
+                llama_kwargs: dict = {
+                    "model_path": model_path,
+                    "n_ctx": n_ctx,
+                    "n_gpu_layers": n_gpu_layers,
+                    "n_threads": kwargs.get("n_threads", 0) or None,
+                    "verbose": verbose,
+                    "flash_attn": flash_attn,
+                    "chat_format": chat_format,
+                }
                 # Phase 11 P1: KV cache quantisation. Maps
                 # ``"q4_0"`` / ``"q8_0"`` strings to llama-cpp's
                 # ``type_k`` / ``type_v`` integer enum. ``"f16"`` is
@@ -1168,15 +1168,15 @@ class LlamaCppEngine(InferenceEngine):
         # Phase 12 P1 — V2 row 7. llama-cpp's ``__call__`` accepts
         # ``logprobs`` directly; passing 0 keeps them off (library
         # default).
-        call_kwargs: dict = dict(
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            top_k=cfg.top_k,
-            repeat_penalty=cfg.repeat_penalty,
-            stop=cfg.stop,
-            seed=cfg.seed if cfg.seed >= 0 else None,
-        )
+        call_kwargs: dict = {
+            "max_tokens": cfg.max_tokens,
+            "temperature": cfg.temperature,
+            "top_p": cfg.top_p,
+            "top_k": cfg.top_k,
+            "repeat_penalty": cfg.repeat_penalty,
+            "stop": cfg.stop,
+            "seed": cfg.seed if cfg.seed >= 0 else None,
+        }
         if cfg.logprobs and cfg.logprobs > 0:
             call_kwargs["logprobs"] = cfg.logprobs
 
@@ -1367,15 +1367,15 @@ class LlamaCppEngine(InferenceEngine):
 
         msgs = self._messages_to_llama_cpp(messages)
 
-        kwargs: dict = dict(
-            messages=msgs,
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            top_k=cfg.top_k,
-            repeat_penalty=cfg.repeat_penalty,
-            stop=self._build_stop_list(cfg.stop, tools),
-        )
+        kwargs: dict = {
+            "messages": msgs,
+            "max_tokens": cfg.max_tokens,
+            "temperature": cfg.temperature,
+            "top_p": cfg.top_p,
+            "top_k": cfg.top_k,
+            "repeat_penalty": cfg.repeat_penalty,
+            "stop": self._build_stop_list(cfg.stop, tools),
+        }
         if tools:
             # llama-cpp-python >= 0.3.0 forwards ``tools`` into the chat
             # template and parses tool calls back into the response.
@@ -1496,16 +1496,16 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         msgs = self._messages_to_llama_cpp(messages)
 
-        kwargs: dict = dict(
-            messages=msgs,
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            top_k=cfg.top_k,
-            repeat_penalty=cfg.repeat_penalty,
-            stop=self._build_stop_list(cfg.stop, tools),
-            stream=True,
-        )
+        kwargs: dict = {
+            "messages": msgs,
+            "max_tokens": cfg.max_tokens,
+            "temperature": cfg.temperature,
+            "top_p": cfg.top_p,
+            "top_k": cfg.top_k,
+            "repeat_penalty": cfg.repeat_penalty,
+            "stop": self._build_stop_list(cfg.stop, tools),
+            "stream": True,
+        }
         if tools:
             kwargs["tools"] = tools
 
