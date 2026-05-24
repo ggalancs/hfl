@@ -278,7 +278,11 @@ class TransformersEmbeddingEngine(EmbeddingEngine):
             else:
                 device = "cpu"
 
-        trust_remote_code = kwargs.pop("trust_remote_code", False)
+        from hfl.security import remote_code_allowed
+
+        # Gate trust_remote_code behind operator opt-in (HFL_ALLOW_REMOTE_CODE);
+        # an untrusted caller must never be able to execute model-repo Python.
+        trust_remote_code = bool(kwargs.pop("trust_remote_code", False)) and remote_code_allowed()
         self._tokenizer = AutoTokenizer.from_pretrained(
             model_path, trust_remote_code=trust_remote_code
         )

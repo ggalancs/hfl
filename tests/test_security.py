@@ -148,3 +148,27 @@ class TestChecksumFunctions:
         # Just verify it completes without error
         hash_value = compute_file_hash(test_file)
         assert len(hash_value) == 64  # SHA256 hex length
+
+
+class TestRemoteCodeAllowed:
+    """trust_remote_code must be operator-gated (HFL_ALLOW_REMOTE_CODE)."""
+
+    def test_off_by_default(self, monkeypatch):
+        from hfl.security import remote_code_allowed
+
+        monkeypatch.delenv("HFL_ALLOW_REMOTE_CODE", raising=False)
+        assert remote_code_allowed() is False
+
+    @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on", " On "])
+    def test_enabled_by_truthy_env(self, monkeypatch, val):
+        from hfl.security import remote_code_allowed
+
+        monkeypatch.setenv("HFL_ALLOW_REMOTE_CODE", val)
+        assert remote_code_allowed() is True
+
+    @pytest.mark.parametrize("val", ["", "0", "false", "no", "off", "maybe"])
+    def test_disabled_by_falsy_env(self, monkeypatch, val):
+        from hfl.security import remote_code_allowed
+
+        monkeypatch.setenv("HFL_ALLOW_REMOTE_CODE", val)
+        assert remote_code_allowed() is False

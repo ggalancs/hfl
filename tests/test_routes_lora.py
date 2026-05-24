@@ -43,8 +43,11 @@ def llm_manifest():
 
 
 @pytest.fixture
-def adapter_file(tmp_path):
-    p = tmp_path / "adapter.safetensors"
+def adapter_file(temp_dir):
+    # Adapters reachable over HTTP must live under the HFL data dir: the route
+    # contains lora_path to config.home_dir (== temp_dir under temp_config).
+    p = temp_dir / "adapters" / "adapter.safetensors"
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"\x00" * 32)
     return str(p)
 
@@ -69,18 +72,43 @@ class TestApplyLoraRoute:
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["path"] == adapter_file
+        # The route applies the *contained, resolved* path (symlinks collapsed,
+        # e.g. /var -> /private/var on macOS), so compare canonically.
+        from pathlib import Path
+
+        assert Path(body["path"]) == Path(adapter_file).resolve()
         assert body["scale"] == 0.6
         assert "adapter_id" in body
 
-    def test_missing_path_returns_404(self, client, llm_manifest, tmp_path):
+    def test_missing_path_returns_404(self, client, llm_manifest, temp_dir):
         _wire_engine(llm_manifest)
-        ghost = tmp_path / "ghost.safetensors"
+        # Missing file, but inside the HFL data dir so it clears containment
+        # and fails at the file-existence check (404, not the 400 path guard).
+        ghost = temp_dir / "ghost.safetensors"
         response = client.post(
             "/api/lora/apply",
             json={"model": llm_manifest.name, "lora_path": str(ghost)},
         )
         assert response.status_code == 404
+
+    def test_apply_rejects_path_outside_home(self, client, llm_manifest, tmp_path):
+        # SSRF/LFI hardening: a lora_path outside the HFL data dir (here a
+        # foreign tmp dir) or a traversal string is rejected with 400 before
+        # the engine ever opens it.
+        _wire_engine(llm_manifest)
+        outside = tmp_path / "evil.safetensors"
+        outside.write_bytes(b"\x00" * 32)
+        resp = client.post(
+            "/api/lora/apply",
+            json={"model": llm_manifest.name, "lora_path": str(outside)},
+        )
+        assert resp.status_code == 400
+
+        resp2 = client.post(
+            "/api/lora/apply",
+            json={"model": llm_manifest.name, "lora_path": "../../../../etc/passwd"},
+        )
+        assert resp2.status_code == 400
 
     def test_invalid_scale_returns_400(self, client, llm_manifest, adapter_file):
         _wire_engine(llm_manifest)

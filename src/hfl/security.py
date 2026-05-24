@@ -13,10 +13,26 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def remote_code_allowed() -> bool:
+    """Whether executing model-repo Python is permitted (transformers
+    ``trust_remote_code``).
+
+    Defaults to OFF. Only the operator running the server can enable it, via
+    the ``HFL_ALLOW_REMOTE_CODE`` env var. This is a hard gate so that an
+    untrusted request body / Modelfile can never flip ``trust_remote_code`` on
+    and turn "load this HuggingFace repo" into arbitrary code execution.
+    """
+    return os.environ.get("HFL_ALLOW_REMOTE_CODE", "").strip().lower() in _TRUTHY
+
 
 logger = logging.getLogger(__name__)
 

@@ -21,8 +21,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import hfl.config
 from hfl.api.model_loader import load_llm
 from hfl.engine.lora import apply_lora, list_loras, remove_lora
+from hfl.security import PathTraversalError, sanitize_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,14 @@ class RemoveLoraRequest(BaseModel):
     },
 )
 async def api_lora_apply(req: ApplyLoraRequest) -> dict[str, Any]:
+    # Contain the adapter path to the HFL data dir BEFORE loading anything:
+    # over HTTP, lora_path is untrusted and must not be allowed to point at
+    # arbitrary files (e.g. /etc/passwd, ~/.ssh/id_rsa) for the engine to read.
+    try:
+        safe_lora_path = str(sanitize_path(hfl.config.config.home_dir, req.lora_path))
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
@@ -61,7 +71,7 @@ async def api_lora_apply(req: ApplyLoraRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
-        info = apply_lora(engine, lora_path=req.lora_path, scale=req.scale, name=req.name)
+        info = apply_lora(engine, lora_path=safe_lora_path, scale=req.scale, name=req.name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

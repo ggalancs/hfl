@@ -53,18 +53,49 @@ class TestModelLoaderPassesAdapterPaths:
         gguf.parent.mkdir(parents=True, exist_ok=True)
         gguf.write_bytes(b"fake")
 
+        # Adapters must live under the HFL data dir; the loader contains them.
+        ad_dir = temp_config.home_dir / "adapters"
+        ad_dir.mkdir(parents=True, exist_ok=True)
+        ad1, ad2 = ad_dir / "a.gguf", ad_dir / "b.gguf"
+        ad1.write_bytes(b"x")
+        ad2.write_bytes(b"x")
+
         manifest = ModelManifest(
             name="withlora",
             repo_id="org/withlora",
             local_path=str(gguf),
             format="gguf",
-            adapter_paths=["/abs/a.gguf", "/abs/b.gguf"],
+            adapter_paths=[str(ad1), str(ad2)],
         )
         get_registry().add(manifest)
 
         ml.load_llm_sync("withlora")
         _, kwargs = fake_engine.load.call_args
-        assert kwargs["lora_paths"] == ["/abs/a.gguf", "/abs/b.gguf"]
+        # Loader forwards the contained, resolved adapter paths.
+        assert kwargs["lora_paths"] == [str(ad1.resolve()), str(ad2.resolve())]
+
+    def test_adapter_path_traversal_rejected(self, temp_config, monkeypatch):
+        # An ADAPTER path escaping the HFL data dir is refused before load.
+        from hfl.api import model_loader as ml
+
+        monkeypatch.setattr(ml, "select_engine", lambda _p: MagicMock())
+        monkeypatch.setattr(ml, "detect_model_type", lambda _p: ml.ModelType.LLM)
+
+        gguf = temp_config.home_dir / "models" / "m.gguf"
+        gguf.parent.mkdir(parents=True, exist_ok=True)
+        gguf.write_bytes(b"fake")
+
+        manifest = ModelManifest(
+            name="evil-lora",
+            repo_id="org/evil",
+            local_path=str(gguf),
+            format="gguf",
+            adapter_paths=["/etc/passwd"],
+        )
+        get_registry().add(manifest)
+
+        with pytest.raises(ValueError, match="adapter path rejected"):
+            ml.load_llm_sync("evil-lora")
 
     def test_no_adapters_no_lora_kwarg(self, temp_config, monkeypatch):
         from hfl.api import model_loader as ml
