@@ -234,3 +234,99 @@ class TestOpenAIToolCalling:
 
         finishes = [c["choices"][0]["finish_reason"] for c in chunks]
         assert "tool_calls" in finishes
+
+
+GET_TIME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_time",
+        "description": "Get the current time",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+class TestOpenAIToolChoice:
+    @pytest.fixture(autouse=True)
+    def reset_state(self):
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
+        yield
+        get_state().api_key = None
+        get_state().engine = None
+        get_state().current_model = None
+
+    def _wire(self, engine: MagicMock) -> TestClient:
+        engine.is_loaded = True
+        model = MagicMock()
+        model.name = "qwen3-32b"
+        get_state().engine = engine
+        get_state().current_model = model
+        return TestClient(app)
+
+    def test_tool_choice_none_suppresses_tool_calls(self):
+        """tool_choice='none' drops tools: a tool-call marker stays plain text."""
+        engine = MagicMock()
+        # Even though the model emits a tool-call marker, with tools suppressed
+        # the parser never runs, so it must surface as content.
+        engine.chat.return_value = _result(
+            '<tool_call>\n{"name": "write_wiki", "arguments": {"path": "x"}}\n</tool_call>'
+        )
+        client = self._wire(engine)
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "qwen3-32b",
+                "messages": [{"role": "user", "content": "save x"}],
+                "tools": [WRITE_WIKI_TOOL],
+                "tool_choice": "none",
+            },
+        )
+        assert resp.status_code == 200
+        choice = resp.json()["choices"][0]
+        assert choice["finish_reason"] == "stop"
+        assert choice["message"].get("tool_calls") is None
+        assert "write_wiki" in choice["message"]["content"]
+        # Tools were NOT forwarded to the engine.
+        assert engine.chat.call_args.kwargs.get("tools") is None
+
+    def test_tool_choice_specific_function_narrows_tools(self):
+        """A forced function forwards only that tool to the engine."""
+        engine = MagicMock()
+        engine.chat.return_value = _result("ok")
+        client = self._wire(engine)
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "qwen3-32b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [WRITE_WIKI_TOOL, GET_TIME_TOOL],
+                "tool_choice": {"type": "function", "function": {"name": "get_time"}},
+            },
+        )
+        assert resp.status_code == 200
+        forwarded = engine.chat.call_args.kwargs.get("tools")
+        assert isinstance(forwarded, list) and len(forwarded) == 1
+        assert forwarded[0]["function"]["name"] == "get_time"
+
+    def test_tool_choice_auto_forwards_all_tools(self):
+        """tool_choice='auto' keeps the full tool list (default behaviour)."""
+        engine = MagicMock()
+        engine.chat.return_value = _result("ok")
+        client = self._wire(engine)
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "qwen3-32b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [WRITE_WIKI_TOOL, GET_TIME_TOOL],
+                "tool_choice": "auto",
+            },
+        )
+        assert resp.status_code == 200
+        forwarded = engine.chat.call_args.kwargs.get("tools")
+        assert isinstance(forwarded, list) and len(forwarded) == 2
