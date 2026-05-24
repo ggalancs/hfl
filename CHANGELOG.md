@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-05-24
+
+**Agent compatibility, security hardening, and a code-quality pass.**
+
+### Added — OpenAI-compatible tool calling (#20, #21)
+
+- ``POST /v1/chat/completions`` now accepts ``tools`` / ``tool_choice`` and
+  emits structured ``tool_calls`` in the OpenAI wire shape (``id`` /
+  ``type`` / ``function`` with a JSON-string ``arguments``, and
+  ``finish_reason: "tool_calls"``), for both non-streaming and streaming
+  responses, plus multi-turn ``role: tool`` round-trips. Per-family markers
+  are lifted via the existing tool parser; streaming buffers tool-aware
+  turns so a raw ``<tool_call>`` marker never leaks as content. This
+  unblocks OpenAI-SDK / Vercel-AI-SDK agents (e.g. Terax) against
+  ``/v1/chat/completions`` (previously only ``/api/chat`` parsed tools).
+- ``tool_choice`` honoured to the extent a parse-based backend can:
+  ``"none"`` is a hard opt-out (tools dropped, output never scanned for
+  markers); ``{"type":"function","function":{"name":"X"}}`` narrows to tool
+  ``X``; ``"auto"`` / ``"required"`` forward all declared tools.
+
+### Security
+
+- **SSRF (``web_fetch``)** — redirects are re-validated on every hop, so a
+  public URL can no longer 302 the fetch onto an internal / loopback /
+  cloud-metadata address (``169.254.169.254``, ``127.0.0.1``). Previously
+  only the initial hostname's IPs were checked. (#23)
+- **Arbitrary file load** — ``lora_path`` / Modelfile ``ADAPTER`` paths
+  (``/api/lora/apply``, ``/api/create``) and ``FROM <local path>`` are now
+  contained to the HFL data dir (``config.home_dir``) via
+  ``security.sanitize_path``, so a request can't make the engine open
+  ``/etc/passwd``, ``~/.ssh/id_rsa``, etc. Import external files via
+  ``POST /api/blobs``. (#23, #24)
+- **``trust_remote_code`` (RCE)** — gated behind an operator-only opt-in
+  (``HFL_ALLOW_REMOTE_CODE``); an untrusted request / Modelfile can no
+  longer enable execution of model-repo Python. (#23)
+- Security test coverage raised on the untrusted-input validators:
+  ``api.image_validator`` 79 → 99 %, ``observability.signing`` 74 → 97 %. (#22)
+
+### Changed — Code quality
+
+- Behaviour-preserving simplifications across the codebase
+  (flake8-comprehensions / -pie / SIM / RET / PERF / RUF). (#25)
+- Explicit exception chaining at 88 sites
+  (``raise ... from exc`` / ``from None``) so server tracebacks keep the
+  original cause instead of discarding it. (#26)
+- ruff lint now enforces ``C4``, ``PIE`` and ``B904`` so these antipatterns
+  can't silently regress.
+
+---
+
 ## [0.12.2] - 2026-04-17
 
 **Phase 18 of OLLAMA_PARITY_PLAN_V2 — Polish. Plan V2 complete.**
