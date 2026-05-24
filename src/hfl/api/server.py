@@ -37,6 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from hfl import __version__
 from hfl.api.exception_handlers import register_exception_handlers
 from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
@@ -197,7 +198,7 @@ _openapi_tags = [
 app = FastAPI(
     title="hfl API",
     description="OpenAI, Ollama, and Anthropic compatible API for HuggingFace models",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
     openapi_tags=_openapi_tags,
 )
