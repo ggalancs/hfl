@@ -12,6 +12,8 @@ Security posture:
   address lands on a private / loopback / link-local range. This
   prevents SSRF against cloud-metadata endpoints (169.254.169.254)
   and internal services.
+- Redirects are followed manually and re-validated on every hop, so a
+  public URL cannot 302 the fetch onto an internal/metadata address.
 - Response body is capped at 5 MiB by default.
 - Charset is sniffed from the Content-Type header and falls back to
   UTF-8 with replacement errors.
@@ -25,7 +27,7 @@ import re
 import socket
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -35,6 +37,7 @@ __all__ = ["WebFetchError", "fetch"]
 
 _DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
+_MAX_REDIRECTS = 3
 
 
 class WebFetchError(ValueError):
@@ -78,7 +81,7 @@ def _validate_url(url: str) -> str:
     except (socket.gaierror, OSError) as exc:
         raise WebFetchError("hostname does not resolve") from exc
     for info in infos:
-        addr = info[4][0]
+        addr = str(info[4][0])
         if _is_private_ip(addr):
             raise WebFetchError("URL resolves to a private or reserved address — refusing to fetch")
 
@@ -165,19 +168,28 @@ async def fetch(
     failures, which the route turns into a 400.
     """
     cleaned_url = _validate_url(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
+        "Accept": "text/html,application/xhtml+xml",
+    }
     try:
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            max_redirects=3,
-        ) as client:
-            resp = await client.get(
-                cleaned_url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-            )
+        # Redirects are followed manually so every hop is re-validated by the
+        # SSRF guard. httpx's own follow_redirects would chase a 302 to
+        # 169.254.169.254 / 127.0.0.1 without re-checking, defeating the guard.
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            current = cleaned_url
+            for _ in range(_MAX_REDIRECTS + 1):
+                resp = await client.get(current, headers=headers)
+                if not resp.is_redirect:
+                    break
+                location = resp.headers.get("location")
+                if not location:
+                    break
+                # Resolve relative redirects against the current URL, then run
+                # the full scheme + private-IP guard again before following.
+                current = _validate_url(urljoin(current, location))
+            else:
+                raise WebFetchError("too many redirects")
             body_bytes = resp.content[:max_bytes]
             charset = resp.charset_encoding or "utf-8"
             try:
