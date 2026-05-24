@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import Response, StreamingResponse
 
+from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
@@ -209,27 +210,11 @@ def _build_chat_message(
       (spec rule C4).
     - ``tool_calls`` is always a list (spec rule C7): empty when none.
     """
-    # Only trust structured tool_calls from the engine if they are an
-    # actual list — MagicMock auto-attrs in unit tests would otherwise
-    # masquerade as populated data.
-    if isinstance(engine_tool_calls, list) and engine_tool_calls:
-        return {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": engine_tool_calls,
-        }
-
-    cleaned, parsed_calls = parse_tool_calls(raw_text, model_name, tools)
-    if parsed_calls:
-        return {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": parsed_calls,
-        }
+    out = resolve_chat_output(raw_text, model_name, tools, engine_tool_calls)
     return {
         "role": "assistant",
-        "content": cleaned,
-        "tool_calls": [],
+        "content": out.content,
+        "tool_calls": out.tool_calls,
     }
 
 
@@ -767,7 +752,9 @@ async def api_tags() -> dict[str, Any]:
 @router.get("/api/version", tags=["Ollama"], summary="Get server version")
 async def api_version() -> dict[str, str]:
     """Server version (Ollama compatible)."""
-    return {"version": "0.1.0"}
+    from hfl import __version__
+
+    return {"version": __version__}
 
 
 @router.head("/")

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 from fastapi import APIRouter
 from fastapi.responses import Response, StreamingResponse
 
+from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import openai_to_generation_config
 from hfl.api.errors import service_unavailable
 from hfl.api.helpers import (
@@ -220,27 +221,27 @@ async def chat_completions(
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
 
-    # Prefer the engine's structured tool_calls; otherwise recover them from
-    # the generated text via the per-family parser (spec rule C4). When a
-    # tool call is present, ``content`` is null and finish_reason flips to
-    # ``tool_calls`` so OpenAI-SDK agent loops dispatch instead of stopping.
-    engine_tool_calls = getattr(result, "tool_calls", None)
-    if tools_disabled:
-        canonical: list[dict] = []
-        content_out: str | None = result.text
-    elif isinstance(engine_tool_calls, list) and engine_tool_calls:
-        canonical = engine_tool_calls
-        content_out = ""
-    else:
-        cleaned, canonical = parse_tool_calls(result.text, req.model, tools)
-        content_out = cleaned if not canonical else ""
-
-    message: dict[str, Any] = {"role": "assistant", "content": content_out}
-    finish_reason = result.stop_reason
-    if canonical:
-        message["content"] = None
-        message["tool_calls"] = _to_openai_tool_calls(canonical)
+    # Shared decision (see chat_core): prefer engine tool_calls, else parse
+    # markers; "none" disables both. When a tool call is present, content is
+    # null and finish_reason flips to ``tool_calls`` so OpenAI-SDK agent loops
+    # dispatch instead of stopping.
+    resolved = resolve_chat_output(
+        result.text,
+        req.model,
+        tools,
+        getattr(result, "tool_calls", None),
+        tools_disabled=tools_disabled,
+    )
+    if resolved.has_tool_calls:
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": _to_openai_tool_calls(resolved.tool_calls),
+        }
         finish_reason = "tool_calls"
+    else:
+        message = {"role": "assistant", "content": resolved.content}
+        finish_reason = result.stop_reason
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
