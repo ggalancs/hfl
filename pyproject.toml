@@ -6,8 +6,41 @@ build-backend = "hatchling.build"
 name = "hfl"
 version = "0.13.0"
 description = "Run HuggingFace models locally like Ollama"
+readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
+authors = [{name = "Gabriel Galán Pelayo"}]
+keywords = [
+    "huggingface",
+    "llm",
+    "ollama",
+    "gguf",
+    "local-llm",
+    "llama-cpp",
+    "mlx",
+    "vllm",
+    "inference",
+    "model-serving",
+    "openai-api",
+    "self-hosted",
+    "ai",
+    "transformers",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Environment :: Console",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     # Using ~= (compatible release) for stability: allows patch updates only
     "typer>=0.15.0,<1.0",
@@ -136,6 +169,13 @@ build = ["pyinstaller>=6.0"]
 
 [project.scripts]
 hfl = "hfl.cli.main:app"
+
+[project.urls]
+Homepage = "https://ggalancs.github.io/hfl/"
+Documentation = "https://ggalancs.github.io/hfl/"
+Repository = "https://github.com/ggalancs/hfl"
+Issues = "https://github.com/ggalancs/hfl/issues"
+Changelog = "https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hfl"]
