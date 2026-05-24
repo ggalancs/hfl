@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for ``LlamaCppEngine`` memory-safety guards.
 
 These tests exist because of a real incident: loading a Gemma 4 GGUF

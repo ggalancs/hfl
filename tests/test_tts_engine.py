@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Tests for TTS engine classes and related functionality."""
 
 import numpy as np

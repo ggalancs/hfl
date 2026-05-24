@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Tests for CLI helper functions."""
 
 from hfl.cli.commands._utils import (

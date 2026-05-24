@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the ``tokenizer.ggml.add_bos_token`` plumbing (Phase 11 P1)."""
 

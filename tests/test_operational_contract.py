@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the operational §5 contract in the tool-calling spec.
 
 Covers:

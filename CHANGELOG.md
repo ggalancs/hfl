@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — Relicensed to Apache-2.0 + Safeguards policy
+
+- hfl is now licensed under the **Apache License 2.0** (was the custom
+  source-available HRUL v1.0). This makes it a real OSI open-source project —
+  better adoption, packaging, and trust. The historical HRUL text is kept at
+  ``LICENSE-HRUL-1.0.txt``.
+- The five responsible-use **Safeguards** (license verification, provenance,
+  AI-output disclaimer, privacy protection, model gating) are now protected
+  through the project's **trademark policy** (``SAFEGUARDS.md`` + ``NOTICE``)
+  rather than copyright conditions: the Apache-licensed code is unrestricted,
+  but a distribution presented *as* "hfl" must keep the Safeguards active.
+- Packaging discoverability: PyPI ``readme`` / ``keywords`` / ``classifiers``
+  / ``project.urls`` populated; GitHub "About" homepage + topics expanded.
+
 ## [0.13.0] - 2026-05-24
 
 **Agent compatibility, security hardening, and a code-quality pass.**

@@ -1,0 +1,10 @@
+hfl — Run HuggingFace models locally like Ollama
+Copyright 2026 Gabriel Galán Pelayo
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+hfl ships a set of responsible-use Safeguards — license verification,
+provenance tracking, AI-output disclaimers, privacy protection, and model
+gating. The Apache-2.0 license places no restriction on the code itself, but
+use of the "hfl" name and official distributions is conditioned on keeping
+those Safeguards active. See SAFEGUARDS.md.

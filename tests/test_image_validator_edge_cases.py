@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Security edge cases for image_validator.
 
 Complements ``test_image_validator.py`` (happy paths + main gates) by

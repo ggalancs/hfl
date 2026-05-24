@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """End-to-end acceptance suite for ``hfl-tool-calling-spec.md`` §6.
 
 These are the tests that llm-kb (the compiler agent) must see pass for
