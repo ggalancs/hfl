@@ -48,15 +48,59 @@ class ImageContentPart(BaseModel):
 ContentPart = Union[TextContentPart, ImageContentPart]
 
 
+# ----------------------------------------------------------------------
+# Tool calling (OpenAI function-calling wire format)
+# ----------------------------------------------------------------------
+
+
+class FunctionDefinition(BaseModel):
+    """The ``function`` body of an OpenAI tool definition."""
+
+    name: str = Field(..., min_length=1, max_length=64)
+    description: str = Field(default="", max_length=4_096)
+    # JSON Schema for the arguments object. Kept as a free-form dict so we
+    # forward whatever the client declared straight to the chat template.
+    parameters: dict = Field(default_factory=dict)
+
+
+class ToolDefinition(BaseModel):
+    """An OpenAI ``tools[]`` entry (``{"type":"function","function":{...}}``)."""
+
+    type: Literal["function"] = "function"
+    function: FunctionDefinition
+
+
+class ToolCallFunction(BaseModel):
+    """The ``function`` body of an assistant tool call.
+
+    ``arguments`` is a JSON **string** on the OpenAI wire (not an object) —
+    this mirrors OpenAI exactly so SDK clients parse it the way they expect.
+    """
+
+    name: str = Field(..., min_length=1, max_length=64)
+    arguments: str = Field(default="{}")
+
+
+class ToolCall(BaseModel):
+    """An assistant tool call in OpenAI shape."""
+
+    id: str = Field(..., min_length=1, max_length=128)
+    type: Literal["function"] = "function"
+    function: ToolCallFunction
+
+
 class ChatCompletionMessage(BaseModel):
     """A single message in a chat conversation.
 
     Attributes:
-        role: The role of the message author (system, user, assistant).
-        content: Either a plain string (text-only, classical chat) or
-            a list of content parts (vision requests, OpenAI-style).
-            The bounded-length invariant is the same in both cases:
-            total textual length ≤ 2_000_000 characters.
+        role: The role of the message author (system, user, assistant, tool).
+        content: Either a plain string (text-only, classical chat), a list of
+            content parts (vision requests, OpenAI-style), or ``None`` (an
+            assistant turn that carries only ``tool_calls``).
+        tool_calls: present on an assistant turn requesting function calls.
+        tool_call_id: present on a ``role=tool`` result, linking it to the
+            assistant call it answers.
+        name: optional function name on a ``role=tool`` result.
     """
 
     role: str = Field(
@@ -64,17 +108,33 @@ class ChatCompletionMessage(BaseModel):
         min_length=1,
         max_length=32,
         description="Role of the message author",
-        examples=["user", "assistant", "system"],
+        examples=["user", "assistant", "system", "tool"],
     )
-    content: str | list[ContentPart] = Field(
-        ...,
-        description="Text-only content OR a list of text/image parts (vision).",
+    content: str | list[ContentPart] | None = Field(
+        default=None,
+        description="Text content, a list of text/image parts, or null for a tool-call-only turn.",
+    )
+    tool_calls: list[ToolCall] | None = Field(
+        default=None,
+        description="Function calls emitted by the assistant.",
+    )
+    tool_call_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Id of the assistant tool call this tool result answers.",
+    )
+    name: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Function name for a role=tool result.",
     )
 
     @field_validator("content")
     @classmethod
-    def _bound_content(cls, v: str | list[ContentPart]) -> str | list[ContentPart]:
+    def _bound_content(cls, v: str | list[ContentPart] | None) -> str | list[ContentPart] | None:
         """Enforce size caps on both the string and list shapes."""
+        if v is None:
+            return v
         if isinstance(v, str):
             if len(v) > 2_000_000:
                 raise ValueError("content string exceeds 2_000_000 characters")
@@ -168,6 +228,15 @@ class ChatCompletionRequest(BaseModel):
             "conformance. See OLLAMA_PARITY_PLAN P0-5."
         ),
     )
+    tools: list[ToolDefinition] | None = Field(
+        None,
+        max_length=128,
+        description="Function definitions the model may call (OpenAI function-calling).",
+    )
+    tool_choice: str | dict | None = Field(
+        None,
+        description="OpenAI tool_choice hint; accepted for compatibility.",
+    )
 
     @field_validator("messages")
     @classmethod
@@ -180,6 +249,8 @@ class ChatCompletionRequest(BaseModel):
         """
         total = 0
         for m in v:
+            if m.content is None:
+                continue
             if isinstance(m.content, str):
                 total += len(m.content)
             else:
