@@ -200,7 +200,20 @@ def _resolve_from(
     # Absolute or relative file path?
     path = Path(source)
     if path.exists() and path.is_file():
-        return str(path.resolve()), None, None
+        # FROM <local path> is untrusted over HTTP: contain it to the HFL data
+        # dir so a request can't register (and then load) an arbitrary file
+        # such as /etc/passwd or ~/.ssh/id_rsa as a "model".
+        import hfl.config
+        from hfl.security import PathTraversalError, sanitize_path
+
+        try:
+            contained = sanitize_path(hfl.config.config.home_dir, source)
+        except PathTraversalError as exc:
+            raise ValueError(
+                "FROM local path must be inside the HFL data dir "
+                "(use POST /api/blobs to import an external file)"
+            ) from exc
+        return str(contained), None, None
 
     # Existing model name / alias?
     registry = get_registry()
