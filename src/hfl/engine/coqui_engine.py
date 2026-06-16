@@ -13,7 +13,7 @@ Supported models:
 """
 
 import io
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 import numpy as np
 
@@ -24,7 +24,7 @@ class CoquiEngine(AudioEngine):
     """TTS engine using Coqui TTS library."""
 
     def __init__(self):
-        self._tts = None
+        self._tts: Any = None
         self._model_name: str = ""
         self._sample_rate: int = 22050
 
@@ -101,7 +101,7 @@ class CoquiEngine(AudioEngine):
         config = config or TTSConfig()
 
         # Prepare synthesis parameters
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
 
         # Language (for multilingual models like XTTS)
         if self._is_multilingual():
@@ -249,7 +249,7 @@ class CoquiEngine(AudioEngine):
         try:
             import torch
 
-            return torch.cuda.is_available()
+            return cast(bool, torch.cuda.is_available())
         except ImportError:
             return False
 
@@ -262,13 +262,13 @@ class CoquiEngine(AudioEngine):
             audio_tensor = torch.from_numpy(audio).unsqueeze(0).float()
             resampler = torchaudio.transforms.Resample(orig_sr, target_sr)
             resampled = resampler(audio_tensor)
-            return resampled.squeeze().numpy()
+            return cast(np.ndarray, resampled.squeeze().numpy())
         except ImportError:
             # Fallback: simple linear interpolation
             duration = len(audio) / orig_sr
             target_length = int(duration * target_sr)
             indices = np.linspace(0, len(audio) - 1, target_length)
-            return np.interp(indices, np.arange(len(audio)), audio)
+            return cast(np.ndarray, np.interp(indices, np.arange(len(audio)), audio))
 
     def _encode_audio(self, audio: np.ndarray, sample_rate: int, fmt: str) -> bytes:
         """Encode numpy audio array to bytes in the specified format."""

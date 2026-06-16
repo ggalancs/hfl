@@ -88,7 +88,7 @@ class WhisperEngine:
         if not is_available():
             raise RuntimeError("No Whisper backend installed. `pip install 'hfl[stt]'` adds one.")
         try:
-            from faster_whisper import WhisperModel  # type: ignore
+            from faster_whisper import WhisperModel
 
             self._model = WhisperModel(
                 model,
@@ -102,7 +102,7 @@ class WhisperEngine:
         except ImportError:
             pass
         try:
-            import whisper  # type: ignore
+            import whisper
 
             self._model = whisper.load_model(model)
             self._backend = "openai_whisper"

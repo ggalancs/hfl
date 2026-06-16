@@ -25,12 +25,13 @@ This design ensures that:
 from huggingface_hub import HfApi, get_token
 from huggingface_hub.utils import HfHubHTTPError
 
+from hfl.config import config
+
+LocalTokenNotFoundError: type[BaseException]
 try:
-    from huggingface_hub.utils import LocalTokenNotFoundError
+    from huggingface_hub.utils import LocalTokenNotFoundError as LocalTokenNotFoundError
 except ImportError:
     LocalTokenNotFoundError = Exception
-
-from hfl.config import config
 
 
 def get_hf_token() -> str | None:

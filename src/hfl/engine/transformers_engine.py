@@ -9,7 +9,7 @@ Supports dynamic quantization via bitsandbytes.
 
 import logging
 import time
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
@@ -25,8 +25,8 @@ class TransformersEngine(InferenceEngine):
     """HuggingFace Transformers inference engine."""
 
     def __init__(self):
-        self._model = None
-        self._tokenizer = None
+        self._model: Any = None
+        self._tokenizer: Any = None
         self._model_id = ""
 
     def load(self, model_path: str, **kwargs) -> None:
@@ -155,11 +155,11 @@ class TransformersEngine(InferenceEngine):
             if tools:
                 template_kwargs["tools"] = tools
             try:
-                return self._tokenizer.apply_chat_template(msgs, **template_kwargs)
+                return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
             except TypeError:
                 # Older transformers / templates without ``tools`` kwarg
                 template_kwargs.pop("tools", None)
-                return self._tokenizer.apply_chat_template(msgs, **template_kwargs)
+                return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
 
         # Generic fallback (no template, no tool awareness)
         parts = []
@@ -252,7 +252,7 @@ class TransformersEngine(InferenceEngine):
         cancel = Event()
         if isinstance(StoppingCriteria, type):
 
-            class _Cancelled(StoppingCriteria):  # type: ignore[misc, valid-type]
+            class _Cancelled(StoppingCriteria):
                 def __call__(self, input_ids, scores, **kwargs):  # noqa: ANN001
                     return cancel.is_set()
 

@@ -138,7 +138,7 @@ def _measure_one(engine: "InferenceEngine", prompt: str, max_tokens: int) -> Ben
         first = None
         tokens = 0
         try:
-            stream = engine.generate_stream(prompt, cfg)  # type: ignore[attr-defined]
+            stream = engine.generate_stream(prompt, cfg)
             for tok in stream:
                 if first is None:
                     first = time.perf_counter()

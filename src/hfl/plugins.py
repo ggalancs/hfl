@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import importlib
 import time
-from typing import TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Any, Callable, Type
 
 from hfl.logging_config import get_logger
 
@@ -20,27 +20,29 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 # Engine discovery cache
-_engine_cache: dict[str, Type["InferenceEngine"] | callable] | None = None
+_engine_cache: dict[str, Type["InferenceEngine"] | Callable[..., Any]] | None = None
 _engine_cache_timestamp: float = 0
-_tts_cache: dict[str, Type["AudioEngine"] | callable] | None = None
+_tts_cache: dict[str, Type["AudioEngine"] | Callable[..., Any]] | None = None
 _tts_cache_timestamp: float = 0
 _CACHE_TTL: float = 300.0  # 5 minutes
 
 
-def _lazy_import(module: str, name: str) -> type:
+def _lazy_import(module: str, name: str) -> Callable[[], Any]:
     """Lazy import helper that returns a callable.
 
     Returns a function that imports and returns the class when called.
     """
 
-    def loader():
+    def loader() -> Any:
         mod = importlib.import_module(module)
         return getattr(mod, name)
 
     return loader
 
 
-def discover_engines(force_refresh: bool = False) -> dict[str, Type["InferenceEngine"] | callable]:
+def discover_engines(
+    force_refresh: bool = False,
+) -> dict[str, Type["InferenceEngine"] | Callable[..., Any]]:
     """Discover available inference engine plugins.
 
     Includes built-in engines and any plugins registered via entry points.
@@ -61,7 +63,7 @@ def discover_engines(force_refresh: bool = False) -> dict[str, Type["InferenceEn
         if (time.time() - _engine_cache_timestamp) < _CACHE_TTL:
             return _engine_cache
 
-    engines: dict[str, Type["InferenceEngine"] | callable] = {}
+    engines: dict[str, Type["InferenceEngine"] | Callable[..., Any]] = {}
 
     # Built-in engines (lazy imports)
     engines["llama-cpp"] = _lazy_import("hfl.engine.llama_cpp", "LlamaCppEngine")
@@ -90,7 +92,9 @@ def discover_engines(force_refresh: bool = False) -> dict[str, Type["InferenceEn
     return engines
 
 
-def discover_tts_engines(force_refresh: bool = False) -> dict[str, Type["AudioEngine"] | callable]:
+def discover_tts_engines(
+    force_refresh: bool = False,
+) -> dict[str, Type["AudioEngine"] | Callable[..., Any]]:
     """Discover available TTS engine plugins.
 
     Results are cached for 5 minutes to avoid repeated discovery overhead.
@@ -108,7 +112,7 @@ def discover_tts_engines(force_refresh: bool = False) -> dict[str, Type["AudioEn
         if (time.time() - _tts_cache_timestamp) < _CACHE_TTL:
             return _tts_cache
 
-    engines: dict[str, Type["AudioEngine"] | callable] = {}
+    engines: dict[str, Type["AudioEngine"] | Callable[..., Any]] = {}
 
     # Built-in TTS engines
     engines["bark"] = _lazy_import("hfl.engine.bark_engine", "BarkEngine")

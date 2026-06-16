@@ -61,9 +61,9 @@ class HardwareProfile:
 
 def _system_ram_gb() -> float:
     try:
-        import psutil  # type: ignore[import-not-found]
+        import psutil
 
-        return round(psutil.virtual_memory().total / (1024**3), 1)
+        return round(float(psutil.virtual_memory().total) / (1024**3), 1)
     except Exception:  # pragma: no cover — defensive, psutil is in [dev]
         return 0.0
 
@@ -83,7 +83,7 @@ def _has_mlx() -> bool:
 
 def _has_cuda() -> bool:
     try:
-        import torch  # type: ignore[import-not-found]
+        import torch
 
         return bool(torch.cuda.is_available())
     except Exception:
@@ -104,7 +104,7 @@ def _has_rocm() -> bool:
 
 def _cuda_vram_gb() -> float | None:
     try:
-        import torch  # type: ignore[import-not-found]
+        import torch
 
         if not torch.cuda.is_available():
             return None

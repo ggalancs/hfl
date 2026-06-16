@@ -206,9 +206,9 @@ class HFLMCPServer:
 
     def _require_sdk(self) -> Any:
         try:
-            from mcp.server import Server  # type: ignore
-            from mcp.server.models import InitializationOptions  # type: ignore
-            from mcp.types import TextContent, Tool  # type: ignore
+            from mcp.server import Server
+            from mcp.server.models import InitializationOptions
+            from mcp.types import TextContent, Tool
         except ImportError as exc:
             raise MCPServerUnavailableError(
                 "The MCP SDK is not installed. `pip install 'hfl[mcp]'` adds it."
@@ -229,7 +229,7 @@ class HFLMCPServer:
 
         server = Server("hfl")
 
-        @server.list_tools()  # type: ignore[misc]
+        @server.list_tools()
         async def _list_tools() -> list[Any]:
             return [
                 Tool(
@@ -240,7 +240,7 @@ class HFLMCPServer:
                 for spec in self._tools.values()
             ]
 
-        @server.call_tool()  # type: ignore[misc]
+        @server.call_tool()
         async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
             spec = self._tools.get(name)
             if spec is None:
@@ -272,7 +272,7 @@ async def serve_stdio(capabilities: list[str] | None = None) -> None:
     launched as a subprocess by the MCP host (Cline, etc.).
     """
     server = HFLMCPServer(capabilities).build_server()
-    from mcp.server.stdio import stdio_server  # type: ignore
+    from mcp.server.stdio import stdio_server
 
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
@@ -286,13 +286,13 @@ async def serve_sse(host: str, port: int, capabilities: list[str] | None = None)
     """
     server = HFLMCPServer(capabilities).build_server()
     import uvicorn
-    from mcp.server.sse import SseServerTransport  # type: ignore
+    from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.routing import Mount, Route
 
     sse = SseServerTransport("/messages/")
 
-    async def handle_sse(request):  # type: ignore[no-untyped-def]
+    async def handle_sse(request: Any) -> None:
         async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
             read, write = streams
             await server.run(read, write, server.create_initialization_options())

@@ -76,7 +76,7 @@ def _apply_linux_seccomp() -> SandboxResult:
     # pyseccomp is present, use it — otherwise we only set
     # NO_NEW_PRIVS and log partial success.
     try:
-        import seccomp  # type: ignore
+        import seccomp
     except ImportError:
         return SandboxResult(
             mode="seccomp",

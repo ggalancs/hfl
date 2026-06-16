@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
@@ -29,9 +29,9 @@ from hfl.engine.base import (
 # imported and exercised in environments without llama-cpp-python (CI
 # default, doc generators, type checkers).
 try:
-    from llama_cpp import Llama  # type: ignore[import-not-found]
+    from llama_cpp import Llama
 except ImportError:  # pragma: no cover — exercised by the [dev] CI matrix
-    Llama = None  # type: ignore[misc,assignment]
+    Llama = None
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +305,7 @@ def _detect_chat_format_from_gguf(model_path: str) -> str | None:
     from the GGUF header lets us pick the correct format ahead of time.
     """
     try:
-        import gguf  # type: ignore[import-not-found]
+        import gguf
     except ImportError:
         logger.debug(
             "gguf package not installed; skipping chat-format auto-detection. "
@@ -345,7 +345,7 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
     caps and user-supplied ``n_ctx`` still apply).
     """
     try:
-        import gguf  # type: ignore[import-not-found]
+        import gguf
     except ImportError:
         logger.debug(
             "gguf package not installed; skipping GGUF model info probe. "
@@ -377,7 +377,7 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
             if isinstance(value, (bytes, bytearray, memoryview)):
                 return int.from_bytes(bytes(value), "little", signed=False)
             # numpy array with a single scalar, or plain int
-            import numpy as np  # type: ignore[import-not-found]
+            import numpy as np
 
             arr = np.asarray(value)
             return int(arr.flat[0])
@@ -392,7 +392,7 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
             value = field.parts[-1]
             if isinstance(value, (bytes, bytearray, memoryview)):
                 return bool(int.from_bytes(bytes(value), "little", signed=False))
-            import numpy as np  # type: ignore[import-not-found]
+            import numpy as np
 
             arr = np.asarray(value)
             return bool(int(arr.flat[0]))
@@ -617,7 +617,7 @@ def _build_vision_chat_handler(
         )
         handler_cls = Llava15ChatHandler
 
-    return handler_cls(clip_model_path=clip_model_path, verbose=verbose)
+    return cast("object | None", handler_cls(clip_model_path=clip_model_path, verbose=verbose))
 
 
 # V4 F5 — adapter that lets a second ``Llama`` instance act as a
@@ -696,7 +696,7 @@ class _LlamaModelDraftAdapter:
             self._processed = []
             return False
 
-    def __call__(self, input_ids, /, **kwargs):  # type: ignore[no-untyped-def]
+    def __call__(self, input_ids, /, **kwargs):
         import numpy as np
 
         if input_ids is None or len(input_ids) == 0:
@@ -733,13 +733,18 @@ class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
     def __init__(self):
-        self._model: "Llama | None" = None
+        # ``Llama`` is an untyped optional-dependency handle (resolved
+        # to ``Any`` when llama-cpp-python isn't installed). Annotating
+        # the attribute as ``Any`` lets mypy type-check the call sites
+        # without spurious ``union-attr`` / ``None not callable`` errors
+        # while preserving the runtime ``None`` sentinel for "unloaded".
+        self._model: Any = None
         self._model_path: str = ""
         self._architecture: str | None = None
         # V4 F5 — companion draft model for speculative decoding.
         # Held here so ``unload()`` can free its memory alongside
         # the target.
-        self._draft_model: "Llama | None" = None
+        self._draft_model: Any = None
         # True when the model was loaded with a CLIP projector and
         # accepts images in ``create_chat_completion`` messages.
         # Phase 4 P0-6.
@@ -790,7 +795,10 @@ class LlamaCppEngine(InferenceEngine):
         verbose = kwargs.get("verbose", False)
         user_n_ctx = kwargs.get("n_ctx")
         explicit_n_ctx = user_n_ctx is not None and user_n_ctx > 0
-        n_ctx = user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size
+        # ``explicit_n_ctx`` guarantees ``user_n_ctx`` is a positive int
+        # at runtime, but mypy can't carry that narrowing through the
+        # separate boolean — cast to the runtime-correct ``int``.
+        n_ctx: int = cast(int, user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size)
         # Phase 11 P1 — V2 row 13 VRAM auto-sizing moved *after* the
         # architecture cap below so that arch-specific safe defaults
         # (Gemma's 8192 cap) always take precedence. We only reach
@@ -995,7 +1003,7 @@ class LlamaCppEngine(InferenceEngine):
                 kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
                 if kv_type and kv_type != "f16":
                     try:
-                        from llama_cpp import llama_cpp as _lcpp  # type: ignore
+                        from llama_cpp import llama_cpp as _lcpp
                     except Exception:
                         _lcpp = None
                     type_map = {}

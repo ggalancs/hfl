@@ -14,7 +14,7 @@ Supported models:
 import io
 import logging
 import time
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 import numpy as np
 
@@ -27,7 +27,7 @@ class BarkEngine(AudioEngine):
     """TTS engine using Bark via HuggingFace Transformers."""
 
     def __init__(self):
-        self._pipeline = None
+        self._pipeline: Any = None
         self._model_name: str = ""
         self._sample_rate: int = 24000  # Bark outputs at 24kHz
 
@@ -226,7 +226,10 @@ class BarkEngine(AudioEngine):
             audio_tensor = torch.from_numpy(audio).unsqueeze(0)
             resampler = torchaudio.transforms.Resample(orig_sr, target_sr)
             resampled = resampler(audio_tensor)
-            return resampled.squeeze().numpy()
+            # ``np`` is only imported in the ImportError branch below, so it is a
+            # function-local here — use a string forward-ref so ``cast`` does not
+            # evaluate ``np`` at runtime (UnboundLocalError in the torch path).
+            return cast("np.ndarray", resampled.squeeze().numpy())
         except ImportError:
             # Fallback: simple linear interpolation
             import numpy as np
@@ -234,7 +237,7 @@ class BarkEngine(AudioEngine):
             duration = len(audio) / orig_sr
             target_length = int(duration * target_sr)
             indices = np.linspace(0, len(audio) - 1, target_length)
-            return np.interp(indices, np.arange(len(audio)), audio)
+            return cast(np.ndarray, np.interp(indices, np.arange(len(audio)), audio))
 
     def _adjust_speed(self, audio: np.ndarray, speed: float) -> np.ndarray:
         """Adjust audio playback speed."""
@@ -243,7 +246,7 @@ class BarkEngine(AudioEngine):
         # Simple time stretching via interpolation
         new_length = int(len(audio) / speed)
         indices = np.linspace(0, len(audio) - 1, new_length)
-        return np.interp(indices, np.arange(len(audio)), audio)
+        return cast(np.ndarray, np.interp(indices, np.arange(len(audio)), audio))
 
     def _encode_audio(self, audio: np.ndarray, sample_rate: int, fmt: str) -> bytes:
         """Encode numpy audio array to bytes in the specified format."""

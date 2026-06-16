@@ -28,7 +28,7 @@ import platform
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, cast
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class CtxTier:
 
 def _probe_nvidia() -> float | None:
     try:
-        import pynvml  # type: ignore
+        import pynvml
     except ImportError:
         return None
     # CON-9: NVML init/shutdown is process-global state; serialise the
@@ -98,7 +98,7 @@ def _probe_metal() -> float | None:
     if platform.system() != "Darwin":
         return None
     try:
-        import torch  # type: ignore
+        import torch
 
         if getattr(torch.backends, "mps", None) is None:
             return None
@@ -107,7 +107,7 @@ def _probe_metal() -> float | None:
         fn = getattr(torch.mps, "recommended_max_memory", None)
         if fn is not None:
             try:
-                return fn() / (1024**3)
+                return cast(float, fn() / (1024**3))
             except Exception:
                 pass
     except ImportError:

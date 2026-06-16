@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import platform
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
@@ -44,7 +44,7 @@ def is_available() -> bool:
     if platform.machine().lower() not in ("arm64", "aarch64"):
         return False
     try:
-        import mlx_lm  # type: ignore  # noqa: F401
+        import mlx_lm  # noqa: F401
     except ImportError:
         return False
     return True
@@ -74,7 +74,7 @@ class MLXEngine(InferenceEngine):
             raise RuntimeError(
                 "MLX engine requires Darwin-arm64 with `pip install 'hfl[mlx]'` installed."
             )
-        from mlx_lm import load  # type: ignore
+        from mlx_lm import load
 
         start = time.perf_counter()
         self._model, self._tokenizer = load(model_path)
@@ -118,7 +118,7 @@ class MLXEngine(InferenceEngine):
         apply = getattr(self._tokenizer, "apply_chat_template", None)
         if callable(apply):
             try:
-                return apply(dicts, tokenize=False, add_generation_prompt=True)
+                return cast(str, apply(dicts, tokenize=False, add_generation_prompt=True))
             except Exception:
                 logger.debug("apply_chat_template failed; falling back to manual", exc_info=True)
         parts: list[str] = []
@@ -140,7 +140,7 @@ class MLXEngine(InferenceEngine):
         them as a kwargs dict ready to splat into ``generate`` /
         ``stream_generate``.
         """
-        from mlx_lm.sample_utils import (  # type: ignore
+        from mlx_lm.sample_utils import (
             make_logits_processors,
             make_sampler,
         )
@@ -160,7 +160,7 @@ class MLXEngine(InferenceEngine):
         }
 
     def _run_generate(self, prompt: str, cfg: GenerationConfig) -> tuple[str, int, int, int]:
-        from mlx_lm import generate  # type: ignore
+        from mlx_lm import generate
 
         start_ns = time.monotonic_ns()
         kwargs = self._build_sampling(cfg)
@@ -214,6 +214,7 @@ class MLXEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
         **_kwargs: Any,
     ) -> GenerationResult:
         prompt = self._messages_to_prompt(messages)
@@ -228,7 +229,7 @@ class MLXEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
-        from mlx_lm import stream_generate  # type: ignore
+        from mlx_lm import stream_generate
 
         kwargs = self._build_sampling(cfg)
         for token in stream_generate(
@@ -246,6 +247,7 @@ class MLXEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
         **_kwargs: Any,
     ) -> Iterator[str]:
         prompt = self._messages_to_prompt(messages)

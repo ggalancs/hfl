@@ -20,7 +20,7 @@ import logging
 import threading
 import uuid
 from queue import Empty, Queue
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from hfl.config import config as _hfl_config
 from hfl.engine.base import (
@@ -43,7 +43,7 @@ class VLLMEngine(InferenceEngine):
     """
 
     def __init__(self):
-        self._engine = None
+        self._engine: Any = None
         self._model_path = ""
         self._is_async = False
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -70,7 +70,8 @@ class VLLMEngine(InferenceEngine):
     def _run_async(self, coro):
         """Run an async coroutine from sync context."""
         self._ensure_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        loop = cast(asyncio.AbstractEventLoop, self._loop)
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=300)
 
     def _detect_prompt_format(self, model_path: str) -> PromptFormat:
@@ -215,7 +216,7 @@ class VLLMEngine(InferenceEngine):
             finally:
                 token_queue.put(None, timeout=_hfl_config.vllm_error_put_timeout)
 
-        asyncio.run_coroutine_threadsafe(_producer(), self._loop)
+        asyncio.run_coroutine_threadsafe(_producer(), cast(asyncio.AbstractEventLoop, self._loop))
 
         while True:
             try:

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from hfl.hub.discovery import (
+    DiscoveryEntry,
     DiscoveryQuery,
     _family_for,
     _parameter_estimate_b,
@@ -120,7 +121,7 @@ def pick_draft_for(
     ]
 
     # Score: matching prefer_quants → +3 each, log-scaled likes → +1.
-    def _score(entry) -> float:
+    def _score(entry: DiscoveryEntry) -> float:
         s = 0.0
         if entry.quantization in prefer_quants:
             s += 3.0

@@ -74,7 +74,7 @@ def _anthropic_tools_to_payload(req: AnthropicMessagesRequest) -> list[dict] | N
         # advertise tools to the template. The per-family marker parser is
         # also suppressed via ``tools_disabled`` in the handler.
         return None
-    payload = [
+    payload: list[dict[str, Any]] = [
         {
             "type": "function",
             "function": {

@@ -124,9 +124,9 @@ class MCPClient:
         """Import ``mcp`` on demand; translate ImportError to our own."""
         try:
             import mcp  # noqa: F401
-            from mcp import ClientSession, StdioServerParameters  # type: ignore
-            from mcp.client.sse import sse_client  # type: ignore
-            from mcp.client.stdio import stdio_client  # type: ignore
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.sse import sse_client
+            from mcp.client.stdio import stdio_client
         except ImportError as exc:
             raise MCPClientUnavailableError(
                 "The MCP SDK is not installed. `pip install 'hfl[mcp]'` adds it."

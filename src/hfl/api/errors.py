@@ -112,7 +112,10 @@ def render_envelope(path: str | None, status_code: int, flat: dict[str, Any]) ->
     extras = {k: v for k, v in flat.items() if k != "error"}
     if path.startswith("/v1/messages"):
         request_id = extras.pop("request_id", None)
-        err = {"type": _ANTHROPIC_TYPE.get(status_code, "api_error"), "message": msg}
+        err: dict[str, Any] = {
+            "type": _ANTHROPIC_TYPE.get(status_code, "api_error"),
+            "message": msg,
+        }
         err.update(extras)
         out: dict[str, Any] = {"type": "error", "error": err}
         if request_id:

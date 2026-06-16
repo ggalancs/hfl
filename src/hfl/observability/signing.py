@@ -27,7 +27,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -109,13 +109,13 @@ def manifest_digest(envelope: dict[str, Any]) -> str:
 
 def _sign_raw(private_key: bytes, message: bytes) -> bytes:
     try:
-        from nacl.signing import SigningKey  # type: ignore
+        from nacl.signing import SigningKey
 
         return bytes(SigningKey(private_key).sign(message).signature)
     except ImportError:
         pass
     try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # type: ignore
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
             Ed25519PrivateKey,
         )
     except ImportError as exc:
@@ -123,12 +123,12 @@ def _sign_raw(private_key: bytes, message: bytes) -> bytes:
             "No ed25519 backend installed (need pynacl or cryptography)"
         ) from exc
     key = Ed25519PrivateKey.from_private_bytes(private_key)
-    return key.sign(message)
+    return cast(bytes, key.sign(message))
 
 
 def _verify_raw(public_key: bytes, signature: bytes, message: bytes) -> bool:
     try:
-        from nacl.signing import VerifyKey  # type: ignore
+        from nacl.signing import VerifyKey
 
         try:
             VerifyKey(public_key).verify(message, signature)
@@ -138,8 +138,8 @@ def _verify_raw(public_key: bytes, signature: bytes, message: bytes) -> bool:
     except ImportError:
         pass
     try:
-        from cryptography.exceptions import InvalidSignature  # type: ignore
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # type: ignore
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
             Ed25519PublicKey,
         )
     except ImportError as exc:

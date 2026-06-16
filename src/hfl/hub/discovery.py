@@ -31,7 +31,7 @@ import logging
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, cast
 
 if TYPE_CHECKING:
     from huggingface_hub import HfApi, ModelInfo
@@ -238,7 +238,7 @@ def _matches_filters(entry: DiscoveryEntry, query: DiscoveryQuery) -> bool:
 def _entry_from_model_info(info: "ModelInfo") -> DiscoveryEntry:
     """Convert a ``huggingface_hub.ModelInfo`` to our typed shape."""
     tags = list(getattr(info, "tags", None) or [])
-    repo_id = info.id  # type: ignore[attr-defined]
+    repo_id = info.id
 
     pipeline_tag = getattr(info, "pipeline_tag", None)
     family = _family_for(repo_id, tags)
@@ -352,7 +352,7 @@ class DiscoveryCache:
             return {}
         try:
             with self._path.open() as f:
-                return json.load(f)
+                return cast("dict[str, Any]", json.load(f))
         except (OSError, json.JSONDecodeError):
             # Corrupt cache shouldn't break the request — start fresh.
             logger.warning("Discovery cache at %s is corrupt; resetting", self._path)

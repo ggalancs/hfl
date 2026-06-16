@@ -333,9 +333,9 @@ async def ws_chat(ws: WebSocket) -> None:
                 drive_task = asyncio.create_task(_drive_chat(ws, frame, cancel_event))
                 drive_task.add_done_callback(lambda t: _log_drive_result(ws, t))
             elif kind == "cancel":
-                cancel_event = ws.scope.get("hfl_ws_cancel")
-                if cancel_event is not None:
-                    cancel_event.set()
+                pending = ws.scope.get("hfl_ws_cancel")
+                if pending is not None:
+                    pending.set()
             elif kind == "ping":
                 await _send(ws, {"type": "pong"})
             else:

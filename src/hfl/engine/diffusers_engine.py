@@ -39,11 +39,11 @@ DEFAULT_STEPS = 30
 
 def is_available() -> bool:
     try:
-        import diffusers  # type: ignore  # noqa: F401
+        import diffusers  # noqa: F401
     except ImportError:
         return False
     try:
-        import torch  # type: ignore  # noqa: F401
+        import torch  # noqa: F401
     except ImportError:
         return False
     return True
@@ -75,8 +75,8 @@ class DiffusersEngine:
     def load(self, model: str, *, device: str | None = None) -> None:
         if not is_available():
             raise RuntimeError("Diffusers backend not installed. `pip install 'hfl[imagegen]'`.")
-        import torch  # type: ignore
-        from diffusers import DiffusionPipeline  # type: ignore
+        import torch
+        from diffusers import DiffusionPipeline
 
         selected = device or (
             "cuda"
@@ -120,7 +120,7 @@ class DiffusersEngine:
     ) -> ImageResult:
         if not self.is_loaded:
             raise RuntimeError("Diffusers engine not loaded")
-        import torch  # type: ignore
+        import torch
 
         start = time.perf_counter()
         generator = torch.Generator(device=self._device or "cpu")

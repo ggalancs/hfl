@@ -22,7 +22,7 @@ and adequate for the scale of sentence embeddings (≤ 512 tokens).
 
 from __future__ import annotations
 
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Sequence, cast
 
 __all__ = ["POOLING_STRATEGIES", "Pooling", "pool"]
 
@@ -33,7 +33,7 @@ POOLING_STRATEGIES: tuple[Pooling, ...] = ("mean", "cls", "last")
 
 def _require_numpy():
     try:
-        import numpy as np  # type: ignore
+        import numpy as np
     except ImportError:  # pragma: no cover — numpy is a transitive dep
         return None
     return np
@@ -72,12 +72,12 @@ def pool(
     if np is not None:
         mat = np.asarray(token_embeddings, dtype=np.float32)
         mask_arr = np.asarray(mask, dtype=np.float32)
-        return _pool_numpy(mat, mask_arr, strategy_lc, np)
+        return cast("list[float]", _pool_numpy(mat, mask_arr, strategy_lc, np))
 
     return _pool_python(token_embeddings, mask, strategy_lc)
 
 
-def _pool_numpy(mat, mask, strategy: str, np):  # type: ignore[no-untyped-def]
+def _pool_numpy(mat, mask, strategy: str, np):
     if strategy == "cls":
         return mat[0].tolist()
     if strategy == "last":

@@ -23,6 +23,7 @@ Decision logic for TTS:
 
 import os
 from pathlib import Path
+from typing import cast
 
 from hfl.converter.formats import ModelFormat, ModelType, detect_format, detect_model_type
 from hfl.engine.base import AudioEngine, InferenceEngine
@@ -32,12 +33,12 @@ class MissingDependencyError(Exception):
     """Error when an optional dependency is missing."""
 
 
-def _get_llama_cpp_engine():
+def _get_llama_cpp_engine() -> InferenceEngine:
     """Lazy import of LlamaCppEngine."""
     try:
         from hfl.engine.llama_cpp import LlamaCppEngine
 
-        return LlamaCppEngine()
+        return cast(InferenceEngine, LlamaCppEngine())
     except ImportError as e:
         raise MissingDependencyError(
             "The llama-cpp backend requires the 'llama-cpp-python' library.\n\n"
@@ -50,7 +51,7 @@ def _get_llama_cpp_engine():
         ) from e
 
 
-def _get_mlx_engine():
+def _get_mlx_engine() -> InferenceEngine:
     """Lazy import + availability gate for MLXEngine.
 
     Raises MissingDependencyError either when the host isn't
@@ -70,7 +71,7 @@ def _get_mlx_engine():
             "Or directly:\n"
             "  pip install mlx-lm"
         )
-    return mlx_engine.MLXEngine()
+    return cast(InferenceEngine, mlx_engine.MLXEngine())
 
 
 def _mlx_preferred() -> bool:
@@ -166,12 +167,12 @@ def select_engine(
     return _get_llama_cpp_engine()
 
 
-def _get_transformers_engine():
+def _get_transformers_engine() -> InferenceEngine:
     """Lazy import of TransformersEngine."""
     try:
         from hfl.engine.transformers_engine import TransformersEngine
 
-        return TransformersEngine()
+        return cast(InferenceEngine, TransformersEngine())
     except ImportError as e:
         raise MissingDependencyError(
             "The transformers backend requires additional dependencies.\n\n"
@@ -182,12 +183,12 @@ def _get_transformers_engine():
         ) from e
 
 
-def _get_vllm_engine():
+def _get_vllm_engine() -> InferenceEngine:
     """Lazy import of VLLMEngine."""
     try:
         from hfl.engine.vllm_engine import VLLMEngine
 
-        return VLLMEngine()
+        return cast(InferenceEngine, VLLMEngine())
     except ImportError as e:
         raise MissingDependencyError(
             "The vLLM backend requires additional dependencies.\n\n"
@@ -215,7 +216,7 @@ def _has_cuda() -> bool:
     try:
         import torch
 
-        return torch.cuda.is_available()
+        return cast(bool, torch.cuda.is_available())
     except ImportError:
         return False
 
@@ -225,12 +226,12 @@ def _has_cuda() -> bool:
 # =============================================================================
 
 
-def _get_bark_engine():
+def _get_bark_engine() -> AudioEngine:
     """Lazy import of BarkEngine."""
     try:
         from hfl.engine.bark_engine import BarkEngine
 
-        return BarkEngine()
+        return cast(AudioEngine, BarkEngine())
     except ImportError as e:
         raise MissingDependencyError(
             "The Bark TTS engine requires additional dependencies.\n\n"
@@ -241,12 +242,12 @@ def _get_bark_engine():
         ) from e
 
 
-def _get_coqui_engine():
+def _get_coqui_engine() -> AudioEngine:
     """Lazy import of CoquiEngine."""
     try:
         from hfl.engine.coqui_engine import CoquiEngine
 
-        return CoquiEngine()
+        return cast(AudioEngine, CoquiEngine())
     except ImportError as e:
         raise MissingDependencyError(
             "The Coqui TTS engine requires additional dependencies.\n\n"
