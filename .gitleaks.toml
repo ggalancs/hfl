@@ -6,21 +6,19 @@ title = "HFL gitleaks config"
 [allowlist]
   description = "Allow common false positives"
 
-  # Allow README example API keys (placeholders)
-  paths = [
-    '''README\.md''',
-    '''README\.es\.md''',
-    '''docs/.*\.md''',
-  ]
-
-  # Allow common placeholder patterns in documentation
+  # DEP-7: no blanket file-path allowlist. Whitelisting all of README*.md and
+  # docs/*.md would suppress a real secret accidentally committed to the most
+  # copy-pasted files. Instead we allowlist the known placeholder *patterns*
+  # below, so real-secret detection stays active everywhere.
   regexTarget = "match"
   regexes = [
     # Placeholder API keys in examples
     '''your-secret-key''',
     '''your-api-key''',
     '''api[_-]?key[_-]?here''',
+    '''tu[_-]?clave[_-]?secreta''',
     # Bearer token placeholders
     '''Bearer\s+your[_-]token''',
+    '''Bearer\s+tu[_-]clave[_-]secreta''',
     '''Bearer\s+<token>''',
   ]

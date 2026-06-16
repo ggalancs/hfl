@@ -32,8 +32,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Install only dependencies, not the package itself (to avoid editable issue)
-          pip install typer rich huggingface-hub fastapi uvicorn pydantic httpx sse-starlette pyyaml
+          # Install only dependencies, not the package itself (to avoid editable issue).
+          # DEP-1: mirror pyproject's core dependencies exactly so pip-audit scans
+          # what users actually install — no phantom sse-starlette (not a dependency),
+          # and include starlette + python-multipart (which ARE declared deps).
+          pip install typer rich huggingface-hub fastapi starlette python-multipart uvicorn pydantic httpx pyyaml
           pip install pytest pytest-asyncio ruff pytest-cov mypy numpy
 
       - name: Run pip-audit
