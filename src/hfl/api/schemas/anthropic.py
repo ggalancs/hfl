@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AnthropicTextBlock(BaseModel):
@@ -18,6 +18,41 @@ class AnthropicTextBlock(BaseModel):
 
     type: str = "text"
     text: str
+
+
+class AnthropicContentBlock(BaseModel):
+    """A single content block in an Anthropic message.
+
+    Permissive by design: Claude Code and the Anthropic SDK send several
+    block shapes (``text``, ``tool_use``, ``tool_result``, ``image``) and
+    new ones appear over time. Rather than 422 on an unrecognised block —
+    which would break every multi-turn tool conversation (API-2) — we
+    accept any ``type`` and surface the fields each variant uses.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    # text block
+    text: str | None = None
+    # tool_use block (assistant requests a tool)
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] | None = None
+    # tool_result block (user returns a tool's output)
+    tool_use_id: str | None = None
+    content: Any | None = None
+    is_error: bool | None = None
+
+
+class AnthropicTool(BaseModel):
+    """An Anthropic tool definition (name + JSON-schema ``input_schema``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
 
 
 class AnthropicMessage(BaseModel):
@@ -30,7 +65,7 @@ class AnthropicMessage(BaseModel):
         ...,
         description="Role of the message author (user or assistant)",
     )
-    content: Union[str, list[AnthropicTextBlock]] = Field(
+    content: Union[str, list[AnthropicContentBlock]] = Field(
         ...,
         description="Message content as string or list of content blocks",
     )
@@ -39,7 +74,7 @@ class AnthropicMessage(BaseModel):
         """Extract plain text from content regardless of format."""
         if isinstance(self.content, str):
             return self.content
-        return "".join(block.text for block in self.content if block.type == "text")
+        return "".join(block.text for block in self.content if block.type == "text" and block.text)
 
 
 class AnthropicMessagesRequest(BaseModel):
@@ -99,6 +134,15 @@ class AnthropicMessagesRequest(BaseModel):
     metadata: dict[str, Any] | None = Field(
         None,
         description="Request metadata",
+    )
+    tools: list[AnthropicTool] | None = Field(
+        None,
+        max_length=256,
+        description="Tool definitions the model may call",
+    )
+    tool_choice: dict[str, Any] | None = Field(
+        None,
+        description="Tool-choice control ({'type': 'auto'|'any'|'tool', 'name'?})",
     )
 
     @field_validator("messages")

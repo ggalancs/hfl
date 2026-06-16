@@ -839,3 +839,185 @@ class TestAnthropicAuth:
         )
 
         assert response.status_code == 401
+
+
+class TestAnthropicTools:
+    """API-1/2: real tool support on the Anthropic Messages API."""
+
+    @pytest.fixture(autouse=True)
+    def reset_state(self):
+        state = get_state()
+        state.engine = None
+        state.api_key = None
+        yield
+        state.engine = None
+        state.api_key = None
+
+    def test_tools_field_translated_and_forwarded(self):
+        engine = _make_engine()
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 256,
+                "tools": [
+                    {
+                        "name": "get_weather",
+                        "description": "Get the weather",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                        },
+                    }
+                ],
+                "messages": [{"role": "user", "content": "weather in Paris?"}],
+            },
+        )
+
+        assert response.status_code == 200
+        forwarded = engine.chat.call_args.kwargs["tools"]
+        assert forwarded[0]["type"] == "function"
+        assert forwarded[0]["function"]["name"] == "get_weather"
+        assert forwarded[0]["function"]["parameters"]["properties"]["city"]["type"] == "string"
+
+    def test_tool_call_produces_tool_use_block(self):
+        marker = '<tool_call>{"name": "get_weather", "arguments": {"city": "Paris"}}</tool_call>'
+        engine = _make_engine(text=marker)
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 256,
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "weather in Paris?"}],
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["stop_reason"] == "tool_use"
+        tool_blocks = [b for b in data["content"] if b["type"] == "tool_use"]
+        assert len(tool_blocks) == 1
+        assert tool_blocks[0]["name"] == "get_weather"
+        assert tool_blocks[0]["input"] == {"city": "Paris"}
+        assert tool_blocks[0]["id"].startswith("toolu_")
+
+    def test_multi_turn_tool_result_not_rejected(self):
+        """API-2: a turn carrying tool_use + tool_result blocks must not 422
+        and must reach the engine as a role=tool message."""
+        engine = _make_engine(text="It is sunny in Paris.")
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 256,
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "messages": [
+                    {"role": "user", "content": "weather in Paris?"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "get_weather",
+                                "input": {"city": "Paris"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": "sunny, 22C",
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200  # NOT 422
+        messages = engine.chat.call_args[0][0]
+        tool_msgs = [m for m in messages if m.role == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0].content == "sunny, 22C"
+        assert tool_msgs[0].tool_call_id == "toolu_1"
+        assert tool_msgs[0].name == "get_weather"  # recovered from the tool_use id
+        assert any(m.role == "assistant" and m.tool_calls for m in messages)
+
+    def test_streaming_emits_tool_use_events(self):
+        marker = '<tool_call>{"name": "get_weather", "arguments": {"city": "Paris"}}</tool_call>'
+        engine = _make_engine()
+        # Split across chunks to exercise buffering.
+        engine.chat_stream.return_value = iter([marker[:25], marker[25:]])
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 256,
+                "stream": True,
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "weather?"}],
+            },
+        )
+
+        body = response.text
+        assert '"type": "tool_use"' in body
+        assert '"name": "get_weather"' in body
+        assert "input_json_delta" in body
+        assert '"stop_reason": "tool_use"' in body
+        # The raw marker must never leak to the client as a text delta.
+        assert "text_delta" not in body
+        assert "<tool_call>" not in body
+
+    def test_tool_choice_none_is_a_hard_opt_out(self):
+        """tool_choice {"type": "none"} forbids tool use: even if the model
+        emits a marker, the reply is plain text, never a tool_use block, and
+        tools are not advertised to the engine (mirrors the OpenAI route)."""
+        marker = '<tool_call>{"name": "get_weather", "arguments": {"city": "Paris"}}</tool_call>'
+        engine = _make_engine(text=marker)
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 256,
+                "tool_choice": {"type": "none"},
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "weather?"}],
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["stop_reason"] == "end_turn"
+        assert all(b["type"] != "tool_use" for b in data["content"])
+        # Tools were not forwarded to the engine's tool-aware template.
+        assert engine.chat.call_args.kwargs["tools"] is None
