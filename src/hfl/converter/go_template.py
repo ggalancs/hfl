@@ -270,9 +270,16 @@ def render_go_template(source: str, data: Any) -> str:
     """
     try:
         tree = _parse(source)
+        out: list[str] = []
+        _render(tree, data, out)
+        return "".join(out)
     except GoTemplateError as exc:
-        logger.warning("Go-template parse failed, falling back to literal: %s", exc)
+        logger.warning("Go-template render failed, falling back to literal: %s", exc)
         return source
-    out: list[str] = []
-    _render(tree, data, out)
-    return "".join(out)
+    except RecursionError:
+        # Deeply-nested {{ if }}/{{ range }} can exhaust the Python stack
+        # during either _parse or _render. The renderer is a convenience
+        # layer, never a gate, so fall back to the literal source rather
+        # than letting a crafted template surface as an unhandled 500.
+        logger.warning("Go-template nesting too deep, falling back to literal")
+        return source

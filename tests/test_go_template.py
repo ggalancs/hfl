@@ -144,3 +144,16 @@ class TestRealisticTemplates:
         rendered = render_go_template(tmpl, {"Prompt": "hi"})
         assert "SYSTEM" not in rendered
         assert rendered == "USER:hi\nASSISTANT:"
+
+
+class TestRecursionSafety:
+    def test_deeply_nested_template_falls_back_to_literal(self):
+        # CNV-2: a pathologically nested template must not surface as an
+        # unhandled RecursionError (which would become a 500). It falls
+        # back to the literal source instead of raising.
+        import sys
+
+        depth = sys.getrecursionlimit() * 3
+        tmpl = "{{ if .Prompt }}" * depth + "x" + "{{ end }}" * depth
+        result = render_go_template(tmpl, {"Prompt": "yes"})
+        assert result == tmpl  # literal fallback, no exception escaped

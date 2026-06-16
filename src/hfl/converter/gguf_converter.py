@@ -262,6 +262,18 @@ def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
         return False
 
 
+def _gguf_variant_path(base: Path, label: str) -> Path:
+    """Return ``base`` with ``.{label}.gguf`` appended.
+
+    Deliberately avoids :meth:`pathlib.Path.with_suffix`: model names
+    routinely contain version dots (e.g. ``Qwen--Qwen2.5-7B-Instruct``)
+    which ``with_suffix`` mistakes for a file extension and truncates,
+    yielding wrong — and, across models sharing a prefix, colliding —
+    output filenames.
+    """
+    return base.with_name(f"{base.name}.{label}.gguf")
+
+
 def convert_with_cache(
     converter: "GGUFConverter",
     model_path: Path,
@@ -278,9 +290,9 @@ def convert_with_cache(
     # Check if already converted (fast path)
     quant = quantization.upper()
     if quant == "F16":
-        expected_output = output_path.with_suffix(".f16.gguf")
+        expected_output = _gguf_variant_path(output_path, "f16")
     else:
-        expected_output = output_path.with_suffix(f".{quant}.gguf")
+        expected_output = _gguf_variant_path(output_path, quant)
 
     if expected_output.exists():
         console.print(f"[green]Using cached conversion:[/] {expected_output}")
@@ -490,7 +502,7 @@ class GGUFConverter:
         )
 
         # Step 1: Convert to GGUF FP16 (intermediate format)
-        fp16_path = output_path.with_suffix(".fp16.gguf")
+        fp16_path = _gguf_variant_path(output_path, "fp16")
 
         # Resume support: skip FP16 conversion if already exists
         if fp16_path.exists() and fp16_path.stat().st_size > 0:
@@ -517,7 +529,7 @@ class GGUFConverter:
 
         if quantization.upper() == "F16":
             # If FP16 is requested, we're done
-            final_path = output_path.with_suffix(".f16.gguf")
+            final_path = _gguf_variant_path(output_path, "f16")
             fp16_path.rename(final_path)
             # Verify output
             self._verify_output(final_path, model_path)
@@ -525,7 +537,7 @@ class GGUFConverter:
 
         # Step 2: Quantize to the requested level
         quant = quantization.upper()
-        final_path = output_path.with_suffix(f".{quant}.gguf")
+        final_path = _gguf_variant_path(output_path, quant)
 
         console.print(f"[cyan]Step 2/2:[/] Quantizing to {quant}...")
 

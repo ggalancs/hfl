@@ -392,3 +392,24 @@ class TestConvertWithCacheLockCreation:
 
         # Same lock object
         assert _conversion_locks[cache_key] is lock_after_first
+
+
+class TestDottedModelNamePreserved:
+    """CNV-1: version dots in model names must survive output naming.
+
+    ``Path.with_suffix`` mistook the version dot for an extension and
+    truncated ``Qwen--Qwen2.5-7B-Instruct`` to ``Qwen--Qwen2.<quant>.gguf``,
+    which collides across models sharing the ``Qwen--Qwen2`` prefix.
+    """
+
+    def test_fast_path_preserves_dotted_name(self, mock_converter, tmp_path):
+        model_path = tmp_path / "model"
+        output_path = tmp_path / "Qwen--Qwen2.5-7B-Instruct"
+        expected = tmp_path / "Qwen--Qwen2.5-7B-Instruct.Q4_K_M.gguf"
+        expected.write_bytes(b"fake gguf data")
+
+        result = convert_with_cache(mock_converter, model_path, output_path, "Q4_K_M")
+
+        assert result == expected
+        assert result.name == "Qwen--Qwen2.5-7B-Instruct.Q4_K_M.gguf"
+        mock_converter.convert.assert_not_called()
