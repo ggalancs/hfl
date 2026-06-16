@@ -220,6 +220,13 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
 
             if dimensions is not None and len(vec) > dimensions:
                 vec = vec[:dimensions]
+                # Matryoshka (ENG-5): llama.cpp L2-normalises full
+                # embeddings, so slicing alone yields norm < 1. Re-normalise
+                # the truncated vector to keep it unit-norm for cosine/IP
+                # consumers.
+                norm = sum(x * x for x in vec) ** 0.5
+                if norm > 0:
+                    vec = [x / norm for x in vec]
 
             vectors.append([float(x) for x in vec])
 
@@ -361,14 +368,20 @@ class TransformersEmbeddingEngine(EmbeddingEngine):
         summed = (last_hidden * mask).sum(dim=1)
         counts = mask.sum(dim=1).clamp(min=1e-9)
         pooled = summed / counts
+        # Matryoshka (ENG-5): truncate BEFORE the final L2-normalisation so
+        # the returned vector is unit-norm at the requested dimensionality.
+        # Normalising first and slicing afterwards leaves norm < 1, which
+        # breaks cosine/dot-product consumers (FAISS inner-product indexes,
+        # LangChain) that assume unit vectors — the exact contract
+        # text-embedding-3 / MRL define.
+        if dimensions is not None:
+            pooled = pooled[:, :dimensions]
         # L2-normalise for cosine-friendly consumption (matches
         # sentence-transformers default and what LangChain expects).
         norms = pooled.norm(p=2, dim=1, keepdim=True).clamp(min=1e-12)
         pooled = pooled / norms
 
         vectors = pooled.cpu().tolist()
-        if dimensions is not None:
-            vectors = [v[:dimensions] for v in vectors]
 
         return EmbeddingResult(
             embeddings=vectors,

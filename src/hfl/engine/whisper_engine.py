@@ -178,12 +178,23 @@ class WhisperEngine:
         audio: bytes,
         language: str | None,
     ) -> tuple[str, str | None, list[WhisperSegment]]:
+        import os
         import tempfile
 
+        # ENG-9: delete=False means the OS won't reclaim the temp .wav on
+        # close, so we must unlink it ourselves — on both the success and
+        # error paths — or every transcription leaks a full-size file.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio)
             tmp.flush()
-            result = self._model.transcribe(tmp.name, language=language)
+            tmp_name = tmp.name
+        try:
+            result = self._model.transcribe(tmp_name, language=language)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except OSError:  # pragma: no cover — already gone / unreadable
+                pass
         text = (result or {}).get("text", "").strip()
         lang = (result or {}).get("language")
         out_segments = [
