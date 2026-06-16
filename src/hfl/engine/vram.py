@@ -25,11 +25,15 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 logger = logging.getLogger(__name__)
+
+# CON-9: serialises the process-global NVML init/shutdown in _probe_nvidia.
+_nvml_lock = threading.Lock()
 
 __all__ = [
     "CtxTier",
@@ -63,27 +67,31 @@ def _probe_nvidia() -> float | None:
         import pynvml  # type: ignore
     except ImportError:
         return None
-    try:
-        pynvml.nvmlInit()
-    except Exception:
-        return None
-    try:
-        count = pynvml.nvmlDeviceGetCount()
-        total = 0
-        for i in range(count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            total += info.total
-        if total <= 0:
-            return None
-        return total / (1024**3)
-    except Exception:
-        return None
-    finally:
+    # CON-9: NVML init/shutdown is process-global state; serialise the
+    # whole init→query→shutdown so concurrent probes (e.g. parallel model
+    # loads) can't tear down NVML out from under each other.
+    with _nvml_lock:
         try:
-            pynvml.nvmlShutdown()
+            pynvml.nvmlInit()
         except Exception:
-            pass
+            return None
+        try:
+            count = pynvml.nvmlDeviceGetCount()
+            total = 0
+            for i in range(count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                total += info.total
+            if total <= 0:
+                return None
+            return total / (1024**3)
+        except Exception:
+            return None
+        finally:
+            try:
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
 
 
 def _probe_metal() -> float | None:

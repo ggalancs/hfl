@@ -94,7 +94,7 @@ async def stream_with_backpressure(
     """
     # Use bounded queue for backpressure
     queue: asyncio.Queue[Any | None | Exception] = asyncio.Queue(maxsize=queue_size)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     start_time = time.monotonic()
     cancelled = asyncio.Event()
 
@@ -205,17 +205,29 @@ async def simple_stream_async(
     Yields:
         Formatted string responses.
     """
-    queue: asyncio.Queue[Any | None | Exception] = asyncio.Queue()
-    loop = asyncio.get_event_loop()
+    # CON-6: bound the queue so a slow consumer applies backpressure instead
+    # of the producer growing it without limit.
+    queue: asyncio.Queue[Any | None | Exception] = asyncio.Queue(maxsize=DEFAULT_QUEUE_SIZE)
+    loop = asyncio.get_running_loop()
+    cancelled = asyncio.Event()
 
     def producer() -> None:
         try:
             for item in sync_iterator:
-                loop.call_soon_threadsafe(queue.put_nowait, item)
+                if cancelled.is_set():
+                    break
+                # Blocking put for backpressure (bounded by the configured
+                # put timeout) rather than an unbounded put_nowait.
+                future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+                future.result(timeout=_hfl_config.stream_queue_put_timeout)
         except Exception as e:
-            logger.error("Error in stream producer: %s", e)
-            loop.call_soon_threadsafe(queue.put_nowait, e)
+            if not cancelled.is_set():
+                logger.error("Error in stream producer: %s", e)
+                loop.call_soon_threadsafe(queue.put_nowait, e)
         finally:
+            # Close the generator from the producer thread so the engine runs
+            # its cooperative cancel / cleanup instead of leaking until GC.
+            _close_iterator(sync_iterator)
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     producer_task = asyncio.create_task(asyncio.to_thread(producer))
@@ -231,6 +243,7 @@ async def simple_stream_async(
 
         yield format_done()
     finally:
+        cancelled.set()
         if not producer_task.done():
             producer_task.cancel()
             try:

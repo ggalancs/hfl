@@ -146,7 +146,7 @@ class AsyncEngineWrapper:
             Exception: Re-raises any exception from the producer thread.
         """
         queue: asyncio.Queue[str | None | Exception] = asyncio.Queue(maxsize=100)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def producer() -> None:
             """Run sync generator and put tokens in queue."""
@@ -215,7 +215,7 @@ class AsyncEngineWrapper:
             Exception: Re-raises any exception from the producer thread.
         """
         queue: asyncio.Queue[str | None | Exception] = asyncio.Queue(maxsize=100)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def producer() -> None:
             """Run sync generator and put tokens in queue."""
