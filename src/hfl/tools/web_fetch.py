@@ -12,8 +12,13 @@ Security posture:
   address lands on a private / loopback / link-local range. This
   prevents SSRF against cloud-metadata endpoints (169.254.169.254)
   and internal services.
-- Redirects are followed manually and re-validated on every hop, so a
-  public URL cannot 302 the fetch onto an internal/metadata address.
+- The validated IP is *pinned* for the actual connection (the request
+  dials the vetted address with the original Host header + TLS SNI), so
+  httpx cannot re-resolve at connect time — closing the DNS-rebinding
+  TOCTOU window.
+- Redirects are followed manually, re-validated, and re-pinned on every
+  hop, so a public URL cannot 302 the fetch onto an internal/metadata
+  address.
 - Response body is capped at 5 MiB by default.
 - Charset is sniffed from the Content-Type header and falls back to
   UTF-8 with replacement errors.
@@ -64,8 +69,17 @@ def _is_private_ip(ip_str: str) -> bool:
     )
 
 
-def _validate_url(url: str) -> str:
-    """Reject hostile URLs before httpx even touches the socket."""
+def _resolve_and_validate(url: str) -> tuple[str, str]:
+    """Validate + resolve a URL, returning ``(cleaned_url, pinned_ip)``.
+
+    Rejects hostile URLs before httpx touches the socket *and* returns a
+    concrete validated IP to connect to. Reusing that IP for the actual
+    request closes the DNS-rebinding TOCTOU window: without it, httpx
+    re-resolves the hostname at connect time, and an attacker controlling
+    authoritative DNS (TTL 0) could answer with a public address here and
+    a private/metadata address (169.254.169.254 / 127.0.0.1) to httpx,
+    bypassing the guard.
+    """
     if not isinstance(url, str) or not url:
         raise WebFetchError("URL must be a non-empty string")
 
@@ -75,19 +89,55 @@ def _validate_url(url: str) -> str:
     if not parsed.hostname:
         raise WebFetchError("URL is missing a hostname")
 
-    # Resolve and reject private / loopback / metadata targets.
+    # Resolve and reject private / loopback / metadata targets. Every
+    # returned address must be public; we pin the first one.
     try:
         infos = socket.getaddrinfo(parsed.hostname, None)
     except (socket.gaierror, OSError) as exc:
         raise WebFetchError("hostname does not resolve") from exc
+    pinned_ip: str | None = None
     for info in infos:
         addr = str(info[4][0])
         if _is_private_ip(addr):
             raise WebFetchError("URL resolves to a private or reserved address — refusing to fetch")
+        if pinned_ip is None:
+            pinned_ip = addr
+    if pinned_ip is None:
+        raise WebFetchError("hostname does not resolve")
 
     # Normalise: strip fragments (we never need them).
     cleaned = parsed._replace(fragment="")
-    return urlunparse(cleaned)
+    return urlunparse(cleaned), pinned_ip
+
+
+def _pinned_request(cleaned_url: str, pinned_ip: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """Build the connection target that forces httpx to dial ``pinned_ip``.
+
+    Returns ``(connect_url, host_headers, extensions)``. The URL host is
+    swapped for the validated IP literal while the original authority is
+    preserved in the ``Host`` header and (for https) the TLS SNI /
+    certificate hostname, so virtual hosting and certificate validation
+    keep working against the real hostname instead of the bare IP.
+    """
+    parsed = urlparse(cleaned_url)
+    host = parsed.hostname or ""
+    hh_host = f"[{host}]" if ":" in host else host
+    host_header = hh_host if parsed.port is None else f"{hh_host}:{parsed.port}"
+
+    ip_lit = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    netloc = ip_lit if parsed.port is None else f"{ip_lit}:{parsed.port}"
+    # Preserve any userinfo (HTTP Basic credentials) verbatim so httpx still
+    # derives the Authorization header — the IP-only rewrite would otherwise
+    # silently drop ``user:pass@`` and break auth-protected fetches.
+    if "@" in parsed.netloc:
+        netloc = parsed.netloc.rsplit("@", 1)[0] + "@" + netloc
+    connect_url = urlunparse(parsed._replace(netloc=netloc))
+
+    extensions: dict[str, Any] = {}
+    if parsed.scheme.lower() == "https":
+        # Verify the certificate against the real hostname, not the IP.
+        extensions["sni_hostname"] = host
+    return connect_url, {"Host": host_header}, extensions
 
 
 # ----------------------------------------------------------------------
@@ -167,27 +217,34 @@ async def fetch(
     ``WebFetchError`` only for protocol / security / timeout
     failures, which the route turns into a 400.
     """
-    cleaned_url = _validate_url(url)
+    cleaned_url, pinned_ip = _resolve_and_validate(url)
     headers = {
         "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
         "Accept": "text/html,application/xhtml+xml",
     }
     try:
         # Redirects are followed manually so every hop is re-validated by the
-        # SSRF guard. httpx's own follow_redirects would chase a 302 to
-        # 169.254.169.254 / 127.0.0.1 without re-checking, defeating the guard.
+        # SSRF guard *and* pinned to its validated IP. httpx's own
+        # follow_redirects (and its connect-time DNS re-resolution) would
+        # otherwise chase / rebind onto 169.254.169.254 / 127.0.0.1.
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            current = cleaned_url
+            current, current_ip = cleaned_url, pinned_ip
             for _ in range(_MAX_REDIRECTS + 1):
-                resp = await client.get(current, headers=headers)
+                connect_url, host_header, extensions = _pinned_request(current, current_ip)
+                resp = await client.get(
+                    connect_url,
+                    headers={**headers, **host_header},
+                    extensions=extensions,
+                )
                 if not resp.is_redirect:
                     break
                 location = resp.headers.get("location")
                 if not location:
                     break
-                # Resolve relative redirects against the current URL, then run
-                # the full scheme + private-IP guard again before following.
-                current = _validate_url(urljoin(current, location))
+                # Resolve relative redirects against the logical (hostname)
+                # URL, then re-run the full scheme + private-IP guard and
+                # re-pin before following.
+                current, current_ip = _resolve_and_validate(urljoin(current, location))
             else:
                 raise WebFetchError("too many redirects")
             body_bytes = resp.content[:max_bytes]

@@ -258,3 +258,66 @@ class TestRedirectRevalidation:
         self._install(monkeypatch, handler)
         with pytest.raises(wf.WebFetchError, match="too many redirects"):
             await wf.fetch("https://example.com/start")
+
+
+class TestIPPinning:
+    """SEC-1: the connection is pinned to the validated IP so httpx cannot
+    re-resolve the hostname at connect time (DNS-rebinding TOCTOU)."""
+
+    async def test_connection_dials_validated_ip_with_host_preserved(self, monkeypatch):
+        monkeypatch.setattr(wf.socket, "getaddrinfo", _public_getaddrinfo)
+        seen: dict[str, object] = {}
+
+        def handler(req):
+            seen["host"] = req.url.host
+            seen["host_header"] = req.headers.get("host")
+            seen["sni"] = req.extensions.get("sni_hostname")
+            return httpx.Response(200, text=SAMPLE_HTML)
+
+        transport = httpx.MockTransport(handler)
+        original = httpx.AsyncClient
+
+        def _factory(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(wf.httpx, "AsyncClient", _factory)
+
+        doc = await wf.fetch("https://example.com/page")
+        assert doc["title"] == "Example Page"
+        # The socket target is the vetted IP, not the hostname → a rebound
+        # second resolution can never reach an internal address.
+        assert seen["host"] == "93.184.216.34"
+        # Host header + TLS SNI still carry the real hostname (vhosting +
+        # certificate validation keep working).
+        assert seen["host_header"] == "example.com"
+        assert seen["sni"] == "example.com"
+
+    async def test_basic_auth_credentials_preserved(self, monkeypatch):
+        # The IP-pinning rewrite must keep URL userinfo so httpx still sends
+        # the Authorization header (regression: the bare-IP netloc dropped it).
+        import base64
+
+        monkeypatch.setattr(wf.socket, "getaddrinfo", _public_getaddrinfo)
+        seen: dict[str, object] = {}
+
+        def handler(req):
+            seen["host"] = req.url.host
+            seen["auth"] = req.headers.get("authorization")
+            return httpx.Response(200, text=SAMPLE_HTML)
+
+        transport = httpx.MockTransport(handler)
+        original = httpx.AsyncClient
+
+        def _factory(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(wf.httpx, "AsyncClient", _factory)
+
+        await wf.fetch("https://user:pass@example.com/secret")
+        # Still pinned to the validated IP...
+        assert seen["host"] == "93.184.216.34"
+        # ...and the Basic credentials survive the rewrite.
+        expected = "Basic " + base64.b64encode(b"user:pass").decode()
+        assert seen["auth"] == expected
