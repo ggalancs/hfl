@@ -306,6 +306,7 @@ async def _stream_chat(
     first_chunk = True
     tool_aware = bool(tools)
     accumulated: list[str] = []
+    emitted = [0]  # API-13: token count → report finish_reason "length" on cap
 
     def _chunk_json(delta: dict, finish_reason: str | None) -> str:
         chunk = {
@@ -320,6 +321,7 @@ async def _stream_chat(
 
     def format_chunk(token: str) -> str:
         nonlocal first_chunk
+        emitted[0] += 1
         # Tool-aware turns buffer everything; emit nothing until done so a
         # tool-call marker is never streamed verbatim as content.
         if tool_aware:
@@ -332,8 +334,14 @@ async def _stream_chat(
         return _chunk_json(delta, None)
 
     def format_done() -> str:
+        # API-13: report "length" when generation hit the token cap, else
+        # "stop" (real OpenAI distinguishes them; the stream only exposes the
+        # emitted-token count, so this is best-effort but accurate at the cap).
+        stop_finish = (
+            "length" if (config.max_tokens and emitted[0] >= config.max_tokens) else "stop"
+        )
         if not tool_aware:
-            return _chunk_json({}, "stop") + "data: [DONE]\n\n"
+            return _chunk_json({}, stop_finish) + "data: [DONE]\n\n"
 
         cleaned, canonical = parse_tool_calls("".join(accumulated), model, tools)
         if canonical:
@@ -346,7 +354,7 @@ async def _stream_chat(
         # No tool call after all — surface the cleaned text as one delta.
         return (
             _chunk_json({"role": "assistant", "content": cleaned}, None)
-            + _chunk_json({}, "stop")
+            + _chunk_json({}, stop_finish)
             + "data: [DONE]\n\n"
         )
 
@@ -475,8 +483,10 @@ async def _stream_completion(
 
     completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"
     created = int(time.time())  # Consistent timestamp across all chunks
+    emitted = [0]  # API-13: token count → report finish_reason "length" on cap
 
     def format_chunk(token: str) -> str:
+        emitted[0] += 1
         chunk = {
             "id": completion_id,
             "object": "text_completion",
@@ -488,7 +498,19 @@ async def _stream_completion(
         return f"data: {json.dumps(chunk)}\n\n"
 
     def format_done() -> str:
-        return "data: [DONE]\n\n"
+        # API-13: emit a final chunk carrying finish_reason — the legacy
+        # completions stream previously sent only [DONE], so clients never
+        # saw a stop reason at all.
+        finish = "length" if (config.max_tokens and emitted[0] >= config.max_tokens) else "stop"
+        final = {
+            "id": completion_id,
+            "object": "text_completion",
+            "created": created,
+            "model": model,
+            "system_fingerprint": None,
+            "choices": [{"text": "", "index": 0, "finish_reason": finish}],
+        }
+        return f"data: {json.dumps(final)}\n\n" + "data: [DONE]\n\n"
 
     try:
         async for chunk in stream_with_backpressure(

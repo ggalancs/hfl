@@ -142,6 +142,31 @@ class TestChatCompletionsFormat:
         # Last chunk should have finish_reason
         assert events[-1]["choices"][0]["finish_reason"] == "stop"
 
+    def test_chat_streaming_finish_reason_length_on_cap(self, client, mock_loaded_state):
+        """API-13: finish_reason is 'length' (not always 'stop') when the
+        emitted-token count reaches the request's max_tokens."""
+        mock_state, mock_engine = mock_loaded_state
+        mock_engine.chat_stream.return_value = iter(["a", "b", "c"])
+
+        with patch("hfl.api.routes_openai._get_state", return_value=mock_state):
+            with patch("hfl.api.routes_openai._ensure_model_loaded"):
+                response = client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "test-model",
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "stream": True,
+                        "max_tokens": 2,
+                    },
+                )
+
+        events = [
+            json.loads(line[6:])
+            for line in response.text.split("\n")
+            if line.startswith("data: ") and line[6:] != "[DONE]"
+        ]
+        assert events[-1]["choices"][0]["finish_reason"] == "length"
+
 
 class TestCompletionsFormat:
     """Tests for /v1/completions response format."""
