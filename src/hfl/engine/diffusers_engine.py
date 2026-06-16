@@ -126,6 +126,10 @@ class DiffusersEngine:
         generator = torch.Generator(device=self._device or "cpu")
         if seed is not None:
             generator = generator.manual_seed(int(seed))
+        else:
+            # ENG-11: capture the random seed actually used so the result is
+            # reproducible — previously ImageResult.seed reported None.
+            seed = generator.initial_seed()
         output = self._pipeline(
             prompt,
             negative_prompt=negative_prompt,
