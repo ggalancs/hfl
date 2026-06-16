@@ -189,6 +189,56 @@ class TestSnapshotErrors:
         assert meta.version == 1
 
 
+# --- integrity (SEC-6) ------------------------------------------------------
+
+
+class TestSnapshotIntegrity:
+    """The pickled state blob is HMAC-authenticated before unpickling, so a
+    tampered or planted ``.state`` file cannot execute code on load."""
+
+    def test_save_writes_integrity_tag(self, isolated_home, fake_state):
+        meta = save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+        assert meta.mac  # non-empty HMAC tag stamped at save time
+
+    def test_tampered_state_is_rejected_before_unpickling(self, isolated_home, fake_state):
+        from hfl.engine.snapshot import SnapshotIntegrityError
+
+        save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+        # Attacker swaps in a different payload (here, not even valid pickle —
+        # the integrity check must fire first, never reaching pickle.loads).
+        (isolated_home / "snapshots" / "warm-1.state").write_bytes(b"malicious payload")
+
+        engine = _engine_with_state(fake_state)
+        with pytest.raises(SnapshotIntegrityError, match="integrity"):
+            load_snapshot(engine, name="warm-1", model_name="m")
+        engine.load_state.assert_not_called()
+
+    def test_missing_integrity_tag_is_rejected(self, isolated_home, fake_state):
+        import json
+
+        from hfl.engine.snapshot import SnapshotIntegrityError
+
+        save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+        meta_path = isolated_home / "snapshots" / "warm-1.meta.json"
+        data = json.loads(meta_path.read_text())
+        data.pop("mac", None)
+        meta_path.write_text(json.dumps(data))
+
+        with pytest.raises(SnapshotIntegrityError):
+            load_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+
+    def test_foreign_installation_key_is_rejected(self, isolated_home, fake_state):
+        from hfl.engine.snapshot import SnapshotIntegrityError
+
+        save_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+        # Rotate the per-installation key → a snapshot from elsewhere (or a
+        # forged tag) no longer verifies.
+        (isolated_home / "snapshot.key").write_bytes(b"\x02" * 32)
+
+        with pytest.raises(SnapshotIntegrityError):
+            load_snapshot(_engine_with_state(fake_state), name="warm-1", model_name="m")
+
+
 # --- listing & deletion -----------------------------------------------------
 
 

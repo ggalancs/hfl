@@ -20,13 +20,26 @@ small JSON sidecar with metadata (model_name, tokens, created_at).
 The pickle is HFL-internal — we do not document it as a stable
 format; the sidecar is consulted before loading to verify
 ``model_name`` matches.
+
+Security: ``pickle.loads`` executes arbitrary code during
+deserialisation (CWE-502), so a tampered or attacker-planted
+``.state`` file would be a code-execution primitive. Every state
+blob is therefore authenticated with an HMAC-SHA256 keyed by a
+per-installation secret (``HFL_HOME/snapshot.key``) and verified
+*before* it is unpickled — only blobs this installation wrote will
+load. Snapshots are a same-machine warm-start cache, not a portable
+interchange format; copy one between machines and it will be
+rejected (re-save it locally).
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import pickle
+import secrets
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -45,6 +58,7 @@ __all__ = [
     "list_snapshots",
     "delete_snapshot",
     "SNAPSHOT_FORMAT_VERSION",
+    "SnapshotIntegrityError",
 ]
 
 
@@ -64,6 +78,13 @@ class SnapshotVersionMismatch(ValueError):
     """
 
 
+class SnapshotIntegrityError(ValueError):
+    """Raised when a snapshot's state blob fails its HMAC integrity
+    check (tampered, planted, or written by a different installation),
+    so it is refused before :func:`pickle.loads` can run.
+    """
+
+
 @dataclass(frozen=True)
 class SnapshotMeta:
     """Sidecar metadata. Stored as ``<name>.meta.json`` next to the
@@ -78,6 +99,10 @@ class SnapshotMeta:
     """Format-version stamp written at save time. ``load_snapshot``
     rejects values that don't match
     :data:`SNAPSHOT_FORMAT_VERSION`."""
+    mac: str = ""
+    """HMAC-SHA256 of the pickled state blob, keyed by the
+    per-installation snapshot key. Verified before unpickling to stop a
+    tampered / planted ``.state`` file from executing code on load."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -111,6 +136,39 @@ def _validate_name(name: str) -> None:
         raise ValueError(f"invalid snapshot name: {name!r}")
     if not name.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise ValueError(f"snapshot name must be alphanumeric / -._: {name!r}")
+
+
+def _snapshot_key() -> bytes:
+    """Per-installation secret authenticating snapshot state blobs.
+
+    Generated once (32 random bytes) and stored ``0600`` in the HFL home
+    dir. This is a *local integrity* key, not a shared secret: its only
+    job is to guarantee that a ``.state`` file unpickled by this
+    installation was written by it, so a tampered or planted pickle
+    cannot execute code via :func:`pickle.loads` (CWE-502).
+    """
+    from hfl.config import config
+
+    key_path = config.home_dir / "snapshot.key"
+    try:
+        data = key_path.read_bytes()
+        if len(data) >= 32:
+            return data
+    except FileNotFoundError:
+        pass
+    key = secrets.token_bytes(32)
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key_path.write_bytes(key)
+    try:
+        key_path.chmod(0o600)
+    except OSError:  # pragma: no cover — non-POSIX filesystem
+        pass
+    return key
+
+
+def _state_mac(raw: bytes) -> str:
+    """Hex HMAC-SHA256 of ``raw`` under the per-installation key."""
+    return hmac.new(_snapshot_key(), raw, hashlib.sha256).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +209,8 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
         raise RuntimeError(f"engine.save_state() failed: {exc}") from exc
 
     state_path = _state_path(name)
-    with state_path.open("wb") as f:
-        pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+    raw = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
+    state_path.write_bytes(raw)
 
     tokens = int(getattr(state, "n_tokens", 0) or 0)
     meta = SnapshotMeta(
@@ -161,6 +219,7 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
         tokens=tokens,
         created_at=time.time(),
         bytes=state_path.stat().st_size,
+        mac=_state_mac(raw),
     )
     with _meta_path(name).open("w") as f:
         json.dump(meta.to_json(), f, indent=2)
@@ -208,8 +267,23 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
             "engine does not expose load_state(); KV snapshots require llama-cpp-python"
         )
 
-    with state_p.open("rb") as f:
-        state = pickle.load(f)
+    # Authenticate the state blob BEFORE unpickling: pickle.loads executes
+    # arbitrary code during deserialisation (CWE-502), so a tampered or
+    # attacker-planted .state file is an RCE primitive. The per-install
+    # HMAC ensures we only unpickle blobs this installation wrote.
+    raw = state_p.read_bytes()
+    expected_mac = meta_data.get("mac")
+    if not expected_mac:
+        raise SnapshotIntegrityError(
+            f"snapshot {name!r} has no integrity tag (created before integrity "
+            "protection, or hand-edited) — refusing to unpickle. Re-save it."
+        )
+    if not hmac.compare_digest(_state_mac(raw), str(expected_mac)):
+        raise SnapshotIntegrityError(
+            f"snapshot {name!r} failed its integrity check — refusing to load a "
+            "possibly-tampered state file."
+        )
+    state = pickle.loads(raw)
 
     try:
         load_fn(state)
