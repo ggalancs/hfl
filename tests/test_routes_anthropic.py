@@ -483,6 +483,73 @@ class TestAnthropicMessagesStreaming:
         else:
             pytest.fail("No message_start event found")
 
+    def test_streaming_stop_reason_max_tokens_on_cap(self):
+        """API-10: streaming message_delta reports max_tokens when the cap is
+        hit, not always end_turn."""
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream.return_value = iter(["a", "b", "c"])
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 2,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        assert '"stop_reason": "max_tokens"' in response.text
+
+    def test_streaming_tool_aware_no_call_reports_max_tokens(self):
+        """API-10: a tool-aware turn that answers in plain text (no tool call)
+        and hits the cap must still report max_tokens — the buffered tokens
+        are counted even though content is withheld."""
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream.return_value = iter(["plain ", "answer"])  # no marker
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 2,
+                "stream": True,
+                "tools": [{"name": "x", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        assert '"stop_reason": "max_tokens"' in response.text
+        assert '"type": "tool_use"' not in response.text  # no spurious tool call
+
+    def test_streaming_echoes_prefixed_model(self):
+        """API-14: message_start echoes the client's model verbatim (with the
+        provider prefix), matching the non-streaming response."""
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream.return_value = iter(["hi"])
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "hfl/qwen-coder",
+                "max_tokens": 256,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        assert '"model": "hfl/qwen-coder"' in response.text
+        assert '"stop_reason": "end_turn"' in response.text  # well under the cap
+
     def test_streaming_message_delta_has_stop_reason(self):
         """Test that message_delta has stop_reason and usage."""
         engine = MagicMock()

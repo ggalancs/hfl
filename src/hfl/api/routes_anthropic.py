@@ -254,7 +254,9 @@ async def create_message(
 
     if req.stream:
         return await prepare_stream_response(
-            lambda slot: _stream_messages(model_name, messages, gen_config, tools, slot),
+            lambda slot: _stream_messages(
+                model_name, messages, gen_config, tools, slot, echo_model=req.model
+            ),
             media_type="text/event-stream",
             path="/v1/messages",
         )
@@ -336,6 +338,8 @@ async def _stream_messages(
     config: "GenerationConfig",
     tools: list[dict] | None = None,
     slot_cm: Any | None = None,
+    *,
+    echo_model: str | None = None,
 ) -> AsyncIterator[str]:
     """Generate Anthropic-compatible SSE streaming responses.
 
@@ -371,7 +375,9 @@ async def _stream_messages(
             "type": "message",
             "role": "assistant",
             "content": [],
-            "model": model,
+            # API-14: echo the client's model string verbatim (incl. any
+            # provider prefix), matching the non-streaming response.
+            "model": echo_model or model,
             "stop_reason": None,
             "stop_sequence": None,
             "usage": {"input_tokens": 0, "output_tokens": 0},
@@ -397,10 +403,13 @@ async def _stream_messages(
 
     def format_delta(token: str) -> str:
         nonlocal output_tokens
+        # Count every token (incl. buffered tool-aware ones) so the
+        # usage.output_tokens and the max_tokens stop-reason detection
+        # (_plain_stop_reason) are live on the tool-aware path too (API-10).
+        output_tokens += 1
         if tool_aware:
             accumulated.append(token)
             return ""
-        output_tokens += 1
         delta = {
             "type": "content_block_delta",
             "index": 0,
@@ -429,6 +438,15 @@ async def _stream_messages(
             + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
         )
 
+    def _plain_stop_reason() -> str:
+        # API-10: report max_tokens when the cap was hit, else end_turn (the
+        # streaming path only exposes the emitted-token count).
+        return (
+            "max_tokens"
+            if (config.max_tokens and output_tokens >= config.max_tokens)
+            else "end_turn"
+        )
+
     def format_done() -> str:
         if not tool_aware:
             return (
@@ -437,7 +455,7 @@ async def _stream_messages(
                     "message_delta",
                     {
                         "type": "message_delta",
-                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "delta": {"stop_reason": _plain_stop_reason(), "stop_sequence": None},
                         "usage": {"output_tokens": output_tokens},
                     },
                 )
@@ -485,7 +503,7 @@ async def _stream_messages(
             stop_reason = "tool_use"
         else:
             events.append(_text_block(0, resolved.content))
-            stop_reason = "end_turn"
+            stop_reason = _plain_stop_reason()
 
         events.append(
             _sse(
