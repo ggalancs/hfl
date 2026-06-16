@@ -364,3 +364,79 @@ class TestTransformersEngineStreaming:
 
             assert hasattr(engine, "chat_stream")
             assert callable(engine.chat_stream)
+
+
+class _FakeStreamer:
+    """Minimal real iterable standing in for TextIteratorStreamer: a queue
+    drained by iteration and terminated by ``end()``."""
+
+    def __init__(self, *args, **kwargs):
+        import queue
+
+        self._q = queue.Queue()
+
+    def put(self, *args, **kwargs):  # pragma: no cover - unused by the fakes
+        pass
+
+    def end(self):
+        self._q.put(None)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        item = self._q.get(timeout=5)
+        if item is None:
+            raise StopIteration
+        return item
+
+
+class _Inputs(dict):
+    def to(self, *args, **kwargs):
+        return self
+
+
+def _stream_engine(generate_side_effect):
+    """Build a TransformersEngine whose generate() is driven by the given
+    side effect, with a real iterable streamer (transformers/torch mocked)."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    fake_tf = MagicMock()
+    fake_tf.TextIteratorStreamer = _FakeStreamer
+    # StoppingCriteria left as a MagicMock -> isinstance(..., type) is False,
+    # so the cooperative-cancel block is skipped under test (no subclassing).
+    with patch.dict(sys.modules, {"transformers": fake_tf, "torch": MagicMock()}):
+        from hfl.engine.transformers_engine import TransformersEngine
+
+        engine = TransformersEngine()
+        engine._model = MagicMock()
+        engine._model.generate.side_effect = generate_side_effect
+        engine._tokenizer = MagicMock(return_value=_Inputs(input_ids="x"))
+        yield engine
+
+
+class TestTransformersStreamLifecycle:
+    """ENG-8: the streaming worker thread must surface its exception and never
+    leave the consumer hanging on the streamer."""
+
+    def test_worker_exception_is_re_raised_not_swallowed(self):
+        def _boom(**kwargs):
+            # Simulate generate() dying mid-stream (OOM / shape / CUDA error).
+            raise RuntimeError("CUDA OOM")
+
+        gen = _stream_engine(_boom)
+        engine = next(gen)
+        with pytest.raises(RuntimeError, match="CUDA OOM"):
+            list(engine.generate_stream("hello"))
+
+    def test_successful_stream_yields_all_tokens(self):
+        def _emit(**kwargs):
+            streamer = kwargs["streamer"]
+            for tok in ["Hel", "lo", "!"]:
+                streamer._q.put(tok)
+            streamer.end()
+
+        gen = _stream_engine(_emit)
+        engine = next(gen)
+        assert list(engine.generate_stream("hello")) == ["Hel", "lo", "!"]

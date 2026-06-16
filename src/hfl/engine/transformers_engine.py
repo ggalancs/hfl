@@ -216,9 +216,9 @@ class TransformersEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> Iterator[str]:
-        from threading import Thread
+        from threading import Event, Thread
 
-        from transformers import TextIteratorStreamer
+        from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
         cfg = config or GenerationConfig()
         inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
@@ -243,14 +243,54 @@ class TransformersEngine(InferenceEngine):
             "streamer": streamer,
         }
 
-        thread = Thread(target=self._model.generate, kwargs=gen_kwargs)
+        # CON-3: cooperative cancellation. If the consumer closes this
+        # generator early (client disconnect / stream timeout), the ``finally``
+        # sets ``cancel`` and the criteria halts generation at the next token,
+        # so the worker thread does not outlive the request. Guarded by
+        # ``isinstance(..., type)`` so the unit tests' mocked ``transformers``
+        # (a MagicMock, which cannot be subclassed) takes the no-op path.
+        cancel = Event()
+        if isinstance(StoppingCriteria, type):
+
+            class _Cancelled(StoppingCriteria):  # type: ignore[misc, valid-type]
+                def __call__(self, input_ids, scores, **kwargs):  # noqa: ANN001
+                    return cancel.is_set()
+
+            gen_kwargs["stopping_criteria"] = StoppingCriteriaList([_Cancelled()])
+
+        # ENG-8: a bare Thread never propagates the worker's exception, so an
+        # OOM / shape / CUDA failure mid-generation used to be swallowed and
+        # the consumer hung forever on the streamer. Capture it and re-raise
+        # after the loop; push the stop sentinel so the loop always terminates.
+        worker_error: list[BaseException] = []
+
+        def _run() -> None:
+            try:
+                self._model.generate(**gen_kwargs)
+            except BaseException as exc:  # noqa: BLE001 - surfaced after the loop
+                worker_error.append(exc)
+                try:
+                    streamer.end()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+        thread = Thread(target=_run)
         thread.start()
 
-        for text in streamer:
-            if text:
-                yield text
+        clean_exit = False
+        try:
+            for text in streamer:
+                if text:
+                    yield text
+            clean_exit = True
+        finally:
+            # On early close (GeneratorExit) or normal exhaustion, stop the
+            # worker cooperatively and join it so no generation thread leaks.
+            cancel.set()
+            thread.join()
 
-        thread.join()
+        if clean_exit and worker_error:
+            raise worker_error[0]
 
     def chat(
         self,
