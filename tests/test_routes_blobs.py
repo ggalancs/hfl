@@ -73,6 +73,28 @@ class TestPostBlob:
         resp = client.post("/api/blobs/sha256:not-hex", content=b"anything")
         assert resp.status_code == 400
 
+    def test_blob_over_configured_cap_rejected(self, client, temp_config, monkeypatch):
+        # SEC-2: when an operator sets HFL_MAX_BLOB_BYTES, an oversized upload
+        # is rejected (default 0/unlimited preserves the create flow).
+        from hfl.api import routes_blobs
+
+        monkeypatch.setattr(routes_blobs.config, "max_blob_bytes", 8)
+        data = b"this body is well over eight bytes"
+        digest = _sha256(data)
+        resp = client.post(f"/api/blobs/sha256:{digest}", content=data)
+        assert resp.status_code == 400
+        assert "limit" in resp.text.lower()
+        assert not blob_exists(digest)
+
+    def test_blob_under_configured_cap_accepted(self, client, temp_config, monkeypatch):
+        from hfl.api import routes_blobs
+
+        monkeypatch.setattr(routes_blobs.config, "max_blob_bytes", 4096)
+        data = b"small"
+        digest = _sha256(data)
+        resp = client.post(f"/api/blobs/sha256:{digest}", content=data)
+        assert resp.status_code == 201
+
     def test_empty_body_accepted_when_matches(self, client, temp_config):
         empty_digest = _sha256(b"")
         resp = client.post(f"/api/blobs/sha256:{empty_digest}", content=b"")

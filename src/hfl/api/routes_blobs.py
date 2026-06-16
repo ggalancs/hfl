@@ -30,6 +30,7 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from hfl.config import config
 from hfl.hub.blobs import (
     DigestMismatchError,
     InvalidBlobDigestError,
@@ -87,7 +88,11 @@ async def post_blob(digest: str, request: Request) -> Response:
     ``RequestBodyLimitMiddleware.EXCLUDED_PREFIXES``).
     """
     try:
-        bytes_written = await write_blob_stream(digest, _request_chunks(request))
+        # SEC-2: bound the upload when an operator has configured a cap;
+        # the default (0 → None) preserves the unlimited GGUF create flow.
+        bytes_written = await write_blob_stream(
+            digest, _request_chunks(request), chunk_limit=config.max_blob_bytes or None
+        )
     except InvalidBlobDigestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DigestMismatchError as exc:

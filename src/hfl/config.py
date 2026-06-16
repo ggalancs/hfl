@@ -256,6 +256,15 @@ class HFLConfig:
         default_factory=lambda: int(os.environ.get("HFL_MAX_REQUEST_BYTES", str(10 * 1024 * 1024)))
     )
 
+    # SEC-2: optional per-request cap on streamed blob uploads (/api/blobs/),
+    # which are exempt from max_request_bytes because GGUFs are legitimately
+    # multi-GB. 0 (default) = unlimited (unchanged behaviour); operators that
+    # expose the server off loopback can set HFL_MAX_BLOB_BYTES to bound a
+    # disk-fill upload.
+    max_blob_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_MAX_BLOB_BYTES", "0"))
+    )
+
     # Inference dispatcher (spec §5.3 — concurrency / queueing).
     # Llama.cpp and transformers-GPU share a single non-reentrant model
     # instance; concurrent requests must be serialized by a bounded
