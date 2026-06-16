@@ -95,6 +95,18 @@ class TestMetrics:
         assert "hfl_uptime_seconds" in output
         assert "TYPE hfl_requests_total counter" in output
 
+    def test_record_stream_cancel_orphan(self, metrics):
+        """CON-3: the SSE/HTTP orphan counter increments and is exported
+        (Prometheus-only, parity with the WS orphan counter)."""
+        assert metrics.stream_cancel_orphans_total == 0
+        metrics.record_stream_cancel_orphan()
+        metrics.record_stream_cancel_orphan()
+        assert metrics.stream_cancel_orphans_total == 2
+
+        output = metrics.export_prometheus()
+        assert "# TYPE hfl_stream_cancel_orphans_total counter" in output
+        assert "hfl_stream_cancel_orphans_total 2" in output
+
     def test_export_prometheus_emits_inference_concurrency_gauges(self, metrics):
         """The three V3 dispatcher gauges must show up with the right
         TYPE lines and a numeric value sourced from the shared

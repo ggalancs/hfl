@@ -47,6 +47,11 @@ class Metrics:
     # engine returns by itself).
     ws_cancels_total: int = 0
     ws_cancel_orphans_total: int = 0
+    # CON-3 — SSE/HTTP streaming orphans: a stream torn down (client
+    # disconnect / timeout) while the engine producer thread was still
+    # running, so the engine call keeps going in the background. Parity with
+    # the WebSocket orphan counter above.
+    stream_cancel_orphans_total: int = 0
 
     # Histograms using deque for O(1) FIFO eviction (circular buffer)
     _generation_latencies_ms: deque[float] = field(
@@ -150,6 +155,14 @@ class Metrics:
             if orphaned_slot:
                 self.ws_cancel_orphans_total += 1
 
+    def record_stream_cancel_orphan(self) -> None:
+        """An SSE/HTTP stream was torn down (client disconnect or timeout)
+        while the engine producer thread was still running — the engine call
+        keeps going in the background until it finishes by itself. Parity with
+        the WebSocket orphan counter (used for capacity planning)."""
+        with self._lock:
+            self.stream_cancel_orphans_total += 1
+
     def _percentile(self, values: deque[float] | list[float], p: float) -> float:
         """Calculate percentile using linear interpolation.
 
@@ -232,6 +245,13 @@ class Metrics:
             )
             lines.append("# TYPE hfl_ws_cancel_orphans_total counter")
             lines.append(f"hfl_ws_cancel_orphans_total {self.ws_cancel_orphans_total}")
+            lines.append("")
+            lines.append(
+                "# HELP hfl_stream_cancel_orphans_total SSE/HTTP streams torn "
+                "down with the engine call still running in the background"
+            )
+            lines.append("# TYPE hfl_stream_cancel_orphans_total counter")
+            lines.append(f"hfl_stream_cancel_orphans_total {self.stream_cancel_orphans_total}")
 
             # Inference dispatcher concurrency. Pulled from the shared
             # dispatcher snapshot so /metrics reflects the same state

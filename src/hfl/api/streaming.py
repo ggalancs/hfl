@@ -37,6 +37,32 @@ class StreamCancelledError(Exception):
     """Raised when a stream is cancelled (e.g., client disconnect)."""
 
 
+def _close_iterator(it: Iterator[Any]) -> None:
+    """Close a generator-backed iterator if it supports ``close()``.
+
+    Called from the producer thread (which drives ``next()``), so it is safe:
+    closing propagates ``GeneratorExit`` into the engine's ``generate_stream``,
+    letting it run its cooperative cancel / cleanup instead of leaking the
+    worker thread until GC (CON-3). A no-op for plain iterators.
+    """
+    close = getattr(it, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+
+def _record_stream_orphan() -> None:
+    """Bump the SSE/HTTP orphan counter (parity with the WS path)."""
+    try:
+        from hfl.metrics import get_metrics
+
+        get_metrics().record_stream_cancel_orphan()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 async def stream_with_backpressure(
     sync_iterator: Iterator[Any],
     format_item: Callable[[Any], str],
@@ -87,11 +113,16 @@ async def stream_with_backpressure(
                 logger.error("Error in stream producer: %s", e)
                 loop.call_soon_threadsafe(queue.put_nowait, e)
         finally:
+            # Close the generator from the thread that drove it so the engine
+            # runs its cooperative cancel / cleanup (CON-3) before the worker
+            # exits, rather than leaking it until GC.
+            _close_iterator(sync_iterator)
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     # Start producer in thread pool
     producer_task = asyncio.create_task(asyncio.to_thread(producer))
 
+    completed_normally = False
     try:
         while True:
             # Check total timeout
@@ -127,14 +158,28 @@ async def stream_with_backpressure(
 
             yield format_item(item)
 
+        # The producer has delivered its sentinel (the ``None`` that broke the
+        # loop), so the stream is logically complete: mark it BEFORE yielding
+        # the done frame, otherwise a teardown at the done-yield boundary (or a
+        # raising ``format_done``) would skip the flag and record a spurious
+        # orphan.
+        completed_normally = True
         # Send done message
         yield format_done()
 
     finally:
-        # Signal producer to stop
+        # Signal the producer to stop; it re-checks the flag at the top of its
+        # loop and then closes the generator (running the engine's cooperative
+        # cancel).
         cancelled.set()
-        # Cancel and cleanup producer if still running
         if not producer_task.done():
+            # Premature teardown (timeout / client disconnect) with the
+            # producer still inside the engine's blocking next(): we cannot
+            # preempt a sync engine call without an engine-level cancellation
+            # API, so the worker may briefly outlive the stream. Record it for
+            # observability (parity with the WS orphan counter).
+            if not completed_normally:
+                _record_stream_orphan()
             producer_task.cancel()
             try:
                 await producer_task

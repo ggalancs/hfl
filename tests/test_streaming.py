@@ -115,6 +115,59 @@ class TestStreamWithBackpressure:
                 pass
 
     @pytest.mark.asyncio
+    async def test_disconnect_records_orphan_and_closes_iterator(self):
+        """CON-3: tearing the stream down while the producer is still inside
+        the engine's blocking next() records an orphan metric (parity with the
+        WS path) and closes the generator so the engine runs its cooperative
+        cancel instead of leaking the worker."""
+        import threading
+
+        from hfl.metrics import get_metrics
+
+        started = threading.Event()
+        release = threading.Event()
+        closed = threading.Event()
+
+        def sync_iter():
+            try:
+                yield "a"
+                started.set()
+                release.wait(timeout=5)  # block inside next() until released
+                yield "b"
+            finally:
+                closed.set()
+
+        # Report disconnected on the 2nd check — after the first token is in.
+        calls = {"n": 0}
+
+        async def _disconnected():
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        mock_request = MagicMock()
+        mock_request.is_disconnected = _disconnected
+
+        m = get_metrics()
+        before = m.stream_cancel_orphans_total
+
+        with pytest.raises(StreamCancelledError):
+            async for _ in stream_with_backpressure(
+                sync_iter(),
+                format_item=lambda x: x,
+                format_done=lambda: "done",
+                request=mock_request,
+                heartbeat_interval=0.01,
+            ):
+                pass
+
+        # Premature teardown with the producer still running -> orphan recorded.
+        assert m.stream_cancel_orphans_total == before + 1
+        # Releasing the blocked producer lets it observe the cancel; the
+        # generator is then closed (cooperative cleanup), not leaked.
+        release.set()
+        assert closed.wait(timeout=2)
+
+    @pytest.mark.asyncio
     async def test_heartbeat_emission(self):
         """Should emit heartbeats during idle periods."""
 
