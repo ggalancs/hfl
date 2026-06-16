@@ -151,7 +151,9 @@ def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
     cfg = GenerationConfig(
         temperature=req.temperature,
         top_p=req.top_p,
-        max_tokens=req.max_output_tokens or 0,
+        # API-11: default to a sane cap (matching the chat route's 2048) rather
+        # than 0/unbounded when the client omits max_output_tokens.
+        max_tokens=req.max_output_tokens or 2048,
     )
     level = _resolve_thinking(req.reasoning)
     if level is not None:

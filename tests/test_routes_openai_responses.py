@@ -337,3 +337,19 @@ class TestResponsesStreaming:
         # ModelNotReadyError surfaces as 503; the body is JSON, not SSE.
         assert response.status_code in (500, 503)
         assert "text/event-stream" not in response.headers.get("content-type", "")
+
+
+class TestResponsesDefaults:
+    def test_default_max_tokens_matches_chat_route(self):
+        """API-11: when max_output_tokens is omitted, default to a sane cap
+        (2048, matching the chat route) instead of 0/unbounded."""
+        from hfl.api.routes_openai_responses import ResponsesRequest, _build_gen_config
+
+        cfg = _build_gen_config(ResponsesRequest(model="m", input="hi"))
+        assert cfg.max_tokens == 2048
+
+    def test_explicit_max_output_tokens_is_honoured(self):
+        from hfl.api.routes_openai_responses import ResponsesRequest, _build_gen_config
+
+        cfg = _build_gen_config(ResponsesRequest(model="m", input="hi", max_output_tokens=64))
+        assert cfg.max_tokens == 64
