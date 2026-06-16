@@ -394,9 +394,8 @@ Response:
 The per-family parser also handles a generic `{"tool_call": {...}}`
 fallback for templates that weren't properly applied. Streaming (`stream:
 true`) accumulates the full reply and emits `tool_calls` on the final
-`done: true` chunk. Full spec is in
-[`hfl-tool-calling-spec.md`](../hfl-tool-calling-spec.md) and the
-acceptance suite lives at `tests/test_tool_calling_acceptance.py`.
+`done: true` chunk. The acceptance suite (the executable spec, T1–T7)
+lives at `tests/test_tool_calling_acceptance.py`.
 
 ## Concurrency & Backpressure
 
@@ -508,7 +507,7 @@ Supported languages: English (`en`), Spanish (`es`)
 
 ## Known Limitations
 
-This is a v0.3.x alpha release. Known limitations include:
+This is a v0.13.x beta release (`Development Status :: 4 - Beta`). Known limitations include:
 
 - **vLLM backend is experimental**: Basic implementation without full streaming support
 - **CORS is restrictive by default**: same-origin only; opt in via `cors_allow_all` or explicit `cors_origins`

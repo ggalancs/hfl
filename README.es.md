@@ -31,6 +31,47 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 
 **HFL no compite con Ollama — lo complementa.** Usa Ollama para modelos curados; usa HFL cuando necesites algo del ecosistema completo de HuggingFace.
 
+## Novedades en V4
+
+V4 (2026-05) incluye funciones que aprovechan la naturaleza HF-Hub-nativa de
+HFL — cosas que Ollama no puede tener estructuralmente por su modelo de
+registro curado:
+
+- **`hfl discover`** — filtra el Hub de HF en vivo (1,5M+ modelos) por
+  familia, quant, multimodal, licencia, popularidad. Marca lo que ya tienes
+  localmente.
+- **`hfl recommend`** — elige los N mejores modelos que *encajan en tu
+  hardware* (sondea RAM/VRAM/MLX, puntúa por ajuste de hardware + capacidad +
+  popularidad + actualidad).
+- **`hfl pull-smart`** — dado un repo base, encuentra la mejor variante de la
+  comunidad (`mlx-community/...-4bit` en Apple Silicon,
+  `bartowski/...-GGUF/Q5_K_M` en CUDA, el quant más pequeño que entre en CPU).
+- **`hfl verify`** — 5 sondas de sanidad contra un modelo recién descargado en
+  segundos: ida y vuelta del tokenizador, render de la plantilla de chat,
+  generación de prueba, parser de herramientas, dimensión de embeddings.
+- **`hfl bench`** — TTFT + tok/s + p50/p95 con prompts de referencia
+  (16/256/2048 caracteres).
+- **`hfl lora apply|remove|list`** — intercambia adaptadores LoRA en caliente a
+  escalas fraccionarias sin recargar los pesos base.
+- **`hfl snapshot save|load|list|delete`** — persiste el KV cache en disco para
+  arranque en caliente entre reinicios. Versionado por formato.
+- **`hfl compliance-dashboard`** — vista del riesgo de licencias del registro
+  local, repos restringidos pendientes de HF_TOKEN, avisos de la EU AI Act.
+- **`hfl draft-recommend`** — elige automáticamente un hermano pequeño del Hub
+  para decodificación especulativa. Speedup medido de 1,33× en Qwen3-14B +
+  draft 0.6B para prompts estructurados.
+- **REST `POST /v1/responses`** — API Responses de OpenAI (la superficie de
+  2025 que usa `client.responses.create()`).
+- **WebSocket `/ws/chat`** — bidireccional con cancelación a nivel de frame (vs
+  streaming HTTP donde cancelar = cerrar TCP).
+- **REST `POST /api/push`** — sube un modelo registrado al Hub de HF (cierra la
+  brecha "fuera de alcance" de V1/V2).
+
+Consulta [docs/v4.md](docs/v4.md) para la guía V4 completa y
+[docs/env-vars.md](docs/env-vars.md) para la matriz de variables de entorno
+(cada knob `HFL_*` tiene un fallback `OLLAMA_*`, así que reemplazar una
+instalación de Ollama funciona sin releer la documentación).
+
 ## Características
 
 - **CLI y API**: Interfaz CLI completa más API REST compatible con OpenAI, Ollama y Anthropic
@@ -354,9 +395,8 @@ El parser por familia también gestiona un fallback genérico
 `{"tool_call": {...}}` para plantillas que no se aplicaron
 correctamente. En streaming (`stream: true`), HFL acumula toda la
 respuesta y emite los `tool_calls` en el chunk final `done: true`. La
-especificación completa está en
-[`hfl-tool-calling-spec.md`](../hfl-tool-calling-spec.md) y la suite de
-aceptación en `tests/test_tool_calling_acceptance.py`.
+suite de aceptación (la especificación ejecutable, T1–T7) está en
+`tests/test_tool_calling_acceptance.py`.
 
 ## Concurrencia y Backpressure
 
@@ -468,7 +508,7 @@ Idiomas soportados: Inglés (`en`), Español (`es`)
 
 ## Limitaciones Conocidas
 
-Esta es una versión alpha v0.3.x. Las limitaciones conocidas incluyen:
+Esta es una versión beta v0.13.x (`Development Status :: 4 - Beta`). Las limitaciones conocidas incluyen:
 
 - **Backend vLLM es experimental**: Implementación básica sin soporte completo de streaming
 - **CORS es restrictivo por defecto**: mismo-origen solamente; habilitar con `cors_allow_all` o `cors_origins` explícito
