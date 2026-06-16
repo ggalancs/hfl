@@ -37,6 +37,7 @@ Frame grammar (JSON, one frame per WebSocket message):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -87,12 +88,34 @@ def _validate_chat_frame(frame: dict[str, Any]) -> tuple[str, list[dict]]:
 # ---------------------------------------------------------------------------
 
 
-async def _drive_chat(ws: WebSocket, frame: dict[str, Any]) -> None:
+def _log_drive_result(ws: WebSocket, task: "asyncio.Task[None]") -> None:
+    """Retrieve a background chat task's exception so it is logged rather than
+    surfacing as an unretrieved-task warning at GC.
+
+    ``_drive_chat`` surfaces expected failures (bad frame, load error, engine
+    error) as ``error`` frames itself, so reaching here means an *unexpected*
+    post-``ready`` failure. Emit a terminal ``error`` frame so the client is
+    not left waiting for a turn that will never complete — the receive loop
+    stays open for the next prompt (previously such an error tore the whole
+    connection down)."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("ws chat turn failed: %s", exc, exc_info=exc)
+        with contextlib.suppress(Exception):
+            asyncio.get_running_loop().create_task(
+                _send(ws, {"type": "error", "message": "internal error during generation"})
+            )
+
+
+async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asyncio.Event) -> None:
     """Run one chat turn over the WebSocket.
 
-    Cancellation contract: a ``cancel`` frame from the client
-    interrupts the generation by setting an internal asyncio.Event;
-    the driver checks it on every produced token and exits cleanly.
+    Cancellation contract: a ``cancel`` frame from the client sets
+    ``cancel_event`` (owned by the receive loop, which keeps reading frames
+    while this turn runs in a background task); the driver races it against
+    each produced token and exits cleanly when it fires.
     """
     try:
         model_name, messages = _validate_chat_frame(frame)
@@ -124,9 +147,6 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any]) -> None:
     )
 
     await _send(ws, {"type": "ready", "model": model_name})
-
-    cancel_event: asyncio.Event = ws.scope.setdefault("hfl_ws_cancel", asyncio.Event())
-    cancel_event.clear()
 
     # Run the sync chat_stream in a thread so the event loop can
     # service inbound ``cancel`` frames concurrently.
@@ -277,6 +297,8 @@ async def ws_chat(ws: WebSocket) -> None:
 
     await ws.accept()
 
+    drive_task: asyncio.Task[None] | None = None
+
     try:
         while True:
             try:
@@ -295,7 +317,21 @@ async def ws_chat(ws: WebSocket) -> None:
 
             kind = frame.get("type")
             if kind == "chat":
-                await _drive_chat(ws, frame)
+                if drive_task is not None and not drive_task.done():
+                    await _send(
+                        ws,
+                        {"type": "error", "message": "a chat turn is already in progress"},
+                    )
+                    continue
+                # CON-2: run the turn in the background so this receive loop
+                # keeps reading frames — notably ``cancel`` — while generation
+                # is in flight. The cancel event is created here, before the
+                # task is scheduled, so a ``cancel`` frame can never race ahead
+                # of its creation nor be cleared out from under it.
+                cancel_event = asyncio.Event()
+                ws.scope["hfl_ws_cancel"] = cancel_event
+                drive_task = asyncio.create_task(_drive_chat(ws, frame, cancel_event))
+                drive_task.add_done_callback(lambda t: _log_drive_result(ws, t))
             elif kind == "cancel":
                 cancel_event = ws.scope.get("hfl_ws_cancel")
                 if cancel_event is not None:
@@ -308,6 +344,11 @@ async def ws_chat(ws: WebSocket) -> None:
                     {"type": "error", "message": f"unknown frame type: {kind!r}"},
                 )
     finally:
+        # Stop any in-flight generation before closing the socket.
+        if drive_task is not None and not drive_task.done():
+            drive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await drive_task
         try:
             await ws.close()
         except RuntimeError:

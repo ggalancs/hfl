@@ -151,6 +151,71 @@ class TestWsChatCancellation:
             ws.send_text(json.dumps({"type": "ping"}))
             assert json.loads(ws.receive_text())["type"] == "pong"
 
+    def test_cancel_is_processed_mid_turn(self, client, llm_manifest):
+        """CON-2: a cancel frame sent during generation is read by the receive
+        loop and interrupts the turn deterministically — previously the loop
+        was blocked awaiting the turn, so cancel was only seen after the engine
+        had already finished (the turn always ended ``done``)."""
+
+        def slow_tokens():
+            for i in range(20):
+                time.sleep(0.05)
+                yield f"t{i}"
+
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream = MagicMock(return_value=slow_tokens())
+        state.engine = engine
+        state.current_model = llm_manifest
+
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "chat",
+                        "model": llm_manifest.name,
+                        "messages": [{"role": "user", "content": "hi"}],
+                    }
+                )
+            )
+            assert json.loads(ws.receive_text())["type"] == "ready"
+            json.loads(ws.receive_text())  # one token in
+            ws.send_text(json.dumps({"type": "cancel"}))
+            seen = _drain_until(ws, lambda f: f["type"] in ("cancelled", "done"))
+
+        # The turn ends as ``cancelled`` (not ``done``) and well before all
+        # 20 tokens were produced — i.e. the cancel was honoured mid-flight.
+        assert seen[-1]["type"] == "cancelled"
+        assert sum(1 for f in seen if f["type"] == "token") < 20
+
+    @pytest.mark.asyncio
+    async def test_unexpected_turn_error_notifies_client(self, monkeypatch):
+        """CON-2 follow-up: a background turn that dies on an *unexpected*
+        post-``ready`` exception must still send the client a terminal
+        ``error`` frame (not leave it hanging) via the done-callback."""
+        import asyncio
+
+        from hfl.api import routes_ws
+
+        sent: list[dict] = []
+
+        async def _fake_send(ws, frame):
+            sent.append(frame)
+
+        monkeypatch.setattr(routes_ws, "_send", _fake_send)
+
+        async def _boom():
+            raise RuntimeError("kaboom")
+
+        task = asyncio.get_running_loop().create_task(_boom())
+        await asyncio.sleep(0.01)
+        assert task.done()
+
+        routes_ws._log_drive_result(object(), task)  # ws unused by the fake send
+        await asyncio.sleep(0.01)  # let the scheduled error-frame send run
+
+        assert any(f["type"] == "error" for f in sent)
+
 
 class TestWsChatValidation:
     def test_invalid_json_yields_error_frame(self, client):
