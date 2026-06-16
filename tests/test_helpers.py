@@ -523,7 +523,7 @@ class TestPrepareStreamResponse:
         cm = fake_slot()
         await cm.__aenter__()
 
-        async def fake_acquire():
+        async def fake_acquire(*, path=None):
             return cm
 
         captured: list = []
@@ -555,7 +555,7 @@ class TestPrepareStreamResponse:
 
         rejection = JSONResponse(status_code=429, content={"error": "queue full"})
 
-        async def fake_acquire():
+        async def fake_acquire(*, path=None):
             return rejection
 
         factory_called = False

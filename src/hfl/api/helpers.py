@@ -130,13 +130,16 @@ async def run_dispatched(
     return cast(T, await dispatcher.run(_execute))
 
 
-async def acquire_stream_slot() -> "AbstractAsyncContextManager[None] | JSONResponse":
+async def acquire_stream_slot(
+    *, path: str | None = None
+) -> "AbstractAsyncContextManager[None] | JSONResponse":
     """Pre-acquire a dispatcher slot for a streaming endpoint.
 
     Returns either an already-entered async context manager (when
     acquisition succeeded) or a :class:`~fastapi.responses.JSONResponse`
     carrying a structured 429 / 503 envelope (spec §5.3). Route handlers
-    should branch on ``isinstance(result, JSONResponse)``.
+    should branch on ``isinstance(result, JSONResponse)``. ``path`` is
+    forwarded for per-dialect rendering of the rejection on ``/v1/*`` (API-3).
     """
     from hfl.api.errors import queue_full, queue_timeout
     from hfl.core import get_dispatcher
@@ -151,21 +154,25 @@ async def acquire_stream_slot() -> "AbstractAsyncContextManager[None] | JSONResp
             retry_after=exc.retry_after_seconds,
             depth=exc.depth,
             max_queued=exc.max_queued,
+            path=path,
         )
     except QueueTimeoutError as exc:
-        return queue_timeout(waited_seconds=exc.waited_seconds)
+        return queue_timeout(waited_seconds=exc.waited_seconds, path=path)
     return cm
 
 
 def queue_response_from_error(
     exc: "QueueFullError | QueueTimeoutError",
+    *,
+    path: str | None = None,
 ) -> JSONResponse:
     """Map a dispatcher exception to a pre-built JSONResponse.
 
     The parameter is deliberately narrowed to the two dispatcher
     rejection types so route handlers can ``return
     queue_response_from_error(exc)`` from an ``except`` block without
-    mypy complaining about a leaking ``None``.
+    mypy complaining about a leaking ``None``. ``path`` is forwarded for
+    per-dialect error rendering on ``/v1/*`` routes (API-3).
     """
     from hfl.api.errors import queue_full, queue_timeout
     from hfl.engine.dispatcher import QueueFullError
@@ -175,8 +182,9 @@ def queue_response_from_error(
             retry_after=exc.retry_after_seconds,
             depth=exc.depth,
             max_queued=exc.max_queued,
+            path=path,
         )
-    return queue_timeout(waited_seconds=exc.waited_seconds)
+    return queue_timeout(waited_seconds=exc.waited_seconds, path=path)
 
 
 def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> bool:
@@ -295,6 +303,8 @@ async def unload_after_response(model_name: str) -> None:
 async def prepare_stream_response(
     gen_factory: "Callable[[AbstractAsyncContextManager[None]], AsyncIterator[str]]",
     media_type: str,
+    *,
+    path: str | None = None,
 ) -> "StreamingResponse | JSONResponse":
     """Acquire a dispatcher slot and wrap a generator in a StreamingResponse.
 
@@ -314,7 +324,7 @@ async def prepare_stream_response(
     """
     from fastapi.responses import StreamingResponse
 
-    slot_or_response = await acquire_stream_slot()
+    slot_or_response = await acquire_stream_slot(path=path)
     if isinstance(slot_or_response, JSONResponse):
         return slot_or_response
     return StreamingResponse(gen_factory(slot_or_response), media_type=media_type)

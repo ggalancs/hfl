@@ -290,7 +290,12 @@ class TestAnthropicMessages:
             },
         )
 
-        assert response.status_code == 422
+        # API-4: the Anthropic surface returns a 400 invalid_request_error in
+        # the native Anthropic envelope (not FastAPI's 422 {"detail": [...]}).
+        assert response.status_code == 400
+        body = response.json()
+        assert body["type"] == "error"
+        assert body["error"]["type"] == "invalid_request_error"
 
     def test_model_not_loaded(self):
         """Test response when no model is loaded and model not found."""

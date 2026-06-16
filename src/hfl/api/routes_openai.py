@@ -182,7 +182,9 @@ async def chat_completions(
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
-        return service_unavailable(f"Model '{req.model}' failed to load")
+        return service_unavailable(
+            f"Model '{req.model}' failed to load", path="/v1/chat/completions"
+        )
 
     # Phase 4 P0-6: multimodal content + tool-calling fields are folded
     # into the engine ChatMessage list at the route boundary so engines
@@ -205,6 +207,7 @@ async def chat_completions(
         return await prepare_stream_response(
             lambda slot: _stream_chat(req.model, messages, gen_config, tools, slot),
             media_type="text/event-stream",
+            path="/v1/chat/completions",
         )
 
     # Run sync engine call in thread pool with timeout, serialized by
@@ -219,7 +222,7 @@ async def chat_completions(
             operation="chat_completion",
         )
     except (QueueFullError, QueueTimeoutError) as exc:
-        return queue_response_from_error(exc)
+        return queue_response_from_error(exc, path="/v1/chat/completions")
 
     # Shared decision (see chat_core): prefer engine tool_calls, else parse
     # markers; "none" disables both. When a tool call is present, content is
@@ -397,7 +400,9 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
     await _ensure_model_loaded(req.model)
     state = _get_state()
     if state.engine is None:
-        return service_unavailable(f"Model '{req.model}' failed to load")
+        return service_unavailable(
+            f"Model '{req.model}' failed to load", path="/v1/chat/completions"
+        )
 
     prompt = req.prompt if isinstance(req.prompt, str) else req.prompt[0]
     gen_config = _to_gen_config(req)
@@ -406,6 +411,7 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
         return await prepare_stream_response(
             lambda slot: _stream_completion(req.model, prompt, gen_config, slot),
             media_type="text/event-stream",
+            path="/v1/completions",
         )
 
     # Run sync engine call in thread pool with timeout, serialized by
@@ -418,7 +424,7 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
             operation="text_completion",
         )
     except (QueueFullError, QueueTimeoutError) as exc:
-        return queue_response_from_error(exc)
+        return queue_response_from_error(exc, path="/v1/chat/completions")
 
     return {
         "id": f"cmpl-{uuid.uuid4().hex[:8]}",

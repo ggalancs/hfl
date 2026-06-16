@@ -242,7 +242,7 @@ async def create_message(
     await _ensure_model_loaded(model_name)
     state = _get_state()
     if state.engine is None:
-        return service_unavailable(f"Model '{model_name}' failed to load")
+        return service_unavailable(f"Model '{model_name}' failed to load", path="/v1/messages")
 
     messages = _request_to_messages(req)
     tools = _anthropic_tools_to_payload(req)
@@ -256,6 +256,7 @@ async def create_message(
         return await prepare_stream_response(
             lambda slot: _stream_messages(model_name, messages, gen_config, tools, slot),
             media_type="text/event-stream",
+            path="/v1/messages",
         )
 
     # Non-streaming, serialized by the inference dispatcher (spec §5.3).
@@ -268,7 +269,7 @@ async def create_message(
             operation="anthropic_messages",
         )
     except (QueueFullError, QueueTimeoutError) as exc:
-        return queue_response_from_error(exc)
+        return queue_response_from_error(exc, path="/v1/messages")
     except ValueError as e:
         # llama_cpp raises ValueError when tokens exceed context
         # window. Branch on the exception text but never forward it

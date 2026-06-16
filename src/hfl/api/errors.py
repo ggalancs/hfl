@@ -64,6 +64,67 @@ def _policy_for(code: str) -> tuple[str, bool]:
     return _ERROR_POLICY.get(code, ("internal", False))
 
 
+# HTTP-status → provider error ``type`` (API-3). Real OpenAI/Anthropic SDKs
+# branch on these, so they must be present and correct per dialect.
+_OPENAI_TYPE: dict[int, str] = {
+    400: "invalid_request_error",
+    401: "invalid_request_error",
+    403: "invalid_request_error",
+    404: "invalid_request_error",
+    422: "invalid_request_error",
+    429: "rate_limit_error",
+    500: "api_error",
+    503: "api_error",
+    504: "api_error",
+}
+_ANTHROPIC_TYPE: dict[int, str] = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    403: "permission_error",
+    404: "not_found_error",
+    413: "request_too_large",
+    422: "invalid_request_error",
+    429: "rate_limit_error",
+    500: "api_error",
+    503: "overloaded_error",
+    504: "timeout_error",
+}
+
+
+def render_envelope(path: str | None, status_code: int, flat: dict[str, Any]) -> dict[str, Any]:
+    """Reshape a flat HFL error body for the API dialect implied by ``path``.
+
+    HFL's native (flat) ``{"error": str, "code": ..., ...}`` shape matches no
+    real provider. This maps it to the OpenAI (``{"error":{message,type,param,
+    code,...}}``) and Anthropic (``{"type":"error","error":{type,message,...},
+    "request_id"}``) wire shapes by request-path prefix, keeping HFL's rich
+    diagnostic fields (code/category/retryable/details) as SDK-ignored
+    extensions *inside* the error object.
+
+    ``/api/*`` (Ollama native) and every non-``/v1`` path get the body
+    UNCHANGED — so only the OpenAI/Anthropic surfaces change shape.
+    """
+    msg = flat.get("error")
+    # Already shaped (e.g. a route that hand-rolled the Anthropic envelope) or
+    # no string message to wrap — leave untouched.
+    if not path or not isinstance(msg, str):
+        return flat
+    extras = {k: v for k, v in flat.items() if k != "error"}
+    if path.startswith("/v1/messages"):
+        request_id = extras.pop("request_id", None)
+        err = {"type": _ANTHROPIC_TYPE.get(status_code, "api_error"), "message": msg}
+        err.update(extras)
+        out: dict[str, Any] = {"type": "error", "error": err}
+        if request_id:
+            out["request_id"] = request_id
+        return out
+    if path.startswith("/v1/"):
+        err = {"message": msg, "type": _OPENAI_TYPE.get(status_code, "api_error"), "param": None}
+        err.update(extras)  # code, category, retryable, request_id, details
+        return {"error": err}
+    return flat
+
+
 class HFLHTTPException(HTTPException):
     """HTTP exception with structured error details.
 
@@ -262,12 +323,16 @@ def internal_error(
 def service_unavailable(
     message: str = "Service temporarily unavailable",
     retry_after: int | None = None,
+    *,
+    path: str | None = None,
 ) -> JSONResponse:
     """Create 503 response for service unavailable.
 
     Args:
         message: Error message
         retry_after: Seconds until service may be available
+        path: Request path; when on a ``/v1/*`` route the body is rendered in
+            the OpenAI/Anthropic dialect (API-3), else the flat HFL shape.
 
     Returns:
         JSONResponse with 503 status
@@ -279,23 +344,28 @@ def service_unavailable(
     category, retryable = _policy_for("SERVICE_UNAVAILABLE")
     return JSONResponse(
         status_code=503,
-        content=ErrorDetail(
-            error=message,
-            code="SERVICE_UNAVAILABLE",
-            category=category,
-            retryable=retryable,
-            details={"retry_after": retry_after} if retry_after else None,
-            request_id=get_request_id(),
-        ).model_dump(),
+        content=render_envelope(
+            path,
+            503,
+            ErrorDetail(
+                error=message,
+                code="SERVICE_UNAVAILABLE",
+                category=category,
+                retryable=retryable,
+                details={"retry_after": retry_after} if retry_after else None,
+                request_id=get_request_id(),
+            ).model_dump(),
+        ),
         headers=headers if headers else None,
     )
 
 
-def model_loading(model_name: str) -> JSONResponse:
+def model_loading(model_name: str, *, path: str | None = None) -> JSONResponse:
     """Create 503 response for model currently loading.
 
     Args:
         model_name: Name of the loading model
+        path: Request path for per-dialect rendering (API-3).
 
     Returns:
         JSONResponse with 503 status
@@ -303,35 +373,45 @@ def model_loading(model_name: str) -> JSONResponse:
     category, retryable = _policy_for("MODEL_LOADING")
     return JSONResponse(
         status_code=503,
-        content=ErrorDetail(
-            error=f"Model '{model_name}' is currently loading",
-            code="MODEL_LOADING",
-            category=category,
-            retryable=retryable,
-            details={"model": model_name},
-            request_id=get_request_id(),
-        ).model_dump(),
+        content=render_envelope(
+            path,
+            503,
+            ErrorDetail(
+                error=f"Model '{model_name}' is currently loading",
+                code="MODEL_LOADING",
+                category=category,
+                retryable=retryable,
+                details={"model": model_name},
+                request_id=get_request_id(),
+            ).model_dump(),
+        ),
         headers={"Retry-After": "5"},
     )
 
 
-def queue_full(retry_after: int, depth: int, max_queued: int) -> JSONResponse:
+def queue_full(
+    retry_after: int, depth: int, max_queued: int, *, path: str | None = None
+) -> JSONResponse:
     """Create 429 response for a full inference queue (spec §5.3)."""
     category, retryable = _policy_for("QUEUE_FULL")
     return JSONResponse(
         status_code=429,
-        content=ErrorDetail(
-            error="Inference queue is full",
-            code="QUEUE_FULL",
-            category=category,
-            retryable=retryable,
-            details={
-                "retry_after_seconds": retry_after,
-                "queue_depth": depth,
-                "max_queued": max_queued,
-            },
-            request_id=get_request_id(),
-        ).model_dump(),
+        content=render_envelope(
+            path,
+            429,
+            ErrorDetail(
+                error="Inference queue is full",
+                code="QUEUE_FULL",
+                category=category,
+                retryable=retryable,
+                details={
+                    "retry_after_seconds": retry_after,
+                    "queue_depth": depth,
+                    "max_queued": max_queued,
+                },
+                request_id=get_request_id(),
+            ).model_dump(),
+        ),
         headers={
             "Retry-After": str(retry_after),
             "X-Queue-Depth": str(depth),
@@ -339,19 +419,23 @@ def queue_full(retry_after: int, depth: int, max_queued: int) -> JSONResponse:
     )
 
 
-def queue_timeout(waited_seconds: float) -> JSONResponse:
+def queue_timeout(waited_seconds: float, *, path: str | None = None) -> JSONResponse:
     """Create 503 response for a dispatcher slot acquire timeout."""
     category, retryable = _policy_for("QUEUE_TIMEOUT")
     return JSONResponse(
         status_code=503,
-        content=ErrorDetail(
-            error="Inference server busy — slot acquire timed out",
-            code="QUEUE_TIMEOUT",
-            category=category,
-            retryable=retryable,
-            details={"waited_seconds": round(waited_seconds, 2)},
-            request_id=get_request_id(),
-        ).model_dump(),
+        content=render_envelope(
+            path,
+            503,
+            ErrorDetail(
+                error="Inference server busy — slot acquire timed out",
+                code="QUEUE_TIMEOUT",
+                category=category,
+                retryable=retryable,
+                details={"waited_seconds": round(waited_seconds, 2)},
+                request_id=get_request_id(),
+            ).model_dump(),
+        ),
         headers={"Retry-After": "5"},
     )
 

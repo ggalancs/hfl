@@ -247,8 +247,8 @@ class TestErrorFormats:
             },
         )
 
-        # Should be 422 Unprocessable Entity
-        assert response.status_code == 422
+        # API-4: /v1/* validation errors map to 400 (real OpenAI), not 422.
+        assert response.status_code == 400
 
 
 class TestRequestValidation:
@@ -277,7 +277,7 @@ class TestRequestValidation:
                 )
 
         # Should reject invalid temperature
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_max_tokens_bounds(self, client, mock_loaded_state):
         """Max tokens should be validated."""
@@ -294,7 +294,7 @@ class TestRequestValidation:
                     },
                 )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_empty_messages_rejected(self, client):
         """Empty messages array should be rejected."""
@@ -306,7 +306,7 @@ class TestRequestValidation:
             },
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestHeadersAndMetadata:

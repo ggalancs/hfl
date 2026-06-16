@@ -298,9 +298,9 @@ class TestOpenAIVisionContent:
                 ],
             },
         )
-        # Schema will reject at 422 because ``input_audio`` isn't in
-        # the discriminated union.
-        assert response.status_code == 422
+        # Schema rejects ``input_audio`` (not in the discriminated union);
+        # /v1/* renders it as a 400 invalid_request_error (API-4).
+        assert response.status_code == 400
 
 
 # ----------------------------------------------------------------------

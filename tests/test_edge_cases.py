@@ -33,7 +33,7 @@ class TestEmptyInputs:
                 "messages": [],
             },
         )
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Validation error
 
     def test_empty_prompt_completion(self, client):
         """Empty prompt should fail validation."""
@@ -56,7 +56,7 @@ class TestEmptyInputs:
                 "messages": [{"role": "user", "content": "Hello"}],
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_empty_model_name(self, client):
         """Empty model name should fail validation."""
@@ -67,7 +67,7 @@ class TestEmptyInputs:
                 "messages": [{"role": "user", "content": "Hello"}],
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestBoundaryValues:
@@ -108,7 +108,7 @@ class TestBoundaryValues:
                 "temperature": 2.5,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_temperature_negative(self, client):
         """Negative temperature should fail validation."""
@@ -120,7 +120,7 @@ class TestBoundaryValues:
                 "temperature": -0.5,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_max_tokens_at_limit(self, client):
         """max_tokens at limit (128000) should be valid."""
@@ -144,7 +144,7 @@ class TestBoundaryValues:
                 "max_tokens": 128001,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_max_tokens_zero(self, client):
         """max_tokens of 0 should fail validation."""
@@ -156,7 +156,7 @@ class TestBoundaryValues:
                 "max_tokens": 0,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_max_tokens_negative(self, client):
         """Negative max_tokens should fail validation."""
@@ -168,7 +168,7 @@ class TestBoundaryValues:
                 "max_tokens": -100,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_top_p_at_zero(self, client):
         """top_p at 0.0 should be valid."""
@@ -192,7 +192,7 @@ class TestBoundaryValues:
                 "top_p": 1.5,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestMaliciousInputs:
@@ -231,7 +231,7 @@ class TestMaliciousInputs:
                 "messages": [{"role": "user", "content": "Hello"}],
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_unicode_in_model_name(self, client):
         """Unicode characters in model name should be handled."""
@@ -280,7 +280,7 @@ class TestMaliciousInputs:
                 "messages": messages,
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestNativeAPIEdgeCases:
@@ -324,6 +324,7 @@ class TestNativeAPIEdgeCases:
                 "messages": [],
             },
         )
+        # Ollama-native (/api/*) keeps FastAPI's native 422; only /v1/* maps to 400.
         assert response.status_code == 422
 
     def test_native_chat_invalid_message_format(self, client):

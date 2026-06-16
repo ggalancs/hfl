@@ -112,10 +112,12 @@ class TestOpenAITTSEndpoint:
             )
 
         assert response.status_code == 400
-        # Envelope after R10 migration: {"error": "...", "code": "ModelTypeMismatchError"}
+        # API-3: /v1/audio/speech is OpenAI-dialect, so the HFLError is nested
+        # under "error" rather than the flat {"error","code"} shape.
         body = response.json()
-        assert body.get("code") == "ModelTypeMismatchError"
-        assert "not a tts model" in body["error"].lower()
+        assert body["error"]["code"] == "ModelTypeMismatchError"
+        assert body["error"]["type"] == "invalid_request_error"
+        assert "not a tts model" in body["error"]["message"].lower()
 
     def test_speech_with_loaded_model(self, client_with_tts_model):
         """Should synthesize audio when model is loaded."""
@@ -160,7 +162,7 @@ class TestOpenAITTSEndpoint:
             },
         )
 
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # API-4: /v1/* dialect → 400
 
     def test_speech_invalid_speed(self, client):
         """Should reject invalid speed values."""
@@ -173,7 +175,7 @@ class TestOpenAITTSEndpoint:
             },
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400  # API-4: /v1/* dialect → 400
 
 
 class TestNativeTTSEndpoint:

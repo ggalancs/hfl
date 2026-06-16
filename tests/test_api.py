@@ -471,7 +471,8 @@ class TestMiddleware:
             },
         )
 
-        assert response.status_code in [404, 422]  # Not found or validation error
+        # /v1/* validation maps to 400 (API-4); 404 if the route 404s.
+        assert response.status_code in [400, 404, 422]
 
 
 class TestServerState:

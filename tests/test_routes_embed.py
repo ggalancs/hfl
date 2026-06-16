@@ -233,7 +233,8 @@ class TestOpenAIEmbeddings:
             "/v1/embeddings",
             json={"model": manifest.name, "input": "x", "encoding_format": "int8"},
         )
-        assert response.status_code == 422
+        # /v1/embeddings is OpenAI-dialect → 400 (API-4).
+        assert response.status_code == 400
 
     def test_token_list_input_decoded(self, client, fake_embed_engine):
         """``input=[1,2,3]`` is lossy but must not 500."""
