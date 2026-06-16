@@ -368,8 +368,19 @@ async def _stream_generate(
         return
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # API-5: derive the usage/timing fields the non-streaming envelope
+    # provides. The stream yields bare tokens, so eval_count counts emitted
+    # chunks (≈ one token per chunk for these backends) and durations are
+    # wall-clock nanoseconds (Ollama's unit). prompt_eval_count/load_duration
+    # are unavailable on the streaming path (the engine discards them) — 0.
+    start_ns = time.monotonic_ns()
+    first_token_ns: list[int | None] = [None]
+    emitted = [0]
 
     def format_chunk(token: str) -> str:
+        emitted[0] += 1
+        if first_token_ns[0] is None:
+            first_token_ns[0] = time.monotonic_ns()
         chunk = {
             "model": model_name,
             "created_at": created_at,
@@ -379,11 +390,21 @@ async def _stream_generate(
         return json.dumps(chunk) + "\n"
 
     def format_done() -> str:
+        ft = first_token_ns[0]
         chunk = {
             "model": model_name,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "response": "",
             "done": True,
+            "done_reason": "length"
+            if (config.max_tokens and emitted[0] >= config.max_tokens)
+            else "stop",
+            "total_duration": time.monotonic_ns() - start_ns,
+            "load_duration": 0,
+            "prompt_eval_count": 0,
+            "prompt_eval_duration": (ft - start_ns) if ft else 0,
+            "eval_count": emitted[0],
+            "eval_duration": time.monotonic_ns() - (ft or start_ns),
         }
         return json.dumps(chunk) + "\n"
 
@@ -640,32 +661,42 @@ async def _stream_chat(
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     accumulated: list[str] = []
-    last_partial_count = 0  # Phase 10 P1: avoid re-emitting identical partials
+    tool_aware = bool(tools)  # API-7: buffer content when tools are declared
+    # API-5: monotonic clock + emitted-chunk counter (see _stream_generate).
+    start_ns = time.monotonic_ns()
+    first_token_ns: list[int | None] = [None]
+    emitted = [0]
 
     def format_chunk(token: str) -> str:
-        nonlocal last_partial_count
         accumulated.append(token)
-        # Phase 10 P1 — streaming partial tool calls. Probe the
-        # accumulated text on every chunk; when the tool parser can
-        # already see one or more (possibly incomplete) calls, attach
-        # them to the chunk so the client can render partial state
-        # (``calling foo with {"city": "Lond...``). We only surface a
-        # fresh partial when the count or the last call's arg string
-        # length increases.
+        emitted[0] += 1
+        if first_token_ns[0] is None:
+            first_token_ns[0] = time.monotonic_ns()
+
+        # Phase 10 P1 — streaming partial tool calls. Probe the accumulated
+        # text on every chunk; when the parser can already see one or more
+        # (possibly incomplete) calls, attach them so the client can render
+        # partial state. Preserved across the API-7 change below.
         partial_calls = None
         try:
             _cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
             if calls:
                 partial_calls = calls
-                last_partial_count = len(calls)
         except Exception:
             partial_calls = None
+
+        # API-7: when tools are declared, never stream the raw token as
+        # content — a <tool_call>{...}</tool_call> marker would otherwise
+        # leak as visible text. Withhold content (emit "") while still
+        # surfacing partial tool_calls; the cleaned narration is flushed once
+        # in format_done. Plain turns (no tools) stream content verbatim.
+        content = "" if tool_aware else token
         chunk = {
             "model": model_name,
             "created_at": created_at,
             "message": {
                 "role": "assistant",
-                "content": token,
+                "content": content,
                 "tool_calls": partial_calls,
             },
             "done": False,
@@ -674,15 +705,31 @@ async def _stream_chat(
 
     def format_done() -> str:
         full_text = "".join(accumulated)
-        _cleaned, calls = parse_tool_calls(full_text, model_name, tools)
+        cleaned, calls = parse_tool_calls(full_text, model_name, tools)
         final_message: dict = {"role": "assistant", "content": "", "tool_calls": []}
         if calls:
             final_message["tool_calls"] = calls
+        elif tool_aware:
+            # No tool call after all — flush the cleaned narration that was
+            # withheld during the stream (API-7).
+            final_message["content"] = cleaned
+
+        ft = first_token_ns[0]
         chunk = {
             "model": model_name,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "message": final_message,
             "done": True,
+            # API-5: mirror the non-streaming envelope's keys/units (ns).
+            "done_reason": "length"
+            if (config.max_tokens and emitted[0] >= config.max_tokens)
+            else "stop",
+            "total_duration": time.monotonic_ns() - start_ns,
+            "load_duration": 0,
+            "prompt_eval_count": 0,
+            "prompt_eval_duration": (ft - start_ns) if ft else 0,
+            "eval_count": emitted[0],
+            "eval_duration": time.monotonic_ns() - (ft or start_ns),
         }
         return json.dumps(chunk) + "\n"
 
