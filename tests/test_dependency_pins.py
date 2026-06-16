@@ -72,9 +72,10 @@ class TestStaticPyprojectPins:
         # HFL pairs with the httpx-based hub 1.x generation so
         # transformers 5.x can import is_offline_mode from the
         # canonical location without blowing up.
-        assert ">=1.0" in pin or ">=1," in pin, (
-            f"huggingface-hub pin must allow 1.x: {pin!r}\n"
-            "Dropping to 0.x re-introduces the is_offline_mode "
+        assert ">=1.5" in pin, (
+            f"huggingface-hub pin must floor at >=1.5 — transformers 5.x's own "
+            f"Requires-Dist is huggingface-hub>=1.5.0: {pin!r}\n"
+            "Dropping below 1.5 re-introduces the is_offline_mode "
             "ImportError chain that crashed convert_hf_to_gguf.py."
         )
         assert "<2.0" in pin or "<2," in pin, (

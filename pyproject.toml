@@ -46,11 +46,14 @@ dependencies = [
     "typer>=0.15.0,<1.0",
     "rich~=13.0",
     # HFL targets huggingface_hub 1.x (the httpx-based generation).
-    # See ``test_dependency_pins.py`` for the static guard that keeps
-    # this pin in sync with the rest of the HF ecosystem.
-    "huggingface-hub>=1.0.0,<2.0",
+    # Floor is >=1.5.0 because transformers 5.x requires it (its own
+    # Requires-Dist is ``huggingface-hub>=1.5.0,<2.0``); a lower floor lets a
+    # ``--no-deps`` / constraints-file resolution install a hub the convert
+    # chain can't import. See ``test_dependency_pins.py`` for the static guard.
+    "huggingface-hub>=1.5.0,<2.0",
     "fastapi~=0.135.0",
-    "starlette>=0.49.1",
+    # Cap at the next major; fastapi carries the precise compatible range.
+    "starlette>=0.49.1,<2.0",
     "python-multipart>=0.0.22",
     "uvicorn[standard]~=0.34.0",
     "pydantic~=2.12.0",
@@ -76,10 +79,10 @@ llama = ["llama-cpp-python>=0.3.20"]
 #
 #     CMAKE_ARGS="-DGGML_VULKAN=ON" pip install 'hfl[vulkan]'
 #
-# The pin matches ``[llama]`` so Vulkan installs side-by-side with
-# the default CPU/Metal build without conflict. Wheels are not
-# pre-built; pip compiles from source on install.
-vulkan = ["llama-cpp-python>=0.3.20"]
+# References ``[llama]`` so the llama-cpp-python pin lives in one place;
+# Vulkan installs side-by-side with the default CPU/Metal build. Wheels
+# are not pre-built; pip compiles from source (with the CMAKE_ARGS above).
+vulkan = ["hfl[llama]"]
 
 # ROCm backend — explicit AMD HIP path for Instinct/Radeon Pro
 # datacentre cards. Requires a ROCm-enabled host (``rocm-llvm``,
@@ -91,31 +94,34 @@ vulkan = ["llama-cpp-python>=0.3.20"]
 #
 # Same wheel as ``[llama]`` and ``[vulkan]`` — the difference is the
 # CMake flag chosen at build time, not the Python package itself.
-rocm = ["llama-cpp-python>=0.3.20"]
+rocm = ["hfl[llama]"]
 transformers = [
     # HFL targets transformers 5.x paired with huggingface_hub 1.x.
     # Both majors bumped together in late 2025 / early 2026 and share
     # the new httpx-based hub client.
     "transformers>=5.0.0,<6.0",
-    "torch>=2.5.0",
-    "accelerate>=1.13.0",
+    "torch>=2.5.0,<3.0",
+    "accelerate>=1.13.0,<2.0",
     "sentencepiece>=0.2.0",
 ]
-vllm = ["vllm>=0.6.0"]
+# Upper bounds on the heavy, fast-moving native deps below: they are the
+# largest vuln/breakage surface and pre-1.0 ones break by minor. Cap at the
+# next major (convention shared with transformers/hub/mlx).
+vllm = ["vllm>=0.6.0,<1.0"]
 convert = ["gguf>=0.10.0"]
 
 # TTS support
 tts = [
     # Same 5.x pin as the [transformers] extra — see comment there.
     "transformers>=5.0.0,<6.0",
-    "torch>=2.5.0",
-    "torchaudio>=2.2.0",
+    "torch>=2.5.0,<3.0",
+    "torchaudio>=2.2.0,<3.0",
     "soundfile>=0.12.1",
 ]
 coqui = [
-    "coqui-tts>=0.24.0",
-    "torch>=2.5.0",
-    "torchaudio>=2.2.0",
+    "coqui-tts>=0.24.0,<1.0",
+    "torch>=2.5.0,<3.0",
+    "torchaudio>=2.2.0,<3.0",
     "soundfile>=0.12.1",
 ]
 # Audio playback (optional)
@@ -135,25 +141,27 @@ mcp = ["mcp>=1.0.0"]
 # Apple Silicon native backend (Phase 13+ — V2 row 14).
 # 0.31.2+ is required for the ``gemma4`` architecture; the same
 # line ships with ``transformers>=5`` as a hard dep, which matches
-# our main pin.
+# our main pin. Capped at the next major (mlx-lm convention is pre-1.0,
+# fast-moving) rather than the previous razor-thin ``<0.32`` which
+# blocked the very next minor for no concrete reason.
 mlx = [
-    "mlx-lm>=0.31.2,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm>=0.31.2,<1.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 # Speech-to-text (Whisper) — Phase 16 / V2 row 16. Prefers
 # faster-whisper (CPU+GPU); openai-whisper stays as a fallback.
 stt = [
-    "faster-whisper>=1.0.0",
+    "faster-whisper>=1.0.0,<2.0",
 ]
 
 # Image generation (SDXL / FLUX) — Phase 16 / V2 row 17. Heavy: a
 # fresh install drags in ~2 GB of wheels. Opt-in only.
 imagegen = [
-    "diffusers>=0.30.0",
-    "torch>=2.5.0",
-    "safetensors>=0.4.0",
+    "diffusers>=0.30.0,<1.0",
+    "torch>=2.5.0,<3.0",
+    "safetensors>=0.4.0,<1.0",
     "Pillow>=10.0.0",
-    "accelerate>=1.2.0",
+    "accelerate>=1.2.0,<2.0",
 ]
 
 # OpenTelemetry tracing — Phase 17 / V2 row 24.
