@@ -133,6 +133,9 @@ class VLLMEngine(InferenceEngine):
             max_tokens=cfg.max_tokens,
             stop=cfg.stop,
             repetition_penalty=cfg.repeat_penalty,
+            # ENG-10: honour the request seed for reproducible output
+            # (vLLM treats None as random).
+            seed=cfg.seed if cfg.seed >= 0 else None,
         )
 
     def generate(self, prompt: str, config: GenerationConfig | None = None) -> GenerationResult:

@@ -1277,6 +1277,7 @@ class LlamaCppEngine(InferenceEngine):
             top_k=cfg.top_k,
             repeat_penalty=cfg.repeat_penalty,
             stop=cfg.stop,
+            seed=cfg.seed if cfg.seed >= 0 else None,
             stream=True,
         ):
             text = chunk["choices"][0]["text"]
@@ -1375,6 +1376,7 @@ class LlamaCppEngine(InferenceEngine):
             "top_k": cfg.top_k,
             "repeat_penalty": cfg.repeat_penalty,
             "stop": self._build_stop_list(cfg.stop, tools),
+            "seed": cfg.seed if cfg.seed >= 0 else None,
         }
         if tools:
             # llama-cpp-python >= 0.3.0 forwards ``tools`` into the chat
@@ -1504,6 +1506,7 @@ class LlamaCppEngine(InferenceEngine):
             "top_k": cfg.top_k,
             "repeat_penalty": cfg.repeat_penalty,
             "stop": self._build_stop_list(cfg.stop, tools),
+            "seed": cfg.seed if cfg.seed >= 0 else None,
             "stream": True,
         }
         if tools:

@@ -234,6 +234,11 @@ class TransformersEngine(InferenceEngine):
             "max_new_tokens": cfg.max_tokens,
             "temperature": cfg.temperature if cfg.temperature > 0 else None,
             "top_p": cfg.top_p,
+            # ENG-6: match the non-streaming generate() so streaming samples
+            # from the same distribution (top_k/repetition_penalty were
+            # silently falling back to HF defaults on the streaming path).
+            "top_k": cfg.top_k,
+            "repetition_penalty": cfg.repeat_penalty,
             "do_sample": cfg.temperature > 0,
             "streamer": streamer,
         }

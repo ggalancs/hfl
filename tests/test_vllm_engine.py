@@ -300,7 +300,25 @@ class TestVLLMEngineGenerate:
             max_tokens=256,
             stop=None,
             repetition_penalty=1.2,
+            seed=None,  # ENG-10: default seed (-1) maps to None = random
         )
+
+    def test_generate_forwards_explicit_seed(self, mock_vllm):
+        """ENG-10: a request seed must reach vLLM's SamplingParams for
+        reproducible output."""
+        from hfl.engine.base import GenerationConfig
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        engine = VLLMEngine()
+        engine._is_async = False
+        mock_output = MagicMock()
+        mock_output.outputs = [MagicMock(text="Ok", token_ids=[1])]
+        engine._engine = MagicMock()
+        engine._engine.generate.return_value = [mock_output]
+
+        engine.generate("Test", GenerationConfig(seed=42))
+
+        assert mock_vllm["sampling"].call_args.kwargs["seed"] == 42
 
 
 class TestVLLMEngineStreaming:
