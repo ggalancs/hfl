@@ -61,5 +61,6 @@ Thumbs.db
 # Internal planning docs
 IMPROVEMENT_PLAN*.md
 ARCHITECTURE_IMPROVEMENT_PLAN*.md
+OLLAMA_PARITY_PLAN*.md
 local/
 coverage.json
