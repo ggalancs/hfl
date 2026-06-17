@@ -144,12 +144,14 @@ async def health_deep(probe: bool = False) -> dict[str, Any]:
     Args:
         probe: If True, run a minimal inference test to verify model health.
     """
+    from hfl import __version__
+
     state = get_state()
     uptime = (datetime.now() - _startup_time).total_seconds()
 
     result: dict[str, Any] = {
         "status": "healthy",
-        "version": "0.1.0",
+        "version": __version__,
         "uptime_seconds": uptime,
         "llm": {
             "loaded": state.is_llm_loaded(),

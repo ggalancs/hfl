@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-06-17
+
+**Correctness, concurrency-safety, and operability hardening.** A deep
+multi-pass audit (≈60 confirmed defects, each with a regression test) plus a
+high-demand-server architecture review. The full suite grew to 3537 tests at
+~89% coverage; mypy, ruff, pip-audit and gitleaks are all clean.
+
+### Security
+
+- **Critical data leak:** `POST /api/push` uploaded the *entire* on-disk blob
+  store (every model's raw bytes) instead of the planned files — for a
+  blob-backed model that meant exfiltrating every stored model to the target
+  repo. Push is now scoped to exactly `plan.files`.
+- **SSRF (DNS rebinding):** `web_fetch` now pins the validated IP for every hop.
+- **RCE via deserialization:** KV-cache snapshots are HMAC-authenticated before
+  `pickle.loads`; the snapshot write is now atomic.
+- **Memory-exhaustion DoS:** `web_fetch` streams with a hard byte budget; the
+  request-body limit now also covers chunked uploads with no `Content-Length`.
+- Dependency floors raised above disclosed CVEs: `starlette>=1.3.1`,
+  `python-multipart>=0.0.31`.
+
+### Fixed
+
+- **Model-lifecycle use-after-free family** on the shared, non-reentrant
+  llama.cpp/transformers model: closed across hot-swap, `/api/stop`, lifespan
+  shutdown, the request-timeout path, embeddings (now serialized), and
+  cold-load coalescing (no more duplicate multi-GB loads → 2× VRAM/OOM).
+- **API conformance** (OpenAI / Ollama / Anthropic): real Anthropic tool
+  calling; per-dialect error envelopes incl. the catch-all 500; correct
+  `stop_reason`/`finish_reason` and usage/timings on streaming; `/v1/responses`
+  streaming routed through the dispatcher (no KV corruption / leaks); empty
+  `prompt` → 400; CORS preflight no longer blocked by API-key auth.
+- **Concurrency:** WebSocket producer no longer mutates an `asyncio.Queue` from
+  a worker thread; `ModelPool` honours `max_models` under concurrent loads;
+  vLLM aborts on disconnect; failover load is transactional; NVML serialized.
+- **Engines:** MLX honours `seed`/`stop`; Llama-2 keeps the tool preamble;
+  LoRA removal rolls back on detach failure; diffusers reports its real seed;
+  truncated embeddings renormalized; assorted `ZeroDivisionError`/leak fixes.
+- **Converter/tools:** Modelfile escape round-trip, gguf cache-lock key, dotted
+  model names, bounded go-template recursion.
+- `/healthz` now reports the real package version (was hardcoded `0.1.0`).
+
+### Changed
+
+- **Observability:** request/generation latency exported as Prometheus
+  histograms (`_bucket`/`_sum`/`_count`); dispatcher 429/503 saturation
+  counters exported; metric labels keyed by the matched route template
+  (bounded cardinality); streaming wall-clock timeout now honours
+  `config.generation_timeout`.
+- **Tooling/quality:** all pre-existing mypy errors resolved; a static-analysis
+  gate (mypy + ruff) added to the test suite; dependency pins tightened.
+- **CI/CD:** every GitHub workflow is now `workflow_dispatch` (manual) only —
+  no automatic runs on push and no auto-publish on tag.
+
 ## [0.13.0] - 2026-05-24
 
 **Agent compatibility, security hardening, and a code-quality pass.**
