@@ -89,6 +89,34 @@ class TestFailoverEngineInit:
         fo = FailoverEngine([e])
         assert fo.model_name == "only"
 
+    def test_load_rolls_back_on_partial_failure(self):
+        """#26: when a later engine fails to load, engines that already
+        loaded must be rolled back (unloaded) rather than leaking weights."""
+
+        class _FailLoad(DummyEngine):
+            def load(self, model_path, **kwargs):
+                raise RuntimeError("backend missing")
+
+        good = DummyEngine("good")
+        bad = _FailLoad("bad")
+        fo = FailoverEngine([good, bad])
+
+        with pytest.raises(RuntimeError, match="backend missing"):
+            fo.load("/path/to/model")
+
+        # The engine that loaded first must not be left resident.
+        assert good.is_loaded is False
+        assert bad.is_loaded is False
+
+    def test_load_all_engines_succeeds(self):
+        """Happy path: every engine ends up loaded, none rolled back."""
+        a = DummyEngine("a")
+        b = DummyEngine("b")
+        fo = FailoverEngine([a, b])
+        fo.load("/path/to/model")
+        assert a.is_loaded is True
+        assert b.is_loaded is True
+
 
 class TestGenerate:
     def test_single_engine_no_failover(self):

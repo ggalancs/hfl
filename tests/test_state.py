@@ -173,6 +173,61 @@ class TestServerStateLLMOperations:
         assert state.current_model is None
         assert engine.unload_called
 
+    @pytest.mark.asyncio
+    async def test_swap_waits_for_in_flight_dispatcher_slot(self):
+        """CON #9: an HTTP inference request holds a dispatcher slot for its
+        whole engine use; the swap's unload of the displaced engine must wait
+        for that slot to clear before freeing the (non-reentrant) model."""
+        from hfl.core import get_dispatcher
+
+        dispatcher = get_dispatcher()
+        dispatcher.reset()  # start idle
+        try:
+            state = ServerState()
+            old_engine = MockEngine("old")
+            new_engine = MockEngine("new")
+            await state.set_llm_engine(old_engine, MockManifest("old"))
+
+            # Simulate an in-flight inference holding the only slot.
+            slot = dispatcher.slot()
+            await slot.__aenter__()
+            try:
+                swap = asyncio.create_task(
+                    state.set_llm_engine(new_engine, MockManifest("new"))
+                )
+                await asyncio.sleep(0.05)  # let the swap reach its drain wait
+                assert not old_engine.unload_called, (
+                    "swap freed the engine while a request still held a slot"
+                )
+                assert not swap.done()
+            finally:
+                await slot.__aexit__(None, None, None)  # request finishes
+
+            await asyncio.wait_for(swap, timeout=2.0)
+            assert old_engine.unload_called  # safe to unload now
+            assert state.engine is new_engine
+        finally:
+            dispatcher.reset()
+
+    @pytest.mark.asyncio
+    async def test_swap_defers_unload_while_engine_pinned(self):
+        """CON #9: a non-dispatcher path (WS) pins the engine it reads; the swap
+        must defer the displaced engine's unload until the last reader unpins."""
+        state = ServerState()
+        old_engine = MockEngine("old")
+        new_engine = MockEngine("new")
+        await state.set_llm_engine(old_engine, MockManifest("old"))
+
+        await state.pin_engine(old_engine)  # WS turn starts reading it
+
+        await state.set_llm_engine(new_engine, MockManifest("new"))
+        # Displaced but still pinned -> unload deferred.
+        assert not old_engine.unload_called
+        assert state.engine is new_engine
+
+        await state.unpin_engine(old_engine)  # WS turn finishes reading
+        assert old_engine.unload_called  # now it is freed
+
     def test_is_llm_loaded_true(self):
         """is_llm_loaded returns True when engine is loaded."""
         state = ServerState()

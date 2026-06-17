@@ -54,9 +54,26 @@ class FailoverEngine(InferenceEngine):
     # -- InferenceEngine interface --------------------------------------------
 
     def load(self, model_path: str, **kwargs) -> None:
-        """Load the model on **all** engines."""
-        for engine in self._engines:
-            engine.load(model_path, **kwargs)
+        """Load the model on **all** engines.
+
+        Transactional: if a later engine fails to load, the engines that
+        already loaded are rolled back (unloaded) before the error is
+        re-raised, so a partial failure never leaks weights/VRAM on the
+        engines that came first.
+        """
+        loaded: list[InferenceEngine] = []
+        try:
+            for engine in self._engines:
+                engine.load(model_path, **kwargs)
+                loaded.append(engine)
+        except Exception:
+            for e in loaded:
+                try:
+                    if e.is_loaded:
+                        e.unload()
+                except Exception:  # pragma: no cover - defensive rollback
+                    logger.exception("failed to roll back engine during load failure")
+            raise
 
     def unload(self) -> None:
         """Unload the model from **all** engines."""

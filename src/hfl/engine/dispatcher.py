@@ -247,6 +247,31 @@ class InferenceDispatcher:
         async with self.slot():
             return await func()
 
+    @contextlib.asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        """Hold the dispatcher fully idle for an administrative task.
+
+        Acquires **all** ``max_inflight`` permits, so the guarded block runs
+        with zero inference in flight — used to unload a model that a swap has
+        displaced without racing a request that is still reading it (a
+        use-after-free of the shared, non-reentrant model). Unlike
+        :meth:`slot`, it never raises ``QueueFull``/``QueueTimeout``: admin
+        work must not be dropped, it simply waits for the permits.
+
+        It does not touch the queue counters (the unload is not an inference
+        request); new inference callers block on the semaphore until the block
+        exits, which is exactly the serialisation we want during a model swap.
+        """
+        acquired = 0
+        try:
+            for _ in range(self._max_inflight):
+                await self._sem.acquire()
+                acquired += 1
+            yield
+        finally:
+            for _ in range(acquired):
+                self._sem.release()
+
     # -- Administrative -------------------------------------------------
 
     def reset(self) -> None:

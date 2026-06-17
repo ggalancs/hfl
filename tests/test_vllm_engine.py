@@ -381,6 +381,48 @@ class TestVLLMEngineStreaming:
 
         engine.unload()
 
+    def test_stream_async_aborts_on_early_close(self, mock_vllm):
+        """RES: closing the stream early (client disconnect) must abort the
+        in-flight vLLM request so the GPU stops decoding tokens for a client
+        that is already gone."""
+        import asyncio
+        import time
+
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        captured: dict = {}
+
+        async def _infinite(prompt, sampling_params, request_id):
+            captured["request_id"] = request_id
+            i = 0
+            while True:
+                comp = MagicMock()
+                comp.text = "x" * (i + 1)  # growing text -> a non-empty delta each step
+                out = MagicMock()
+                out.outputs = [comp]
+                yield out
+                await asyncio.sleep(0.005)
+                i += 1
+
+        engine = VLLMEngine()
+        engine._is_async = True
+        engine._engine = MagicMock()
+        engine._engine.generate = MagicMock(side_effect=lambda *a, **k: _infinite(*a, **k))
+        engine._engine.abort = AsyncMock()
+        engine._ensure_loop()
+
+        gen = engine.generate_stream("Test")
+        assert next(gen) == "x"  # consume one token
+        gen.close()  # simulate client disconnect mid-stream
+
+        # Pump the background loop so the scheduled abort coroutine runs.
+        deadline = time.monotonic() + 2.0
+        while not engine._engine.abort.called and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+        engine._engine.abort.assert_called_once_with(captured["request_id"])
+        engine.unload()
+
     def test_stream_async_single_output(self, mock_vllm):
         """Async mode with single output still works."""
         from hfl.engine.vllm_engine import VLLMEngine

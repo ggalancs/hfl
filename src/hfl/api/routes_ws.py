@@ -151,15 +151,36 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
     # Run the sync chat_stream in a thread so the event loop can
     # service inbound ``cancel`` frames concurrently.
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    # CON: the WS turn reads ``engine`` directly and does NOT hold a dispatcher
+    # slot, so a concurrent model hot-swap could ``unload`` it mid-stream
+    # (use-after-free of the non-reentrant model). Pin it for the lifetime of
+    # the producer; the swap defers the unload until we unpin below. The unpin
+    # must fire when the PRODUCER finishes (it can outlive a client cancel — the
+    # engine call cannot be preempted), not when the consumer loop exits.
+    from hfl.api.state import get_state
+
+    state = get_state()
+    await state.pin_engine(engine)
 
     def _producer() -> None:
+        # ``asyncio.Queue`` is NOT thread-safe, and this closure runs in a
+        # worker thread. Every enqueue must be marshalled back onto the loop
+        # via ``call_soon_threadsafe`` (which also wakes the loop's selector).
+        # Calling ``put_nowait`` directly from the thread races the loop's own
+        # access to the queue internals and can drop the consumer's getter
+        # wakeup, stalling the turn — mirror the streaming.py pattern. (CON)
         try:
             for token in engine.chat_stream(chat_msgs, cfg):
-                queue.put_nowait(("token", token))
+                loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
         except Exception as exc:  # pragma: no cover — surface as error frame
-            queue.put_nowait(("error", str(exc)))
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
         finally:
-            queue.put_nowait(("done", None))
+            # The engine is no longer being read — release the pin so a
+            # displaced engine can finally be unloaded.
+            asyncio.run_coroutine_threadsafe(state.unpin_engine(engine), loop)
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
 
     producer_task = asyncio.create_task(asyncio.to_thread(_producer))
     cancel_task = asyncio.create_task(cancel_event.wait())

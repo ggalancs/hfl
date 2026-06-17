@@ -209,6 +209,16 @@ class ModelPool:
                 self._models[model_name] = cached
                 self._total_memory_mb += memory_mb
 
+                # CON: re-enforce capacity here, under the lock. A concurrent
+                # load of a *different* model evicts against ``_models`` while
+                # we are still in ``_loading`` (invisible to its eviction), so
+                # two distinct loads can both insert and transiently exceed
+                # ``max_models``. Evict the oldest entries — never the one we
+                # just inserted (pinned to the back via ``move_to_end``) —
+                # until we are back within the cap.
+                self._models.move_to_end(model_name)
+                self._evict_over_capacity_locked(keep=model_name)
+
             return cached
 
         except Exception:
@@ -254,6 +264,29 @@ class ModelPool:
                     cached.engine.unload()
             self._models.clear()
             self._total_memory_mb = 0.0
+
+    def _evict_over_capacity_locked(self, *, keep: str) -> None:
+        """Evict oldest models until within ``max_models`` / ``max_memory``,
+        never evicting ``keep`` (must hold the lock).
+
+        Unlike :meth:`_evict_if_needed_locked` (which runs *before* a load and
+        uses ``>=`` to make room for the incoming model), this runs *after*
+        insertion and uses strict ``>`` so the just-loaded ``keep`` entry — kept
+        at the back of the OrderedDict — is preserved while older entries that a
+        racing concurrent load left behind are evicted.
+        """
+        while len(self._models) > self._max_models:
+            oldest = next(iter(self._models))
+            if oldest == keep:
+                break
+            self._evict_locked(oldest)
+
+        if self._max_memory_mb is not None:
+            while len(self._models) > 1 and self._total_memory_mb > self._max_memory_mb:
+                oldest = next(iter(self._models))
+                if oldest == keep:
+                    break
+                self._evict_locked(oldest)
 
     async def _evict_if_needed_locked(self) -> None:
         """Evict models if over limits (must hold lock)."""

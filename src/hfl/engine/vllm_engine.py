@@ -16,6 +16,7 @@ WARNING: EXPERIMENTAL
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import uuid
@@ -201,33 +202,58 @@ class VLLMEngine(InferenceEngine):
         """True token-by-token streaming via AsyncLLMEngine."""
         request_id = str(uuid.uuid4())
         token_queue: Queue[str | None | Exception] = Queue(maxsize=100)
+        loop = cast(asyncio.AbstractEventLoop, self._loop)
+        # Set when the consumer goes away (client disconnect closes this
+        # generator -> GeneratorExit at the ``yield`` below). The producer
+        # checks it so it stops pulling from / pushing to vLLM.
+        cancelled = threading.Event()
 
         async def _producer():
             prev_text = ""
             try:
                 async for output in self._engine.generate(prompt, sampling_params, request_id):
+                    if cancelled.is_set():
+                        break
                     for completion in output.outputs:
                         new_text = completion.text[len(prev_text) :]
                         if new_text:
                             token_queue.put(new_text, timeout=_hfl_config.stream_queue_put_timeout)
                             prev_text = completion.text
             except Exception as e:
-                token_queue.put(e, timeout=_hfl_config.vllm_error_put_timeout)
+                if not cancelled.is_set():
+                    with contextlib.suppress(Exception):
+                        token_queue.put(e, timeout=_hfl_config.vllm_error_put_timeout)
             finally:
-                token_queue.put(None, timeout=_hfl_config.vllm_error_put_timeout)
+                if not cancelled.is_set():
+                    with contextlib.suppress(Exception):
+                        token_queue.put(None, timeout=_hfl_config.vllm_error_put_timeout)
 
-        asyncio.run_coroutine_threadsafe(_producer(), cast(asyncio.AbstractEventLoop, self._loop))
+        producer_future = asyncio.run_coroutine_threadsafe(_producer(), loop)
 
-        while True:
-            try:
-                item = token_queue.get(timeout=_hfl_config.stream_queue_put_timeout)
-            except Empty:
-                raise TimeoutError("vLLM streaming timed out") from None
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                raise item
-            yield item
+        try:
+            while True:
+                try:
+                    item = token_queue.get(timeout=_hfl_config.stream_queue_put_timeout)
+                except Empty:
+                    raise TimeoutError("vLLM streaming timed out") from None
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            # RES: on early teardown (client disconnect -> GeneratorExit here,
+            # or a timeout/error) stop the producer and abort the in-flight
+            # vLLM request, so the GPU stops decoding tokens for a client that
+            # is already gone. AsyncLLMEngine.abort(request_id) exists for
+            # exactly this — without it every cancelled stream leaks a live
+            # generation (and the background coroutine) until it self-terminates.
+            cancelled.set()
+            abort = getattr(self._engine, "abort", None)
+            if abort is not None:
+                with contextlib.suppress(Exception):
+                    asyncio.run_coroutine_threadsafe(abort(request_id), loop)
+            producer_future.cancel()
 
     def chat(
         self,

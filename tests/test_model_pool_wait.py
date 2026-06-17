@@ -44,6 +44,49 @@ class TestModelPoolConcurrentLoad:
         assert load_count == 1
 
     @pytest.mark.asyncio
+    async def test_concurrent_distinct_loads_respect_max_models(self):
+        """CON regression: two concurrent loads of DIFFERENT models with
+        ``max_models=1`` must not leave both resident. Each load's pre-load
+        eviction can't see the other (which is in ``_loading``), so the cap is
+        re-enforced at insertion. Without the fix ``pool.size == 2``."""
+        pool = ModelPool(max_models=1, idle_timeout_seconds=60.0)
+
+        engine_a = MagicMock(is_loaded=True)
+        engine_b = MagicMock(is_loaded=True)
+        manifest = MagicMock()
+
+        entered = asyncio.Event()
+        entered_count = [0]
+        release = asyncio.Event()
+
+        def make_loader(engine):
+            async def loader():
+                entered_count[0] += 1
+                if entered_count[0] >= 2:
+                    entered.set()
+                # Park here until BOTH loads have claimed their _loading slot,
+                # so neither pre-load eviction sees the other — forcing the race.
+                await release.wait()
+                return engine, manifest, 1000.0
+
+            return loader
+
+        task_a = asyncio.create_task(pool.get_or_load("model-a", make_loader(engine_a)))
+        task_b = asyncio.create_task(pool.get_or_load("model-b", make_loader(engine_b)))
+
+        await asyncio.wait_for(entered.wait(), timeout=2.0)
+        release.set()
+        await asyncio.gather(task_a, task_b)
+
+        # The single-resident guarantee must hold.
+        assert pool.size <= 1, f"pool holds {pool.size} models, exceeds max_models=1"
+        # The evicted model's engine must have been unloaded (no VRAM leak).
+        assert engine_a.unload.called or engine_b.unload.called, (
+            "the evicted model's engine was never unloaded"
+        )
+        assert pool.total_memory_mb <= 1000.0
+
+    @pytest.mark.asyncio
     async def test_get_or_load_no_stack_overflow(self, pool):
         """Non-recursive waiting should not cause stack overflow."""
         mock_engine = MagicMock()

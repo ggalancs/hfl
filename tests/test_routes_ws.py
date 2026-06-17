@@ -217,6 +217,67 @@ class TestWsChatCancellation:
         assert any(f["type"] == "error" for f in sent)
 
 
+class TestWsChatThreadSafety:
+    """CON regression: the worker-thread producer must marshal every queue
+    enqueue back onto the loop (``asyncio.Queue`` is not thread-safe). A fast,
+    bursty engine that produces tokens before the consumer re-registers its
+    getter would otherwise race the queue internals and drop wakeups."""
+
+    @pytest.mark.asyncio
+    async def test_producer_enqueues_only_from_loop_thread(self, monkeypatch):
+        import asyncio
+        import threading
+
+        from hfl.api import model_loader, routes_ws
+
+        loop_thread_id = threading.get_ident()
+        offending: list[int] = []
+        real_put_nowait = asyncio.Queue.put_nowait
+
+        def _tracking_put_nowait(self, item):
+            if threading.get_ident() != loop_thread_id:
+                offending.append(threading.get_ident())
+            return real_put_nowait(self, item)
+
+        monkeypatch.setattr(asyncio.Queue, "put_nowait", _tracking_put_nowait)
+
+        class _FastEngine:
+            """Bursty: 200 tokens, no sleeps — maximises the race window."""
+
+            def chat_stream(self, msgs, cfg):
+                for i in range(200):
+                    yield f"t{i}"
+
+        async def _fake_load_llm(model_name):
+            return _FastEngine(), None
+
+        monkeypatch.setattr(model_loader, "load_llm", _fake_load_llm)
+
+        sent: list[dict] = []
+
+        async def _fake_send(ws, frame):
+            sent.append(frame)
+
+        monkeypatch.setattr(routes_ws, "_send", _fake_send)
+
+        cancel_event = asyncio.Event()
+        frame = {
+            "type": "chat",
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        await asyncio.wait_for(
+            routes_ws._drive_chat(object(), frame, cancel_event), timeout=5.0
+        )
+
+        # Every token plus a terminal done must be delivered.
+        token_frames = [f for f in sent if f.get("type") == "token"]
+        assert len(token_frames) == 200
+        assert any(f.get("type") == "done" for f in sent)
+        # And no enqueue may have happened off the loop thread.
+        assert offending == [], f"put_nowait called from worker thread(s): {offending}"
+
+
 class TestWsChatValidation:
     def test_invalid_json_yields_error_frame(self, client):
         with client.websocket_connect("/ws/chat") as ws:

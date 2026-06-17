@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from datetime import datetime  # noqa: F401 — used in type comments / methods
 
     from hfl.engine.base import AudioEngine, InferenceEngine
+    from hfl.engine.dispatcher import InferenceDispatcher
     from hfl.models.manifest import ModelManifest
 
 
@@ -62,6 +63,17 @@ class ServerState:
 
     # Track which models are currently loading
     _loading_models: set[str] = field(default_factory=set)
+
+    # Engine hot-swap safety (CON). Inference paths that do NOT hold a
+    # dispatcher slot (the WebSocket chat turn) ``pin`` the engine they read
+    # for the duration of their use. ``set_llm_engine`` drains the dispatcher
+    # (so no slot-holding HTTP request is mid-flight) and then, if the displaced
+    # engine is still pinned by such a path, defers its ``unload`` until the
+    # last reader ``unpin``s it — so a swap can never free the model out from
+    # under an in-flight request (use-after-free of the non-reentrant model).
+    _engine_inuse: dict[int, int] = field(default_factory=dict)
+    _engine_retired: dict[int, "InferenceEngine"] = field(default_factory=dict)
+    _engine_ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Properties with setters for testing compatibility
     @property
@@ -132,13 +144,80 @@ class ServerState:
             model: Model manifest for the loaded model
         """
         async with self._llm_lock:
-            # Unload previous engine if exists. Run off-loop so a slow
-            # unload (GPU context cleanup, page-cache flush) doesn't
-            # freeze unrelated requests.
-            if self._engine is not None and self._engine.is_loaded:
-                await asyncio.to_thread(self._engine.unload)
-            self._engine = engine
-            self._current_model = model
+            prev = self._engine
+
+            # Fast path: nothing loaded to retire (first load / no-op re-set).
+            if prev is None or prev is engine or not prev.is_loaded:
+                self._engine = engine
+                self._current_model = model
+                return
+
+            # There is a loaded previous engine to retire. Retire it BEFORE
+            # assigning the new one so an unload *failure* leaves the old engine
+            # in place (atomic swap — callers observe "replacement failed", not
+            # a half-updated state). The teardown runs off-loop so a slow unload
+            # (GPU/Metal context cleanup) doesn't freeze unrelated endpoints.
+            async def _retire_and_assign() -> None:
+                # A non-dispatcher path (the WS chat turn) may still be reading
+                # ``prev``; if so, defer its unload until the last reader unpins.
+                async with self._engine_ref_lock:
+                    pinned = self._engine_inuse.get(id(prev), 0) > 0
+                    if pinned:
+                        self._engine_retired[id(prev)] = prev
+                if not pinned and prev.is_loaded:
+                    # May raise (e.g. GPU fault) — propagate without assigning,
+                    # so ``self._engine`` stays the old engine.
+                    await asyncio.to_thread(prev.unload)
+                self._engine = engine
+                self._current_model = model
+
+            # Drain in-flight dispatcher inference first, so no slot-holding
+            # HTTP request (stream or non-stream) is mid-read of ``prev`` when
+            # it is freed. ``exclusive()`` waits for every inference slot to
+            # clear — guarding against a use-after-free of the shared model.
+            dispatcher = self._try_get_dispatcher()
+            if dispatcher is not None:
+                async with dispatcher.exclusive():
+                    await _retire_and_assign()
+            else:  # pragma: no cover — dispatcher always present in running app
+                await _retire_and_assign()
+
+    @staticmethod
+    def _try_get_dispatcher() -> "InferenceDispatcher | None":
+        """Best-effort handle to the inference dispatcher (None if unavailable,
+        e.g. in a unit test that never built the container)."""
+        try:
+            from hfl.core import get_dispatcher
+
+            return get_dispatcher()
+        except Exception:  # pragma: no cover — defensive
+            return None
+
+    async def pin_engine(self, engine: "InferenceEngine | None") -> None:
+        """Mark ``engine`` as in-use by an in-flight request that does not hold
+        a dispatcher slot (the WebSocket chat turn). Paired with
+        :meth:`unpin_engine`; while pinned, a hot-swap defers its unload."""
+        if engine is None:
+            return
+        async with self._engine_ref_lock:
+            self._engine_inuse[id(engine)] = self._engine_inuse.get(id(engine), 0) + 1
+
+    async def unpin_engine(self, engine: "InferenceEngine | None") -> None:
+        """Release a pinned engine. If it was displaced by a hot-swap and this
+        was its last in-flight reader, unload it now (off-loop)."""
+        if engine is None:
+            return
+        to_unload: "InferenceEngine | None" = None
+        async with self._engine_ref_lock:
+            key = id(engine)
+            remaining = self._engine_inuse.get(key, 0) - 1
+            if remaining > 0:
+                self._engine_inuse[key] = remaining
+            else:
+                self._engine_inuse.pop(key, None)
+                to_unload = self._engine_retired.pop(key, None)
+        if to_unload is not None and to_unload.is_loaded:
+            await asyncio.to_thread(to_unload.unload)
 
     @asynccontextmanager
     async def with_llm_engine(self) -> AsyncIterator["InferenceEngine"]:
