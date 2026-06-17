@@ -465,3 +465,33 @@ class TestRequestBodyLimitMiddleware:
         # 100 bytes, far over the 8-byte cap — excluded path must not 413.
         response = client.post("/api/transcribe", json={"x": "y" * 100})
         assert response.status_code == 200
+
+
+class TestMetricLabelCardinality:
+    """Observability: metric endpoint labels must be bounded — keyed by the
+    matched ROUTE TEMPLATE, not the raw path (blob digests / 404 scanners would
+    otherwise mint unbounded permanent series)."""
+
+    def test_templated_paths_collapse_and_404s_bucket(self):
+        from hfl.api.middleware import RequestLogger
+        from hfl.metrics import get_metrics
+
+        get_metrics().reset()
+        app = FastAPI()
+        app.add_middleware(RequestLogger)
+
+        @app.get("/api/blobs/{digest}")
+        def blob(digest: str) -> dict:
+            return {"d": digest}
+
+        client = TestClient(app)
+        client.get("/api/blobs/sha256-aaaa")
+        client.get("/api/blobs/sha256-bbbb")
+        client.get("/this-route-does-not-exist")
+
+        recorded = dict(get_metrics().requests_by_endpoint)
+        # Two distinct digests collapse to one templated series.
+        assert recorded.get("/api/blobs/{digest}") == 2
+        assert "/api/blobs/sha256-aaaa" not in recorded
+        # Unmatched paths collapse into a single bucket.
+        assert recorded.get("<unmatched>") == 1

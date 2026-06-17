@@ -15,6 +15,35 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
+# Latency histogram bucket boundaries (milliseconds). Cumulative counts on
+# these boundaries (+ a +Inf overflow) are exported as a Prometheus *histogram*
+# so histogram_quantile() / rate() work across any scrape window and across
+# replicas — unlike a client-computed summary over a sliding deque (whose
+# window silently shrinks under load).
+_LATENCY_BUCKETS_MS: tuple[float, ...] = (
+    5.0,
+    10.0,
+    25.0,
+    50.0,
+    100.0,
+    250.0,
+    500.0,
+    1000.0,
+    2500.0,
+    5000.0,
+    10000.0,
+    30000.0,
+    60000.0,
+)
+
+
+def _bucket_index(value_ms: float) -> int:
+    """Index of the first bucket boundary >= ``value_ms``, or the +Inf bucket."""
+    for i, boundary in enumerate(_LATENCY_BUCKETS_MS):
+        if value_ms <= boundary:
+            return i
+    return len(_LATENCY_BUCKETS_MS)
+
 
 @dataclass
 class Metrics:
@@ -64,6 +93,18 @@ class Metrics:
         default_factory=lambda: deque(maxlen=1000), repr=False
     )
 
+    # All-time latency histograms (monotonic) for Prometheus _bucket/_sum/_count
+    # export. The deques above remain for the local JSON percentile view; these
+    # accumulate forever so the exported histogram aggregates correctly.
+    _request_latency_buckets: list[int] = field(
+        default_factory=lambda: [0] * (len(_LATENCY_BUCKETS_MS) + 1), repr=False
+    )
+    _request_latency_sum_ms: float = field(default=0.0, repr=False)
+    _generation_latency_buckets: list[int] = field(
+        default_factory=lambda: [0] * (len(_LATENCY_BUCKETS_MS) + 1), repr=False
+    )
+    _generation_latency_sum_ms: float = field(default=0.0, repr=False)
+
     def record_request(
         self,
         endpoint: str,
@@ -93,6 +134,9 @@ class Metrics:
 
             # deque handles FIFO eviction automatically via maxlen
             self._request_latencies_ms.append(duration_ms)
+            # All-time histogram (Prometheus): monotonic bucket counts + sum.
+            self._request_latency_buckets[_bucket_index(duration_ms)] += 1
+            self._request_latency_sum_ms += duration_ms
 
     def record_generation(
         self,
@@ -113,6 +157,9 @@ class Metrics:
 
             # deque handles FIFO eviction automatically via maxlen
             self._generation_latencies_ms.append(duration_ms)
+            # All-time histogram (Prometheus): monotonic bucket counts + sum.
+            self._generation_latency_buckets[_bucket_index(duration_ms)] += 1
+            self._generation_latency_sum_ms += duration_ms
 
     def record_model_load(self, model_name: str, duration_ms: float) -> None:
         """Record a model load.
@@ -281,6 +328,29 @@ class Metrics:
                 )
                 lines.append("# TYPE hfl_inference_queue_depth gauge")
                 lines.append(f"hfl_inference_queue_depth {snap.depth}")
+                # Saturation counters — the load-shedding signals (429/503) you
+                # alert on. Already tracked by the dispatcher; just not exported
+                # before, so load-shedding was un-alertable.
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_accepted_total Requests admitted to the dispatcher"
+                )
+                lines.append("# TYPE hfl_inference_accepted_total counter")
+                lines.append(f"hfl_inference_accepted_total {snap.accepted_total}")
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_rejected_full_total "
+                    "Requests rejected because the wait queue was full (HTTP 429)"
+                )
+                lines.append("# TYPE hfl_inference_rejected_full_total counter")
+                lines.append(f"hfl_inference_rejected_full_total {snap.rejected_full_total}")
+                lines.append("")
+                lines.append(
+                    "# HELP hfl_inference_rejected_timeout_total "
+                    "Requests rejected after waiting too long for a slot (HTTP 503)"
+                )
+                lines.append("# TYPE hfl_inference_rejected_timeout_total counter")
+                lines.append(f"hfl_inference_rejected_timeout_total {snap.rejected_timeout_total}")
             except Exception:  # pragma: no cover — config not loaded in some tests
                 pass
 
@@ -308,30 +378,49 @@ class Metrics:
                 for error_type, count in self.errors_by_type.items():
                     lines.append(f'hfl_errors_total{{type="{error_type}"}} {count}')
 
-            # Latency summaries
-            if self._request_latencies_ms:
-                lines.append("")
-                lines.append("# HELP hfl_request_latency_ms Request latency in milliseconds")
-                lines.append("# TYPE hfl_request_latency_ms summary")
-                p50 = self._percentile(self._request_latencies_ms, 0.5)
-                p95 = self._percentile(self._request_latencies_ms, 0.95)
-                p99 = self._percentile(self._request_latencies_ms, 0.99)
-                lines.append(f'hfl_request_latency_ms{{quantile="0.5"}} {p50:.2f}')
-                lines.append(f'hfl_request_latency_ms{{quantile="0.95"}} {p95:.2f}')
-                lines.append(f'hfl_request_latency_ms{{quantile="0.99"}} {p99:.2f}')
-
-            if self._generation_latencies_ms:
-                lines.append("")
-                lines.append("# HELP hfl_generation_latency_ms Generation latency in milliseconds")
-                lines.append("# TYPE hfl_generation_latency_ms summary")
-                p50 = self._percentile(self._generation_latencies_ms, 0.5)
-                p95 = self._percentile(self._generation_latencies_ms, 0.95)
-                p99 = self._percentile(self._generation_latencies_ms, 0.99)
-                lines.append(f'hfl_generation_latency_ms{{quantile="0.5"}} {p50:.2f}')
-                lines.append(f'hfl_generation_latency_ms{{quantile="0.95"}} {p95:.2f}')
-                lines.append(f'hfl_generation_latency_ms{{quantile="0.99"}} {p99:.2f}')
+            # Latency histograms (aggregatable). histogram_quantile() over these
+            # gives fleet/window p95; rate(..._count) gives throughput.
+            self._append_histogram(
+                lines,
+                "hfl_request_latency_ms",
+                "Request latency in milliseconds",
+                self._request_latency_buckets,
+                self._request_latency_sum_ms,
+            )
+            self._append_histogram(
+                lines,
+                "hfl_generation_latency_ms",
+                "Generation latency in milliseconds",
+                self._generation_latency_buckets,
+                self._generation_latency_sum_ms,
+            )
 
             return "\n".join(lines)
+
+    @staticmethod
+    def _append_histogram(
+        lines: list[str],
+        name: str,
+        help_text: str,
+        buckets: list[int],
+        sum_ms: float,
+    ) -> None:
+        """Append a Prometheus histogram (cumulative ``_bucket``/``_sum``/
+        ``_count``) for the given per-boundary bucket counts."""
+        count = sum(buckets)
+        if not count:
+            return
+        lines.append("")
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} histogram")
+        cumulative = 0
+        for i, boundary in enumerate(_LATENCY_BUCKETS_MS):
+            cumulative += buckets[i]
+            lines.append(f'{name}_bucket{{le="{boundary}"}} {cumulative}')
+        cumulative += buckets[-1]  # +Inf overflow bucket
+        lines.append(f'{name}_bucket{{le="+Inf"}} {cumulative}')
+        lines.append(f"{name}_sum {sum_ms:.2f}")
+        lines.append(f"{name}_count {count}")
 
     def export_json(self) -> dict[str, Any]:
         """Export metrics as JSON.
@@ -422,6 +511,10 @@ class Metrics:
             self._generation_latencies_ms.clear()
             self._model_load_latencies_ms.clear()
             self._request_latencies_ms.clear()
+            self._request_latency_buckets = [0] * (len(_LATENCY_BUCKETS_MS) + 1)
+            self._request_latency_sum_ms = 0.0
+            self._generation_latency_buckets = [0] * (len(_LATENCY_BUCKETS_MS) + 1)
+            self._generation_latency_sum_ms = 0.0
             self._start_time = time.time()
 
 

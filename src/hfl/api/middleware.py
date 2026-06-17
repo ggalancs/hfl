@@ -98,9 +98,15 @@ class RequestLogger(BaseHTTPMiddleware):
             duration_ms=duration_ms,
         )
 
-        # Record metrics for monitoring
+        # Record metrics for monitoring. Label by the matched ROUTE TEMPLATE,
+        # not the raw path: /api/blobs/{digest} embeds a unique SHA-256 per
+        # upload and any 404-walking scanner would otherwise mint an unbounded
+        # number of permanent metric series (in-memory dict + Prometheus TSDB
+        # blow-up). Unmatched paths collapse into a single bucket.
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", None) or "<unmatched>"
         get_metrics().record_request(
-            endpoint=request.url.path,
+            endpoint=endpoint,
             method=request.method,
             status=response.status_code,
             duration_ms=duration_ms,

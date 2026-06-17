@@ -14,6 +14,7 @@ matches before writing tensors, otherwise the operation aborts with
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from typing import Any
@@ -58,8 +59,18 @@ async def api_snapshot_save(req: SnapshotRequest) -> dict[str, Any]:
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
+    # RES/CON: save_state() (multi-GB) + pickle.dumps + write must NOT run on
+    # the event loop (it would freeze /healthz, /metrics and every in-flight
+    # stream for the whole duration) and must NOT race inference / a model swap
+    # on the shared non-reentrant model. Drain the dispatcher (exclusive() also
+    # blocks set_llm_engine, which uses the same barrier) and run off-loop.
+    from hfl.core import get_dispatcher
+
     try:
-        meta = save_snapshot(engine, name=req.name, model_name=req.model)
+        async with get_dispatcher().exclusive():
+            meta = await asyncio.to_thread(
+                save_snapshot, engine, name=req.name, model_name=req.model
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -87,8 +98,16 @@ async def api_snapshot_load(req: SnapshotRequest) -> dict[str, Any]:
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
+    # RES/CON: load_state() WRITES KV tensors into the model — it must run
+    # off-loop and with inference + swaps drained, or it corrupts the model
+    # mid-generation. Same exclusive()-drain + to_thread as the save path.
+    from hfl.core import get_dispatcher
+
     try:
-        meta = load_snapshot(engine, name=req.name, model_name=req.model)
+        async with get_dispatcher().exclusive():
+            meta = await asyncio.to_thread(
+                load_snapshot, engine, name=req.name, model_name=req.model
+            )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

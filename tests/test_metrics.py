@@ -290,3 +290,48 @@ class TestGetMetrics:
 
         m2 = get_metrics()
         assert m2.requests_total == 0
+
+
+class TestPrometheusHistogramsAndSaturation:
+    """Observability: latency must export as an aggregatable histogram (not a
+    client-computed summary), and the dispatcher's 429/503 saturation counters
+    must be exported so load-shedding is alertable."""
+
+    def test_latency_is_histogram_not_summary(self):
+        m = Metrics()
+        m.record_request("/v1/chat/completions", "POST", 200, 42.0)
+        m.record_request("/v1/chat/completions", "POST", 200, 1500.0)
+        out = m.export_prometheus()
+
+        assert "# TYPE hfl_request_latency_ms histogram" in out
+        assert "hfl_request_latency_ms_summary" not in out
+        assert 'hfl_request_latency_ms{quantile=' not in out  # old summary gone
+        assert 'hfl_request_latency_ms_bucket{le="+Inf"} 2' in out
+        assert "hfl_request_latency_ms_count 2" in out
+        assert "hfl_request_latency_ms_sum 1542.00" in out
+        # 42ms lands in the le=50 bucket (cumulative), 1500ms in le=2500.
+        assert 'hfl_request_latency_ms_bucket{le="50.0"} 1' in out
+        assert 'hfl_request_latency_ms_bucket{le="2500.0"} 2' in out
+
+    def test_generation_latency_is_histogram(self):
+        m = Metrics()
+        m.record_generation(1200.0, 10, 50)
+        out = m.export_prometheus()
+        assert "# TYPE hfl_generation_latency_ms histogram" in out
+        assert "hfl_generation_latency_ms_count 1" in out
+
+    def test_dispatcher_saturation_counters_exported(self):
+        m = Metrics()
+        out = m.export_prometheus()
+        # The 429/503 load-shedding signals must be present (value depends on the
+        # live dispatcher; we only assert the series are exported).
+        assert "hfl_inference_accepted_total" in out
+        assert "hfl_inference_rejected_full_total" in out
+        assert "hfl_inference_rejected_timeout_total" in out
+
+    def test_reset_clears_histogram(self):
+        m = Metrics()
+        m.record_request("/x", "GET", 200, 10.0)
+        m.reset()
+        out = m.export_prometheus()
+        assert "hfl_request_latency_ms_count" not in out  # no observations -> no block

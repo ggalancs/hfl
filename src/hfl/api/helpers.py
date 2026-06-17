@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast
+from contextlib import AbstractAsyncContextManager, suppress
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -107,27 +107,52 @@ async def run_dispatched(
     dispatcher = get_dispatcher()
     effective_timeout = timeout if timeout is not None else config.generation_timeout
 
-    async def _execute() -> T:
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(func, *args, **kwargs),
-                timeout=effective_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(
-                status_code=504,
-                detail={
-                    "error": f"{operation} timed out",
-                    "code": "TIMEOUT",
-                    "timeout_seconds": effective_timeout,
-                    "operation": operation,
-                },
-            ) from None
+    # Acquire the slot manually (not via ``dispatcher.run``) so we control WHEN
+    # it is released. ``__aenter__`` raises QueueFull / QueueTimeout on
+    # rejection, which propagates to the route layer as 429 / 503 — unchanged.
+    slot_cm = dispatcher.slot()
+    await slot_cm.__aenter__()
 
-    # ``dispatcher.run`` is generic and mypy loses the concrete ``T``
-    # across the boundary; cast back so route handlers keep their
-    # precise return type.
-    return cast(T, await dispatcher.run(_execute))
+    worker = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+
+    async def _release_when_worker_exits() -> None:
+        # CON: a sync engine call run via ``asyncio.to_thread`` CANNOT be
+        # cancelled — on timeout / client-cancel the worker thread keeps running
+        # inside the engine on the shared, non-reentrant model. Hold the
+        # dispatcher slot until the worker ACTUALLY exits, so the next queued
+        # request can't acquire it and start a second inference that corrupts
+        # the model mid-generation. The client already received its 504/cancel.
+        try:
+            await asyncio.gather(worker, return_exceptions=True)
+        finally:
+            with suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
+
+    try:
+        result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
+    except asyncio.TimeoutError:
+        asyncio.ensure_future(_release_when_worker_exits())
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": f"{operation} timed out",
+                "code": "TIMEOUT",
+                "timeout_seconds": effective_timeout,
+                "operation": operation,
+            },
+        ) from None
+    except BaseException as exc:
+        if worker.done() and not isinstance(exc, asyncio.CancelledError):
+            # The worker finished (it raised); release inline, then propagate.
+            await slot_cm.__aexit__(None, None, None)
+        else:
+            # Cancelled, or the worker is still running on the shared model:
+            # keep the slot until the worker thread is truly done.
+            asyncio.ensure_future(_release_when_worker_exits())
+        raise
+    else:
+        await slot_cm.__aexit__(None, None, None)
+        return result
 
 
 async def acquire_stream_slot(

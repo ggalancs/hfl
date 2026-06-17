@@ -38,6 +38,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import pickle
 import secrets
 import time
@@ -210,7 +211,12 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
 
     state_path = _state_path(name)
     raw = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
-    state_path.write_bytes(raw)
+    # Atomic write: a crash / OOM mid-write must not leave a truncated ``.state``
+    # that a later load would feed into ``Llama.load_state`` and corrupt the
+    # model's memory. Write to a sibling temp then atomically rename.
+    tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
+    tmp_path.write_bytes(raw)
+    os.replace(tmp_path, state_path)
 
     tokens = int(getattr(state, "n_tokens", 0) or 0)
     meta = SnapshotMeta(

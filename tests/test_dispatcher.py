@@ -538,3 +538,59 @@ class TestWaitForCancelReleasesSlot:
 
         assert d.in_flight == 0
         assert d.depth == 0
+
+
+class TestRunDispatchedTimeoutHoldsSlot:
+    """CON: run_dispatched runs a sync engine call via asyncio.to_thread, which
+    CANNOT be cancelled. On timeout the dispatcher slot must stay held until the
+    wedged worker thread actually exits — otherwise the next request acquires it
+    and starts a second inference that corrupts the shared non-reentrant model."""
+
+    async def test_slot_held_until_wedged_worker_exits_on_timeout(self):
+        import threading
+
+        from fastapi import HTTPException
+
+        from hfl.api.helpers import run_dispatched
+        from hfl.core import get_dispatcher
+
+        dispatcher = get_dispatcher()
+        dispatcher.reset()
+        release = threading.Event()
+        started = threading.Event()
+        worker_done = threading.Event()
+
+        def _wedged():
+            started.set()
+            release.wait(timeout=5)
+            worker_done.set()
+            return "late"
+
+        try:
+            # 1) Times out promptly (504) while the worker is still wedged.
+            with pytest.raises(HTTPException) as exc:
+                await run_dispatched(_wedged, timeout=0.1, operation="gen")
+            assert exc.value.status_code == 504
+            assert started.is_set()
+            assert not worker_done.is_set()  # worker still running
+
+            # 2) The slot must NOT be free while the worker runs: a second
+            #    dispatched call must not be able to start inference.
+            quick_ran = asyncio.Event()
+
+            async def _quick():
+                r = await run_dispatched(lambda: "ok", timeout=5.0, operation="quick")
+                quick_ran.set()
+                return r
+
+            task = asyncio.create_task(_quick())
+            await asyncio.sleep(0.15)
+            assert not quick_ran.is_set(), "slot freed while the wedged worker still ran -> UAF"
+
+            # 3) Releasing the worker frees the slot; the quick call proceeds.
+            release.set()
+            assert await asyncio.wait_for(task, timeout=3.0) == "ok"
+        finally:
+            release.set()
+            await asyncio.sleep(0.05)
+            dispatcher.reset()

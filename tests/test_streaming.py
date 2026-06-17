@@ -94,6 +94,28 @@ class TestStreamWithBackpressure:
                 pass
 
     @pytest.mark.asyncio
+    async def test_timeout_defaults_to_config_generation_timeout(self, monkeypatch):
+        """With no explicit timeout, the stream wall-clock budget must come from
+        config.generation_timeout — not the old hardcoded 300s that ignored the
+        config and truncated streamed generations a non-stream call allowed."""
+        from hfl.config import config as _cfg
+
+        monkeypatch.setattr(_cfg, "generation_timeout", 0.05)
+
+        def slow_iter():
+            time.sleep(0.3)
+            yield "a"
+
+        with pytest.raises(StreamTimeoutError, match="exceeded"):
+            async for _ in stream_with_backpressure(
+                slow_iter(),
+                format_item=lambda x: x,
+                format_done=lambda: "done",
+                heartbeat_interval=0.02,
+            ):
+                pass
+
+    @pytest.mark.asyncio
     async def test_client_disconnect(self):
         """Should raise StreamCancelledError on client disconnect."""
         mock_request = MagicMock()

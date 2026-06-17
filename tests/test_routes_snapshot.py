@@ -183,3 +183,43 @@ class TestSnapshotListAndDelete:
         # reject the path char first as 404. Both indicate "not
         # accepted".
         assert response.status_code in (400, 404)
+
+
+class TestSnapshotOffLoop:
+    """RES/CON: snapshot save must run OFF the event loop (multi-GB save_state +
+    pickle + write would otherwise freeze every other request) and under the
+    dispatcher drain (no concurrent inference on the shared model)."""
+
+    @pytest.mark.asyncio
+    async def test_save_runs_off_event_loop(self, temp_config, monkeypatch, llm_manifest):
+        import threading
+
+        from hfl.api import routes_snapshot
+        from hfl.api.routes_snapshot import SnapshotRequest, api_snapshot_save
+        from hfl.core import get_dispatcher
+        from hfl.engine.snapshot import SnapshotMeta
+
+        get_dispatcher().reset()
+        loop_thread = threading.get_ident()
+        captured: dict = {}
+
+        engine = MagicMock(spec=["save_state", "load_state", "is_loaded"])
+        engine.is_loaded = True
+
+        def _fake_save(eng, *, name, model_name):
+            captured["thread"] = threading.get_ident()
+            return SnapshotMeta(
+                name=name, model=model_name, tokens=0, created_at=0.0, bytes=0, mac="x"
+            )
+
+        async def _fake_load(name):
+            return engine, llm_manifest
+
+        monkeypatch.setattr(routes_snapshot, "save_snapshot", _fake_save)
+        monkeypatch.setattr(routes_snapshot, "load_llm", _fake_load)
+
+        await api_snapshot_save(SnapshotRequest(model=llm_manifest.name, name="snap"))
+
+        # save_snapshot ran on a worker thread, not the event-loop thread.
+        assert captured["thread"] != loop_thread
+        get_dispatcher().reset()

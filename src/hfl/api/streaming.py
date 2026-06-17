@@ -68,7 +68,7 @@ async def stream_with_backpressure(
     format_item: Callable[[Any], str],
     format_done: Callable[[], str],
     request: "Request | None" = None,
-    timeout: float = DEFAULT_STREAM_TIMEOUT,
+    timeout: float | None = None,
     queue_size: int = DEFAULT_QUEUE_SIZE,
     heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
     format_heartbeat: Callable[[], str] | None = None,
@@ -80,7 +80,12 @@ async def stream_with_backpressure(
         format_item: Function to format each item as a string.
         format_done: Function to format the final "done" message.
         request: Optional Starlette Request for disconnect detection.
-        timeout: Maximum time for the entire stream (seconds).
+        timeout: Maximum time for the entire stream (seconds). ``None`` (the
+            default for every route) resolves to ``config.generation_timeout``
+            so a streamed request gets the SAME operator-configurable wall-clock
+            budget as a non-streamed one — previously this was hardcoded to 300s
+            and ignored the config, truncating long streamed generations that a
+            non-streamed call would have allowed.
         queue_size: Maximum items in the backpressure queue.
         heartbeat_interval: Time between heartbeat messages when idle.
         format_heartbeat: Optional function to format heartbeat messages.
@@ -92,6 +97,8 @@ async def stream_with_backpressure(
         StreamTimeoutError: If the stream exceeds the timeout.
         StreamCancelledError: If the client disconnects.
     """
+    if timeout is None:
+        timeout = _hfl_config.generation_timeout
     # Use bounded queue for backpressure
     queue: asyncio.Queue[Any | None | Exception] = asyncio.Queue(maxsize=queue_size)
     loop = asyncio.get_running_loop()
