@@ -339,6 +339,80 @@ class TestResponsesStreaming:
         assert "text/event-stream" not in response.headers.get("content-type", "")
 
 
+class TestResponsesStreamingDispatcher:
+    """CON/API regression: streaming ``/v1/responses`` must run on the inference
+    dispatcher (serialised against other requests on the shared, non-reentrant
+    model) instead of calling the engine directly, and must not leak raw
+    tool-call markers as text."""
+
+    def _wire_streaming_engine(self, manifest, *, tokens):
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream = MagicMock(return_value=iter(list(tokens)))
+        state.engine = engine
+        state.current_model = manifest
+        return engine
+
+    def test_streaming_acquires_dispatcher_slot(self, client, llm_manifest, monkeypatch):
+        """The stream must go through ``acquire_stream_slot`` (slot held for the
+        whole stream) — proof it serialises on the dispatcher like every other
+        route, rather than bypassing it and racing the shared model's KV cache."""
+        import hfl.api.helpers as helpers
+
+        seen: list[str | None] = []
+        real = helpers.acquire_stream_slot
+
+        async def _spy(*, path=None):
+            seen.append(path)
+            return await real(path=path)
+
+        monkeypatch.setattr(helpers, "acquire_stream_slot", _spy)
+        self._wire_streaming_engine(llm_manifest, tokens=["hi"])
+
+        resp = client.post(
+            "/v1/responses",
+            json={"model": llm_manifest.name, "input": "hi", "stream": True},
+        )
+        assert resp.status_code == 200
+        assert "/v1/responses" in seen, "streaming path did not acquire a dispatcher slot"
+
+    def test_streaming_tools_do_not_leak_markers_and_surface_function_call(
+        self, client, llm_manifest
+    ):
+        """The fix for the parity break: with tools declared, the raw
+        ``<tool_call>`` marker must never appear in an ``output_text.delta``,
+        and the ``response.completed`` envelope must carry a structured
+        ``function_call`` item (matching the non-streaming endpoint)."""
+        marker = '<tool_call>{"name": "get_weather", "arguments": {"city": "Paris"}}</tool_call>'
+        # Split across token chunks to mimic real streaming.
+        self._wire_streaming_engine(llm_manifest, tokens=["<tool_call>", marker[11:]])
+
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": llm_manifest.name,
+                "input": "weather in Paris?",
+                "stream": True,
+                "tools": [{"type": "function", "function": {"name": "get_weather"}}],
+            },
+        )
+        assert resp.status_code == 200
+        events = _parse_sse_events(resp.text)
+
+        # No text delta may leak the raw marker.
+        deltas = [e for e in events if e.get("type") == "response.output_text.delta"]
+        assert all("tool_call" not in (e.get("delta") or "") for e in deltas), (
+            "raw tool-call marker leaked into output_text.delta"
+        )
+
+        # The completed envelope carries the structured function_call.
+        completed = next(e for e in events if e.get("type") == "response.completed")
+        items = completed["response"]["output"]
+        fcs = [it for it in items if it.get("type") == "function_call"]
+        assert fcs, "no function_call item in completed envelope"
+        assert fcs[0]["name"] == "get_weather"
+
+
 class TestResponsesDefaults:
     def test_default_max_tokens_matches_chat_route(self):
         """API-11: when max_output_tokens is omitted, default to a sane cap

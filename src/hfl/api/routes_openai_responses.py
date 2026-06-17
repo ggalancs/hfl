@@ -27,6 +27,7 @@ persist a ``response_id`` chain.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -34,10 +35,10 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from hfl.api.helpers import run_dispatched
+from hfl.api.helpers import prepare_stream_response, run_dispatched
 from hfl.engine.base import ChatMessage, GenerationConfig
 
 if TYPE_CHECKING:
@@ -246,78 +247,128 @@ async def _stream_response(
     messages: list[ChatMessage],
     cfg: GenerationConfig,
     tools: list[dict[str, Any]] | None,
+    slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
     """SSE stream that re-emits chat tokens as Responses events.
 
     Event grammar (subset of OpenAI's spec — what the SDK actually
-    keys on for non-tool replies):
+    keys on):
 
       response.created
-      response.output_text.delta  (one per token chunk)
-      response.completed
+      response.output_text.delta  (one per token chunk; suppressed when
+                                   ``tools`` are declared so a raw
+                                   ``<tool_call>`` marker never leaks as text)
+      response.completed          (final envelope, incl. structured
+                                   ``function_call`` items when tools fired)
+
+    The engine is driven through ``stream_with_backpressure`` so the work
+    runs on the dispatcher slot held in ``slot_cm`` for the whole stream —
+    serialising against every other inference request, since the shared
+    llama.cpp / transformers model is non-reentrant and concurrent use
+    corrupts its KV cache — and the sync iterator is closed on teardown
+    (client disconnect) instead of leaking its worker thread until GC
+    (CON-3). ``slot_cm`` is released in ``finally`` regardless of outcome.
     """
-    state = _get_state()
-    if state.engine is None:
-        err = {
-            "type": "response.failed",
-            "error": {"code": "engine_unavailable", "message": "Model not loaded"},
+    from hfl.api.streaming import stream_with_backpressure
+
+    try:
+        state = _get_state()
+        if state.engine is None:
+            err = {
+                "type": "response.failed",
+                "error": {"code": "engine_unavailable", "message": "Model not loaded"},
+            }
+            yield f"data: {json.dumps(err)}\n\n"
+            return
+
+        created = {
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": int(time.time()),
+                "status": "in_progress",
+                "model": model,
+            },
         }
-        yield f"data: {json.dumps(err)}\n\n"
-        return
+        yield f"data: {json.dumps(created)}\n\n"
 
-    created = {
-        "type": "response.created",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "created_at": int(time.time()),
-            "status": "in_progress",
-            "model": model,
-        },
-    }
-    yield f"data: {json.dumps(created)}\n\n"
+        tool_aware = bool(tools)
+        accumulated: list[str] = []
 
-    accumulated: list[str] = []
+        def format_item(token: str) -> str:
+            accumulated.append(token)
+            # Tool-aware turns buffer everything and emit nothing until done,
+            # so a raw tool-call marker is never streamed verbatim as text.
+            if tool_aware:
+                return ""
+            evt = {"type": "response.output_text.delta", "delta": token}
+            return f"data: {json.dumps(evt)}\n\n"
 
-    if tools is not None:
-        try:
-            sync_iter = state.engine.chat_stream(messages, cfg, tools=tools)
-        except TypeError:
+        def format_done() -> str:
+            raw_text = "".join(accumulated)
+            text = raw_text
+            tool_calls: list[dict[str, Any]] | None = None
+            if tool_aware:
+                try:
+                    from hfl.api.tool_parsers import dispatch as parse_tool_calls
+
+                    cleaned, parsed = parse_tool_calls(raw_text, model, tools)
+                    if parsed:
+                        tool_calls = parsed
+                        text = ""
+                    else:
+                        text = cleaned
+                except Exception:  # pragma: no cover — parser bugs must not break the stream
+                    logger.exception("tool-call parser failed for /v1/responses stream")
+            completed = {
+                "type": "response.completed",
+                "response": _render_response(
+                    response_id=response_id,
+                    model=model,
+                    text=text,
+                    tokens_input=0,
+                    tokens_output=len(accumulated),
+                    tool_calls=tool_calls,
+                    reasoning_text=None,
+                ),
+            }
+            return f"data: {json.dumps(completed)}\n\n" + "data: [DONE]\n\n"
+
+        if tool_aware:
+            try:
+                sync_iter = state.engine.chat_stream(messages, cfg, tools=tools)
+            except TypeError:
+                sync_iter = state.engine.chat_stream(messages, cfg)
+        else:
             sync_iter = state.engine.chat_stream(messages, cfg)
-    else:
-        sync_iter = state.engine.chat_stream(messages, cfg)
 
-    import asyncio
-
-    def _next(it: Any) -> tuple[bool, str]:
         try:
-            return True, next(it)
-        except StopIteration:
-            return False, ""
-
-    while True:
-        ok, token = await asyncio.to_thread(_next, sync_iter)
-        if not ok:
-            break
-        accumulated.append(token)
-        evt = {"type": "response.output_text.delta", "delta": token}
-        yield f"data: {json.dumps(evt)}\n\n"
-
-    text = "".join(accumulated)
-    completed = {
-        "type": "response.completed",
-        "response": _render_response(
-            response_id=response_id,
-            model=model,
-            text=text,
-            tokens_input=0,
-            tokens_output=len(accumulated),
-            tool_calls=None,
-            reasoning_text=None,
-        ),
-    }
-    yield f"data: {json.dumps(completed)}\n\n"
-    yield "data: [DONE]\n\n"
+            async for chunk in stream_with_backpressure(
+                sync_iterator=sync_iter,
+                format_item=format_item,
+                format_done=format_done,
+            ):
+                yield chunk
+        except Exception:
+            logger.exception("responses stream failed")
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "response.failed",
+                        "error": {
+                            "code": "stream_error",
+                            "message": "Internal server error during streaming.",
+                        },
+                    }
+                )
+                + "\n\n"
+            )
+    finally:
+        if slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
 
 
 # --- Endpoint ---------------------------------------------------------------
@@ -334,7 +385,7 @@ async def _stream_response(
         429: {"description": "Rate limit exceeded"},
     },
 )
-async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse:
+async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse | JSONResponse:
     """OpenAI-compatible ``POST /v1/responses``.
 
     Bundles input, instructions, tools, reasoning effort and structured
@@ -355,9 +406,14 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
 
     if req.stream:
-        return StreamingResponse(
-            _stream_response(response_id, req.model, messages, cfg, req.tools),
+        # API/CON: hold a dispatcher slot for the whole stream (serialise
+        # against other inference requests on the shared non-reentrant model)
+        # and drive the engine through stream_with_backpressure so the
+        # iterator is closed on disconnect — matching every other dialect.
+        return await prepare_stream_response(
+            lambda slot: _stream_response(response_id, req.model, messages, cfg, req.tools, slot),
             media_type="text/event-stream",
+            path="/v1/responses",
         )
 
     if req.tools is not None:
