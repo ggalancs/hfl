@@ -102,14 +102,12 @@ class TestDockerWorkflow:
     def setup_method(self):
         self.cfg = yaml.safe_load(_read(".github/workflows/docker.yml"))
 
-    def test_triggers_on_version_tags_only(self):
-        # Workflows default to running on every push unless we scope
-        # to tags — this test locks that down so we don't accidentally
-        # push on every main commit and burn GHCR quota.
+    def test_is_manual_only(self):
+        # Automatic CI/CD is disabled by owner policy: the image build/push must
+        # be manual (workflow_dispatch) only — never auto-publish on a push/tag.
         on_field = self.cfg[True] if True in self.cfg else self.cfg.get("on")
-        push = on_field["push"]
-        assert push["tags"] == ["v*"]
-        assert "branches" not in push
+        assert "workflow_dispatch" in on_field
+        assert "push" not in on_field
 
     def test_jobs_are_per_architecture(self):
         """Each arch gets its own native-runner job — no QEMU, no

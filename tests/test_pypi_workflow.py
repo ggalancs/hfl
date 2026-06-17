@@ -19,11 +19,14 @@ class TestPyPIWorkflow:
     def setup_method(self):
         self.cfg = _load(".github/workflows/publish-pypi.yml")
 
-    def test_triggers_on_tag_only_by_default(self):
+    def test_is_manual_only(self):
+        # Automatic CI/CD is disabled by owner policy: no auto-publish to PyPI on
+        # tag push. The publish must be a deliberate manual workflow_dispatch
+        # (the publish-pypi JOB still keeps its refs/tags/v guard so a manual run
+        # only publishes when dispatched against a release tag).
         on = self.cfg[True] if True in self.cfg else self.cfg["on"]
-        push = on["push"]
-        assert push["tags"] == ["v*"]
-        assert "branches" not in push
+        assert "workflow_dispatch" in on
+        assert "push" not in on
 
     def test_has_oidc_id_token_permission(self):
         perms = self.cfg["permissions"]

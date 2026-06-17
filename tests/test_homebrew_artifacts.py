@@ -43,9 +43,12 @@ class TestWorkflow:
     def setup_method(self):
         self.cfg = yaml.safe_load(_read(".github/workflows/homebrew.yml"))
 
-    def test_triggers_on_version_tags(self):
+    def test_is_manual_only(self):
+        # Automatic CI/CD is disabled by owner policy: the workflow must be
+        # manual (workflow_dispatch) only — no auto-publish on tag push.
         on = self.cfg[True] if True in self.cfg else self.cfg["on"]
-        assert on["push"]["tags"] == ["v*"]
+        assert "workflow_dispatch" in on
+        assert "push" not in on
 
     def test_waits_for_pypi_sdist(self):
         steps = self.cfg["jobs"]["update-tap"]["steps"]

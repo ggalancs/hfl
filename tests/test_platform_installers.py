@@ -40,9 +40,12 @@ class TestWindowsWorkflow:
     def setup_method(self):
         self.cfg = yaml.safe_load(_read(".github/workflows/windows-msi.yml"))
 
-    def test_triggers_on_tag_only(self):
+    def test_is_manual_only(self):
+        # Automatic CI/CD is disabled by owner policy: manual (workflow_dispatch)
+        # only — no auto-build/publish on tag push.
         on = self.cfg[True] if True in self.cfg else self.cfg["on"]
-        assert on["push"]["tags"] == ["v*"]
+        assert "workflow_dispatch" in on
+        assert "push" not in on
 
     def test_signing_gated_on_secret(self):
         build = self.cfg["jobs"]["build-msi"]
