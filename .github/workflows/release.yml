@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'  # Run on version tags like v0.1.0
+  # Tag trigger intentionally removed: the owner does NOT want automatic
+  # releases. Run this manually from the Actions tab when a release is wanted.
+  workflow_dispatch:
 
 jobs:
   build:

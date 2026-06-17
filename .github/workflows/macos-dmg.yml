@@ -17,9 +17,8 @@
 name: macOS DMG
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Tag trigger intentionally removed: no automatic DMG build/publish. Run
+  # manually from the Actions tab.
   workflow_dispatch:
 
 permissions:

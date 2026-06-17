@@ -2,11 +2,8 @@
 name: Deploy Documentation to GitHub Pages
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "docs/**"
-      - "README.md"
+  # Automatic push trigger intentionally removed: docs are deployed manually
+  # from the Actions tab (Run workflow).
   workflow_dispatch:
 
 permissions:

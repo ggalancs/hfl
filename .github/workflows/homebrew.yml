@@ -17,9 +17,8 @@
 name: Homebrew tap
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Tag trigger intentionally removed: no automatic tap update. Run manually
+  # from the Actions tab.
   workflow_dispatch:
 
 permissions:

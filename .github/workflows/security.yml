@@ -1,14 +1,9 @@
 name: Security Scan
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:  # Allow manual triggering
-  schedule:
-    # Run weekly on Monday at midnight
-    - cron: '0 0 * * 1'
+  # Automatic triggers (push / pull_request / weekly schedule) intentionally
+  # removed: the owner runs the security scan manually from the Actions tab.
+  workflow_dispatch:
 
 jobs:
   dependency-scan:

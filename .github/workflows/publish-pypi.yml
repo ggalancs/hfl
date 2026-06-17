@@ -11,9 +11,8 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Tag trigger intentionally removed: no automatic publish to PyPI. Run
+  # manually from the Actions tab.
   workflow_dispatch:
     inputs:
       testpypi:

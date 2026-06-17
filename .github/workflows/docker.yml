@@ -30,9 +30,8 @@
 name: Docker
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Tag trigger intentionally removed: no automatic image publish. Run
+  # manually from the Actions tab.
   workflow_dispatch:
 
 permissions:

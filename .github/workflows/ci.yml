@@ -1,11 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
-  workflow_dispatch:  # Allow manual triggering
+  # Automatic triggers (push / pull_request) intentionally removed: the owner
+  # runs CI manually. Trigger from the Actions tab (Run workflow).
+  workflow_dispatch:
 
 jobs:
   test:
