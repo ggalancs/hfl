@@ -282,6 +282,67 @@ class TestRmCommand:
         registry = ModelRegistry()
         assert registry.get("rm-test-model") is None
 
+    def test_rm_keeps_blob_shared_with_copy(self, runner, cli_app, temp_config, temp_dir):
+        """DATA: ``cp a b`` then ``rm a`` must NOT delete the shared on-disk
+        blob — the zero-copy ``cp`` contract promises the copy stays loadable.
+        For single-file GGUF blobs this loss would be unrecoverable."""
+        from pathlib import Path
+
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
+
+        model_path = temp_dir / "shared-model.gguf"
+        model_path.write_bytes(b"GGUF" + b"\x00" * 16)
+
+        registry = ModelRegistry()
+        registry.add(
+            ModelManifest(
+                name="orig",
+                repo_id="test/shared",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=20,
+                quantization="Q4_K_M",
+            )
+        )
+        # Zero-copy duplicate pointing at the same blob.
+        assert registry.copy("orig", "backup") is True
+
+        result = runner.invoke(cli_app, ["rm", "orig"], input="y\n")
+        assert result.exit_code == 0
+
+        # The shared blob must survive because ``backup`` still references it.
+        assert model_path.exists(), "rm deleted a blob still referenced by the copy"
+
+        registry = ModelRegistry()
+        assert registry.get("orig") is None
+        backup = registry.get("backup")
+        assert backup is not None
+        assert Path(backup.local_path).exists()
+
+    def test_rm_deletes_blob_when_unshared(self, runner, cli_app, temp_config, temp_dir):
+        """Counterpart: with no other entry sharing the path, ``rm`` still
+        deletes the on-disk file — no behaviour regression for the common case."""
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
+
+        model_path = temp_dir / "lonely-model.gguf"
+        model_path.write_bytes(b"GGUF")
+
+        registry = ModelRegistry()
+        registry.add(
+            ModelManifest(
+                name="lonely",
+                repo_id="test/lonely",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=4,
+            )
+        )
+        result = runner.invoke(cli_app, ["rm", "lonely"], input="y\n")
+        assert result.exit_code == 0
+        assert not model_path.exists()
+
 
 class TestPullCommand:
     """Tests for pull command."""

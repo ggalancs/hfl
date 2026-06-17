@@ -79,7 +79,7 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
     # introduced in V5 β3 — no try/except gymnastics anymore.
     from hfl.api.routes_pull import iter_pull_events
 
-    async for chunk in iter_pull_events(plan.target_repo_id):
+    async for chunk in iter_pull_events(plan.target_repo_id, quantization=plan.quantization):
         yield chunk
 
 

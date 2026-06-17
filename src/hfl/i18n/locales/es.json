@@ -223,6 +223,7 @@
     "pre_loading": "Pre-cargando",
     "server_at": "servidor hfl en http://{host}:{port}",
     "deleted": "Eliminado",
+    "blob_shared": "El blob aún está referenciado por {names}; se elimina solo la entrada del registro (se conservan los ficheros en disco).",
     "alias_assigned": "Alias asignado",
     "you_can_now_use": "Ahora puedes usar",
     "configure_hf_token": "Configurar token de HuggingFace",

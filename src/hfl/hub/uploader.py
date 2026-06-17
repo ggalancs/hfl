@@ -204,6 +204,15 @@ async def stream_push(
         "total": plan.total_bytes,
     }
 
+    # DATA-1: restrict the upload to exactly ``plan.files``. ``upload_folder``
+    # otherwise recursively ships the ENTIRE ``local_dir`` tree — and for a
+    # blob-backed model (``FROM sha256:<digest>``) ``local_dir`` is the shared
+    # ``blobs/`` store, so an unscoped push would exfiltrate every other model's
+    # raw bytes to the (possibly public) target repo. ``allow_patterns`` is
+    # matched against each candidate file's path relative to ``folder_path``,
+    # so listing the planned files verbatim guarantees no sibling leaks.
+    allow_patterns = [p.relative_to(plan.local_dir).as_posix() for p in plan.files]
+
     try:
         commit = await asyncio.to_thread(
             api.upload_folder,
@@ -212,6 +221,7 @@ async def stream_push(
             revision=plan.revision,
             token=token,
             commit_message="hfl push",
+            allow_patterns=allow_patterns,
         )
     except Exception as exc:
         logger.exception("upload_folder failed for %s", plan.repo_id)

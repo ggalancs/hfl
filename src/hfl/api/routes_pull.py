@@ -79,7 +79,9 @@ def _event(status: str, **extra: Any) -> str:
     return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
-async def iter_pull_events(model_name: str) -> AsyncIterator[str]:
+async def iter_pull_events(
+    model_name: str, *, quantization: str | None = None
+) -> AsyncIterator[str]:
     """V5 β3 — public helper that drives the same NDJSON pull shape
     as ``POST /api/pull``.
 
@@ -87,13 +89,20 @@ async def iter_pull_events(model_name: str) -> AsyncIterator[str]:
     events after the planning step. Exposed at module top-level so
     consumers don't need ``try/except ImportError`` against an
     underscore-prefixed name.
+
+    ``quantization`` lets smart-pull thread the variant it selected for
+    the host's memory budget straight through to the resolver, instead
+    of letting the resolver re-pick its own default (which could exceed
+    the budget that was the whole point of the smart plan).
     """
     req = PullRequest(model=model_name, stream=True, insecure=False)
-    async for line in _run_pull_streaming(req):
+    async for line in _run_pull_streaming(req, quantization=quantization):
         yield line
 
 
-async def _run_pull_streaming(req: PullRequest) -> AsyncIterator[str]:
+async def _run_pull_streaming(
+    req: PullRequest, *, quantization: str | None = None
+) -> AsyncIterator[str]:
     """Async NDJSON stream mirroring Ollama's pull progress shape.
 
     The heavy lifting (network I/O + disk writes) runs in a worker
@@ -107,7 +116,7 @@ async def _run_pull_streaming(req: PullRequest) -> AsyncIterator[str]:
     yield _event("pulling manifest")
 
     try:
-        resolved = await asyncio.to_thread(resolve, req.model)
+        resolved = await asyncio.to_thread(resolve, req.model, quantization)
     except Exception as exc:  # pragma: no cover — error envelope tested via mock
         yield _event("error", error=f"Failed to resolve {req.model!r}: {exc}")
         return

@@ -185,3 +185,33 @@ class TestPullContractForOpenWebUI:
                 continue
             parsed = json.loads(line)
             assert "status" in parsed
+
+    @pytest.mark.asyncio
+    async def test_iter_pull_events_forwards_quantization_to_resolver(self, mock_pull):
+        """``iter_pull_events(quantization=X)`` must pass X to ``resolve`` — the
+        channel smart-pull relies on to honour the variant it planned for the
+        host's memory budget (otherwise the resolver re-picks its own default)."""
+        from hfl.api.routes_pull import iter_pull_events
+
+        m_resolve, _m_pull, _f = mock_pull
+        async for _line in iter_pull_events("acme/test-model", quantization="q3_k_m"):
+            pass
+
+        assert m_resolve.call_args is not None
+        args, kwargs = m_resolve.call_args
+        passed = kwargs.get("quantization", args[1] if len(args) > 1 else None)
+        assert passed == "q3_k_m"
+
+    @pytest.mark.asyncio
+    async def test_iter_pull_events_defaults_quantization_to_none(self, mock_pull):
+        """Without an explicit quant, the resolver still receives None and
+        applies its own extraction/priority — no behaviour regression."""
+        from hfl.api.routes_pull import iter_pull_events
+
+        m_resolve, _m_pull, _f = mock_pull
+        async for _line in iter_pull_events("acme/test-model"):
+            pass
+
+        args, kwargs = m_resolve.call_args
+        passed = kwargs.get("quantization", args[1] if len(args) > 1 else None)
+        assert passed is None

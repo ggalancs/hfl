@@ -63,7 +63,7 @@ def fake_pull_iter(monkeypatch):
     name is public; before, we patched the underscore-prefixed
     helper instead."""
 
-    async def _fake(model_name):
+    async def _fake(model_name, *, quantization=None):
         yield json.dumps({"status": "downloading", "completed": 0}) + "\n"
         yield json.dumps({"status": "success"}) + "\n"
 
@@ -71,6 +71,24 @@ def fake_pull_iter(monkeypatch):
 
     monkeypatch.setattr(module, "iter_pull_events", _fake, raising=False)
     return _fake
+
+
+@pytest.fixture
+def spy_pull_iter(monkeypatch):
+    """Like ``fake_pull_iter`` but records the args ``iter_pull_events``
+    was called with, so a test can assert the planned quantization is
+    threaded through rather than silently dropped."""
+    captured: dict = {}
+
+    async def _spy(model_name, *, quantization=None):
+        captured["model_name"] = model_name
+        captured["quantization"] = quantization
+        yield json.dumps({"status": "success"}) + "\n"
+
+    from hfl.api import routes_pull as module
+
+    monkeypatch.setattr(module, "iter_pull_events", _spy, raising=False)
+    return captured
 
 
 def _parse_ndjson(body: str) -> list[dict]:
@@ -97,6 +115,20 @@ class TestSmartPullStreaming:
         assert statuses[0] == "planning"
         assert statuses[1] == "planned"
         assert statuses[-1] == "success"
+
+    def test_planned_quantization_is_forwarded_to_pull(
+        self, client, fake_smart_plan, spy_pull_iter
+    ):
+        """Contract regression: the variant smart-pull selected for the host's
+        memory budget must reach the pull/resolver layer. Dropping it (the old
+        bug) let the resolver re-pick its own default quant, blowing the budget
+        that was the entire point of /api/pull/smart."""
+        resp = client.post(
+            "/api/pull/smart", json={"model": "meta-llama/Llama-3.1-8B-Instruct"}
+        )
+        assert resp.status_code == 200
+        assert spy_pull_iter["model_name"] == "bartowski/Llama-3.1-8B-Instruct-GGUF"
+        assert spy_pull_iter["quantization"] == "q5_k_m"
 
     def test_planned_event_carries_full_plan(self, client, fake_smart_plan, fake_pull_iter):
         events = _parse_ndjson(

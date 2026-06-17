@@ -1028,9 +1028,29 @@ def rm(
     if not confirm:
         return
 
-    # Delete files
+    # Delete files — but only when no OTHER registry entry shares this blob.
+    # ``hfl cp`` deliberately creates a second entry pointing at the same
+    # on-disk path (zero-copy); its contract promises that removing one entry
+    # must not destroy the shared bytes. Honour that so ``cp a b; rm a`` leaves
+    # ``b`` loadable. (DATA: shared-blob guard.)
     path = Path(manifest.local_path)
-    if path.is_dir():
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+
+    def _shares_blob(other) -> bool:
+        try:
+            return Path(other.local_path).resolve() == resolved
+        except OSError:
+            return bool(other.local_path == manifest.local_path)
+
+    others = [m for m in registry.list_all() if m.name != manifest.name and _shares_blob(m)]
+
+    if others:
+        names = ", ".join(sorted(m.name for m in others))
+        console.print(f"[yellow]{t('messages.blob_shared', names=names)}[/]")
+    elif path.is_dir():
         shutil.rmtree(path)
     elif path.is_file():
         path.unlink()
@@ -2002,7 +2022,7 @@ def pull_smart_cmd(
     console.print(f"\n[green]Now pulling[/] {plan.target_repo_id} via the existing pull command...")
 
     async def _pull() -> None:
-        async for line in iter_pull_events(plan.target_repo_id):
+        async for line in iter_pull_events(plan.target_repo_id, quantization=plan.quantization):
             console.print(line.rstrip())
 
     try:

@@ -217,6 +217,61 @@ class TestStreamPushFailureModes:
         assert events[-1]["revision"] == "main"  # default when not set
 
 
+class TestStreamPushScoping:
+    """DATA-1 regression: ``stream_push`` must upload only ``plan.files`` and
+    never sibling files that happen to share ``local_dir`` — critical for the
+    blob-backed case where ``local_dir`` is the shared ``blobs/`` store."""
+
+    @pytest.mark.asyncio
+    async def test_single_file_push_excludes_siblings(self, tmp_path, manifest_factory):
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"GGUF" + b"\x00" * 16)
+        # A sibling that must NEVER be uploaded (e.g. another model's blob).
+        (tmp_path / "secret.gguf").write_bytes(b"other-model-bytes")
+
+        plan = build_upload_plan(manifest_factory(gguf), target_repo_id="user/repo")
+        assert plan.files == (gguf,)
+        assert plan.local_dir == tmp_path  # parent dir holds the sibling too
+
+        api = MagicMock()
+        api.create_repo = MagicMock(return_value=None)
+        api.upload_folder = MagicMock(return_value=MagicMock(commit_url=None))
+
+        events = [event async for event in stream_push(plan, api=api)]
+        assert events[-1]["status"] == "success"
+
+        # upload_folder must be scoped via allow_patterns to exactly model.gguf.
+        _, kwargs = api.upload_folder.call_args
+        allow = kwargs.get("allow_patterns")
+        assert allow == ["model.gguf"], allow
+        assert "secret.gguf" not in allow
+
+    @pytest.mark.asyncio
+    async def test_directory_push_lists_only_filtered_files(self, tmp_path, manifest_factory):
+        (tmp_path / "model.gguf").write_bytes(b"x")
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        (sub / "tokenizer.json").write_text("{}")
+        # Junk that _iter_uploadable_files filters out must not appear in allow_patterns.
+        (tmp_path / ".DS_Store").write_text("")
+        (tmp_path / "stale.pyc").write_bytes(b"x")
+
+        plan = build_upload_plan(manifest_factory(tmp_path), target_repo_id="user/repo")
+
+        api = MagicMock()
+        api.create_repo = MagicMock(return_value=None)
+        api.upload_folder = MagicMock(return_value=MagicMock(commit_url=None))
+
+        events = [event async for event in stream_push(plan, api=api)]
+        assert events[-1]["status"] == "success"
+
+        _, kwargs = api.upload_folder.call_args
+        allow = sorted(kwargs.get("allow_patterns"))
+        assert allow == ["model.gguf", "subdir/tokenizer.json"]
+        assert ".DS_Store" not in allow
+        assert "stale.pyc" not in allow
+
+
 class TestSecretRedaction:
     """V6 ν4 — HF tokens never reach the client error envelope.
 
