@@ -117,7 +117,12 @@ class PromptBuilder:
         for msg in messages:
             escaped = PromptBuilder._escape_content(msg.content, PromptFormat.LLAMA2)
             if msg.role == "system":
-                system_content = escaped
+                # Accumulate, don't overwrite: with tools the catalogue is
+                # prepended as a synthetic system message, and a real system
+                # message would otherwise clobber it (silently dropping tool
+                # definitions for Llama-2-family models). Also fixes the latent
+                # multi-system-message drop.
+                system_content = f"{system_content}\n\n{escaped}" if system_content else escaped
             elif msg.role == "user":
                 if system_content:
                     parts.append(f"[INST] <<SYS>>\n{system_content}\n<</SYS>>\n\n{escaped} [/INST]")

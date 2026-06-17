@@ -416,6 +416,49 @@ class TestAnthropicMessagesStreaming:
         assert "event: message_delta" in text
         assert "event: message_stop" in text
 
+    def test_tool_aware_streaming_usage_uses_token_count_not_words(self):
+        """#24/#30: a tool-aware stream's message_delta ``usage.output_tokens``
+        must be the live token counter, not a whitespace word count (which
+        diverges from real tokenisation for sub-word/BPE tokens)."""
+        import json as _json
+
+        engine = MagicMock()
+        engine.is_loaded = True
+        # 4 tokens, 2 whitespace words, and NO tool-call marker.
+        engine.chat_stream.return_value = iter(["par", "tial ", "ans", "wer"])
+
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+                "tools": [
+                    {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+
+        usage_out = None
+        for block in response.text.split("\n\n"):
+            if "event: message_delta" in block:
+                for line in block.splitlines():
+                    if line.startswith("data:"):
+                        data = _json.loads(line[len("data:") :].strip())
+                        usage_out = data.get("usage", {}).get("output_tokens")
+        assert usage_out == 4, f"expected token count 4, got {usage_out} (word count is 2)"
+
     def test_streaming_content_deltas(self):
         """Test that content deltas contain the correct tokens."""
         engine = MagicMock()

@@ -159,10 +159,45 @@ class MLXEngine(InferenceEngine):
             "logits_processors": logits_processors,
         }
 
+    @staticmethod
+    def _maybe_seed(cfg: GenerationConfig) -> None:
+        """Seed mlx's global RNG for reproducible output when a concrete seed
+        is requested (parity with the vLLM / diffusers backends — ENG-10/11).
+        mlx-lm has no per-call seed argument, so we seed the global RNG."""
+        if cfg.seed is not None and cfg.seed >= 0:
+            try:
+                import mlx.core as mx
+
+                mx.random.seed(int(cfg.seed))
+            except Exception:  # pragma: no cover - mlx optional / API drift
+                logger.debug("mlx seed failed", exc_info=True)
+
+    @staticmethod
+    def _stop_strings(cfg: GenerationConfig) -> list[str]:
+        """Normalise ``cfg.stop`` (str | list | None) to a list of non-empty
+        stop strings. mlx-lm has no native stop-string support, so the engine
+        enforces them by truncating its own output."""
+        raw = cfg.stop
+        if not raw:
+            return []
+        seq = [raw] if isinstance(raw, str) else list(raw)
+        return [s for s in seq if isinstance(s, str) and s]
+
+    @staticmethod
+    def _earliest_stop(text: str, stops: list[str]) -> int | None:
+        """Index of the earliest occurrence of any stop string, or None."""
+        best: int | None = None
+        for s in stops:
+            i = text.find(s)
+            if i != -1 and (best is None or i < best):
+                best = i
+        return best
+
     def _run_generate(self, prompt: str, cfg: GenerationConfig) -> tuple[str, int, int, int]:
         from mlx_lm import generate
 
         start_ns = time.monotonic_ns()
+        self._maybe_seed(cfg)
         kwargs = self._build_sampling(cfg)
         try:
             text = generate(
@@ -174,6 +209,13 @@ class MLXEngine(InferenceEngine):
         except Exception:
             logger.exception("MLX generate failed")
             raise
+        # Enforce the request's stop sequences (mlx-lm ignores them): truncate
+        # at the first occurrence so output never runs past a caller stop string.
+        stops = self._stop_strings(cfg)
+        if stops:
+            cut = self._earliest_stop(text, stops)
+            if cut is not None:
+                text = text[:cut]
         total_ns = time.monotonic_ns() - start_ns
         # mlx-lm returns only the completion text; we still need
         # token counts for the response envelope. Compute via the
@@ -231,17 +273,39 @@ class MLXEngine(InferenceEngine):
             raise RuntimeError("MLX engine is not loaded")
         from mlx_lm import stream_generate
 
+        self._maybe_seed(cfg)
         kwargs = self._build_sampling(cfg)
-        for token in stream_generate(
-            self._model,
-            self._tokenizer,
-            prompt=prompt,
-            **kwargs,
-        ):
-            if hasattr(token, "text"):
-                yield token.text  # newer mlx-lm versions wrap in a GenStep
-            else:
-                yield str(token)
+        stops = self._stop_strings(cfg)
+
+        def _piece(token: Any) -> str:
+            return token.text if hasattr(token, "text") else str(token)
+
+        gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+
+        if not stops:
+            for token in gen:
+                yield _piece(token)
+            return
+
+        # Enforce stop strings (mlx-lm has none): accumulate, hold back a tail
+        # that could be the start of a stop string, and halt at the boundary so
+        # output never includes text at or past a caller stop string.
+        max_stop = max(len(s) for s in stops)
+        acc = ""
+        emitted = 0
+        for token in gen:
+            acc += _piece(token)
+            cut = self._earliest_stop(acc, stops)
+            if cut is not None:
+                if cut > emitted:
+                    yield acc[emitted:cut]
+                return
+            safe = len(acc) - max_stop + 1
+            if safe > emitted:
+                yield acc[emitted:safe]
+                emitted = safe
+        if len(acc) > emitted:
+            yield acc[emitted:]
 
     def chat_stream(
         self,

@@ -170,3 +170,59 @@ class TestMLXEngine:
         engine = mlx_engine.MLXEngine()
         with pytest.raises(RuntimeError):
             engine.generate("hi", GenerationConfig())
+
+
+class TestMLXSeedAndStop:
+    """#20: MLX must honour the request seed (reproducibility, parity with
+    vLLM/diffusers) and stop sequences (which mlx-lm has no native support for)."""
+
+    def _seat_mlx_core(self, monkeypatch):
+        """Seat a fake ``mlx.core`` whose ``random.seed`` records calls."""
+        import types
+
+        seeds: list[int] = []
+        core = ModuleType("mlx.core")
+        core.random = types.SimpleNamespace(seed=lambda s: seeds.append(s))  # type: ignore[attr-defined]
+        mx = ModuleType("mlx")
+        mx.core = core  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "mlx", mx)
+        monkeypatch.setitem(sys.modules, "mlx.core", core)
+        return seeds
+
+    def test_seed_applied_when_requested(self, fake_mlx, monkeypatch):
+        seeds = self._seat_mlx_core(monkeypatch)
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+        engine.generate("hi", GenerationConfig(seed=123))
+        assert seeds == [123]
+
+    def test_seed_not_applied_when_negative(self, fake_mlx, monkeypatch):
+        seeds = self._seat_mlx_core(monkeypatch)
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+        engine.generate("hi", GenerationConfig(seed=-1))
+        assert seeds == []
+
+    def test_stop_truncates_generate(self, fake_mlx):
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+        # fake generate() returns "ECHO:" + prompt -> "ECHO:X"; stop "HO".
+        result = engine.generate("X", GenerationConfig(stop=["HO"]))
+        assert result.text == "EC"  # truncated at the stop boundary
+
+    def test_stop_truncates_stream(self, fake_mlx, monkeypatch):
+        fake = sys.modules["mlx_lm"]
+
+        def _sg(_m, _t, *, prompt, **kwargs):  # noqa: ANN001
+            # Tokens that are not 1:1 with words and that cross a stop string.
+            for chunk in ("par", "tial ", "ST", "OP here"):
+                yield chunk
+
+        monkeypatch.setattr(fake, "stream_generate", _sg)
+
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+        out = "".join(engine.generate_stream("X", GenerationConfig(stop=["STOP"])))
+        assert "STOP" not in out
+        assert "here" not in out  # nothing past the stop leaks
+        assert out == "partial "

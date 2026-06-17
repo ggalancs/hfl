@@ -511,7 +511,10 @@ async def _stream_messages(
                 {
                     "type": "message_delta",
                     "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                    "usage": {"output_tokens": len(raw.split())},
+                    # Use the live token counter (as the plain path and the
+                    # stop-reason logic do), not a whitespace word count, which
+                    # diverges from real tokenisation for sub-word/BPE tokens.
+                    "usage": {"output_tokens": output_tokens},
                 },
             )
         )

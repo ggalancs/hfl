@@ -368,3 +368,32 @@ class TestEdgeCases:
 
         assert "<world>" in result
         assert "'friends'" in result
+
+
+class TestLlama2SystemAccumulation:
+    """#4: build_llama2 must not drop the tools preamble (a synthetic system
+    message) when a real system message is also present — its single-slot
+    ``system_content`` previously overwrote one with the other."""
+
+    def test_keeps_system_and_tool_preamble(self):
+        messages = [
+            ChatMessage(role="system", content="You are helpful"),
+            ChatMessage(role="user", content="weather?"),
+        ]
+        out = PromptBuilder.build(
+            messages,
+            PromptFormat.LLAMA2,
+            tools=[{"type": "function", "function": {"name": "get_weather"}}],
+        )
+        assert "get_weather" in out, "tool preamble was dropped"
+        assert "You are helpful" in out, "real system message was dropped"
+
+    def test_keeps_multiple_system_messages(self):
+        messages = [
+            ChatMessage(role="system", content="First rule"),
+            ChatMessage(role="system", content="Second rule"),
+            ChatMessage(role="user", content="hi"),
+        ]
+        out = PromptBuilder.build(messages, PromptFormat.LLAMA2)
+        assert "First rule" in out
+        assert "Second rule" in out

@@ -72,6 +72,12 @@ class LoraRegistry:
         with self._lock:
             self._by_id[info.adapter_id] = info
 
+    def get(self, adapter_id: str) -> AdapterInfo | None:
+        """Non-mutating lookup — peek without removing (used by remove_lora so
+        a failed engine detach can leave the entry tracked for a retry)."""
+        with self._lock:
+            return self._by_id.get(adapter_id)
+
     def remove(self, adapter_id: str) -> AdapterInfo | None:
         with self._lock:
             return self._by_id.pop(adapter_id, None)
@@ -226,11 +232,17 @@ def remove_lora(engine: "InferenceEngine", adapter_id: str) -> bool:
     Returns ``False`` when the id is unknown to the registry; raises
     ``RuntimeError`` when the engine refuses the unset call.
     """
-    info = get_registry().remove(adapter_id)
+    info = get_registry().get(adapter_id)
     if info is None:
         return False
 
+    # Detach from the live engine FIRST, and only drop the registry entry once
+    # it succeeds. If the engine refuses the unset (no removal API / raises),
+    # the adapter is STILL applied — keeping the entry tracked means it stays
+    # visible to list_loras and the client's retry can succeed, instead of
+    # leaving a ghost adapter mixed into every generation but unremovable.
     _unset_lora(engine, adapter_id)
+    get_registry().remove(adapter_id)
     logger.info("LoRA removed: id=%s path=%s", info.adapter_id, info.path)
     return True
 

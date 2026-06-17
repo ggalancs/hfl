@@ -1229,7 +1229,16 @@ class LlamaCppEngine(InferenceEngine):
                     }
                 )
 
-        logger.debug("Generated %s tokens in %.2fs (%.1f tok/s)", n_gen, elapsed, n_gen / elapsed)
+        # Guard the division: two monotonic_ns() reads can be equal on a fast
+        # completion / low-resolution clock, making elapsed == 0. The argument is
+        # evaluated regardless of log level, so an unguarded divide turns a
+        # successful generation into a 500 whenever DEBUG logging is enabled.
+        logger.debug(
+            "Generated %s tokens in %.2fs (%.1f tok/s)",
+            n_gen,
+            elapsed,
+            (n_gen / elapsed if elapsed > 0 else 0.0),
+        )
 
         # See chat() for the rationale behind this split.
         total_tokens = max(1, n_prompt + n_gen)

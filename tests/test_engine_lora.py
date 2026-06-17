@@ -126,6 +126,20 @@ class TestRemoveLora:
         with pytest.raises(RuntimeError, match="removal"):
             remove_lora(broken, info.adapter_id)
 
+    def test_remove_keeps_registry_on_detach_failure(self, adapter_file):
+        """#19: a failed engine detach must leave the adapter TRACKED (and
+        retryable), not drop it from the registry while it stays applied on the
+        live model — which would make it an unremovable ghost adapter."""
+        engine = _engine_with_apply()
+        info = apply_lora(engine, lora_path=adapter_file)
+
+        broken = MagicMock(spec=[])  # no removal API -> _unset_lora raises
+        with pytest.raises(RuntimeError):
+            remove_lora(broken, info.adapter_id)
+
+        # The entry must still be present so the client can retry.
+        assert any(a.adapter_id == info.adapter_id for a in list_loras())
+
 
 # --- Listing ---------------------------------------------------------------
 

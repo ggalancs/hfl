@@ -59,8 +59,15 @@ def setup_event_listeners() -> None:
     @on(EventType.GENERATION_FAILED)
     def on_generation_failed(event: Any) -> None:
         """Record generation error in metrics."""
-        error = event.data.get("error")
-        error_type = type(error).__name__ if error else "Unknown"
+        # The GENERATION_FAILED event carries ``error`` as a string MESSAGE, so
+        # ``type(error).__name__`` would always be "str", collapsing every
+        # failure into one metric bucket. Prefer the explicit ``error_type``
+        # (the exception's class name set at the emit site); only fall back to
+        # deriving it for events that predate that field.
+        error_type = event.data.get("error_type")
+        if not error_type:
+            error = event.data.get("error")
+            error_type = type(error).__name__ if error and not isinstance(error, str) else "Unknown"
         metrics.record_error(error_type)
         logger.debug("Recorded generation error: %s", error_type)
 

@@ -224,6 +224,36 @@ class TestLlamaCppEngine:
             assert result.tokens_generated == 5
             assert result.stop_reason == "stop"
 
+    def test_generate_no_zerodiv_on_zero_elapsed_with_debug(
+        self, mock_llama_cpp_module, temp_gguf_file, caplog, monkeypatch
+    ):
+        """#25: a fast completion (two equal monotonic_ns reads -> elapsed 0)
+        must not raise ZeroDivisionError in the DEBUG tok/s log line. The log
+        argument is evaluated regardless of level, so an unguarded divide turned
+        a successful generation into a 500 whenever DEBUG logging was on."""
+        import logging
+
+        import hfl.engine.llama_cpp as llama_mod
+        from hfl.engine.base import GenerationConfig
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        engine = LlamaCppEngine()
+        mock_model = MagicMock()
+        mock_model.return_value = {
+            "choices": [{"text": "x", "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        # Freeze the monotonic clock so total_ns == 0 (elapsed == 0.0).
+        monkeypatch.setattr(llama_mod.time, "monotonic_ns", lambda: 12345)
+        caplog.set_level(logging.DEBUG, logger="hfl.engine.llama_cpp")
+
+        with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
+            engine.load(str(temp_gguf_file))
+            # Must not raise ZeroDivisionError.
+            result = engine.generate("p", GenerationConfig(max_tokens=10))
+
+        assert result.tokens_per_second == 0
+
     def test_generate_stream(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies streaming generation."""
         from hfl.engine.llama_cpp import LlamaCppEngine

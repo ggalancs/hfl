@@ -115,3 +115,27 @@ class TestResetEventListeners:
         emit(EventType.MODEL_LOADED, model="test", duration_ms=100)
 
         assert metrics.model_loads >= 1
+
+
+class TestGenerationFailedMetrics:
+    """#29: generation-failure metrics must bucket by the real exception type,
+    not collapse every failure under ``type("str") == "str"``."""
+
+    def test_records_explicit_error_type(self):
+        setup_event_listeners()
+        emit(
+            EventType.GENERATION_FAILED,
+            source="engine",
+            error="CUDA out of memory",
+            error_type="RuntimeError",
+        )
+        errs = get_metrics().errors_by_type
+        assert "str" not in errs
+        assert errs.get("RuntimeError") == 1
+
+    def test_string_error_without_type_does_not_bucket_as_str(self):
+        setup_event_listeners()
+        emit(EventType.GENERATION_FAILED, source="engine", error="boom")
+        errs = get_metrics().errors_by_type
+        assert "str" not in errs  # falls back to "Unknown", never "str"
+        assert errs.get("Unknown") == 1

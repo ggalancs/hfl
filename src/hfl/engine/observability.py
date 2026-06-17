@@ -141,7 +141,7 @@ class EngineObserver:
             if metrics.end_time == 0:
                 metrics.end_time = time.time()
             if emit_events and self._enabled:
-                self._emit_generation_failed(operation, str(e))
+                self._emit_generation_failed(operation, str(e), error_type=type(e).__name__)
             logger.error(
                 "Inference failed",
                 extra={
@@ -265,8 +265,16 @@ class EngineObserver:
         except ImportError:
             pass
 
-    def _emit_generation_failed(self, operation: str, error: str) -> None:
-        """Emit generation failed event."""
+    def _emit_generation_failed(
+        self, operation: str, error: str, error_type: str = "Unknown"
+    ) -> None:
+        """Emit generation failed event.
+
+        ``error`` is the (string) message; ``error_type`` is the exception's
+        class name so the metrics handler can bucket failures by real type
+        (OOM vs timeout vs backend) instead of collapsing them all under
+        ``type("str") == "str"``.
+        """
         try:
             from hfl.events import EventType, emit
 
@@ -276,6 +284,7 @@ class EngineObserver:
                 model=self.model_name,
                 operation=operation,
                 error=error,
+                error_type=error_type,
             )
         except ImportError:
             pass
