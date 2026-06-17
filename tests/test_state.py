@@ -192,9 +192,7 @@ class TestServerStateLLMOperations:
             slot = dispatcher.slot()
             await slot.__aenter__()
             try:
-                swap = asyncio.create_task(
-                    state.set_llm_engine(new_engine, MockManifest("new"))
-                )
+                swap = asyncio.create_task(state.set_llm_engine(new_engine, MockManifest("new")))
                 await asyncio.sleep(0.05)  # let the swap reach its drain wait
                 assert not old_engine.unload_called, (
                     "swap freed the engine while a request still held a slot"

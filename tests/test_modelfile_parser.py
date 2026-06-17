@@ -344,9 +344,7 @@ class TestRoundTrip:
         backslash-escapes must survive a parse -> render -> parse cycle. The
         renderer previously didn't escape backslashes, so e.g. a literal ``\\n``
         decoded into a real newline."""
-        doc = ModelfileDocument(
-            from_="x", system=value, template=value, license=value
-        )
+        doc = ModelfileDocument(from_="x", system=value, template=value, license=value)
         round_tripped = parse_modelfile(render_modelfile_document(doc))
         assert round_tripped.system == value
         assert round_tripped.template == value

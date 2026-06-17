@@ -123,9 +123,7 @@ class TestSmartPullStreaming:
         memory budget must reach the pull/resolver layer. Dropping it (the old
         bug) let the resolver re-pick its own default quant, blowing the budget
         that was the entire point of /api/pull/smart."""
-        resp = client.post(
-            "/api/pull/smart", json={"model": "meta-llama/Llama-3.1-8B-Instruct"}
-        )
+        resp = client.post("/api/pull/smart", json={"model": "meta-llama/Llama-3.1-8B-Instruct"})
         assert resp.status_code == 200
         assert spy_pull_iter["model_name"] == "bartowski/Llama-3.1-8B-Instruct-GGUF"
         assert spy_pull_iter["quantization"] == "q5_k_m"

@@ -305,7 +305,7 @@ class TestPrometheusHistogramsAndSaturation:
 
         assert "# TYPE hfl_request_latency_ms histogram" in out
         assert "hfl_request_latency_ms_summary" not in out
-        assert 'hfl_request_latency_ms{quantile=' not in out  # old summary gone
+        assert "hfl_request_latency_ms{quantile=" not in out  # old summary gone
         assert 'hfl_request_latency_ms_bucket{le="+Inf"} 2' in out
         assert "hfl_request_latency_ms_count 2" in out
         assert "hfl_request_latency_ms_sum 1542.00" in out

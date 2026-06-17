@@ -266,9 +266,7 @@ class TestWsChatThreadSafety:
             "model": "m",
             "messages": [{"role": "user", "content": "hi"}],
         }
-        await asyncio.wait_for(
-            routes_ws._drive_chat(object(), frame, cancel_event), timeout=5.0
-        )
+        await asyncio.wait_for(routes_ws._drive_chat(object(), frame, cancel_event), timeout=5.0)
 
         # Every token plus a terminal done must be delivered.
         token_frames = [f for f in sent if f.get("type") == "token"]
