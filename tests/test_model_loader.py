@@ -187,30 +187,39 @@ class TestLoadLLM:
         mock_select,
         mock_to_thread,
     ):
-        """Successfully loads model through full path."""
+        """A cold load is delegated to state.ensure_llm_loaded (the per-model
+        coalescing primitive); the loader it passes loads off the event loop and
+        returns (engine, manifest)."""
+        mock_engine = MockEngine()
+        mock_manifest = MockManifest("new-model")
+
         mock_state = MagicMock()
         mock_state.current_model = None
         mock_state.context_size_override = 0
-        mock_state.set_llm_engine = AsyncMock()
+        mock_state.ensure_llm_loaded = AsyncMock(return_value=(mock_engine, mock_manifest))
         mock_get_state.return_value = mock_state
 
-        mock_manifest = MockManifest("new-model")
         mock_registry = MagicMock()
         mock_registry.get.return_value = mock_manifest
         mock_get_registry.return_value = mock_registry
-
         mock_detect.return_value = ModelType.LLM
-
-        mock_engine = MockEngine()
         mock_select.return_value = mock_engine
-
         mock_to_thread.return_value = None
 
         engine, manifest = await load_llm("new-model")
-
         assert engine is mock_engine
         assert manifest is mock_manifest
-        mock_state.set_llm_engine.assert_called_once_with(mock_engine, mock_manifest)
+
+        # Delegated to the coalescing primitive with the requested model name.
+        mock_state.ensure_llm_loaded.assert_called_once()
+        call = mock_state.ensure_llm_loaded.call_args
+        assert call.args[0] == "new-model"
+
+        # The passed loader loads off-loop and returns (engine, manifest).
+        loader = call.args[1]
+        result = await loader()
+        assert result == (mock_engine, mock_manifest)
+        mock_to_thread.assert_called()  # engine.load ran via to_thread
 
 
 class TestLoadLLMCleanupOnFailure:
@@ -222,13 +231,24 @@ class TestLoadLLMCleanupOnFailure:
         yield
         reset_state()
 
+    @staticmethod
+    def _driving_ensure_loaded():
+        """A stand-in for state.ensure_llm_loaded that actually DRIVES the loader
+        load_llm passes it (the real primitive does the same under a per-model
+        lock), so the loader's load-failure cleanup is exercised."""
+
+        async def _ensure(model_name, loader, **kwargs):
+            return await loader()
+
+        return _ensure
+
     @pytest.mark.asyncio
     @patch("hfl.api.model_loader.asyncio.to_thread")
     @patch("hfl.api.model_loader.select_engine")
     @patch("hfl.api.model_loader.detect_model_type")
     @patch("hfl.api.model_loader.get_registry")
     @patch("hfl.api.model_loader.get_state")
-    async def test_set_llm_engine_failure_unloads_engine(
+    async def test_load_failure_unloads_engine(
         self,
         mock_get_state,
         mock_get_registry,
@@ -236,14 +256,14 @@ class TestLoadLLMCleanupOnFailure:
         mock_select,
         mock_to_thread,
     ):
-        """If ``set_llm_engine`` raises after a successful load, the loaded
-        engine must be unloaded so we don't leak an orphaned model
-        (ram/GPU held with no owner). Covers model_loader.py lines 89-96.
+        """If ``engine.load()`` fails, the loader must unload the half-loaded
+        engine so we don't leak an orphaned model (ram/GPU held with no owner),
+        then re-raise the original error.
         """
         mock_state = MagicMock()
         mock_state.current_model = None
         mock_state.context_size_override = 0
-        mock_state.set_llm_engine = AsyncMock(side_effect=RuntimeError("state broken"))
+        mock_state.ensure_llm_loaded = self._driving_ensure_loaded()
         mock_get_state.return_value = mock_state
 
         mock_manifest = MockManifest("new-model")
@@ -253,22 +273,15 @@ class TestLoadLLMCleanupOnFailure:
 
         mock_detect.return_value = ModelType.LLM
 
-        unload_calls: list[str] = []
-
-        class TrackingEngine(MockEngine):
-            def unload(self) -> None:  # type: ignore[override]
-                unload_calls.append("unload")
-                super().unload()
-
-        mock_engine = TrackingEngine()
+        mock_engine = MockEngine()  # is_loaded stays True so the cleanup unload runs
         mock_select.return_value = mock_engine
-        mock_to_thread.return_value = None  # both load() and unload() short-circuited
+        # to_thread: load() raises, cleanup unload() succeeds.
+        mock_to_thread.side_effect = [RuntimeError("load boom"), None]
 
-        with pytest.raises(RuntimeError, match="state broken"):
+        with pytest.raises(RuntimeError, match="load boom"):
             await load_llm("new-model")
 
-        # Both the load and the unload should have been routed through
-        # ``asyncio.to_thread``: first the load, then the cleanup unload.
+        # Both the load and the cleanup unload were routed through to_thread.
         assert mock_to_thread.call_count == 2
 
     @pytest.mark.asyncio
@@ -287,15 +300,14 @@ class TestLoadLLMCleanupOnFailure:
         mock_to_thread,
         mock_logger,
     ):
-        """If the cleanup ``unload()`` itself raises, the ORIGINAL error
-        still propagates and the unload error is only logged — otherwise
-        the root cause gets masked by a cleanup failure. Covers the
-        inner try/except at model_loader.py lines 92-95.
+        """If the cleanup ``unload()`` itself raises, the ORIGINAL load error
+        still propagates and the unload error is only logged — otherwise the
+        root cause gets masked by a cleanup failure.
         """
         mock_state = MagicMock()
         mock_state.current_model = None
         mock_state.context_size_override = 0
-        mock_state.set_llm_engine = AsyncMock(side_effect=RuntimeError("root cause"))
+        mock_state.ensure_llm_loaded = self._driving_ensure_loaded()
         mock_get_state.return_value = mock_state
 
         mock_manifest = MockManifest("new-model")
@@ -308,8 +320,9 @@ class TestLoadLLMCleanupOnFailure:
         mock_engine = MockEngine()
         mock_select.return_value = mock_engine
 
-        # to_thread is called twice: for load (ok) and for unload (boom).
-        mock_to_thread.side_effect = [None, RuntimeError("cleanup boom")]
+        # to_thread: load() raises the root cause, then the cleanup unload() also
+        # raises — the cleanup error must be swallowed (logged), root re-raised.
+        mock_to_thread.side_effect = [RuntimeError("root cause"), RuntimeError("cleanup boom")]
 
         with pytest.raises(RuntimeError, match="root cause"):
             await load_llm("new-model")

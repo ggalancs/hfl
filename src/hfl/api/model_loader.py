@@ -78,23 +78,36 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
     if model_type != ModelType.LLM:
         raise ModelTypeMismatchError(model_name, expected="llm", got=model_type.value)
 
-    # Load model in thread pool to avoid blocking event loop
-    # context_size_override > 0 means explicit user override via --ctx flag
-    # Otherwise pass 0 to let the engine auto-detect from model metadata
+    # context_size_override > 0 means explicit user override via --ctx flag;
+    # otherwise pass 0 to let the engine auto-detect from model metadata.
     n_ctx = state.context_size_override if state.context_size_override > 0 else 0
-    engine = select_engine(model_path)
-    try:
-        await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=n_ctx)
-        await state.set_llm_engine(engine, manifest)
+
+    async def _loader() -> tuple["InferenceEngine", "ModelManifest"]:
+        # Load off the event loop; unload on load failure so a half-loaded
+        # engine never leaks. The state swap is performed by ensure_llm_loaded.
+        engine = select_engine(model_path)
+        try:
+            await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=n_ctx)
+        except Exception:
+            if engine.is_loaded:
+                try:
+                    await asyncio.to_thread(engine.unload)
+                except Exception as cleanup_error:
+                    logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
+            raise
         return engine, manifest
-    except Exception:
-        # Cleanup engine if loading succeeded but state update failed
-        if engine.is_loaded:
-            try:
-                await asyncio.to_thread(engine.unload)
-            except Exception as cleanup_error:
-                logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
-        raise
+
+    # CON: coalesce concurrent COLD loads of the same model. The unlocked
+    # fast-path above lets two simultaneous first-requests both fall through and
+    # both run a multi-GB engine.load() (2x VRAM/OOM + A/B load thrash, the
+    # second then unloading the first). ensure_llm_loaded holds a per-model lock
+    # and re-checks residency inside it, so the second request simply awaits the
+    # first's load instead of duplicating it.
+    from hfl.config import config as _hfl_config
+
+    return await state.ensure_llm_loaded(
+        model_name, _loader, timeout=_hfl_config.model_load_timeout
+    )
 
 
 async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:

@@ -287,3 +287,35 @@ class TestModelTypeMismatch:
         assert response.status_code == 400
         body = response.json()
         assert body.get("code") == "ModelTypeMismatchError"
+
+
+class TestEmbedSerialization:
+    """CON: concurrent embed() calls must serialize on the shared, non-reentrant
+    embedding engine (the LlamaCpp embed engine wraps one non-reentrant model)."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_embeds_are_serialized(self):
+        import asyncio as _aio
+        import threading
+        import time as _time
+
+        from hfl.api import routes_embed
+
+        active = 0
+        max_active = 0
+        guard = threading.Lock()  # thunks run in worker threads via to_thread
+
+        def _call():
+            nonlocal active, max_active
+            with guard:
+                active += 1
+                max_active = max(max_active, active)
+            _time.sleep(0.02)
+            with guard:
+                active -= 1
+            return "ok"
+
+        results = await _aio.gather(*[routes_embed._run_embed(_call) for _ in range(8)])
+        assert results == ["ok"] * 8
+        # The embed lock must have serialized all 8 calls.
+        assert max_active == 1, f"embeds ran with max concurrency {max_active}"

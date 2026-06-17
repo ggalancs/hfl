@@ -14,11 +14,15 @@ Three routes, three shapes, one backend:
   "embedding", embedding: [...], index: 0}], model, usage:
   {prompt_tokens, total_tokens}}``.
 
-Embeddings are stateless and batchable — the router doesn't route
-them through the LLM dispatcher (which serialises at max_inflight=1
-for chat). Instead requests run on the default thread pool via
-``asyncio.to_thread`` so a dozen concurrent RAG queries don't block
-each other.
+Embeddings run on a single shared backend (``state._embed_engine``).
+The LlamaCpp embedding engine wraps a NON-REENTRANT llama.cpp model, so
+concurrent ``embed()`` calls on it corrupt vectors / crash the C
+extension. Embeds therefore serialise on a process-local lock
+(``_embed_lock``) and are bounded by a timeout — they do NOT share the
+LLM chat dispatcher (a future embed-dedicated bulkhead with per-engine
+``max_concurrency`` can replace the lock to parallelise reentrant
+backends). Each call still runs off the event loop via
+``asyncio.to_thread``.
 
 Model loading uses a dedicated path from :mod:`hfl.api.model_loader`
 so a future embed-dedicated pool can be plugged in without breaking
@@ -47,6 +51,24 @@ from hfl.exceptions import ValidationError as APIValidationError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Embeddings"])
+
+# CON: serialises embed() on the single shared, non-reentrant embedding engine.
+# Without it, concurrent /api/embed + /v1/embeddings requests run N threads
+# against one llama.cpp model at once — corrupting vectors / crashing the C
+# extension under exactly the concurrency the RAG use case advertises.
+_embed_lock = asyncio.Lock()
+
+
+async def _run_embed(call: "Any") -> Any:
+    """Run a zero-arg ``engine.embed(...)`` thunk under the embed lock, off the
+    event loop, bounded by the configured generation timeout."""
+    from hfl.config import config as _hfl_config
+
+    async with _embed_lock:
+        return await asyncio.wait_for(
+            asyncio.to_thread(call),
+            timeout=_hfl_config.generation_timeout,
+        )
 
 
 # ----------------------------------------------------------------------
@@ -286,11 +308,8 @@ async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
 
     inputs = req.input if isinstance(req.input, list) else [req.input]
 
-    result = await asyncio.to_thread(
-        engine.embed,
-        inputs,
-        truncate=req.truncate,
-        dimensions=req.dimensions,
+    result = await _run_embed(
+        lambda: engine.embed(inputs, truncate=req.truncate, dimensions=req.dimensions)
     )
 
     total_duration = time.monotonic_ns() - start
@@ -328,7 +347,7 @@ async def ollama_embeddings_legacy(req: OllamaEmbeddingsLegacyRequest) -> dict[s
     """
     apply_keep_alive(req.model, req.keep_alive)
     engine = await _load_embedding_model(req.model)
-    result = await asyncio.to_thread(engine.embed, [req.prompt])
+    result = await _run_embed(lambda: engine.embed([req.prompt]))
     return {"embedding": result.embeddings[0]}
 
 
@@ -357,11 +376,8 @@ async def openai_embeddings(req: OpenAIEmbeddingsRequest) -> dict[str, Any]:
     """
     engine = await _load_embedding_model(req.model)
     inputs = _normalize_input(req.input)
-    result = await asyncio.to_thread(
-        engine.embed,
-        inputs,
-        truncate=True,
-        dimensions=req.dimensions,
+    result = await _run_embed(
+        lambda: engine.embed(inputs, truncate=True, dimensions=req.dimensions)
     )
 
     if req.encoding_format == "base64":

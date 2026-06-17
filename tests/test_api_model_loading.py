@@ -155,3 +155,61 @@ class TestAPIVersion:
 
         assert response.status_code == 200
         assert "version" in response.json()
+
+
+class TestColdLoadCoalescing:
+    """CON: concurrent first-requests for the SAME cold model must coalesce into
+    a single engine.load() instead of each running a multi-GB load (2x VRAM /
+    OOM / A-B thrash). load_llm now routes through ensure_llm_loaded."""
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        from hfl.api.state import reset_state
+
+        reset_state()
+        yield
+        reset_state()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_cold_loads_run_loader_once(self):
+        import asyncio
+        import threading
+        import time
+
+        from hfl.api import model_loader
+        from hfl.converter.formats import ModelType
+        from hfl.core import get_dispatcher
+
+        get_dispatcher().reset()
+        try:
+            load_calls = 0
+            guard = threading.Lock()
+
+            def _load(path, **kwargs):
+                nonlocal load_calls
+                with guard:
+                    load_calls += 1
+                time.sleep(0.05)  # widen the race window
+
+            engine = MagicMock()
+            engine.is_loaded = True
+            engine.load = MagicMock(side_effect=_load)
+
+            manifest = MagicMock()
+            manifest.name = "cold-model"
+            manifest.local_path = "/fake/cold.gguf"
+
+            with (
+                patch("hfl.api.model_loader.get_registry") as mock_reg,
+                patch("hfl.api.model_loader.detect_model_type", return_value=ModelType.LLM),
+                patch("hfl.api.model_loader.select_engine", return_value=engine),
+            ):
+                mock_reg.return_value.get.return_value = manifest
+                results = await asyncio.gather(
+                    *[model_loader.load_llm("cold-model") for _ in range(6)]
+                )
+
+            assert all(r[0] is engine for r in results)
+            assert load_calls == 1, f"engine.load ran {load_calls} times (expected 1)"
+        finally:
+            get_dispatcher().reset()

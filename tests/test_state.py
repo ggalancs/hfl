@@ -228,6 +228,59 @@ class TestServerStateLLMOperations:
         await state.unpin_engine(old_engine)  # WS turn finishes reading
         assert old_engine.unload_called  # now it is freed
 
+    @pytest.mark.asyncio
+    async def test_cleanup_drains_in_flight_before_unload(self):
+        """CON: shutdown cleanup()/lifespan and /api/stop must wait for in-flight
+        inference (which holds a dispatcher slot, not _llm_lock) to drain before
+        freeing the shared non-reentrant model — both now route through
+        set_llm_engine(None, None), so the exclusive() barrier applies."""
+        from hfl.core import get_dispatcher
+
+        dispatcher = get_dispatcher()
+        dispatcher.reset()
+        try:
+            state = ServerState()
+            engine = MockEngine("resident")
+            await state.set_llm_engine(engine, MockManifest("m"))
+
+            slot = dispatcher.slot()
+            await slot.__aenter__()  # simulate an in-flight inference
+            try:
+                task = asyncio.create_task(state.cleanup())
+                await asyncio.sleep(0.05)
+                assert not engine.unload_called, "cleanup unloaded while a slot was held"
+                assert not task.done()
+            finally:
+                await slot.__aexit__(None, None, None)  # inference finishes
+
+            await asyncio.wait_for(task, timeout=2.0)
+            assert engine.unload_called  # safe to unload now
+            assert state.engine is None
+        finally:
+            dispatcher.reset()
+
+    @pytest.mark.asyncio
+    async def test_ensure_llm_loaded_unloads_orphan_on_swap_failure(self, monkeypatch):
+        """CON: if the swap (set_llm_engine) fails after the loader produced a
+        loaded engine, ensure_llm_loaded must unload that orphan so a failed
+        swap doesn't leak its weights/VRAM."""
+        state = ServerState()
+
+        async def _boom(engine, model):
+            raise RuntimeError("swap failed")
+
+        monkeypatch.setattr(state, "set_llm_engine", _boom)
+
+        engine = MockEngine("orphan")
+
+        async def _loader():
+            return engine, MockManifest("m")
+
+        with pytest.raises(RuntimeError, match="swap failed"):
+            await state.ensure_llm_loaded("m", _loader)
+
+        assert engine.unload_called  # orphan freed, not leaked
+
     def test_is_llm_loaded_true(self):
         """is_llm_loaded returns True when engine is loaded."""
         state = ServerState()

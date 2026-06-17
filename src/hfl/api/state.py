@@ -290,10 +290,21 @@ class ServerState:
                     return self._engine, self._current_model
 
                 self._loading_models.add(model_name)
+                engine = None
                 try:
                     engine, manifest = await loader()
                     await self.set_llm_engine(engine, manifest)
                     return engine, manifest
+                except Exception:
+                    # If the engine loaded but the swap failed (e.g. the previous
+                    # engine's unload raised), unload the orphan so a failed swap
+                    # doesn't leak its weights/VRAM.
+                    if engine is not None and getattr(engine, "is_loaded", False):
+                        try:
+                            await asyncio.to_thread(engine.unload)
+                        except Exception:  # pragma: no cover - best-effort cleanup
+                            pass
+                    raise
                 finally:
                     self._loading_models.discard(model_name)
 
@@ -412,21 +423,17 @@ class ServerState:
     async def cleanup(self) -> None:
         """Cleanup all engines on shutdown.
 
-        Engine ``unload()`` runs in a worker thread so shutdown does
-        not freeze the event loop — uvicorn's graceful-shutdown path
-        still needs the loop alive to finish in-flight responses.
+        Routes through ``set_llm_engine``/``set_tts_engine`` so the LLM unload
+        DRAINS in-flight inference via ``dispatcher.exclusive()`` (and defers a
+        still-pinned engine) rather than freeing the shared non-reentrant model
+        out from under a request still running during uvicorn's graceful-
+        shutdown window — the same use-after-free the hot-swap path prevents,
+        at the moment (SIGTERM under load) it matters most. ``unload()`` still
+        runs off-loop so the event loop stays alive to finish in-flight
+        responses. (CON)
         """
-        async with self._llm_lock:
-            if self._engine is not None and self._engine.is_loaded:
-                await asyncio.to_thread(self._engine.unload)
-            self._engine = None
-            self._current_model = None
-
-        async with self._tts_lock:
-            if self._tts_engine is not None and self._tts_engine.is_loaded:
-                await asyncio.to_thread(self._tts_engine.unload)
-            self._tts_engine = None
-            self._current_tts_model = None
+        await self.set_llm_engine(None, None)
+        await self.set_tts_engine(None, None)
 
 
 # Singleton access delegated to container for unified management

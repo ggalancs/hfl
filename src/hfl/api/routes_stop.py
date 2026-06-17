@@ -44,27 +44,21 @@ class StopRequest(BaseModel):
 
 
 async def _unload_llm() -> None:
-    """Background helper: run the LLM portion of cleanup() in isolation."""
-    state = get_state()
-    async with state._llm_lock:  # noqa: SLF001 — intentional internal use
-        if state._engine is not None and state._engine.is_loaded:  # noqa: SLF001
-            import asyncio as _asyncio
+    """Background helper: unload the resident LLM.
 
-            await _asyncio.to_thread(state._engine.unload)  # noqa: SLF001
-        state._engine = None  # noqa: SLF001
-        state._current_model = None  # noqa: SLF001
+    Routes through ``set_llm_engine(None, None)`` so the unload DRAINS in-flight
+    inference (``dispatcher.exclusive()``) and respects the engine pin/unpin
+    refcount, instead of freeing the shared non-reentrant model out from under
+    a chat that is still running — an in-flight request holds a dispatcher slot,
+    NOT ``_llm_lock``, so a raw lock+unload here is a use-after-free. (CON)
+    """
+    await get_state().set_llm_engine(None, None)
 
 
 async def _unload_tts() -> None:
-    """Background helper: run the TTS portion of cleanup()."""
-    state = get_state()
-    async with state._tts_lock:  # noqa: SLF001
-        if state._tts_engine is not None and state._tts_engine.is_loaded:  # noqa: SLF001
-            import asyncio as _asyncio
-
-            await _asyncio.to_thread(state._tts_engine.unload)  # noqa: SLF001
-        state._tts_engine = None  # noqa: SLF001
-        state._current_tts_model = None  # noqa: SLF001
+    """Background helper: unload the resident TTS engine (serialised via the
+    TTS lock, mirroring ``set_tts_engine``)."""
+    await get_state().set_tts_engine(None, None)
 
 
 @router.post(
