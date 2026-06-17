@@ -285,10 +285,15 @@ def convert_with_cache(
 
     Uses file-based locking to prevent concurrent conversions of the same model.
     """
-    cache_key = f"{model_path}:{quantization}"
+    # Normalise the quantization BEFORE building the lock key so the key and the
+    # output path derive from the same canonical token. Otherwise two callers
+    # passing 'q4_k_m' and 'Q4_K_M' acquire DIFFERENT locks but target the SAME
+    # output file, defeating the serialization the lock exists to provide (both
+    # can pass the exists() check and convert concurrently, corrupting output).
+    quant = quantization.upper()
+    cache_key = f"{model_path}:{quant}"
 
     # Check if already converted (fast path)
-    quant = quantization.upper()
     if quant == "F16":
         expected_output = _gguf_variant_path(output_path, "f16")
     else:

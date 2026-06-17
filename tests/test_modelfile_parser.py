@@ -18,6 +18,7 @@ from hfl.converter.modelfile_parser import (
     BOOL_PARAMETERS,
     FLOAT_PARAMETERS,
     INT_PARAMETERS,
+    ModelfileDocument,
     ModelfileParseError,
     parse_modelfile,
     render_modelfile_document,
@@ -327,6 +328,29 @@ class TestRoundTrip:
         rendered = render_modelfile_document(doc)
         assert "PARAMETER use_mmap true" in rendered
         assert "True" not in rendered
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "literal backslash-n: a\\nb",  # the reported corruption case
+            "tab\\tx",
+            'quote\\"y',
+            "backslash\\\\z",
+            "{{ .Prompt }}\\n",  # a HF chat template carrying a literal \n
+        ],
+    )
+    def test_round_trip_preserves_backslash_escapes(self, value):
+        """#6: triple-quoted TEMPLATE/SYSTEM/LICENSE values containing literal
+        backslash-escapes must survive a parse -> render -> parse cycle. The
+        renderer previously didn't escape backslashes, so e.g. a literal ``\\n``
+        decoded into a real newline."""
+        doc = ModelfileDocument(
+            from_="x", system=value, template=value, license=value
+        )
+        round_tripped = parse_modelfile(render_modelfile_document(doc))
+        assert round_tripped.system == value
+        assert round_tripped.template == value
+        assert round_tripped.license == value
 
     def test_render_is_deterministic(self):
         text = "FROM x\nPARAMETER top_k 40\nPARAMETER temperature 0.7\nPARAMETER num_ctx 2048\n"

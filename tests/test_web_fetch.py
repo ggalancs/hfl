@@ -321,3 +321,26 @@ class TestIPPinning:
         # ...and the Basic credentials survive the rewrite.
         expected = "Basic " + base64.b64encode(b"user:pass").decode()
         assert seen["auth"] == expected
+
+
+class TestBodyCap:
+    """#8: the response body must be capped DURING transfer (streamed), not
+    buffered whole and then sliced — otherwise a multi-GB body the model can
+    point at would exhaust RAM and OOM the process regardless of max_bytes."""
+
+    async def test_body_truncated_at_max_bytes(self, monkeypatch):
+        monkeypatch.setattr(wf.socket, "getaddrinfo", _public_getaddrinfo)
+        # The sentinel sits BEYOND the cap; it must never be read into the body.
+        big = "<html><body>" + ("A" * 4096) + "SENTINEL_BEYOND_CAP" + "</body></html>"
+        transport = httpx.MockTransport(lambda req: httpx.Response(200, text=big))
+        original = httpx.AsyncClient
+
+        def _factory(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(wf.httpx, "AsyncClient", _factory)
+
+        doc = await wf.fetch("https://example.com/page", max_bytes=1024)
+        haystack = (doc.get("title") or "") + (doc.get("content") or "")
+        assert "SENTINEL_BEYOND_CAP" not in haystack

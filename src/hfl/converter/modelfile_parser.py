@@ -717,14 +717,17 @@ def parse_modelfile(text: str, base_path: str | Path | None = None) -> Modelfile
 def _quote_triple(value: str) -> str:
     """Render ``value`` as a triple-quoted block.
 
-    Values containing an embedded triplet of double-quotes would break
-    the shape; we defensively escape the offending triplet even though
-    it is vanishingly rare in practice.
+    ``_decode_quoted`` interprets ``\\n`` / ``\\t`` / ``\\r`` / ``\\"`` / ``\\\\``
+    on the way back in, so the encoder MUST escape backslashes (and any embedded
+    ``\"\"\"``) to stay symmetric. Without escaping backslashes, a value carrying
+    a literal backslash-escape — e.g. a chat TEMPLATE imported from a HF Jinja
+    template that contains a literal ``\\n`` — is silently mutated on a
+    parse -> render -> parse round-trip (the ``\\n`` becomes a real newline),
+    violating the module's documented round-trip invariant.
     """
+    value = value.replace("\\", "\\\\")
     if '"""' in value:
         value = value.replace('"""', r"\"\"\"")
-    if "\n" in value:
-        return f'"""{value}"""'
     return f'"""{value}"""'
 
 

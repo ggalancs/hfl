@@ -229,26 +229,43 @@ async def fetch(
         # otherwise chase / rebind onto 169.254.169.254 / 127.0.0.1.
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             current, current_ip = cleaned_url, pinned_ip
+            body_bytes = b""
+            charset = "utf-8"
             for _ in range(_MAX_REDIRECTS + 1):
                 connect_url, host_header, extensions = _pinned_request(current, current_ip)
-                resp = await client.get(
+                # Stream so the body is read incrementally with a hard byte
+                # budget: a non-streaming ``get`` buffers the ENTIRE response
+                # into memory before slicing, so ``max_bytes`` capped only the
+                # parser input, not RAM — a multi-GB body (the model controls
+                # the URL) would OOM the process regardless. (SEC)
+                async with client.stream(
+                    "GET",
                     connect_url,
                     headers={**headers, **host_header},
                     extensions=extensions,
-                )
-                if not resp.is_redirect:
+                ) as resp:
+                    location = resp.headers.get("location") if resp.is_redirect else None
+                    if location:
+                        # Redirect: only the Location matters — never read the
+                        # (possibly huge) redirect body. Re-run the full scheme +
+                        # private-IP guard and re-pin against the logical URL
+                        # before following.
+                        current, current_ip = _resolve_and_validate(urljoin(current, location))
+                        continue
+                    # Terminal hop (non-redirect, or redirect without Location):
+                    # pull the body until the budget is reached, then stop.
+                    charset = resp.charset_encoding or "utf-8"
+                    total = 0
+                    chunks: list[bytes] = []
+                    async for chunk in resp.aiter_bytes():
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total >= max_bytes:
+                            break
+                    body_bytes = b"".join(chunks)[:max_bytes]
                     break
-                location = resp.headers.get("location")
-                if not location:
-                    break
-                # Resolve relative redirects against the logical (hostname)
-                # URL, then re-run the full scheme + private-IP guard and
-                # re-pin before following.
-                current, current_ip = _resolve_and_validate(urljoin(current, location))
             else:
                 raise WebFetchError("too many redirects")
-            body_bytes = resp.content[:max_bytes]
-            charset = resp.charset_encoding or "utf-8"
             try:
                 body = body_bytes.decode(charset, errors="replace")
             except LookupError:

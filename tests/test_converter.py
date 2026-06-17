@@ -744,3 +744,51 @@ class TestUnsupportedModelError:
 
         err = UnsupportedModelError("LoRA models are not supported")
         assert str(err) == "LoRA models are not supported"
+
+
+class TestConvertWithCacheLocking:
+    """#27: the per-conversion lock key must be derived from the SAME canonical
+    (upper-cased) quantization token as the output path, so case-variant callers
+    ('q4_k_m' vs 'Q4_K_M') share one lock instead of converting concurrently to
+    the same file."""
+
+    def test_case_variant_quant_is_serialized(self, tmp_path):
+        import threading
+        import time
+        from pathlib import Path
+
+        from hfl.converter import gguf_converter as gc
+
+        gc._conversion_locks.clear()
+
+        class _StubConverter:
+            def __init__(self):
+                self.active = 0
+                self.max_active = 0
+                self._lock = threading.Lock()
+
+            def convert(self, *args, **kwargs):
+                with self._lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                time.sleep(0.05)
+                with self._lock:
+                    self.active -= 1
+                return Path("/tmp/out.gguf")
+
+        conv = _StubConverter()
+        model_path = tmp_path / "model.safetensors"
+        output_path = tmp_path / "out.gguf"  # never created -> both threads convert
+
+        def _run(q):
+            gc.convert_with_cache(conv, model_path, output_path, quantization=q)
+
+        t1 = threading.Thread(target=_run, args=("q4_k_m",))
+        t2 = threading.Thread(target=_run, args=("Q4_K_M",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # The shared lock must have serialized the two case-variant conversions.
+        assert conv.max_active == 1, f"convert ran with max concurrency {conv.max_active}"

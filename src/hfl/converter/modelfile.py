@@ -36,6 +36,21 @@ def _format_stop_value(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _quote_triple(value: str) -> str:
+    """Escape a value for a triple-quoted Modelfile block.
+
+    Ollama's parser decodes ``\\n`` / ``\\t`` / ``\\r`` / ``\\"`` / ``\\\\`` inside
+    quoted values, so the renderer must escape backslashes (and any embedded
+    ``\"\"\"``) for the value to survive a round-trip. Without this, a chat
+    TEMPLATE that contains a literal ``\\n`` is corrupted when a client re-parses
+    the ``/api/show`` output (the ``\\n`` becomes a real newline).
+    """
+    value = value.replace("\\", "\\\\")
+    if '"""' in value:
+        value = value.replace('"""', r"\"\"\"")
+    return f'"""{value}"""'
+
+
 def render_modelfile(manifest: "ModelManifest") -> str:
     '''Render ``manifest`` as a Modelfile string.
 
@@ -69,7 +84,7 @@ def render_modelfile(manifest: "ModelManifest") -> str:
     # ----- TEMPLATE -----
     if manifest.chat_template:
         lines.append("")
-        lines.append(f'TEMPLATE """{manifest.chat_template}"""')
+        lines.append(f"TEMPLATE {_quote_triple(manifest.chat_template)}")
 
     # ----- SYSTEM -----
     # HFL doesn't yet track per-model system prompts (P2-1 will wire
@@ -78,7 +93,7 @@ def render_modelfile(manifest: "ModelManifest") -> str:
     system = getattr(manifest, "system", None)
     if system:
         lines.append("")
-        lines.append(f'SYSTEM """{system}"""')
+        lines.append(f"SYSTEM {_quote_triple(system)}")
 
     # ----- PARAMETER block -----
     # We emit what the manifest carries today. Callers creating custom
@@ -119,8 +134,8 @@ def render_modelfile(manifest: "ModelManifest") -> str:
     # ----- LICENSE -----
     if manifest.license_name or manifest.license:
         lines.append("")
-        text = manifest.license_name or manifest.license
-        lines.append(f'LICENSE """{text}"""')
+        text = manifest.license_name or manifest.license or ""
+        lines.append(f"LICENSE {_quote_triple(text)}")
 
     # Final newline so editors don't scream
     return "\n".join(lines) + "\n"
