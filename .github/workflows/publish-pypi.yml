@@ -73,7 +73,13 @@ jobs:
 
   publish-pypi:
     needs: build
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    # Publish to real PyPI on a MANUAL dispatch against a release tag
+    # (``gh workflow run publish-pypi.yml --ref vX.Y.Z``). The old
+    # ``event_name == 'push'`` guard could never fire once the tag trigger was
+    # removed, so the job was permanently skipped. Still gated on a ``refs/tags/v``
+    # ref so you can't publish from a branch, and excluded when ``testpypi`` is
+    # requested (that path goes to TestPyPI above).
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.testpypi != 'true' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     environment:
       name: pypi

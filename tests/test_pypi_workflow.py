@@ -41,8 +41,15 @@ class TestPyPIWorkflow:
 
     def test_publish_pypi_is_tag_guarded(self):
         pub = self.cfg["jobs"]["publish-pypi"]
-        # startsWith(github.ref, 'refs/tags/v') guard prevents main-branch pushes.
-        assert "refs/tags/v" in pub["if"]
+        cond = pub["if"]
+        # A MANUAL dispatch must be able to publish (the only trigger now that
+        # automatic CI/CD is disabled) — a ``push``-only guard would make the
+        # job permanently skipped.
+        assert "workflow_dispatch" in cond
+        # ...but only against a release tag, never from a branch.
+        assert "refs/tags/v" in cond
+        # The TestPyPI path is mutually exclusive with real PyPI.
+        assert "testpypi" in cond
 
     def test_publish_pypi_uses_trusted_publisher_action(self):
         pub = self.cfg["jobs"]["publish-pypi"]
