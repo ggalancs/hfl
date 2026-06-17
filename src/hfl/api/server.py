@@ -203,25 +203,19 @@ app = FastAPI(
     openapi_tags=_openapi_tags,
 )
 
-# CORS - Configurable via config.py
-# Use ["*"] if cors_allow_all is True, otherwise use explicit origins
-_cors_origins = ["*"] if config.cors_allow_all else config.cors_origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=config.cors_allow_credentials,
-    allow_methods=config.cors_allow_methods,
-    allow_headers=config.cors_allow_headers,
-)
-
 # R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)
 
 # Middleware execution order (Starlette runs in reverse add order):
-# RequestLogger → BodyLimit → APIKey → RateLimit → Disclaimer → CORS
-# Body-limit runs before auth/rate-limit so oversized requests are
-# rejected with 413 without consuming rate-limit tokens or touching
-# auth; this matches the "reject early, reject cheap" principle.
+# CORS → RequestLogger → BodyLimit → APIKey → RateLimit → Disclaimer
+# CORS is added LAST so it is the OUTERMOST middleware (API-3 fix): a browser
+# CORS preflight (OPTIONS) carries no Authorization header, so if auth ran
+# first it would 401 the preflight before CORS could emit the
+# Access-Control-Allow-* headers, blocking every browser cross-origin client
+# whenever an API key is configured. Outermost CORS answers the preflight
+# directly. Body-limit still runs before auth/rate-limit so oversized requests
+# are rejected with 413 without consuming rate-limit tokens or touching auth
+# ("reject early, reject cheap").
 
 # Optional rate limiting (after auth in execution order)
 if config.rate_limit_enabled:
@@ -241,8 +235,20 @@ app.add_middleware(APIKeyMiddleware)
 if config.max_request_bytes > 0:
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=config.max_request_bytes)
 
-# Request logging and metrics recording (outermost - runs first)
+# Request logging and metrics recording
 app.add_middleware(RequestLogger)
+
+# CORS — added LAST so it is the OUTERMOST middleware and can answer browser
+# preflight (OPTIONS) requests before auth/rate-limit run. Configurable via
+# config.py: ["*"] when cors_allow_all, otherwise the explicit origins.
+_cors_origins = ["*"] if config.cors_allow_all else config.cors_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=config.cors_allow_credentials,
+    allow_methods=config.cors_allow_methods,
+    allow_headers=config.cors_allow_headers,
+)
 
 # Register global exception handlers for HFLError hierarchy
 register_exception_handlers(app)

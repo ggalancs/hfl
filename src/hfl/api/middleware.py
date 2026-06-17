@@ -121,8 +121,12 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
     # excluded because GGUFs legitimately exceed any text-oriented
     # cap (multi-GB); the blob route has its own streaming SHA-256
     # validator so oversized uploads still fail before the bytes
-    # are promoted.
-    EXCLUDED_PREFIXES: tuple[str, ...] = ("/api/blobs/",)
+    # are promoted. ``/api/transcribe`` carries audio uploads that
+    # legitimately exceed the 10 MiB text cap and enforces its own
+    # ``_MAX_AUDIO_BYTES`` (100 MB) limit; without this exclusion the
+    # advertised 100 MB ceiling is unreachable (any audio over the
+    # global cap is 413'd before the route runs).
+    EXCLUDED_PREFIXES: tuple[str, ...] = ("/api/blobs/", "/api/transcribe")
 
     def __init__(self, app: Any, max_bytes: int) -> None:
         super().__init__(app)
@@ -155,9 +159,28 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
             try:
                 if int(content_length) > self.max_bytes:
                     return self._too_large_response()
+                # A valid Content-Length within budget is authoritative — a body
+                # cannot be both Content-Length-framed and chunked.
+                response = await call_next(request)
+                return response
             except ValueError:
-                # Malformed Content-Length — let downstream handle it
+                # Malformed Content-Length — fall through to streamed enforcement.
                 pass
+
+        # No valid Content-Length: a chunked / streaming body sets none, so the
+        # header check above would let it through unbounded — exactly the
+        # multi-gigabyte-prompt DoS this middleware exists to stop. Read the
+        # body with a running budget, reject as soon as it exceeds max_bytes,
+        # then cache it so BaseHTTPMiddleware replays it to the route (its
+        # ``_CachedRequest.wrapped_receive`` serves a cached ``_body`` to the
+        # downstream app; without this the route would see an empty body).
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > self.max_bytes:
+                return self._too_large_response()
+
+        request._body = body
         response = await call_next(request)
         return response
 

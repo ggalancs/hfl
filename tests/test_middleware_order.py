@@ -147,3 +147,58 @@ class TestMiddlewareExecutionOrder:
             f"APIKeyMiddleware (line {apikey_line}) must be added AFTER "
             f"RateLimitMiddleware (line {ratelimit_line}) so auth runs first"
         )
+
+
+class TestCorsPreflightWithAuth:
+    """#3: CORS must be the OUTERMOST middleware so a browser preflight (OPTIONS,
+    which carries no Authorization header) succeeds even when an API key is set —
+    otherwise auth 401s the preflight and blocks every cross-origin client."""
+
+    def test_real_app_has_cors_outermost(self):
+        """``add_middleware`` prepends, so the LAST-added middleware sits at
+        ``user_middleware[0]`` and runs first. CORS must be there."""
+        from starlette.middleware.cors import CORSMiddleware
+
+        from hfl.api.server import app
+
+        assert app.user_middleware[0].cls is CORSMiddleware
+
+    def test_preflight_passes_auth_when_cors_outermost(self):
+        """End-to-end: with CORS added after (outer) APIKey and an API key
+        configured, an unauthenticated OPTIONS preflight returns 200 + CORS
+        headers instead of a 401."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from starlette.middleware.cors import CORSMiddleware
+
+        from hfl.api.server import APIKeyMiddleware
+        from hfl.api.state import get_state
+
+        app = FastAPI()
+
+        @app.post("/v1/chat/completions")
+        async def _ep() -> dict:
+            return {"ok": True}
+
+        # Mirror server.py's fixed order: APIKey inner, CORS outermost.
+        app.add_middleware(APIKeyMiddleware)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
+        get_state().api_key = "secret-key"
+        try:
+            resp = TestClient(app).options(
+                "/v1/chat/completions",
+                headers={
+                    "Origin": "https://example.com",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+            assert resp.status_code == 200
+            assert "access-control-allow-origin" in {k.lower() for k in resp.headers}
+        finally:
+            get_state().api_key = None

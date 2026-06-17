@@ -412,6 +412,13 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
             f"Model '{req.model}' failed to load", path="/v1/chat/completions"
         )
 
+    # An empty ``prompt`` array would IndexError on ``[0]`` below and surface
+    # as a 500; real OpenAI returns 400. Raise the domain ValidationError so the
+    # HFLError handler renders it in the OpenAI/Anthropic dialect (API-3).
+    if isinstance(req.prompt, list) and not req.prompt:
+        from hfl.exceptions import ValidationError as APIValidationError
+
+        raise APIValidationError("'prompt' must not be empty")
     prompt = req.prompt if isinstance(req.prompt, str) else req.prompt[0]
     gen_config = _to_gen_config(req)
 

@@ -344,7 +344,12 @@ class PerModelRateLimiter:
     def _get_model_semaphore(self, model_name: str) -> threading.Semaphore:
         with self._lock:
             if model_name not in self._concurrent:
-                self._concurrent[model_name] = threading.Semaphore(self._concurrent_limit)
+                # BoundedSemaphore (not plain Semaphore): a future unpaired
+                # ``release_concurrent`` then raises ValueError loudly instead of
+                # silently inflating the concurrency ceiling above the limit.
+                # (Defensive — the API currently has no callers; this keeps it
+                # safe if it is ever wired in.)
+                self._concurrent[model_name] = threading.BoundedSemaphore(self._concurrent_limit)
             return self._concurrent[model_name]
 
     def is_allowed(self, client_id: str, model_name: str) -> tuple[bool, int]:

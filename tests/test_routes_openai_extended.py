@@ -195,6 +195,25 @@ class TestCompletionsExtended:
         config = call_args[1].get("config") or call_args[0][1]
         assert config.max_tokens == 100
 
+    def test_completions_empty_prompt_list_returns_400(self):
+        """#12: an empty ``prompt`` array must return 400 (real OpenAI behaviour),
+        not a 500 from ``req.prompt[0]`` IndexError."""
+        mock_engine = MagicMock()
+        mock_engine.is_loaded = True
+        mock_model = MagicMock()
+        mock_model.name = "test-model"
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
+
+        client = TestClient(app)
+        response = client.post("/v1/completions", json={"model": "test-model", "prompt": []})
+
+        assert response.status_code == 400
+        body = response.json()
+        # OpenAI dialect on /v1/* nests the error object.
+        assert isinstance(body["error"], dict)
+        mock_engine.generate.assert_not_called()
+
 
 class TestModelsEndpoint:
     """Tests for /v1/models endpoint."""

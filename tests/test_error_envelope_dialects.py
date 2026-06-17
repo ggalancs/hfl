@@ -106,6 +106,58 @@ class TestErrorPathDialects:
         assert "code" not in body  # no flat top-level leakage
 
 
+class TestUnhandled500Dialect:
+    """#15: the catch-all 500 handler must shape the body per dialect on /v1/*
+    (real OpenAI/Anthropic SDKs parse ``body['error']`` as an OBJECT). A bare
+    RuntimeError escaping a /v1/* route previously produced a flat string
+    ``error``, breaking those parsers."""
+
+    def _app(self):
+        from fastapi import FastAPI
+
+        from hfl.api.exception_handlers import register_exception_handlers
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.post("/v1/chat/completions")
+        async def _openai_boom() -> dict:
+            raise RuntimeError("engine exploded")
+
+        @app.post("/v1/messages")
+        async def _anthropic_boom() -> dict:
+            raise RuntimeError("engine exploded")
+
+        @app.post("/api/chat")
+        async def _ollama_boom() -> dict:
+            raise RuntimeError("engine exploded")
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_openai_500_is_nested(self):
+        r = self._app().post("/v1/chat/completions", json={})
+        assert r.status_code == 500
+        body = r.json()
+        assert set(body.keys()) == {"error"}
+        assert isinstance(body["error"], dict)
+        assert body["error"]["type"] == "api_error"
+
+    def test_anthropic_500_is_native(self):
+        r = self._app().post("/v1/messages", json={})
+        assert r.status_code == 500
+        body = r.json()
+        assert body["type"] == "error"
+        assert isinstance(body["error"], dict)
+
+    def test_ollama_500_stays_flat(self):
+        r = self._app().post("/api/chat", json={})
+        assert r.status_code == 500
+        body = r.json()
+        # /api/* keeps the flat HFL body (error is a string, not an object).
+        assert isinstance(body["error"], str)
+        assert body["code"] == "UnhandledError"
+
+
 class TestQueueRejectionFactoryDialect:
     """The dispatcher queue-rejection factories are path-aware so streaming
     /v1/* rejections (routed through acquire_stream_slot) nest too, not just

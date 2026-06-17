@@ -412,3 +412,56 @@ class TestRequestBodyLimitMiddleware:
             headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 413
+
+    def test_chunked_body_over_limit_rejected_without_content_length(self):
+        """SEC #14: a chunked request (no Content-Length) over the limit must
+        still be 413'd — the header-only check would otherwise let it bypass
+        the cap entirely (the streamed-DoS the middleware exists to stop)."""
+        app = self._make_app(max_bytes=128)
+        client = TestClient(app)
+
+        def _gen():
+            # An iterator body makes httpx use chunked transfer with NO
+            # Content-Length header.
+            yield b'{"msg":"' + b"x" * 1024 + b'"}'
+
+        response = client.post(
+            "/echo", content=_gen(), headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+    def test_chunked_body_under_limit_passes_and_route_reads_body(self):
+        """A chunked body under the limit passes AND the route still receives the
+        re-injected body (guards against an empty-body regression from the
+        streamed-enforcement path)."""
+        app = self._make_app(max_bytes=1024)
+        client = TestClient(app)
+
+        def _gen():
+            yield b'{"msg":"ok"}'
+
+        response = client.post(
+            "/echo", content=_gen(), headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+
+    def test_excluded_prefix_skips_limit(self):
+        """#17: /api/transcribe carries large audio with its own 100 MB cap; the
+        global text-oriented limit must not 413 it."""
+        from hfl.api.middleware import RequestBodyLimitMiddleware
+
+        assert "/api/transcribe" in RequestBodyLimitMiddleware.EXCLUDED_PREFIXES
+
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=8)
+
+        @app.post("/api/transcribe")
+        def transcribe(payload: dict) -> dict:
+            return {"ok": True}
+
+        client = TestClient(app)
+        # 100 bytes, far over the 8-byte cap — excluded path must not 413.
+        response = client.post("/api/transcribe", json={"x": "y" * 100})
+        assert response.status_code == 200

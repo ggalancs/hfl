@@ -320,3 +320,26 @@ class TestTTSSchemas:
         assert _map_openai_format("wav") == "wav"
         assert _map_openai_format("opus") == "ogg"
         assert _map_openai_format("pcm") == "wav"
+
+
+class TestTTSLoadingDelegation:
+    """#16: TTS loading must go through the shared async ``load_tts`` helper."""
+
+    @pytest.mark.asyncio
+    async def test_ensure_tts_delegates_to_load_tts(self, monkeypatch):
+        """``_ensure_tts_model_loaded`` must delegate to ``load_tts`` (threaded
+        load off the event loop + cleanup-on-failure), not load inline on the
+        loop as the previous implementation did."""
+        from hfl.api import routes_tts
+
+        called = {}
+
+        async def _fake_load_tts(name):
+            called["name"] = name
+            return object(), object()
+
+        # load_tts is imported lazily inside the function — patch its source.
+        monkeypatch.setattr("hfl.api.model_loader.load_tts", _fake_load_tts)
+
+        await routes_tts._ensure_tts_model_loaded("my-tts-model")
+        assert called["name"] == "my-tts-model"

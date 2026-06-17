@@ -37,43 +37,18 @@ def _get_state() -> "ServerState":
 
 
 async def _ensure_tts_model_loaded(model_name: str) -> None:
-    """Load the TTS model if not already in memory (thread-safe)."""
-    state = _get_state()
+    """Load the TTS model if not already in memory (thread-safe).
 
-    # Fast path: model already loaded
-    if state.is_tts_loaded():
-        if state.current_tts_model and state.current_tts_model.name == model_name:
-            return
+    Delegates to the shared async ``load_tts`` helper, which performs the
+    registry lookup + TTS-type check, loads the engine OFF the event loop
+    (``asyncio.to_thread``), and unloads it if the post-load state update
+    fails. The previous inline implementation did neither: it ran the
+    multi-second ``engine.load`` directly on the loop (stalling every other
+    request) and leaked the engine if ``set_tts_engine`` failed. (CON/RES)
+    """
+    from hfl.api.model_loader import load_tts
 
-    # Look up model in registry
-    registry = get_registry()
-    manifest = registry.get(model_name)
-    if not manifest:
-        from hfl.exceptions import ModelNotFoundError
-
-        raise ModelNotFoundError(model_name)
-
-    # Verify it's a TTS model
-    from pathlib import Path
-
-    from hfl.converter.formats import ModelType, detect_model_type
-
-    model_path = Path(manifest.local_path)
-    model_type = detect_model_type(model_path)
-
-    if model_type != ModelType.TTS:
-        from hfl.exceptions import ModelTypeMismatchError
-
-        raise ModelTypeMismatchError(model_name, expected="tts", got=model_type.value)
-
-    # Select and load engine
-    from hfl.engine.selector import select_tts_engine
-
-    engine = select_tts_engine(model_path)
-    engine.load(manifest.local_path)
-
-    # Thread-safe state update
-    await state.set_tts_engine(engine, manifest)
+    await load_tts(model_name)
 
 
 def _map_openai_format(fmt: str) -> str:

@@ -71,6 +71,23 @@ class TestListDelete:
         listed = sessions.list_sessions()
         assert all(s.name != "broken" for s in listed)
 
+    def test_list_skips_missing_required_field(self, temp_config):
+        """#22: a syntactically valid session missing a required field
+        (``name``/``model``) must be skipped, not abort the WHOLE listing —
+        ``ChatSession(**filtered)`` raises TypeError, which was not caught."""
+        import json as _json
+
+        (sessions.sessions_dir() / "good.json").write_text(
+            _json.dumps({"name": "good", "model": "llama"})
+        )
+        (sessions.sessions_dir() / "broken.json").write_text(
+            _json.dumps({"name": "broken"})  # no ``model`` -> TypeError on load
+        )
+        listed = sessions.list_sessions()
+        names = [s.name for s in listed]
+        assert "good" in names
+        assert "broken" not in names
+
     def test_delete_returns_false_for_missing(self, temp_config):
         assert sessions.delete_session("ghost") is False
 

@@ -109,12 +109,17 @@ def register_exception_handlers(app: FastAPI) -> None:
             request.url.path,
             type(exc).__name__,
         )
+        # API-3: shape the body for the OpenAI/Anthropic dialect on /v1/* routes
+        # (real SDKs parse ``body["error"]`` as an OBJECT, so a flat string-valued
+        # ``error`` breaks them); /api/* and everything else keep the flat body.
+        flat = {
+            "error": "Internal server error",
+            "code": "UnhandledError",
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:500],
+            "request_id": get_request_id(),
+        }
         return JSONResponse(
             status_code=500,
-            content={
-                "error": "Internal server error",
-                "code": "UnhandledError",
-                "error_type": type(exc).__name__,
-                "message": str(exc)[:500],
-            },
+            content=render_envelope(request.url.path, 500, flat),
         )

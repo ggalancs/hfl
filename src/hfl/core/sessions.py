@@ -123,7 +123,11 @@ def list_sessions() -> list[ChatSession]:
     for entry in sorted(sessions_dir().glob("*.json")):
         try:
             out.append(load_session(entry.stem))
-        except (json.JSONDecodeError, InvalidSessionNameError, SessionNotFoundError):
+        except (json.JSONDecodeError, TypeError, ValueError, SessionNotFoundError):
+            # Valid JSON but missing a required field (``name``/``model``) makes
+            # ``ChatSession(**filtered)`` raise TypeError; an interrupted write
+            # makes json raise. Skip the bad file rather than aborting the whole
+            # listing. (ValueError covers InvalidSessionNameError.)
             continue
     out.sort(key=lambda s: s.updated_at, reverse=True)
     return out
