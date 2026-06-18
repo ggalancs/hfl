@@ -59,7 +59,7 @@ dependencies = [
     # Floor at 0.0.31: < 0.0.31 carries CVE-2026-42561/53538/53539/53540.
     "python-multipart>=0.0.31",
     "uvicorn[standard]~=0.34.0",
-    "pydantic~=2.12.0",
+    "pydantic>=2.12,<2.14",
     "httpx~=0.28.0",
     "pyyaml~=6.0",
 ]
