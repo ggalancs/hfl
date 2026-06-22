@@ -44,7 +44,7 @@ classifiers = [
 dependencies = [
     # Using ~= (compatible release) for stability: allows patch updates only
     "typer>=0.15.0,<1.0",
-    "rich~=13.0",
+    "rich>=13,<16",
     # HFL targets huggingface_hub 1.x (the httpx-based generation).
     # Floor is >=1.5.0 because transformers 5.x requires it (its own
     # Requires-Dist is ``huggingface-hub>=1.5.0,<2.0``); a lower floor lets a
