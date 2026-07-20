@@ -56,6 +56,15 @@ class PullRequest(BaseModel):
         max_length=512,
         description="Model identifier: ``org/name`` or ``org/name:quant``.",
     )
+    revision: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "Optional HuggingFace ref (branch, tag, or commit) to pin the pull "
+            "to an exact repo state. ``org/name@<ref>`` in ``model`` works too. "
+            "Defaults to the repo's main branch."
+        ),
+    )
     insecure: bool = Field(
         False,
         description=(
@@ -116,7 +125,7 @@ async def _run_pull_streaming(
     yield _event("pulling manifest")
 
     try:
-        resolved = await asyncio.to_thread(resolve, req.model, quantization)
+        resolved = await asyncio.to_thread(resolve, req.model, quantization, req.revision)
     except Exception as exc:  # pragma: no cover — error envelope tested via mock
         yield _event("error", error=f"Failed to resolve {req.model!r}: {exc}")
         return

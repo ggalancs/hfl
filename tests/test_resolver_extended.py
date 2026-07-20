@@ -308,3 +308,62 @@ class TestResolvedModel:
         assert model.filename == "model.Q4_K_M.gguf"
         assert model.revision == "v1.0"
         assert model.quantization == "Q4_K_M"
+
+
+class TestResolveRevisionPinning:
+    """resolve() revision pinning: --revision, ``@<ref>`` syntax, commit SHA."""
+
+    @staticmethod
+    def _mock_api(mock_api_class, *, sha="abc123def456", rfilename="model.safetensors"):
+        mock_api = MagicMock()
+        mock_info = MagicMock()
+        mock_info.id = "org/model"
+        mock_info.sha = sha
+        sibling = MagicMock()
+        sibling.rfilename = rfilename
+        mock_info.siblings = [sibling]
+        mock_api.model_info.return_value = mock_info
+        mock_api_class.return_value = mock_api
+        return mock_api
+
+    def test_default_revision_is_main(self):
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            api = self._mock_api(cls)
+            result = resolve("org/model")
+            assert result.revision == "main"
+            # the pinned ref is forwarded to the Hub metadata lookup
+            api.model_info.assert_called_once_with("org/model", revision="main")
+
+    def test_revision_param_pins_and_reaches_hub(self):
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            api = self._mock_api(cls)
+            result = resolve("org/model", revision="v2.0")
+            assert result.revision == "v2.0"
+            api.model_info.assert_called_once_with("org/model", revision="v2.0")
+
+    def test_revision_from_at_syntax(self):
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            self._mock_api(cls)
+            result = resolve("org/model@deadbeef")
+            assert result.repo_id == "org/model"
+            assert result.revision == "deadbeef"
+
+    def test_flag_overrides_at_syntax(self):
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            self._mock_api(cls)
+            result = resolve("org/model@fromspec", revision="fromflag")
+            assert result.revision == "fromflag"
+
+    def test_commit_sha_is_captured(self):
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            self._mock_api(cls, sha="0123456789abcdef")
+            result = resolve("org/model", revision="main")
+            assert result.commit_sha == "0123456789abcdef"
+
+    def test_at_ref_combines_with_quant(self):
+        # ``repo:quant@ref`` — both the Ollama quant tag and the HF ref pin.
+        with patch("hfl.hub.resolver.HfApi") as cls:
+            self._mock_api(cls, rfilename="model-Q5_K_M.gguf")
+            result = resolve("org/model:Q5_K_M@myref")
+            assert result.revision == "myref"
+            assert result.quantization == "Q5_K_M"

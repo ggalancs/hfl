@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Revision pinning on pulls.** `hfl pull` accepts `--revision <branch|tag|commit>`
+  (and the `org/name@<ref>` spec form) to fetch an exact repo state, and
+  `POST /api/pull` accepts an optional `revision` field. The resolver records the
+  immutable `commit_sha` the ref resolved to, and both the pinned ref and the
+  commit are stored in the model manifest — a reproducible, traceable pull that
+  hardens against a repo changing content between downloads (supply-chain). Also
+  adds a top-level `hfl --version` flag.
+
 ### Changed
 
 - **License: relicensed from the custom HRUL v1.0 to the Apache License 2.0.**

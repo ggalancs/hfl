@@ -17,29 +17,47 @@ from huggingface_hub import HfApi
 @dataclass
 class ResolvedModel:
     repo_id: str  # org/model in HF
-    revision: str = "main"  # branch/tag/commit
+    revision: str = "main"  # branch/tag/commit the user pinned (or "main")
     filename: str | None = None  # Specific file (for GGUF)
     format: str = "auto"  # auto, gguf, safetensors, pytorch
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
     pipeline_tag: str | None = None  # text-generation, text-to-speech, etc.
+    commit_sha: str | None = None  # immutable commit the revision resolved to
 
 
-def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
+def resolve(
+    model_spec: str,
+    quantization: str | None = None,
+    revision: str | None = None,
+) -> ResolvedModel:
     """
     Resolve a model specification to a concrete ResolvedModel.
 
     Supported formats:
     - "org/model"                    -> direct repo
     - "org/model:Q4_K_M"             -> repo with quantization (Ollama style)
+    - "org/model@<ref>"              -> repo pinned to a branch/tag/commit
     - "model-name"                   -> search by name
 
     Resolution strategy:
-    1. Extract quantization if using repo:quant format
-    2. If contains '/', treat as direct repo_id
-    3. If the repo has GGUF files, use them directly
-    4. Otherwise, use safetensors and mark for conversion
+    1. Extract an ``@<ref>`` revision pin if present
+    2. Extract quantization if using repo:quant format
+    3. If contains '/', treat as direct repo_id
+    4. If the repo has GGUF files, use them directly
+    5. Otherwise, use safetensors and mark for conversion
+
+    ``revision`` (branch, tag, or commit) pins the pull to an exact repo
+    state; the argument takes precedence over an ``@<ref>`` in ``model_spec``.
+    Whatever ref is used is resolved to its immutable ``commit_sha`` so the
+    pull is reproducible and traceable (supply-chain hardening).
     """
     api = HfApi()
+
+    # Extract an explicit "@<ref>" revision pin: "org/model@abc123".
+    # A flag-supplied ``revision`` wins over one embedded in the spec.
+    if "@" in model_spec:
+        model_spec, _, rev_from_spec = model_spec.rpartition("@")
+        revision = revision or (rev_from_spec or None)
 
     # Extract quantization from "repo:Q4_K_M" format (Ollama style)
     if ":" in model_spec:
@@ -49,6 +67,8 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
             model_spec = parts[0]
             # Explicit quantization in the spec takes priority
             quantization = parts[1]
+
+    resolved_revision = revision or "main"
 
     # Case 1: direct repo_id (org/model)
     if "/" in model_spec:
@@ -67,11 +87,13 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
             raise ValueError(f"Model not found: {model_spec}")
         repo_id = results[0].id
 
-    # Detect available format and model type
-    model_info = api.model_info(repo_id)
+    # Detect available format and model type — at the pinned revision, and
+    # capture the immutable commit the ref resolves to for traceability.
+    model_info = api.model_info(repo_id, revision=resolved_revision)
     siblings = model_info.siblings or []
     filenames = [s.rfilename for s in siblings]
     pipeline_tag = model_info.pipeline_tag  # text-generation, text-to-speech, etc.
+    commit_sha = getattr(model_info, "sha", None)
 
     gguf_files = [f for f in filenames if f.endswith(".gguf")]
     safetensor_files = [f for f in filenames if f.endswith(".safetensors")]
@@ -81,6 +103,8 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
         target_file = _select_gguf(gguf_files, quantization)
         return ResolvedModel(
             repo_id=repo_id,
+            revision=resolved_revision,
+            commit_sha=commit_sha,
             filename=target_file,
             format="gguf",
             quantization=_detect_quant(target_file),
@@ -89,12 +113,16 @@ def resolve(model_spec: str, quantization: str | None = None) -> ResolvedModel:
     if safetensor_files:
         return ResolvedModel(
             repo_id=repo_id,
+            revision=resolved_revision,
+            commit_sha=commit_sha,
             format="safetensors",
             quantization=quantization,
             pipeline_tag=pipeline_tag,
         )
     return ResolvedModel(
         repo_id=repo_id,
+        revision=resolved_revision,
+        commit_sha=commit_sha,
         format="pytorch",
         quantization=quantization,
         pipeline_tag=pipeline_tag,

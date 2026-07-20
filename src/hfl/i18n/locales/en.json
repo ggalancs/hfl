@@ -12,6 +12,7 @@
       "options": {
         "quantize": "Quantization level (Q2_K to F16)",
         "format": "Output format: auto, gguf, safetensors",
+        "revision": "Pin to a HuggingFace ref (branch, tag, or commit) for a reproducible pull",
         "alias": "Short alias for the model (e.g.: 'coder')",
         "skip_license": "Skip license verification"
       }
@@ -211,6 +212,8 @@
     "repo": "Repo",
     "format": "Format",
     "file": "File",
+    "revision": "Revision",
+    "commit": "Commit",
     "type": "Type",
     "downloaded_to": "Downloaded to",
     "converting_to_gguf": "Converting to GGUF ({quantize})...",

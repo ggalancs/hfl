@@ -187,6 +187,10 @@ hfl pull mistralai/Mistral-7B-Instruct-v0.3 --format safetensors
 
 # Download with a custom alias for easier reference
 hfl pull meta-llama/Llama-3.3-70B-Instruct --alias llama70b
+
+# Pin to a specific revision (branch, tag, or commit) for a reproducible pull
+hfl pull meta-llama/Llama-3.3-70B-Instruct --revision a1b2c3d
+hfl pull meta-llama/Llama-3.3-70B-Instruct@main   # ...or with the @ syntax
 ```
 
 ### Interactive Chat

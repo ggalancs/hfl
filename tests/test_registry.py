@@ -198,6 +198,8 @@ class TestModelManifest:
         original = ModelManifest(
             name="roundtrip-test",
             repo_id="org/model",
+            revision="v1.2.0",
+            commit_sha="0123456789abcdef",
             local_path="/path/to/model",
             format="gguf",
             size_bytes=12345,
@@ -213,8 +215,26 @@ class TestModelManifest:
         assert restored.name == original.name
         assert restored.repo_id == original.repo_id
         assert restored.size_bytes == original.size_bytes
+        # revision pin survives the round-trip
+        assert restored.revision == "v1.2.0"
+        assert restored.commit_sha == "0123456789abcdef"
         assert restored.quantization == original.quantization
         assert restored.architecture == original.architecture
+
+    def test_from_dict_defaults_revision_when_absent(self):
+        """Legacy manifests without a revision key load with None (=main)."""
+        from hfl.models.manifest import ModelManifest
+
+        restored = ModelManifest.from_dict(
+            {
+                "name": "legacy",
+                "repo_id": "org/model",
+                "local_path": "/p",
+                "format": "gguf",
+            }
+        )
+        assert restored.revision is None
+        assert restored.commit_sha is None
 
 
 class TestModelRegistry:

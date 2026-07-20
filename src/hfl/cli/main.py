@@ -78,6 +78,11 @@ def pull(
         "-f",
         help=t("commands.pull.options.format"),
     ),
+    revision: str | None = typer.Option(
+        None,
+        "--revision",
+        help=t("commands.pull.options.revision"),
+    ),
     alias: str | None = typer.Option(
         None,
         "--alias",
@@ -101,7 +106,7 @@ def pull(
     # 1. Resolve model
     console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
     try:
-        resolved = resolve(model, quantization=quantize)
+        resolved = resolve(model, quantization=quantize, revision=revision)
     except (ValueError, Exception) as e:
         error_msg = str(e)
         if "Repo id must" in error_msg or "repo_name" in error_msg:
@@ -133,6 +138,12 @@ def pull(
     console.print(f"  {t('messages.format')}: {resolved.format}")
     if resolved.filename:
         console.print(f"  {t('messages.file')}: {resolved.filename}")
+    # Show the pinned revision + the immutable commit it resolved to, so the
+    # user can see (and later reproduce) exactly what was fetched.
+    if resolved.revision and resolved.revision != "main":
+        console.print(f"  {t('messages.revision')}: {resolved.revision}")
+    if resolved.commit_sha:
+        console.print(f"  {t('messages.commit')}: {resolved.commit_sha[:12]}")
     if resolved_model_type:
         type_name = get_model_type_display_name(resolved_model_type)
         console.print(f"  {t('messages.type')}: {type_name}")
@@ -280,6 +291,8 @@ def pull(
     manifest = ModelManifest(
         name=short_name,
         repo_id=resolved.repo_id,
+        revision=resolved.revision,
+        commit_sha=resolved.commit_sha,
         alias=alias,
         local_path=str(final_path),
         format=detect_format(final_path).value,

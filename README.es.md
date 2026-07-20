@@ -186,6 +186,10 @@ hfl pull mistralai/Mistral-7B-Instruct-v0.3 --format safetensors
 
 # Descargar con un alias personalizado para referencia más fácil
 hfl pull meta-llama/Llama-3.3-70B-Instruct --alias llama70b
+
+# Fija una revisión concreta (rama, tag o commit) para un pull reproducible
+hfl pull meta-llama/Llama-3.3-70B-Instruct --revision a1b2c3d
+hfl pull meta-llama/Llama-3.3-70B-Instruct@main   # ...o con la sintaxis @
 ```
 
 ### Chat Interactivo

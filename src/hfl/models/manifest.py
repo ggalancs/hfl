@@ -28,6 +28,10 @@ class ModelManifest:
     alias: str | None = None  # User-defined alias (e.g., "coder")
     size_bytes: int = 0  # Size on disk
 
+    # Source pinning / provenance
+    revision: str | None = None  # HF ref pulled (branch/tag/commit); None = legacy/"main"
+    commit_sha: str | None = None  # immutable commit the revision resolved to
+
     # Quantization
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
     original_format: str | None = None  # Original format if converted
