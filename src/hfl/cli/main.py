@@ -41,6 +41,31 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    """Back the top-level ``--version`` flag: print the version and exit."""
+    if value:
+        from hfl import __version__
+
+        console.print(f"hfl v{__version__} — Licensed under Apache-2.0")
+        console.print("[dim]https://github.com/ggalancs/hfl[/]")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="Show the hfl version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    # No docstring on purpose: Typer would use it as the group help and
+    # override the i18n ``help=t("app.description")`` set on the Typer() above.
+    pass
+
+
 @app.command()
 def pull(
     model: str = typer.Argument(help=t("commands.pull.args.model")),
