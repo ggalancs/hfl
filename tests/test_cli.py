@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for the CLI module (main commands)."""
 
@@ -50,7 +50,7 @@ class TestVersionCommand:
         assert result.exit_code == 0
         assert "hfl" in result.stdout
         assert __version__ in result.stdout
-        assert "HRUL" in result.stdout  # License reference
+        assert "Apache" in result.stdout  # License reference
 
 
 class TestListCommand:

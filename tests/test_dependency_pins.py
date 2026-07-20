@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Regression guards for cross-package dependency compatibility.
 
 HFL targets the post-2025 Hugging Face stack: ``transformers>=5`` paired

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Extended tests for hub resolver module."""
 
 from unittest.mock import MagicMock, patch

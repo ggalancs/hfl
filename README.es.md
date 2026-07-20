@@ -1,6 +1,6 @@
 # hfl
 
-[![Licencia: HRUL v1.0](https://img.shields.io/badge/Licencia-HRUL%20v1.0-blue.svg)](LICENSE)
+[![Licencia: Apache 2.0](https://img.shields.io/badge/Licencia-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ggalancs/hfl/branch/main/graph/badge.svg)](https://codecov.io/gh/ggalancs/hfl)
@@ -594,12 +594,10 @@ Los modelos de IA pueden generar contenido inexacto, sesgado o inapropiado. Los 
 
 ## Licencia
 
-hfl se distribuye como source-available bajo la **hfl Responsible Use License (HRUL) v1.0**.
+hfl se distribuye bajo la **Apache License 2.0** — una licencia open-source permisiva y aprobada por la OSI. Eres libre de usar, modificar, distribuir y vender hfl y sus derivados, incluso con fines comerciales, siempre que conserves los avisos de copyright y de licencia.
 
-Esta licencia permite uso libre, modificación y distribución comercial con una condición: los trabajos derivados que se distribuyan públicamente deben mantener las características de cumplimiento legal (verificación de licencias, descargos de IA, seguimiento de procedencia, protecciones de privacidad y respeto de restricciones).
+hfl incluye salvaguardas de uso responsable (verificación de licencias, descargos de IA, seguimiento de procedencia, protecciones de privacidad y respeto de restricciones). Apache-2.0 no te obliga a mantenerlas, pero como norma del proyecto pedimos que las redistribuciones las conserven activas. Estas normas están documentadas en [DISCLAIMER.md](DISCLAIMER.md), [PRIVACY.md](PRIVACY.md) y [NOTICE-EU-AI-ACT.md](NOTICE-EU-AI-ACT.md).
 
-Eres libre de reescribir, extender, renombrar y vender derivados — simplemente no puedes eliminar las características de seguridad.
+**Licencias de los modelos:** hfl no cambia la licencia de los modelos que descargas. Cada modelo conserva su propia licencia (Llama, Gemma, OpenRAIL, CC-BY-NC, etc.) y eres responsable de cumplirla. hfl muestra la información de licencia antes de la descarga y la almacena en los metadatos del modelo; usa `hfl inspect <model>` para consultarla.
 
-**Nota:** La HRUL no es una licencia open-source aprobada por la OSI. Es una licencia source-available con requisitos de uso responsable, inspirada en Apache 2.0, el copyleft de GPL, y la familia de licencias RAIL para IA.
-
-Ver [LICENSE](LICENSE) para el texto completo y [LICENSE-FAQ.md](LICENSE-FAQ.md) para preguntas frecuentes.
+Ver [LICENSE](LICENSE) para el texto completo y [NOTICE](NOTICE) para la atribución.

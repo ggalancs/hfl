@@ -63,7 +63,7 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 LABEL org.opencontainers.image.title="hfl" \
       org.opencontainers.image.description="Run HuggingFace models locally (Ollama-compatible)" \
       org.opencontainers.image.source="https://github.com/ggalancs/hfl" \
-      org.opencontainers.image.licenses="HRUL-1.0"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \

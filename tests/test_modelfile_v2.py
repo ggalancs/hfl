@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for Modelfile v2 directives (Phase 14 — V2 rows 19 / 21 / 22)."""
 

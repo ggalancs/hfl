@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the per-family tool-call parsers in :mod:`hfl.api.tool_parsers`.
 
 Fixtures mirror the raw outputs documented in the HFL tool-calling spec

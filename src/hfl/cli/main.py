@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """
 Main CLI for hfl.
@@ -1353,7 +1353,7 @@ def version():
     """Show the hfl version."""
     from hfl import __version__
 
-    console.print(f"hfl v{__version__} — Licensed under HRUL v1.0")
+    console.print(f"hfl v{__version__} — Licensed under Apache-2.0")
     console.print("[dim]https://github.com/ggalancs/hfl[/]")
 
 

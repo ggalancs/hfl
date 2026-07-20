@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Security edge cases for ed25519 manifest signature verification.
 
 Complements ``test_signing.py`` by driving the rejection paths in

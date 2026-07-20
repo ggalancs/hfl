@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Sanity tests for the Homebrew formula and its release workflow."""
 
@@ -22,8 +22,8 @@ class TestFormula:
     def test_class_name_matches_file(self):
         assert "class Hfl < Formula" in self.text
 
-    def test_license_is_hrul(self):
-        assert 'license "HRUL-1.0"' in self.text
+    def test_license_is_apache(self):
+        assert 'license "Apache-2.0"' in self.text
 
     def test_virtualenv_install(self):
         assert "virtualenv_install_with_resources" in self.text

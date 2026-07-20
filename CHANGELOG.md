@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **License: relicensed from the custom HRUL v1.0 to the Apache License 2.0.**
+  hfl is now permissively OSI-approved open source. `LICENSE` now carries the
+  canonical Apache-2.0 text; a `NOTICE` file was added; `pyproject.toml`
+  declares `license = "Apache-2.0"` (SPDX / PEP 639); and every source file's
+  SPDX header was flipped `HRUL-1.0` → `Apache-2.0`. The HRUL-specific
+  `LICENSE-FAQ.md` was removed.
+- The responsible-use safeguards that HRUL previously enforced as a license
+  condition (license verification, provenance tracking, AI disclaimers, privacy
+  protection, gating respect) are now **project norms** rather than license
+  terms — documented in `DISCLAIMER.md`, `PRIVACY.md`, `NOTICE-EU-AI-ACT.md`,
+  `CONTRIBUTING.md`, and the PR template. Respecting the individual licenses of
+  downloaded models remains a documented expectation (see `CONTRIBUTING.md`).
+
 ## [0.14.0] - 2026-06-17
 
 **Correctness, concurrency-safety, and operability hardening.** A deep

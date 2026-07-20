@@ -42,15 +42,27 @@ ruff format src/ tests/
 - Use type hints where practical
 - Write docstrings for public APIs
 
-## Compliance Module Requirements
+## Responsible-Use Safeguards
 
-Per the HRUL license, any contributions that modify the Compliance Modules must maintain their protective functionality:
+hfl is licensed under Apache-2.0, which imposes no such condition — but as a
+**project norm** we ask that contributions which modify the safeguard modules
+preserve their protective functionality:
 
 1. **License Verification** - Must still verify and display model licenses
 2. **Provenance Tracking** - Must still record conversion history
 3. **AI Disclaimer** - Must still attach disclaimers to AI outputs
 4. **Privacy Protection** - Must NOT persist tokens to disk
 5. **Gating Respect** - Must NOT bypass HuggingFace gating
+
+### Respecting model licenses
+
+hfl's own Apache-2.0 license does **not** relicense the models users download.
+Every model retains its own license (Llama, Gemma, OpenRAIL, CC-BY-NC, and so
+on). Contributions must not weaken hfl's ability to surface and record those
+licenses: keep displaying license information before download, keep storing it
+in the model metadata, and never bypass a model's usage restrictions or
+HuggingFace gating. Users are responsible for complying with each model's
+license, and hfl exists to make that information visible — not to hide it.
 
 ## Testing
 
@@ -68,4 +80,4 @@ Per the HRUL license, any contributions that modify the Compliance Modules must 
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the HRUL v1.0 license.
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0.

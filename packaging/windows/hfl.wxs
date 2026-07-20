@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  SPDX-License-Identifier: HRUL-1.0
+  SPDX-License-Identifier: Apache-2.0
   Copyright (c) 2026 Gabriel Galán Pelayo
 
   WiX (Windows Installer XML) recipe for HFL (Phase 17 — V2 row 30).
@@ -26,7 +26,7 @@
       Compressed="yes"
       InstallScope="perMachine"
       Description="HFL — Run HuggingFace models locally, Ollama-compatible"
-      Comments="Licensed under HRUL-1.0" />
+      Comments="Licensed under Apache-2.0" />
 
     <MajorUpgrade
       DowngradeErrorMessage="A newer version of HFL is already installed." />

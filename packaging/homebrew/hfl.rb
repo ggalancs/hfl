@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
 #
 # Homebrew formula for HFL — "Run HuggingFace models locally, Ollama-compatible".
@@ -25,7 +25,7 @@ class Hfl < Formula
   homepage "https://github.com/ggalancs/hfl"
   url "https://files.pythonhosted.org/packages/source/h/hfl/hfl-0.10.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
-  license "HRUL-1.0"
+  license "Apache-2.0"
   head "https://github.com/ggalancs/hfl.git", branch: "main"
 
   depends_on "cmake" => :build

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """End-to-end concurrency contract tests (spec §5.3).
 
 These tests drive the real FastAPI app with an ``httpx.AsyncClient`` and a

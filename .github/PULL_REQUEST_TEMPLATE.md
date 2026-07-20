@@ -26,11 +26,11 @@ Closes #
 - [ ] All new and existing tests pass (`pytest`)
 - [ ] I have updated documentation if needed
 
-## Compliance Modules
+## Responsible-Use Safeguards
 
 <!-- If your changes affect any of these, explain how they're preserved -->
 
-Per the HRUL license, these modules must maintain their functionality:
+As a project responsible-use norm (not an Apache-2.0 license condition), these modules should keep their functionality:
 
 - [ ] License Verification - unchanged / updated to maintain functionality
 - [ ] Provenance Tracking - unchanged / updated to maintain functionality

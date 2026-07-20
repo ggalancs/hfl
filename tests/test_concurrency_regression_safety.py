@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: HRUL-1.0
+# SPDX-License-Identifier: Apache-2.0
 """Regression / canary suite for the inference dispatcher (spec §5.3).
 
 These tests are the safety net: after all the dispatcher changes they
