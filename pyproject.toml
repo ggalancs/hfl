@@ -268,3 +268,15 @@ module = [
     "hfl.cli.commands.*",
 ]
 disallow_untyped_defs = true
+
+# numpy 2.5+ ships PEP 695 ``type X = ...`` statements in its bundled stubs.
+# mypy targets py3.10 here (our floor), so it rejects that syntax with
+# "Type statement is only supported in Python 3.12 and greater" while parsing
+# ``numpy/__init__.pyi`` — a spurious failure in a third-party stub, unrelated
+# to HFL's own types. Skip following into numpy; combined with
+# ``ignore_missing_imports`` above, numpy symbols resolve to ``Any`` (numpy is
+# a test-only [dev] dep, never imported by shipped API/CLI code paths).
+[[tool.mypy.overrides]]
+module = ["numpy"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

@@ -311,7 +311,7 @@ class BarkEngine(AudioEngine):
             data_size,
         )
 
-        return header + audio_bytes
+        return cast(bytes, header + audio_bytes)
 
     def _encode_mp3(self, audio: np.ndarray, sample_rate: int) -> bytes:
         """Encode audio to MP3 format (requires pydub or ffmpeg)."""
