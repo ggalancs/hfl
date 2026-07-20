@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""V4 ``GET /api/recommend`` — HW-aware model recommendation.
+"""``GET /api/recommend`` — HW-aware model recommendation.
 
 Wraps :func:`hfl.hub.recommend.recommend_models` with HTTP plumbing
 and exposes the host hardware profile in the response so the client

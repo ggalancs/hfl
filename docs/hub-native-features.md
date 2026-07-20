@@ -1,6 +1,6 @@
-# HFL V4 — features beyond Ollama
+# HFL — Hub-native features (beyond Ollama)
 
-V4 turns HFL into a HuggingFace-Hub-native LLM server. Every feature
+hfl is a HuggingFace-Hub-native LLM server. Every feature
 in this guide is something Ollama either doesn't have, or can't have
 without rewriting around its curated registry.
 
@@ -249,9 +249,9 @@ own `/v1/responses` limitation.
 
 ---
 
-## Environment variables added in V4
+## Environment variables for these features
 
-See `docs/env-vars.md` for the full table. V4-relevant additions:
+See `docs/env-vars.md` for the full table. relevant additions:
 
 - `HFL_NUM_PARALLEL` / `OLLAMA_NUM_PARALLEL` — dispatcher slot count.
 - `HFL_MAX_LOADED_MODELS` / `OLLAMA_MAX_LOADED_MODELS` — multi-model pool.

@@ -27,13 +27,13 @@ If you want to run a model that isn't in Ollama's catalog — a specific fine-tu
 | Multi-backend | llama.cpp only | llama.cpp + Transformers + vLLM |
 | License verification | No | Yes (5 risk levels) |
 | Legal traceability | No | Yes (provenance log) |
-| Maturity | High (established) | Beta (v0.14.0) |
+| Maturity | High (established) | Beta (v0.15.0) |
 
 **HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
 
-## What's new in V4
+## What's new
 
-V4 (2026-05) ships features that exploit HFL's HF-Hub-native nature
+hfl ships Hub-native features that exploit its HuggingFace-Hub nature
 — things Ollama can't structurally have because of its curated
 registry model:
 
@@ -66,9 +66,9 @@ registry model:
 - **WebSocket `/ws/chat`** — bidirectional with frame-level
   cancellation (vs HTTP streaming where cancel = TCP close).
 - **REST `POST /api/push`** — upload a registered model to the HF
-  Hub (closes the V1/V2 "out-of-scope" gap).
+  Hub.
 
-See [docs/v4.md](docs/v4.md) for the full V4 guide and
+See [docs/hub-native-features.md](docs/hub-native-features.md) for the full guide and
 [docs/env-vars.md](docs/env-vars.md) for the env var matrix
 (every `HFL_*` knob has an `OLLAMA_*` fallback so a drop-in
 replacement of an Ollama install works without re-reading the docs).
@@ -511,7 +511,7 @@ Supported languages: English (`en`), Spanish (`es`)
 
 ## Known Limitations
 
-This is a v0.14.x beta release (`Development Status :: 4 - Beta`). Known limitations include:
+This is a v0.15.x beta release (`Development Status :: 4 - Beta`). Known limitations include:
 
 - **vLLM backend is experimental**: Basic implementation without full streaming support
 - **CORS is restrictive by default**: same-origin only; opt in via `cors_allow_all` or explicit `cors_origins`

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""V4 ``POST /api/pull/smart`` — best-variant pull for the current host.
+"""``POST /api/pull/smart`` — best-variant pull for the current host.
 
 Builds a :class:`hfl.hub.smart_pull.SmartPullPlan`, then delegates
 the actual byte transfer to the existing ``/api/pull`` endpoint
@@ -93,7 +93,7 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
     },
 )
 async def api_pull_smart(req: SmartPullRequest) -> StreamingResponse | JSONResponse:
-    """V4: pick the optimal Hub variant for this host and pull it.
+    """pick the optimal Hub variant for this host and pull it.
 
     Body:
 

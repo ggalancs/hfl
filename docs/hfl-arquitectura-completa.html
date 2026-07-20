@@ -117,7 +117,7 @@
   <h1>HFL — Arquitectura Completa</h1>
   <div class="subtitle">Run HuggingFace Models Locally Like Ollama</div>
   <div class="meta">
-    <span>v0.14.0</span>
+    <span>v0.15.0</span>
     <span>Python ≥3.10</span>
     <span>Licencia Apache-2.0</span>
     <span>Autor: Gabriel Galán Pelayo</span>
@@ -235,7 +235,7 @@
 ├── <span class="file">SECURITY.md</span>               <span class="desc">— Política de seguridad</span>
 │
 ├── <span class="dir">src/hfl/</span>                 <span class="desc">— CÓDIGO FUENTE PRINCIPAL</span>
-│   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.14.0)</span>
+│   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.15.0)</span>
 │   ├── <span class="file">config.py</span>            <span class="desc">— HFLConfig dataclass — configuración global</span>
 │   ├── <span class="file">exceptions.py</span>        <span class="desc">— Jerarquía completa de excepciones</span>
 │   ├── <span class="file">events.py</span>            <span class="desc">— EventBus para pub/sub interno</span>
@@ -363,7 +363,7 @@
 <section id="diagrama-arquitectura">
   <h2>4. Diagrama de Arquitectura General</h2>
   <div class="diagram-container">
-    <div class="diagram-title">Arquitectura de Alto Nivel — HFL v0.14.0</div>
+    <div class="diagram-title">Arquitectura de Alto Nivel — HFL v0.15.0</div>
     <svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1200px;margin:0 auto;display:block;">
       <!-- Background groups -->
       <!-- CLI Layer -->
@@ -591,7 +591,7 @@
   <h3>Funciones Auxiliares del CLI</h3>
   <p><code>_format_size()</code> convierte bytes a formato legible. <code>_get_key()</code> lee una tecla sin Enter (raw terminal). <code>_extract_params_from_name()</code> extrae parámetros del nombre (regex: "70b", "7b", "1.5b"). <code>_estimate_model_size()</code> estima tamaño en disco según parámetros y cuantización. <code>_display_model_row()</code> renderiza una fila de resultado de búsqueda. <code>_get_params_value()</code> extrae el valor numérico para filtrado.</p>
 <h3>Comandos nuevos (desde v0.1.0)</h3>
-  <p><strong>El fichero creció a ~2.350 líneas</strong> en <code>src/hfl/cli/main.py</code>. Se añadieron dos familias: comandos de paridad Ollama (drop-in) y los comandos V4 de descubrimiento/operación. Los imports perezosos mantienen un arranque barato; la mayoría de los comandos V4 ejecutan internamente una corrutina con <code>asyncio.run()</code>.</p>
+  <p><strong>El fichero creció a ~2.350 líneas</strong> en <code>src/hfl/cli/main.py</code>. Se añadieron dos familias: comandos de paridad Ollama (drop-in) y los comandos nativos del Hub de descubrimiento/operación. Los imports perezosos mantienen un arranque barato; la mayoría de estos comandos ejecutan internamente una corrutina con <code>asyncio.run()</code>.</p>
   <table>
     <tr><th>Comando</th><th>Descripción</th><th>Opciones clave</th></tr>
     <tr><td><code>hfl cp &lt;src&gt; &lt;dst&gt;</code></td><td>Clon de registro sin copia apuntando al mismo blob (compatible Ollama)</td><td>—</td></tr>
@@ -615,7 +615,7 @@
   </table>
   <p>El comando <code>serve</code> también ganó <code>--tray</code>/<code>--gui</code> (bandeja del sistema, ver la sección tray), <code>--log-level</code>, <code>--json-logs</code> y <code>--ctx</code>.</p>
   <div class="highlight highlight-warning">
-    <strong>Defecto conocido (v0.14.0):</strong> <code>compliance-report</code> aún codifica fijo <code>"hfl_version": "0.1.0"</code> en su salida JSON/Markdown en vez de leer <code>hfl.__version__</code> (ahora <code>0.14.0</code>).
+    <strong>Defecto conocido (v0.15.0):</strong> <code>compliance-report</code> aún codifica fijo <code>"hfl_version": "0.1.0"</code> en su salida JSON/Markdown en vez de leer <code>hfl.__version__</code> (ahora <code>0.15.0</code>).
   </div>
 </section>
 
@@ -637,7 +637,7 @@
     <div class="card">
       <h4>downloader.py — Descarga con Progreso</h4>
       <p>Función principal <code>pull_model(resolved)</code>. Para GGUF descarga archivo individual con <code>hf_hub_download()</code>. Para safetensors descarga snapshot completo con <code>snapshot_download()</code> filtrando: <code>*.safetensors</code>, <code>config.json</code>, <code>tokenizer*.json</code>, <code>tokenizer.model</code>.</p>
-      <p>Implementa rate limiting (0.5s entre llamadas API) y User-Agent identificativo (<code>hfl/0.14.0</code>) para cumplir con ToS de HuggingFace.</p>
+      <p>Implementa rate limiting (0.5s entre llamadas API) y User-Agent identificativo (<code>hfl/0.15.0</code>) para cumplir con ToS de HuggingFace.</p>
     </div>
 
     <div class="card">
@@ -653,7 +653,7 @@
       <p><code>check_model_license()</code> consulta la API de HF, clasifica el riesgo, y devuelve <code>LicenseInfo</code>. <code>require_user_acceptance()</code> presenta un panel Rich con la licencia y requiere confirmación explícita para licencias no permisivas.</p>
     </div>
   </div>
-<h3>7. Descubrimiento, Recomendación, Smart Pull y Push del Hub (V4)</h3>
+<h3>7. Descubrimiento, Recomendación, Smart Pull y Push del Hub</h3>
 <p>Más allá del <code>pull</code> básico, la capa Hub expone ahora el catálogo completo de HuggingFace (1,5M+ modelos con metadatos estructurados) como una superficie consultable y consciente del hardware. Cuatro endpoints de lectura/escritura se apoyan en módulos de planificación puros y sin red, de modo que las heurísticas son testeables sin acceso a internet.</p>
 
 <div class="grid-2">
@@ -877,7 +877,7 @@
   <tr><td><code>HFL_LLM_LIBRARY</code> / <code>OLLAMA_LLM_LIBRARY</code></td><td>Leídos por <code class="func">_resolve_forced_backend()</code>. Acepta <code>llama-cpp</code>, <code>transformers</code>, <code>vllm</code>, <code>mlx</code>; solo se aplica si el llamante pasó <code>backend="auto"</code> (una petición explícita por modelo siempre gana). Los valores no reconocidos registran un warning y vuelven a auto.</td></tr>
 </table>
 <p>GGUF permanece en llama-cpp en todos los casos — MLX no ingiere GGUF. <code class="func">_create_engine("mlx")</code> conecta la petición explícita <code>--backend mlx</code>.</p>
-<h3>Snapshots de KV-cache — arranque en caliente (snapshot.py, V4 F6)</h3>
+<h3>Snapshots de KV-cache — arranque en caliente (snapshot.py)</h3>
 <p>La mayoría de servidores reprocesan el prompt de sistema / prefijo few-shot en cada conversación nueva. <code>snapshot.py</code> expone <code class="func">Llama.save_state()</code> / <code class="func">load_state()</code> de llama-cpp-python como función de servidor: un operador puede capturar todo el KV-cache (tokens procesados + tensores) y restaurarlo para TTFT cero sobre el prefijo cacheado, incluso entre reinicios. Respalda <code>POST /api/snapshot/save</code>, <code>/load</code>, <code>GET /api/snapshot</code> y <code>DELETE /api/snapshot/{name}</code>.</p>
 <pre><code><span class="keyword">def</span> <span class="func">save_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...
 <span class="keyword">def</span> <span class="func">load_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...</code></pre>
@@ -888,7 +888,7 @@
   <div class="card"><div class="card-header"><span class="icon">💾</span><h4>Escritura atómica + nombre</h4></div><p>El <code>.state</code> se escribe en un hermano <code>.tmp</code> y se hace <code class="func">os.replace</code> para que un fallo no deje un blob truncado. <code class="func">_validate_name()</code> rechaza separadores de ruta / <code>..</code> / unicode extraño.</p></div>
 </div>
 <p><code class="func">save_snapshot</code>/<code class="func">load_snapshot</code> resuelven <code>save_state</code>/<code>load_state</code> en el engine directamente o en su <code>_model</code> interno; los engines sin esa API lanzan (los snapshots de KV son exclusivos de llama-cpp-python).</p>
-<h3>Decodificación especulativa (llama_cpp.py, V4 F5)</h3>
+<h3>Decodificación especulativa (llama_cpp.py)</h3>
 <p>El backend llama-cpp puede ejecutar un modelo borrador que propone tokens que el modelo objetivo verifica en una sola pasada. Se elige al cargar mediante el kwarg <code>draft_model_path</code> (proveniente de un Modelfile); <code class="cls">GenerationConfig</code> también lleva un campo <code>draft_model</code>. Dos modos comparten el kwarg:</p>
 <div class="grid-2">
   <div class="card">
@@ -901,7 +901,7 @@
   </div>
 </div>
 <p><code class="cls">_LlamaModelDraftAdapter</code> adapta un <code class="cls">Llama</code> normal al protocolo <code class="cls">LlamaDraftModel</code> (un Llama desnudo devuelve un dict de completion, no un array de token-ids). Es deliberadamente <em>incremental</em>: <code class="func">_align_and_eval_suffix()</code> halla el prefijo común más largo con los ids ya procesados y evalúa solo el sufijo, preservando el KV-cache del borrador entre pasos. Un reset ingenuo por llamada pagaría el prefill completo N veces y haría la especulación 2-3× <em>más lenta</em>; ante divergencia (petición nueva / predicciones rechazadas) resetea y reproduce. El Llama borrador se guarda en <code>self._draft_model</code> y se libera en <code class="func">unload()</code> para no duplicar VRAM en una carga posterior.</p>
-<h3>LoRA hot-swap y multi-LoRA (lora.py, V4 F4)</h3>
+<h3>LoRA hot-swap y multi-LoRA (lora.py)</h3>
 <p><code>lora.py</code> aplica / elimina adaptadores LoRA sobre un modelo en ejecución sin recargar los pesos base, respaldando <code>POST /api/lora/apply</code>, <code>/remove</code>, <code>GET /api/lora</code> y <code>/api/lora/{model}</code>. La superficie pública:</p>
 <pre><code><span class="keyword">def</span> <span class="func">apply_lora</span>(engine, *, lora_path, scale=<span class="string">1.0</span>, name=<span class="keyword">None</span>) -&gt; <span class="cls">AdapterInfo</span>
 <span class="keyword">def</span> <span class="func">remove_lora</span>(engine, adapter_id) -&gt; <span class="cls">bool</span>
@@ -962,7 +962,7 @@
 <p><span class="cls">InferenceDispatcher</span> (<code>hfl/engine/dispatcher.py</code>) es async-aware y se apoya en un <code>asyncio.Semaphore</code> cuya capacidad sigue exactamente a <code>max_inflight</code>. Todos los contadores mutan bajo un único <code>_counter_lock</code> para que las decisiones de la ruta rápida y la lenta observen una vista consistente.</p>
 <table>
 <tr><th>Parámetro</th><th>Por defecto</th><th>Config / env</th><th>Significado</th></tr>
-<tr><td><code>max_inflight</code></td><td>1</td><td><code>queue_max_inflight</code> &larr; <code>HFL_QUEUE_MAX_INFLIGHT</code> / <code>HFL_NUM_PARALLEL</code> / <code>OLLAMA_NUM_PARALLEL</code></td><td>Cuántas peticiones pueden ejecutarse a la vez. El valor 1 preserva el comportamiento single-flight de V1.</td></tr>
+<tr><td><code>max_inflight</code></td><td>1</td><td><code>queue_max_inflight</code> &larr; <code>HFL_QUEUE_MAX_INFLIGHT</code> / <code>HFL_NUM_PARALLEL</code> / <code>OLLAMA_NUM_PARALLEL</code></td><td>Cuántas peticiones pueden ejecutarse a la vez. El valor 1 preserva el comportamiento single-flight.</td></tr>
 <tr><td><code>max_queued</code></td><td>16</td><td><code>queue_max_size</code> &larr; <code>HFL_QUEUE_MAX_SIZE</code> / <code>HFL_MAX_QUEUE</code> / <code>OLLAMA_MAX_QUEUE</code></td><td>Cuántas <em>más</em> pueden esperar en cola. Si está llena, los nuevos llamantes se rechazan de inmediato.</td></tr>
 <tr><td><code>acquire_timeout</code></td><td>60 s</td><td><code>queue_acquire_timeout_seconds</code> &larr; <code>HFL_QUEUE_ACQUIRE_TIMEOUT</code></td><td>Tope de cuánto espera un llamante en cola por un slot antes de rendirse.</td></tr>
 </table>
@@ -1311,7 +1311,7 @@
   <div class="highlight highlight-info">
     <strong>Uso:</strong> Configurar idioma con <code>export HFL_LANG=es</code>. Todos los comandos CLI utilizan <code>t()</code> para sus mensajes, permitiendo cambiar el idioma sin modificar código.
   </div>
-<h3>Estado actual (v0.14.0)</h3>
+<h3>Estado actual (v0.15.0)</h3>
   <p>Siguen siendo exactamente dos locales — <code>en.json</code> y <code>es.json</code> — pero cada uno ha crecido a <strong>441 líneas (~294 claves hoja)</strong>, ya que cada comando nuevo (discover, recommend, bench, snapshot, lora, …) registra sus cadenas <code>commands.&lt;name&gt;.description</code> / ayuda de opciones a través de <code>t()</code> en tiempo de import. La resolución de idioma es <code>HFL_LANG</code> → locale del sistema (<code>LC_ALL</code>/<code>LC_MESSAGES</code>/<code>LANG</code>) → <code>en</code>. Una clave ausente cae a inglés y, en su defecto, devuelve la clave literal, de modo que una cadena sin traducir se degrada con elegancia en vez de tumbar el CLI.</p>
 </section>
 
@@ -1634,7 +1634,7 @@
     </div>
     <div class="card">
       <h4><span class="badge badge-purple">R8</span> ToS de HuggingFace</h4>
-      <p>Rate limiting (0.5s entre llamadas API). User-Agent identificativo (<code>hfl/0.14.0</code>). Respeto al sistema de gating: NO se bypasea la aceptación de licencias. El usuario debe aceptar en huggingface.co primero.</p>
+      <p>Rate limiting (0.5s entre llamadas API). User-Agent identificativo (<code>hfl/0.15.0</code>). Respeto al sistema de gating: NO se bypasea la aceptación de licencias. El usuario debe aceptar en huggingface.co primero.</p>
     </div>
     <div class="card">
       <h4><span class="badge badge-green">R9</span> Disclaimer AI</h4>
@@ -1863,7 +1863,7 @@
     <tr><td><code>test_server_lifecycle.py</code></td><td>Startup, shutdown, cleanup</td></tr>
   </table>
 
-  <h3>Tests Adicionales (v0.14.0)</h3>
+  <h3>Tests Adicionales (v0.15.0)</h3>
   <table>
     <tr><td>Signal handling CLI</td><td>Ctrl+C durante streaming preserva respuesta parcial</td></tr>
     <tr><td>Middleware order</td><td>Verifica orden correcto de ejecucion del middleware stack</td></tr>
@@ -1935,7 +1935,7 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
   <p><strong>Issue Templates:</strong> <code>bug_report.yml</code> (formulario estructurado con info de sistema, pasos para reproducir, logs) y <code>feature_request.yml</code> (problema, solución propuesta, componente afectado).</p>
   <p><strong>PR Template:</strong> Checklist que incluye verificación de los 5 Compliance Modules (licencia, provenance, disclaimer, privacidad, gating) como normas de uso responsable del proyecto.</p>
   <p><strong>Archivos de comunidad:</strong> <code>CONTRIBUTING.md</code> (guía de desarrollo, estilo de código, proceso de PR), <code>CODE_OF_CONDUCT.md</code> (Contributor Covenant v2.1), <code>SECURITY.md</code> (política de reporte de vulnerabilidades).</p>
-<h3>Workflows solo manuales (v0.14.0)</h3>
+<h3>Workflows solo manuales (v0.15.0)</h3>
   <p>Cada uno de los 14 workflows bajo <code>.github/workflows/</code> está ahora declarado <code>on: workflow_dispatch</code> — los disparadores automáticos <code>push</code> / <code>pull_request</code> / <code>schedule</code> / por tag se eliminaron deliberadamente. El propietario ejecuta cada pipeline a mano desde la pestaña Actions. <strong>No hay publicación automática</strong>: <code>publish-pypi.yml</code> tiene su disparador por tag eliminado y corre solo por dispatch manual (con un input <code>testpypi</code>), usando PyPI Trusted Publisher (OIDC, sin token almacenado) más una atestación Sigstore. <code>build-executables.yml</code> además conserva un disparador <code>release:</code> para subir artefactos.</p>
   <table>
     <tr><th>Workflow</th><th>Disparador</th><th>Qué ejecuta</th></tr>
@@ -1952,7 +1952,7 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
 
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
-  <p><strong>HFL v0.14.0</strong> — Documentación de Arquitectura Exhaustiva</p>
+  <p><strong>HFL v0.15.0</strong> — Documentación de Arquitectura Exhaustiva</p>
   <p>Actualizado el 19 de junio de 2026 — Todos los diagramas son SVG interactivos</p>
   <p>Licencia: Apache-2.0 — Copyright © 2026 Gabriel Galán Pelayo</p>
 </div>

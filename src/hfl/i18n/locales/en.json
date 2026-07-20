@@ -120,7 +120,7 @@
       }
     },
     "discover": {
-      "description": "V4: filter the HuggingFace Hub catalogue by capability and popularity.",
+      "description": "filter the HuggingFace Hub catalogue by capability and popularity.",
       "args": {
         "query": "Free-text query (optional)"
       },
@@ -137,7 +137,7 @@
       }
     },
     "recommend": {
-      "description": "V4: HW-aware top-N model recommendations.",
+      "description": "HW-aware top-N model recommendations.",
       "options": {
         "task": "Use case: chat / code / vision / embeddings / tools",
         "family": "Family filter",
@@ -146,7 +146,7 @@
       }
     },
     "lora": {
-      "description": "V4: hot-swap LoRA adapters on a loaded model.",
+      "description": "hot-swap LoRA adapters on a loaded model.",
       "args": {
         "action": "apply | remove | list",
         "model": "Loaded model name"
@@ -159,7 +159,7 @@
       }
     },
     "pull-smart": {
-      "description": "V4: pull the optimal Hub variant for the current hardware.",
+      "description": "pull the optimal Hub variant for the current hardware.",
       "args": {
         "model": "Base repo id"
       },
@@ -168,13 +168,13 @@
       }
     },
     "verify": {
-      "description": "V4: sanity-check a registered model.",
+      "description": "sanity-check a registered model.",
       "args": {
         "model": "Registered model name"
       }
     },
     "bench": {
-      "description": "V4: benchmark TTFT and tokens-per-second.",
+      "description": "benchmark TTFT and tokens-per-second.",
       "args": {
         "model": "Registered model name"
       },
@@ -185,7 +185,7 @@
       }
     },
     "snapshot": {
-      "description": "V4: KV cache snapshot save/restore.",
+      "description": "KV cache snapshot save/restore.",
       "args": {
         "action": "save | load | list | delete",
         "model": "Model (save/load only)"
@@ -195,10 +195,10 @@
       }
     },
     "compliance-dashboard": {
-      "description": "V4: license / EU AI Act compliance overview of the local registry."
+      "description": "license / EU AI Act compliance overview of the local registry."
     },
     "draft-recommend": {
-      "description": "V4: recommend a draft model for speculative decoding.",
+      "description": "recommend a draft model for speculative decoding.",
       "args": {
         "model": "Target repo id"
       },

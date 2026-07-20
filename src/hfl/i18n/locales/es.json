@@ -120,7 +120,7 @@
       }
     },
     "discover": {
-      "description": "V4: filtra el catálogo del HuggingFace Hub por capacidad y popularidad.",
+      "description": "filtra el catálogo del HuggingFace Hub por capacidad y popularidad.",
       "args": {
         "query": "Texto libre de búsqueda (opcional)"
       },
@@ -137,7 +137,7 @@
       }
     },
     "recommend": {
-      "description": "V4: recomendaciones top-N adaptadas al hardware.",
+      "description": "recomendaciones top-N adaptadas al hardware.",
       "options": {
         "task": "Caso de uso: chat / code / vision / embeddings / tools",
         "family": "Filtro de familia",
@@ -146,7 +146,7 @@
       }
     },
     "lora": {
-      "description": "V4: aplica/quita adaptadores LoRA en caliente sobre un modelo cargado.",
+      "description": "aplica/quita adaptadores LoRA en caliente sobre un modelo cargado.",
       "args": {
         "action": "apply | remove | list",
         "model": "Nombre del modelo cargado"
@@ -159,7 +159,7 @@
       }
     },
     "pull-smart": {
-      "description": "V4: descarga la mejor variante del Hub para el hardware actual.",
+      "description": "descarga la mejor variante del Hub para el hardware actual.",
       "args": {
         "model": "Repo base"
       },
@@ -168,13 +168,13 @@
       }
     },
     "verify": {
-      "description": "V4: verificación rápida de un modelo registrado.",
+      "description": "verificación rápida de un modelo registrado.",
       "args": {
         "model": "Nombre del modelo registrado"
       }
     },
     "bench": {
-      "description": "V4: benchmark de TTFT y tokens-por-segundo.",
+      "description": "benchmark de TTFT y tokens-por-segundo.",
       "args": {
         "model": "Nombre del modelo registrado"
       },
@@ -185,7 +185,7 @@
       }
     },
     "snapshot": {
-      "description": "V4: guarda/restaura snapshots de KV cache.",
+      "description": "guarda/restaura snapshots de KV cache.",
       "args": {
         "action": "save | load | list | delete",
         "model": "Modelo (solo save/load)"
@@ -195,10 +195,10 @@
       }
     },
     "compliance-dashboard": {
-      "description": "V4: panel de cumplimiento (licencias y EU AI Act) del registro local."
+      "description": "panel de cumplimiento (licencias y EU AI Act) del registro local."
     },
     "draft-recommend": {
-      "description": "V4: recomienda un modelo draft para decodificación especulativa.",
+      "description": "recomienda un modelo draft para decodificación especulativa.",
       "args": {
         "model": "Repo objetivo"
       },

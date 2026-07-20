@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""V4 F8 — ``GET /api/compliance/dashboard``.
+"""F8 — ``GET /api/compliance/dashboard``.
 
 Aggregates the local registry's metadata into a single envelope that
 Ollama cannot produce: per-license-risk breakdown, gated repos
@@ -103,7 +103,7 @@ def _build_compliance_dashboard() -> dict[str, Any]:
 @router.get(
     "/api/compliance/dashboard",
     response_model=None,
-    summary="Local-registry compliance overview (V4 F8)",
+    summary="Local-registry compliance overview",
     responses={200: {"description": "Compliance dashboard"}},
 )
 async def api_compliance_dashboard() -> dict[str, Any]:

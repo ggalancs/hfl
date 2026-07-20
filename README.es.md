@@ -27,15 +27,15 @@ Si quieres ejecutar un modelo que no está en el catálogo de Ollama — un fine
 | Multi-backend | solo llama.cpp | llama.cpp + Transformers + vLLM |
 | Verificación de licencia | No | Sí (5 niveles de riesgo) |
 | Trazabilidad legal | No | Sí (log de procedencia) |
-| Madurez | Alta (establecido) | Beta (v0.14.0) |
+| Madurez | Alta (establecido) | Beta (v0.15.0) |
 
 **HFL no compite con Ollama — lo complementa.** Usa Ollama para modelos curados; usa HFL cuando necesites algo del ecosistema completo de HuggingFace.
 
-## Novedades en V4
+## Novedades
 
-V4 (2026-05) incluye funciones que aprovechan la naturaleza HF-Hub-nativa de
-HFL — cosas que Ollama no puede tener estructuralmente por su modelo de
-registro curado:
+hfl incluye funciones nativas del Hub que aprovechan su naturaleza
+HuggingFace-Hub — cosas que Ollama no puede tener estructuralmente por su
+modelo de registro curado:
 
 - **`hfl discover`** — filtra el Hub de HF en vivo (2M+ modelos) por
   familia, quant, multimodal, licencia, popularidad. Marca lo que ya tienes
@@ -64,10 +64,9 @@ registro curado:
   2025 que usa `client.responses.create()`).
 - **WebSocket `/ws/chat`** — bidireccional con cancelación a nivel de frame (vs
   streaming HTTP donde cancelar = cerrar TCP).
-- **REST `POST /api/push`** — sube un modelo registrado al Hub de HF (cierra la
-  brecha "fuera de alcance" de V1/V2).
+- **REST `POST /api/push`** — sube un modelo registrado al Hub de HF.
 
-Consulta [docs/v4.md](docs/v4.md) para la guía V4 completa y
+Consulta [docs/hub-native-features.md](docs/hub-native-features.md) para la guía completa y
 [docs/env-vars.md](docs/env-vars.md) para la matriz de variables de entorno
 (cada knob `HFL_*` tiene un fallback `OLLAMA_*`, así que reemplazar una
 instalación de Ollama funciona sin releer la documentación).
@@ -512,7 +511,7 @@ Idiomas soportados: Inglés (`en`), Español (`es`)
 
 ## Limitaciones Conocidas
 
-Esta es una versión beta v0.14.x (`Development Status :: 4 - Beta`). Las limitaciones conocidas incluyen:
+Esta es una versión beta v0.15.x (`Development Status :: 4 - Beta`). Las limitaciones conocidas incluyen:
 
 - **Backend vLLM es experimental**: Implementación básica sin soporte completo de streaming
 - **CORS es restrictivo por defecto**: mismo-origen solamente; habilitar con `cors_allow_all` o `cors_origins` explícito

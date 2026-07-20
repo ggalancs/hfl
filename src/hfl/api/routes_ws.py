@@ -300,7 +300,7 @@ def _check_ws_auth_and_origin(ws: WebSocket) -> tuple[bool, str | None]:
 
 @router.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
-    """V4: bidirectional chat with cancellation.
+    """bidirectional chat with cancellation.
 
     The connection stays open across multiple chat turns; clients
     cancel a turn by sending ``{"type": "cancel"}`` mid-flight. A

@@ -1795,7 +1795,7 @@ def discover(
     page_size: int = typer.Option(20, "--limit", "-l", help=t("commands.discover.options.limit")),
     refresh: bool = typer.Option(False, "--refresh", help=t("commands.discover.options.refresh")),
 ):
-    """V4: filter the HuggingFace Hub catalogue by capability and popularity.
+    """filter the HuggingFace Hub catalogue by capability and popularity.
 
     Unlike Ollama's static registry, this hits the live Hub (~1.5M
     models) and combines filters: family + quantisation + likes +
@@ -1872,7 +1872,7 @@ def recommend(
     ),
     top_n: int = typer.Option(5, "--top", "-n", help=t("commands.recommend.options.top")),
 ):
-    """V4: HW-aware top-N model recommendations.
+    """HW-aware top-N model recommendations.
 
     Combines the Hub catalogue, your hardware profile (RAM, VRAM,
     MLX availability), and a capability/popularity score to pick
@@ -1945,7 +1945,7 @@ def lora_cmd(
     scale: float = typer.Option(1.0, "--scale", help=t("commands.lora.options.scale")),
     name: str | None = typer.Option(None, "--name", help=t("commands.lora.options.name")),
 ):
-    """V4: hot-swap LoRA adapters on a loaded model.
+    """hot-swap LoRA adapters on a loaded model.
 
     Examples::
 
@@ -2017,7 +2017,7 @@ def pull_smart_cmd(
         None, "--max-vram-gb", help=t("commands.pull-smart.options.max_vram_gb")
     ),
 ):
-    """V4: pull the optimal Hub variant for the current hardware.
+    """pull the optimal Hub variant for the current hardware.
 
     Inspects MLX / GGUF community forks, picks the best (repo, quant)
     pair that fits the host budget, and downloads it. On Apple
@@ -2074,7 +2074,7 @@ def pull_smart_cmd(
 def verify_cmd(
     model: str = typer.Argument(help=t("commands.verify.args.model")),
 ):
-    """V4: sanity-check a registered model.
+    """sanity-check a registered model.
 
     Runs five probes (tokenizer round-trip, chat-template render,
     smoke generation, tool-parser, embedding dim) and prints a pass/
@@ -2130,7 +2130,7 @@ def bench_cmd(
         "16,256,2048", "--lengths", help=t("commands.bench.options.lengths")
     ),
 ):
-    """V4: benchmark TTFT + tok/s on a registered model.
+    """benchmark TTFT + tok/s on a registered model.
 
     Streams per-run measurements and a final p50/p95 summary. Useful
     to validate that a freshly pulled model performs as expected on
@@ -2216,7 +2216,7 @@ def snapshot_cmd(
     model: str = typer.Argument(default="", help=t("commands.snapshot.args.model")),
     name: str = typer.Option("", "--name", help=t("commands.snapshot.options.name")),
 ):
-    """V4: KV cache snapshot save/restore.
+    """KV cache snapshot save/restore.
 
     Save a "warm" KV cache after loading a long system prompt or
     few-shot context, then restore it on the next server start to
@@ -2308,7 +2308,7 @@ def snapshot_cmd(
 
 @app.command(name="compliance-dashboard", help=t("commands.compliance-dashboard.description"))
 def compliance_dashboard_cmd():
-    """V4: license / EU AI Act compliance overview of the local registry.
+    """license / EU AI Act compliance overview of the local registry.
 
     Different from ``compliance-report`` (which produces a per-model
     Markdown audit trail) — this is the at-a-glance dashboard:
@@ -2362,7 +2362,7 @@ def draft_recommend_cmd(
         0.25, "--max-ratio", min=0.01, max=1.0, help=t("commands.draft-recommend.options.max_ratio")
     ),
 ):
-    """V4: recommend a draft model for speculative decoding.
+    """recommend a draft model for speculative decoding.
 
     Looks for a smaller sibling of the target on the HF Hub and
     falls back to the canonical small reference for the family

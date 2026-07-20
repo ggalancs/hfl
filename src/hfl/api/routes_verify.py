@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""V4 ``POST /api/verify/{model}`` — model sanity-check endpoint."""
+"""``POST /api/verify/{model}`` — model sanity-check endpoint."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ router = APIRouter(tags=["HFL Beyond"])
     },
 )
 async def api_verify(model: str) -> dict[str, Any]:
-    """Run V4 verification probes against ``model``.
+    """Run verification probes against ``model``.
 
     Output shape:
 

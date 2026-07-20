@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""V4 ``GET /api/discover`` — Hub-backed model catalogue.
+"""``GET /api/discover`` — Hub-backed model catalogue.
 
 Wraps :mod:`hfl.hub.discovery` with HTTP plumbing: query-string
 validation via FastAPI, on-disk cache lookup, registry join for
@@ -80,7 +80,7 @@ async def api_discover(
     page_size: int = Query(default=30, ge=1, le=100),
     refresh: bool = Query(default=False, description="Bypass the on-disk cache"),
 ) -> dict[str, Any]:
-    """V4: filter the HF Hub catalogue by capability/popularity.
+    """filter the HF Hub catalogue by capability/popularity.
 
     The endpoint is read-only and does not require authentication
     (gated repos still need ``HF_TOKEN`` to actually load — but

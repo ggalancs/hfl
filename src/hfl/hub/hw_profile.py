@@ -4,9 +4,9 @@
 
 Used by:
 
-- ``GET /api/recommend`` (V4 F1.2): pick top-N HF Hub models that
+- ``GET /api/recommend``: pick top-N HF Hub models that
   fit the current machine.
-- ``POST /api/pull/smart`` (V4 F2.1): pick the best variant of a
+- ``POST /api/pull/smart``: pick the best variant of a
   repo for the current machine.
 
 The probe is intentionally cheap (no GPU work, only metadata reads)
