@@ -93,6 +93,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: ${{ inputs.version != 'dev' }}
+    permissions:
+      contents: write  # required for softprops/action-gh-release to create the release
 
     steps:
       - name: Download all artifacts

@@ -40,8 +40,7 @@ jobs:
       - name: Build PyInstaller executable
         run: |
           pip install -e ".[llama]"
-          pyinstaller --onefile --name hfl --icon packaging\windows\hfl.ico ^
-                      src\hfl\cli\main.py
+          pyinstaller --onefile --name hfl --icon packaging\windows\hfl.ico --collect-data hfl src\hfl\cli\main.py
 
       - name: Derive version
         id: ver
