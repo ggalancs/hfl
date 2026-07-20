@@ -95,7 +95,7 @@ jobs:
           cache-to: type=gha,scope=hfl-amd64-${{ matrix.extras }},mode=max
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless)
         if: ${{ steps.build.outputs.digest != '' }}
@@ -156,7 +156,7 @@ jobs:
           cache-to: type=gha,scope=hfl-arm64-${{ matrix.extras }},mode=max
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless)
         if: ${{ steps.build.outputs.digest != '' }}
