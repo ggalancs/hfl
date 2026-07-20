@@ -43,24 +43,27 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    # Using ~= (compatible release) for stability: allows patch updates only
+    # Pinning strategy: floor at a known-good/security-patched version, cap
+    # before the next breaking boundary. Upper bounds widened (2026-07) to
+    # absorb the minor releases that shipped since 0.14.0 — see the Dependabot
+    # PRs — after a full-suite green run. Bump the cap deliberately, not with ~=.
     "typer>=0.15.0,<1.0",
-    "rich~=13.0",
+    "rich>=13.0,<16",
     # HFL targets huggingface_hub 1.x (the httpx-based generation).
     # Floor is >=1.5.0 because transformers 5.x requires it (its own
     # Requires-Dist is ``huggingface-hub>=1.5.0,<2.0``); a lower floor lets a
     # ``--no-deps`` / constraints-file resolution install a hub the convert
     # chain can't import. See ``test_dependency_pins.py`` for the static guard.
     "huggingface-hub>=1.5.0,<2.0",
-    "fastapi~=0.135.0",
+    "fastapi>=0.135.0,<0.140",
     # Floor at 1.3.1: 1.0.x–1.2.x carry CVE-2026-48817/48818/54282/54283 +
     # PYSEC-2026-161 (DoS / multipart). Cap at the next major; fastapi carries
     # the precise compatible range.
     "starlette>=1.3.1,<2.0",
     # Floor at 0.0.31: < 0.0.31 carries CVE-2026-42561/53538/53539/53540.
     "python-multipart>=0.0.31",
-    "uvicorn[standard]~=0.34.0",
-    "pydantic~=2.12.0",
+    "uvicorn[standard]>=0.34.0,<0.52",
+    "pydantic>=2.12.0,<2.14",
     "httpx~=0.28.0",
     "pyyaml~=6.0",
 ]
