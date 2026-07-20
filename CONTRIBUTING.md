@@ -81,3 +81,11 @@ license, and hfl exists to make that information visible — not to hide it.
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+
+### Dependency licenses
+
+hfl keeps its dependency tree permissively licensed — no copyleft
+(GPL/AGPL/LGPL). This is enforced automatically by the `license-check.yml` CI
+workflow (`pip-licenses --fail-on=GPL;AGPL;LGPL;…`), so a copyleft dependency
+fails the build. Before adding a dependency, check its license with
+`pip-licenses --format=table --with-urls`.
