@@ -11,13 +11,13 @@ Run HuggingFace models locally like Ollama.
 
 ## Why HFL?
 
-**Ollama has a curated catalog of ~500 models. HuggingFace Hub has 500,000+.**
+**Ollama has a curated catalog of ~200 models. HuggingFace Hub has 2M+.**
 
 If you want to run a model that isn't in Ollama's catalog — a specific fine-tune, a recent release from a small lab, a niche model — you have to manually download from HuggingFace, convert to GGUF with llama.cpp, quantize, and configure inference. **HFL automates all of this in a single command.**
 
 | Feature | Ollama | HFL |
 |---------|--------|-----|
-| Model catalog | ~500 curated | 500K+ (all HF Hub) |
+| Model catalog | ~200 curated | 2M+ (all HF Hub) |
 | Auto-conversion | Not needed (pre-converted) | Yes (safetensors→GGUF) |
 | Ease of use | Excellent | Good |
 | OpenAI API compatible | Yes | Yes |
@@ -37,7 +37,7 @@ V4 (2026-05) ships features that exploit HFL's HF-Hub-native nature
 — things Ollama can't structurally have because of its curated
 registry model:
 
-- **`hfl discover`** — filter the live HF Hub (1.5M+ models) by
+- **`hfl discover`** — filter the live HF Hub (2M+ models) by
   family, quant, multimodal, license, popularity. Marks what you
   already have locally.
 - **`hfl recommend`** — picks top-N models that *fit your hardware*
