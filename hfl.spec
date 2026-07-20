@@ -16,6 +16,12 @@ block_cipher = None
 rich_imports = collect_submodules('rich')
 rich_data = collect_data_files('rich')
 
+# Collect hfl's own package data — the i18n locale JSONs
+# (hfl/i18n/locales/*.json). The CLI loads them at startup via
+# ``Path(__file__).parent / "locales"``; without bundling them the frozen
+# binary crashes on every command with "Translation file not found".
+hfl_data = collect_data_files('hfl')
+
 # Detect platform
 is_windows = sys.platform == 'win32'
 is_macos = sys.platform == 'darwin'
@@ -80,7 +86,7 @@ hidden_imports = [
 ]
 
 # Additional data to include
-datas = rich_data
+datas = rich_data + hfl_data
 
 # Exclude heavy optional modules not needed for basic CLI
 excludes = [
