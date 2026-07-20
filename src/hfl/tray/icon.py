@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from hfl import __version__
 from hfl.tray.controller import ServerStatus, TrayServerController
 
 if TYPE_CHECKING:
@@ -110,6 +111,7 @@ def _build_menu(controller: TrayServerController) -> Any:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(status_text, None, enabled=False),
         pystray.MenuItem(url_text, None, enabled=False),
+        pystray.MenuItem(f"HFL v{__version__}", None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Exit", on_exit),
     )

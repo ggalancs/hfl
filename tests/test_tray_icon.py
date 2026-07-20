@@ -66,8 +66,8 @@ class TestBuildMenu:
         menu = _build_menu(ctrl)
         # pystray.Menu items are accessible
         items = list(menu)
-        # Should have: Start, Stop, separator, Status, URL, separator, Exit
-        assert len(items) == 7
+        # Should have: Start, Stop, separator, Status, URL, Version, separator, Exit
+        assert len(items) == 8
 
     def test_start_enabled_when_stopped(self):
         from hfl.tray.icon import _build_menu
@@ -152,6 +152,18 @@ class TestBuildMenu:
         url_item = items[4]
         assert url_item.text == "http://0.0.0.0:8080"
 
+    def test_version_item_shows_version(self):
+        from hfl import __version__
+        from hfl.tray.icon import _build_menu
+
+        ctrl = TrayServerController()
+        menu = _build_menu(ctrl)
+        items = list(menu)
+        version_item = items[5]
+        assert version_item.text == f"HFL v{__version__}"
+        # Informational only — must not be clickable.
+        assert version_item.enabled is False
+
 
 class TestMenuCallbacks:
     """Test menu callback behavior."""
@@ -201,7 +213,7 @@ class TestMenuCallbacks:
 
         menu = _build_menu(ctrl)
         items = list(menu)
-        exit_item = items[6]
+        exit_item = items[7]
 
         mock_icon = MagicMock()
         exit_item(mock_icon)
