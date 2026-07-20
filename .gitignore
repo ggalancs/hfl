@@ -64,3 +64,8 @@ ARCHITECTURE_IMPROVEMENT_PLAN*.md
 OLLAMA_PARITY_PLAN*.md
 local/
 coverage.json
+
+# Claude Code (local agent tooling — not part of the project)
+CLAUDE.md
+.claude/
+RELICENSE-VERIFICATION.md
