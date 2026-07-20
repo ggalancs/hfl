@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-07-20
+
+### Fixed
+
+- **Artifact builds repaired.** The Windows-MSI and macOS-DMG workflows built
+  the frozen binary with a bare `pyinstaller --onefile ... main.py` (not
+  `hfl.spec`), so the i18n locale JSONs were never bundled and the binary
+  crashed on startup — fixed with `--collect-data hfl`. The Windows step also
+  used a cmd `^` line-continuation under PowerShell (`Script file '^' does not
+  exist`), now a single line. The `build-executables` release job lacked
+  `contents: write`, so it 403'd creating the GitHub Release. The Docker
+  workflow referenced the non-existent `sigstore/cosign-installer@v4` (pinned
+  to `@v3`).
+
+### Changed
+
+- Dropped the "V4" feature-generation label from the README, architecture
+  docs, CLI `--help` and OpenAPI summaries — its number clashed with the
+  package's semver (0.15.x). Aligned all version stamps to the current release.
+- Removed `LICENSE-DEPENDENCIES.md` (a stale, manually-maintained dependency
+  table that duplicated the automated `license-check.yml` gate and listed a
+  phantom `sse-starlette`). The no-copyleft policy is documented in
+  `CONTRIBUTING.md` and enforced in CI.
+
 ## [0.15.0] - 2026-07-20
 
 ### Added
