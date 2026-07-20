@@ -117,12 +117,12 @@
   <h1>HFL — Complete Architecture</h1>
   <div class="subtitle">Run HuggingFace Models Locally Like Ollama</div>
   <div class="meta">
-    <span>v0.1.0</span>
+    <span>v0.14.0</span>
     <span>Python >=3.10</span>
-    <span>License HRUL-1.0</span>
+    <span>License Apache-2.0</span>
     <span>Author: Gabriel Galan Pelayo</span>
     <span>Build: Hatchling</span>
-    <span>1900 tests | 90%+ coverage</span>
+    <span>3,537 tests | ~89% coverage</span>
   </div>
 </div>
 
@@ -139,9 +139,13 @@
     <a href="#hub">Module hub — HuggingFace Integration</a>
     <a href="#models">Module models — Data and Registry</a>
     <a href="#engine">Module engine — Inference Engines</a>
+    <a href="#core">Core — Concurrency, Dispatcher & Sessions</a>
     <a href="#converter">Module converter — Format Conversion</a>
     <a href="#api">Module api — REST Server</a>
     <a href="#i18n">Module i18n — Internationalization</a>
+    <a href="#tray">Module tray — System Tray</a>
+    <a href="#observability">Observability — Metrics, Signing & Audit</a>
+    <a href="#tools-mcp">Modules tools & mcp</a>
     <a href="#exceptions">Exception Hierarchy</a>
     <a href="#flujo-pull">Complete Flow: hfl pull</a>
     <a href="#flujo-run">Complete Flow: hfl run</a>
@@ -218,21 +222,21 @@
 <pre><span class="dir">hfl/</span>
 ├── <span class="file">pyproject.toml</span>           <span class="desc">— Package definition, deps, scripts, tools</span>
 ├── <span class="file">hfl.spec</span>                 <span class="desc">— PyInstaller spec for standalone executable</span>
-├── <span class="file">LICENSE</span>                  <span class="desc">— HRUL v1.0 (custom license)</span>
+├── <span class="file">LICENSE</span>                  <span class="desc">— Apache-2.0</span>
 ├── <span class="file">LICENSE-DEPENDENCIES.md</span>  <span class="desc">— Licenses of all dependencies</span>
 ├── <span class="file">PRIVACY.md</span>               <span class="desc">— Privacy policy</span>
 ├── <span class="file">NOTICE-EU-AI-ACT.md</span>     <span class="desc">— EU AI Act compliance</span>
 ├── <span class="file">DISCLAIMER.md</span>            <span class="desc">— Liability disclaimer</span>
 ├── <span class="file">README.md</span>                <span class="desc">— Main documentation</span>
 ├── <span class="file">README.es.md</span>             <span class="desc">— Main documentation (Spanish)</span>
-├── <span class="file">LICENSE-FAQ.md</span>            <span class="desc">— License FAQ for HRUL</span>
+├── <span class="file">LICENSE-FAQ.md</span>            <span class="desc">— License notice</span>
 ├── <span class="file">CONTRIBUTING.md</span>           <span class="desc">— Contributing guide</span>
 ├── <span class="file">CODE_OF_CONDUCT.md</span>        <span class="desc">— Code of Conduct (Contributor Covenant 2.1)</span>
 ├── <span class="file">CHANGELOG.md</span>              <span class="desc">— Changelog (Keep a Changelog format)</span>
 ├── <span class="file">SECURITY.md</span>               <span class="desc">— Security policy</span>
 │
 ├── <span class="dir">src/hfl/</span>                 <span class="desc">— MAIN SOURCE CODE</span>
-│   ├── <span class="file">__init__.py</span>          <span class="desc">— Package version (0.1.0)</span>
+│   ├── <span class="file">__init__.py</span>          <span class="desc">— Package version (0.14.0)</span>
 │   ├── <span class="file">config.py</span>            <span class="desc">— HFLConfig dataclass — global configuration</span>
 │   ├── <span class="file">exceptions.py</span>        <span class="desc">— Complete exception hierarchy</span>
 │   ├── <span class="file">events.py</span>            <span class="desc">— EventBus for internal pub/sub</span>
@@ -330,7 +334,7 @@
 │   │   └── <span class="file">0006-rate-limiting-strategy.md</span>
 │   └── <span class="file">*.html</span>               <span class="desc">— Architecture documentation</span>
 │
-└── <span class="dir">tests/</span>                   <span class="desc">— TEST SUITE (80+ files, 90%+ coverage)</span>
+└── <span class="dir">tests/</span>                   <span class="desc">— TEST SUITE (~200 files, ~89% coverage)</span>
     ├── <span class="file">conftest.py</span>          <span class="desc">— Shared fixtures</span>
     ├── <span class="file">test_api*.py</span>         <span class="desc">— API tests (5 files)</span>
     ├── <span class="file">test_cli*.py</span>         <span class="desc">— CLI tests (4 files)</span>
@@ -360,7 +364,7 @@
 <section id="diagrama-arquitectura">
   <h2>4. General Architecture Diagram</h2>
   <div class="diagram-container">
-    <div class="diagram-title">High-Level Architecture — HFL v0.1.0</div>
+    <div class="diagram-title">High-Level Architecture — HFL v0.14.0</div>
     <svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1200px;margin:0 auto;display:block;">
       <!-- Background groups -->
       <!-- CLI Layer -->
@@ -519,7 +523,7 @@
     <tr><td><code>llama_cpp_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/tools/llama.cpp</code></td><td>—</td><td>Compiled conversion tools</td></tr>
     <tr><td><code>host</code></td><td>str</td><td><code>127.0.0.1</code></td><td><code>HFL_HOST</code></td><td>API server address</td></tr>
     <tr><td><code>port</code></td><td>int</td><td><code>11434</code></td><td><code>HFL_PORT</code></td><td>Port (same as Ollama for compatibility)</td></tr>
-    <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>4096</code></td><td>—</td><td>Default context tokens</td></tr>
+    <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>0</code> (auto-detect)</td><td><code>HFL_DEFAULT_CTX_SIZE</code></td><td>Default n_ctx; <code>0</code> = auto-detect from GGUF metadata</td></tr>
     <tr><td><code>default_n_gpu_layers</code></td><td>int</td><td><code>-1</code></td><td>—</td><td>GPU layers (-1 = all)</td></tr>
     <tr><td><code>rate_limit_enabled</code></td><td>bool</td><td><code>true</code></td><td><code>HFL_RATE_LIMIT_ENABLED</code></td><td>Enable/disable rate limiting</td></tr>
     <tr><td><code>rate_limit_requests</code></td><td>int</td><td><code>60</code></td><td><code>HFL_RATE_LIMIT_REQUESTS</code></td><td>Max requests per window</td></tr>
@@ -534,13 +538,36 @@
   <div class="highlight highlight-legal">
     <strong>Privacy (R6):</strong> The <code>hf_token</code> is read ONLY from the environment variable. It is never persisted to disk, never saved to models.json or any configuration file. It exists only in memory during process execution.
   </div>
+<h3>New Environment Knobs (since v0.1.0)</h3>
+  <p>Resolution rule for every row: <strong>HFL-specific name → HFL alias → Ollama-equivalent → default</strong>. So a host that already exports Ollama vars works as a drop-in replacement. An invalid value is logged once and ignored — boot never fails on operator misconfiguration. Full reference: <code>docs/env-vars.md</code>.</p>
+  <table>
+    <tr><th>HFL</th><th>Ollama alias</th><th>Default</th><th>What it does</th></tr>
+    <tr><td><code>OLLAMA_HOST</code> / <code>OLLAMA_PORT</code></td><td>(native)</td><td>—</td><td>Accepted for <code>host</code>/<code>port</code>: <code>OLLAMA_HOST</code> parses <code>host</code>, <code>host:port</code> or <code>:port</code> (<code>_parse_ollama_host_env</code>).</td></tr>
+    <tr><td><code>HFL_LLM_LIBRARY</code></td><td><code>OLLAMA_LLM_LIBRARY</code></td><td>(auto)</td><td>Pin backend: <code>llama-cpp</code>, <code>transformers</code>, <code>vllm</code>, <code>mlx</code>. Per-call <code>backend=</code> still wins.</td></tr>
+    <tr><td><code>HFL_FLASH_ATTENTION</code></td><td><code>OLLAMA_FLASH_ATTENTION</code></td><td>(auto)</td><td>Toggle flash-attention fleet-wide; per-arch safety list still rejects unsafe arches.</td></tr>
+    <tr><td><code>HFL_DISABLE_MLX</code></td><td>—</td><td><code>0</code></td><td>Forces the llama-cpp Metal path on Apple Silicon (benchmarking).</td></tr>
+    <tr><td><code>HFL_KV_CACHE_TYPE</code></td><td><code>OLLAMA_KV_CACHE_TYPE</code></td><td><code>f16</code></td><td>KV-cache dtype: <code>f16</code> / <code>q8_0</code> / <code>q4_0</code> (halves / quarters VRAM).</td></tr>
+    <tr><td><code>HFL_NUM_PARALLEL</code> / <code>HFL_QUEUE_MAX_INFLIGHT</code></td><td><code>OLLAMA_NUM_PARALLEL</code></td><td><code>1</code></td><td>Concurrent inference slots in the dispatcher.</td></tr>
+    <tr><td><code>HFL_MAX_QUEUE</code> / <code>HFL_QUEUE_MAX_SIZE</code></td><td><code>OLLAMA_MAX_QUEUE</code></td><td><code>16</code></td><td>Wait-queue depth; over it requests get 429.</td></tr>
+    <tr><td><code>HFL_QUEUE_ACQUIRE_TIMEOUT</code></td><td>—</td><td><code>60</code></td><td>Seconds a caller waits for a slot before 503.</td></tr>
+    <tr><td><code>HFL_KEEP_ALIVE</code></td><td><code>OLLAMA_KEEP_ALIVE</code></td><td><code>5m</code></td><td>Default keep-alive when a request omits the field (Ollama duration grammar; <code>-1</code>=never).</td></tr>
+    <tr><td><code>HFL_ORIGINS</code></td><td><code>OLLAMA_ORIGINS</code></td><td>(same-origin)</td><td>Comma-separated CORS allow-list; <code>*</code> flips wildcard mode (rejects credentials).</td></tr>
+    <tr><td><code>HFL_DEBUG</code></td><td><code>OLLAMA_DEBUG</code></td><td>(off)</td><td>Truthy forces the <code>hfl</code> root logger to DEBUG.</td></tr>
+    <tr><td><code>HFL_MAX_REQUEST_BYTES</code></td><td>—</td><td><code>10 MiB</code></td><td>Cap on request body (<code>0</code> disables). Blob uploads use <code>HFL_MAX_BLOB_BYTES</code> (default unlimited).</td></tr>
+    <tr><td><code>HFL_STREAM_QUEUE_PUT/GET_TIMEOUT</code></td><td>—</td><td><code>60</code>/<code>30</code></td><td>Streaming backpressure timeouts (engine enqueue / consumer wait).</td></tr>
+    <tr><td><code>HFL_REGISTRY_SQLITE_TIMEOUT</code></td><td>—</td><td><code>30</code></td><td>SQLite registry busy-timeout in seconds.</td></tr>
+    <tr><td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td><td>—</td><td>(off)</td><td>Standard OpenTelemetry env; HFL emits spans when set (extra <code>[otel]</code>).</td></tr>
+  </table>
+  <div class="highlight highlight-info">
+    <strong>CORS guard:</strong> <code>HFLConfig.__post_init__</code> rejects the wildcard-origin + <code>allow_credentials</code> combination at construction time, so the misconfiguration surfaces on boot rather than after hours of broken CORS.
+  </div>
 </section>
 
 <!-- ========== 6. CLI ========== -->
 <section id="cli">
   <h2>6. Module cli — Command Line Interface</h2>
   <div class="card">
-    <p><strong>File:</strong> <code>src/hfl/cli/main.py</code> (~870 lines)</p>
+    <p><strong>File:</strong> <code>src/hfl/cli/main.py</code> (~2,350 lines)</p>
     <p><strong>Framework:</strong> Typer + Rich. Entry point registered in pyproject.toml as <code>hfl = "hfl.cli.main:app"</code></p>
   </div>
 
@@ -566,6 +593,33 @@
 
   <h3>CLI Helper Functions</h3>
   <p><code>_format_size()</code> converts bytes to readable format. <code>_get_key()</code> reads a key without Enter (raw terminal). <code>_extract_params_from_name()</code> extracts parameters from name (regex: "70b", "7b", "1.5b"). <code>_estimate_model_size()</code> estimates disk size based on parameters and quantization. <code>_display_model_row()</code> renders a search result row. <code>_get_params_value()</code> extracts numeric value for filtering.</p>
+<h3>New Commands (since v0.1.0)</h3>
+  <p><strong>File grew to ~2,350 lines</strong> in <code>src/hfl/cli/main.py</code>. Two families were added: drop-in Ollama-parity commands and the V4 discovery/ops commands. Lazy imports keep startup cheap; most V4 commands run an <code>asyncio.run()</code> coroutine internally.</p>
+  <table>
+    <tr><th>Command</th><th>Description</th><th>Key Options</th></tr>
+    <tr><td><code>hfl cp &lt;src&gt; &lt;dst&gt;</code></td><td>Zero-copy registry clone pointing at the same blob (Ollama-compatible)</td><td>—</td></tr>
+    <tr><td><code>hfl stop [model]</code></td><td>Unload a model (or all) on a running server via <code>POST /api/stop</code></td><td><code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl show &lt;model&gt;</code></td><td>Ollama-style summary: arch, params, capabilities, license</td><td><code>--modelfile</code>, <code>--parameters</code>, <code>--template</code>, <code>--license</code></td></tr>
+    <tr><td><code>hfl ps</code></td><td>List models resident in memory via <code>/api/ps</code> (NAME/ID/SIZE/PROCESSOR/UNTIL)</td><td><code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl create &lt;model&gt;</code></td><td>Build a model from a Modelfile; streams NDJSON from <code>POST /api/create</code></td><td><code>--file</code>, <code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl mcp &lt;action&gt;</code></td><td>Model Context Protocol: connect / disconnect / list / serve (stdio or sse)</td><td><code>--transport</code>, <code>--host</code>, <code>--port</code>, <code>--capabilities</code></td></tr>
+    <tr><td><code>hfl doctor</code></td><td>Diagnose accelerators (NVIDIA/Metal/ROCm), installed extras, VRAM + recommended <code>num_ctx</code></td><td>—</td></tr>
+    <tr><td><code>hfl check</code></td><td>Backend availability (llama-cpp / transformers / vllm / mlx), GPU, TTS deps</td><td>—</td></tr>
+    <tr><td><code>hfl debug</code></td><td>System / dependency versions / GPU / memory dump for bug reports</td><td>—</td></tr>
+    <tr><td><code>hfl discover [query]</code></td><td>Filter the live HF Hub catalogue by capability + popularity (5-min disk cache)</td><td><code>--family</code>, <code>--task</code>, <code>--quant</code>, <code>--multimodal</code>, <code>--min-likes</code>, <code>--license</code>, <code>--gated/--open</code>, <code>--refresh</code></td></tr>
+    <tr><td><code>hfl recommend</code></td><td>HW-aware top-N picks (RAM/VRAM/MLX profile + capability score)</td><td><code>--task</code>, <code>--family</code>, <code>--quant</code>, <code>--top</code></td></tr>
+    <tr><td><code>hfl pull-smart &lt;model&gt;</code></td><td>Pull the optimal Hub variant for this hardware (MLX 4-bit / GGUF quant / CPU fallback)</td><td><code>--max-vram-gb</code></td></tr>
+    <tr><td><code>hfl verify &lt;model&gt;</code></td><td>5-probe sanity check: tokenizer round-trip, chat-template, smoke gen, tool-parser, embed dim</td><td>—</td></tr>
+    <tr><td><code>hfl bench &lt;model&gt;</code></td><td>Benchmark TTFT + tok/s with p50/p95 summary</td><td><code>--runs</code>, <code>--max-tokens</code>, <code>--lengths</code></td></tr>
+    <tr><td><code>hfl snapshot &lt;action&gt;</code></td><td>KV-cache snapshot save / load / list / delete (skip prefill on restart)</td><td><code>--name</code></td></tr>
+    <tr><td><code>hfl lora &lt;action&gt;</code></td><td>Hot-swap LoRA adapters on a loaded model (apply / remove / list)</td><td><code>--path</code>, <code>--id</code>, <code>--scale</code>, <code>--name</code></td></tr>
+    <tr><td><code>hfl draft-recommend &lt;model&gt;</code></td><td>Pick a draft model for speculative decoding</td><td><code>--max-ratio</code></td></tr>
+    <tr><td><code>hfl compliance-dashboard</code></td><td>At-a-glance license / EU AI Act risk overview of the local registry</td><td>—</td></tr>
+  </table>
+  <p>The <code>serve</code> command also gained <code>--tray</code>/<code>--gui</code> (system tray, see the tray section), <code>--log-level</code>, <code>--json-logs</code> and <code>--ctx</code>.</p>
+  <div class="highlight highlight-warning">
+    <strong>Known defect (v0.14.0):</strong> <code>compliance-report</code> still hard-codes <code>"hfl_version": "0.1.0"</code> in its JSON/Markdown output instead of reading <code>hfl.__version__</code> (now <code>0.14.0</code>).
+  </div>
 </section>
 
 <!-- ========== 7. HUB ========== -->
@@ -586,7 +640,7 @@
     <div class="card">
       <h4>downloader.py — Download with Progress</h4>
       <p>Main function <code>pull_model(resolved)</code>. For GGUF downloads individual file with <code>hf_hub_download()</code>. For safetensors downloads complete snapshot with <code>snapshot_download()</code> filtering: <code>*.safetensors</code>, <code>config.json</code>, <code>tokenizer*.json</code>, <code>tokenizer.model</code>.</p>
-      <p>Implements rate limiting (0.5s between API calls) and identifying User-Agent (<code>hfl/0.1.0</code>) to comply with HuggingFace ToS.</p>
+      <p>Implements rate limiting (0.5s between API calls) and identifying User-Agent (<code>hfl/0.14.0</code>) to comply with HuggingFace ToS.</p>
     </div>
 
     <div class="card">
@@ -602,6 +656,46 @@
       <p><code>check_model_license()</code> queries HF API, classifies risk, and returns <code>LicenseInfo</code>. <code>require_user_acceptance()</code> presents a Rich panel with the license and requires explicit confirmation for non-permissive licenses.</p>
     </div>
   </div>
+<h3>7. Hub Discovery, Recommendation, Smart Pull &amp; Push (V4)</h3>
+<p>Beyond plain <code>pull</code>, the Hub layer now exposes the full HuggingFace catalogue (1.5M+ models with structured metadata) as a queryable, hardware-aware surface. Four read/write endpoints sit on top of pure, network-free planning modules so the heuristics are unit-testable without the network.</p>
+
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🔎</span><h4>GET /api/discover</h4></div>
+  <p>Backed by <code>hfl/hub/discovery.py</code>. <span class="func">search_hub()</span> queries <code>HfApi.list_models</code> (over-fetching <code>page_size&nbsp;&times;&nbsp;3</code>, sorted by downloads) and reshapes each <span class="cls">ModelInfo</span> into a typed <span class="cls">DiscoveryEntry</span>: family (<code>llama/qwen/gemma/mistral/mixtral/phi/yi/falcon/deepseek/command-r</code>), quantization (<code>gguf/awq/gptq/mlx/exl2/fp8/int4/int8</code>), multimodal flag, and a best-effort <code>parameter_estimate_b</code> parsed from the repo id. HFL-specific post-filters (likes, downloads, family, quant, gated, license) run in Python because the Hub filter grammar can't express them.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">🧠</span><h4>GET /api/recommend</h4></div>
+  <p>Backed by <code>hfl/hub/recommend.py</code>. <span class="func">recommend_models()</span> blends four deterministic scores — <code>hardware_fit&nbsp;0.45</code>, <code>capability_fit&nbsp;0.30</code>, <code>popularity&nbsp;0.20</code>, <code>recency&nbsp;0.05</code> — over a discovery query (page 60, <code>min_likes&nbsp;10</code>). Candidates that overflow the memory budget score 0 and are dropped before sorting. The HTTP response always carries the <code>hardware_profile</code> so the client can explain the picks.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">🎯</span><h4>POST /api/pull/smart</h4></div>
+  <p>Backed by <code>hfl/hub/smart_pull.py</code>. <span class="func">build_smart_plan()</span> resolves a <em>base</em> repo to the best available variant for the host, probing community forks in order, intersecting the GGUF quant ladder with the files actually published, and returning the first <code>(repo, quant)</code> that fits the budget as a <span class="cls">SmartPullPlan</span>. The route streams a <code>planning</code> &rarr; <code>planned</code> NDJSON preface, then delegates byte transfer to the existing pull machinery via <span class="func">iter_pull_events()</span>.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">⬆️</span><h4>POST /api/push</h4></div>
+  <p>Backed by <code>hfl/hub/uploader.py</code> + <code>routes_push.py</code>. <span class="func">build_upload_plan()</span> (pure) resolves a local manifest to an <span class="cls">UploadPlan</span>; <span class="func">stream_push()</span> drives <code>HfApi.create_repo(exist_ok=True)</code> + <code>upload_folder</code> and yields NDJSON mirroring <code>/api/pull</code>. Ollama clients may pass <code>name</code> as an alias for <code>destination</code>.</p></div>
+</div>
+
+<h4>Hardware probing &amp; VRAM budgets</h4>
+<p><code>hfl/hub/hw_profile.py</code> builds a cheap, metadata-only <span class="cls">HardwareProfile</span> (no GPU work). Memory budgets used by both <code>recommend</code> and <code>smart_pull</code>:</p>
+<table>
+<tr><th>Host</th><th>Detection</th><th>Budget</th></tr>
+<tr><td>CUDA</td><td><code>torch.cuda.is_available()</code>; largest visible device via <code>get_device_properties</code></td><td>full GPU VRAM</td></tr>
+<tr><td>Apple Silicon (Metal)</td><td>Darwin + arm64 + <code>mlx_lm</code> importable (<code>has_mlx</code>)</td><td>70% of unified RAM</td></tr>
+<tr><td>ROCm</td><td><code>HIP_VISIBLE_DEVICES</code> / <code>ROCM_PATH</code> env</td><td>not probed (None)</td></tr>
+<tr><td>CPU-only / unknown</td><td>fallthrough</td><td>70% of system RAM (psutil)</td></tr>
+</table>
+<p><code>hfl/hub/quant_table.py</code> turns <code>(params_b, quantization)</code> into a conservative <span class="cls">FitEstimate</span> = (weights + 4k-context KV cache + 1.0&nbsp;GB overhead) &times; 1.2 safety. Bits-per-weight are tabulated per quant (<code>q4_k_m&rarr;4.85</code>, <code>q8_0&rarr;8.5</code>, <code>mlx-4bit&rarr;4.5</code>, …); layer counts and KV hidden dims are bucketed by size, with Qwen 3, Gemma 2 and Mixtral-8x7B (effective) added to close the original Llama-only gap.</p>
+
+<h4>Smart-pull candidate order</h4>
+<p><span class="func">_candidate_repos()</span> generates, most-specific-first:</p>
+<div class="flow"><span class="flow-step">mlx-community/&lt;name&gt;-4bit</span><span class="flow-arrow">→</span><span class="flow-step">-8bit</span><span class="flow-arrow">→</span><span class="flow-step">bartowski/&lt;name&gt;-GGUF</span><span class="flow-arrow">→</span><span class="flow-step">TheBloke/&lt;name&gt;-GGUF</span><span class="flow-arrow">→</span><span class="flow-step">base repo</span></div>
+<p>The MLX legs only appear when <code>has_mlx</code> is true. The quant ladder is <code>["mlx-8bit","mlx-4bit","q5_k_m","q4_k_m"]</code> on Apple Silicon, else <code>["q5_k_m","q4_k_m","q4_0","q3_k_m"]</code>; rejected probes are recorded in <code>fallback_chain</code> and surfaced verbatim. When nothing fits, <span class="func">build_smart_plan()</span> raises <span class="cls">ValueError</span> (mapped to a 400 with a "try --max-vram-gb or a smaller repo" hint).</p>
+
+<pre><code><span class="comment"># POST /api/pull/smart — Apple Silicon, 16 GB unified</span>
+{<span class="string">"status"</span>: <span class="string">"planned"</span>, <span class="string">"target_repo_id"</span>: <span class="string">"mlx-community/Llama-3.1-8B-Instruct-4bit"</span>,
+ <span class="string">"quantization"</span>: <span class="string">"mlx-4bit"</span>, <span class="string">"estimated_vram_gb"</span>: 6.3,
+ <span class="string">"reason"</span>: <span class="string">"picked mlx-community/... @ mlx-4bit (6.3 GB / 11.2 GB budget)"</span>}</code></pre>
+
+<h4>Discovery cache &amp; security</h4>
+<p><span class="cls">DiscoveryCache</span> (<code>HFL_HOME/cache/discovery.json</code>) keys on the JSON-serialised query, TTL 300s, bounded to the 32 most-recent keys, with atomic temp-file writes and corrupt-file reset — it exists to dodge the Hub's unauthenticated 429s on chained CLI calls. On the push side, <span class="func">redact_secrets()</span> strips anything matching <code>hf_[A-Za-z0-9]{20,}</code> from both logs and client-facing error events, and the upload is scoped to <code>allow_patterns</code> = exactly the planned files — critical because a blob-backed model (<code>FROM sha256:&lt;digest&gt;</code>) has its <code>local_dir</code> pointing at the shared <code>blobs/</code> store, so an unscoped <code>upload_folder</code> would exfiltrate every other model's bytes.</p>
 </section>
 
 <!-- ========== 8. MODELS ========== -->
@@ -628,6 +722,32 @@
 
   <h3>ProvenanceLog (provenance.py)</h3>
   <p>Immutable conversion log in <code>~/.hfl/provenance.json</code>. Each <code>ConversionRecord</code> documents: source (repo, format, revision), destination (format, path, quantization), tool used (llama.cpp + version), original license, and timestamps. Serves for legal traceability and compliance audit (R3).</p>
+<h3>8. Registry, Manifest, Provenance &amp; Capabilities (current state)</h3>
+<p>The model layer hardened and widened considerably. The on-disk registry gained concurrency safety; the manifest absorbed Modelfile-derived and legal fields; and a dedicated module now computes Ollama-style capabilities.</p>
+
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🗄️</span><h4>ModelRegistry</h4></div>
+  <p><code>hfl/models/registry.py</code> is now thread-safe (<span class="cls">RLock</span>) and multi-process-safe via cross-platform file locking (<code>fcntl</code> / <code>msvcrt</code>). It keeps three O(1) dict indexes (<code>by_name</code>, <code>by_alias</code>, <code>by_repo_id</code>), does atomic temp-file saves with a <code>.json.bak</code> backup, recovers from a corrupt file by restoring the backup (emitting an <code>ERROR</code> event), and adds <span class="func">copy()</span> (Ollama <code>/api/copy</code> parity — duplicates the manifest, shares the on-disk blob), <span class="func">repair()</span>, <span class="func">validate_integrity()</span> and <span class="func">set_alias()</span>. The singleton is obtained through <code>hfl.core.container</code>, not a module global.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">📋</span><h4>ModelManifest</h4></div>
+  <p><code>hfl/models/manifest.py</code> carries far more than name/path/format: license block (SPDX id, name, url, restrictions, <code>gated</code>, <code>license_accepted_at</code>), EU-AI-Act fields (<code>gpai_classification</code>, <code>training_flops</code>), integrity (<code>file_hash</code> + <span class="func">verify_integrity()</span> / <span class="func">update_hash()</span>), and Modelfile-derived fields: <code>system</code>, <code>default_parameters</code>, <code>adapter_paths</code>, <code>messages</code>, <code>parent_name</code>/<code>parent_digest</code> (set by <code>POST /api/create</code>), plus <code>env_vars</code> and <code>declared_capabilities</code>.</p></div>
+</div>
+
+<h4>Capability detection (Ollama-compatible)</h4>
+<p>New module <code>hfl/models/capabilities.py</code>. <span class="func">detect_capabilities()</span> returns the list <code>POST /api/show</code> emits, which Ollama SDK clients (ollama-python, Open WebUI, LangChain) use to gate tool-calling, vision, embeddings and reasoning. Detection is permissive substring-matching over <code>name</code> + <code>repo_id</code> + <code>architecture</code>:</p>
+<table>
+<tr><th>Capability</th><th>Trigger</th></tr>
+<tr><td><code>completion</code></td><td>any model whose <code>model_type</code> isn't <code>tts</code>/<code>stt</code>/<code>audio</code></td></tr>
+<tr><td><code>tools</code></td><td>qwen, llama/llama3, mistral, mixtral, gemma4 (kept in sync with <code>tool_parsers.dispatch</code>)</td></tr>
+<tr><td><code>insert</code> (FIM)</td><td>codellama, codegemma, starcoder/2, qwen-coder, deepseek-coder</td></tr>
+<tr><td><code>vision</code></td><td>llava, llama-3.2-vision, llama4, gemma-3, qwen2-vl/2.5-vl, internvl, pixtral, molmo, idefics, minicpm-v</td></tr>
+<tr><td><code>embedding</code></td><td>bert/nomic/jina/bge/gte/e5/mxbai/stella/arctic-embed — drops <code>completion</code></td></tr>
+<tr><td><code>thinking</code></td><td>gemma-4, deepseek-r1, qwen3-thinking, gpt-oss, o1/o3</td></tr>
+</table>
+<p>Order is deterministic: <code>completion</code>/<code>embedding</code> first, the rest alphabetical.</p>
+
+<h4>Provenance log</h4>
+<p><code>hfl/models/provenance.py</code> records the source&rarr;conversion&rarr;result chain (<code>~/.hfl/provenance.json</code>) for the legal-audit safeguard: source repo/format/revision, target path, quantization, tool + version, original license and acceptance timestamp. <span class="func">log_conversion()</span> is the convenience entrypoint, called from the GGUF converter after a successful quantize.</p>
 </section>
 
 <!-- ========== 9. ENGINE ========== -->
@@ -659,12 +779,16 @@
       <!-- vLLM -->
       <rect x="630" y="170" width="240" height="70" rx="8" fill="#3a2f1a" stroke="#d29922"/>
       <text x="750" y="195" text-anchor="middle" fill="#d29922" font-size="12" font-weight="bold">VLLMEngine</text>
+      <!-- MLX -->
+      <rect x="330" y="260" width="240" height="48" rx="8" fill="#2d1f4e" stroke="#bc8cff"/>
+      <text x="450" y="282" text-anchor="middle" fill="#bc8cff" font-size="12" font-weight="bold">MLXEngine</text>
+      <text x="350" y="298" fill="#8b949e" font-size="10">safetensors | Apple Silicon Metal (mlx-lm)</text>
       <text x="650" y="215" fill="#8b949e" font-size="10">Production GPU | NVIDIA CUDA</text>
       <text x="650" y="228" fill="#8b949e" font-size="10">PagedAttention, continuous batching</text>
 
       <!-- Selector -->
       <rect x="250" y="270" width="400" height="40" rx="8" fill="#21262d" stroke="#bc8cff" stroke-dasharray="4"/>
-      <text x="450" y="295" text-anchor="middle" fill="#bc8cff" font-size="11">selector.py → GGUF→LlamaCpp | CUDA+safetensors→Transformers | fallback→LlamaCpp</text>
+      <text x="450" y="295" text-anchor="middle" fill="#bc8cff" font-size="11">selector.py → GGUF→LlamaCpp | safetensors on Darwin-arm64→MLX | CUDA+safetensors→Transformers | fallback→LlamaCpp</text>
 
       <!-- Inheritance arrows -->
       <line x1="150" y1="170" x2="400" y2="110" stroke="#3fb950" stroke-width="1.2"/>
@@ -683,7 +807,7 @@
   <div class="grid-3">
     <div class="card">
       <h4>LlamaCppEngine</h4>
-      <p>Main backend. Uses <code>llama-cpp-python</code>. Parameters: n_ctx, n_gpu_layers (-1=all), n_threads (0=auto), flash_attn, chat_format (auto-detect). Includes stderr suppression to silence Metal/CUDA logs when verbose=False. Generates results with metrics: tokens/s, prompt tokens, stop reason.</p>
+      <p>Main backend. Uses <code>llama-cpp-python</code>. Parameters: n_ctx (with a per-architecture cap, e.g. Gemma 3/4 → 8192), n_gpu_layers (-1=all), n_threads (0=auto), flash_attn (architecture-aware, off for known-unsafe arches like gemma4 unless forced), chat_format (auto-detect), kv_cache_type (q4_0/q8_0/f16), lora_paths and draft_model_path (speculative decoding). Includes stderr suppression to silence Metal/CUDA logs when verbose=False. Generates results with metrics: tokens/s, prompt/eval token counts and nanosecond durations, stop reason.</p>
     </div>
     <div class="card">
       <h4>TransformersEngine</h4>
@@ -726,11 +850,207 @@
     <span class="flow-step" style="border-color:#3fb950">LlamaCppEngine (will need prior conversion)</span>
   </div>
   <p>All imports are lazy (<code>_get_llama_cpp_engine()</code>, etc.) to avoid requiring all dependencies to be installed.</p>
+<h3>MLX Backend — Apple Silicon (Phase 13)</h3>
+<p><code>mlx_engine.MLXEngine</code> is a fourth <code class="cls">InferenceEngine</code> implementation that wraps Apple's <code>mlx-lm</code> and hits Metal directly. The module docstring claims a 3-10% edge on prompt processing and 15-25% on decode at fp16 versus llama-cpp's Metal path for Llama-family architectures, plus native q4/q5/q8 mixed precision with no GGUF conversion. The dependency lives behind the <code>[mlx]</code> extra.</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🍏</span><h4>Availability gate</h4></div>
+    <p><code class="func">is_available()</code> returns True only when <code>platform.system() == "Darwin"</code>, <code>platform.machine()</code> is <code>arm64</code>/<code>aarch64</code>, and <code>mlx_lm</code> imports. On every other platform the import is a no-op, so a stray <code>hfl[mlx]</code> in a Linux container fails fast rather than crashing.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🎛️</span><h4>mlx-lm 0.30+ sampler shim</h4></div>
+    <p><code class="func">_build_sampling()</code> translates <code class="cls">GenerationConfig</code> into the post-0.30 API: a <code class="func">make_sampler()</code> callable (temp / top_p / top_k) plus <code class="func">make_logits_processors()</code> for the repetition penalty, splatted into <code class="func">generate()</code> / <code class="func">stream_generate()</code>.</p>
+  </div>
+</div>
+<p>mlx-lm exposes no per-call seed or stop-string support, so the engine fills both gaps itself: <code class="func">_maybe_seed()</code> seeds mlx's global RNG (<code>mx.random.seed</code>) when <code>cfg.seed &gt;= 0</code> (ENG-10/11 parity with vLLM/diffusers), and <code class="func">_stop_strings()</code> + <code class="func">_earliest_stop()</code> truncate the completion at the first caller stop string. In <code class="func">generate_stream()</code> the stop enforcement is a buffered char-level filter that holds back a tail (<code>max_stop</code>) that could begin a stop marker so output never runs past it. Token counts for the response envelope are recomputed via the tokenizer because mlx-lm returns only the completion text.</p>
+<h3>Backend Selection — MLX path &amp; force-override</h3>
+<p><code class="func">select_engine()</code> in <code>selector.py</code> gained an Apple-Silicon branch and an operator-level override that the old flow doesn't show.</p>
+<div class="flow">
+  <span class="flow-step">GGUF?</span><span class="flow-arrow">→ Yes →</span><span class="flow-step" style="border-color:#3fb950">LlamaCppEngine</span>
+</div>
+<div class="flow">
+  <span class="flow-step">safetensors/pytorch + _mlx_preferred()?</span><span class="flow-arrow">→ Yes →</span><span class="flow-step" style="border-color:#bc8cff">MLXEngine</span><span class="flow-arrow">→ MissingDependencyError →</span><span class="flow-step">fall through</span>
+</div>
+<div class="flow">
+  <span class="flow-step">_has_cuda()?</span><span class="flow-arrow">→ Yes →</span><span class="flow-step" style="border-color:#58a6ff">TransformersEngine</span><span class="flow-arrow">→ else →</span><span class="flow-step" style="border-color:#3fb950">LlamaCppEngine</span>
+</div>
+<table>
+  <tr><th>Control</th><th>Effect</th></tr>
+  <tr><td><code>HFL_DISABLE_MLX=1</code></td><td><code class="func">_mlx_preferred()</code> returns False — forces the legacy llama-cpp path on Apple Silicon (benchmarking parity).</td></tr>
+  <tr><td><code>HFL_LLM_LIBRARY</code> / <code>OLLAMA_LLM_LIBRARY</code></td><td>Read by <code class="func">_resolve_forced_backend()</code>. Accepts <code>llama-cpp</code>, <code>transformers</code>, <code>vllm</code>, <code>mlx</code>; only honoured when the caller passed <code>backend="auto"</code> (an explicit per-model request always wins). Unrecognised values log a warning and fall back to auto.</td></tr>
+</table>
+<p>GGUF stays on llama-cpp regardless — MLX cannot ingest GGUF. <code class="func">_create_engine("mlx")</code> wires the explicit <code>--backend mlx</code> request.</p>
+<h3>KV-Cache Snapshots — warm-start (snapshot.py, V4 F6)</h3>
+<p>Most servers re-process the system prompt / few-shot prefix on every new conversation. <code>snapshot.py</code> exposes llama-cpp-python's <code class="func">Llama.save_state()</code> / <code class="func">load_state()</code> as a server feature so an operator can capture the entire KV cache (processed tokens + cache tensors) and restore it for zero TTFT on the cached prefix, even across server restarts. It backs <code>POST /api/snapshot/save</code>, <code>/load</code>, <code>GET /api/snapshot</code> and <code>DELETE /api/snapshot/{name}</code>.</p>
+<pre><code><span class="keyword">def</span> <span class="func">save_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...
+<span class="keyword">def</span> <span class="func">load_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...</code></pre>
+<p>State is a pickle of <code class="func">save_state()</code> plus a <code>&lt;name&gt;.meta.json</code> sidecar (model, tokens, created_at, bytes, version, mac) under <code>HFL_HOME/snapshots/</code>. Safety properties built into the module:</p>
+<div class="grid-3">
+  <div class="card"><div class="card-header"><span class="icon">🔐</span><h4>HMAC integrity</h4></div><p><code>pickle.loads</code> is RCE (CWE-502), so every blob is authenticated with HMAC-SHA256 keyed by a per-install secret (<code>HFL_HOME/snapshot.key</code>, 32 random bytes, <code>0600</code>) and verified with <code class="func">hmac.compare_digest</code> <em>before</em> unpickling. A tampered/foreign blob raises <code class="cls">SnapshotIntegrityError</code>. Snapshots are a same-machine cache, not portable.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🏷️</span><h4>Model + version guards</h4></div><p>Load checks the sidecar's <code>model</code> matches <code>model_name</code> (wrong-model tensors would corrupt memory) and rejects a foreign <code>SNAPSHOT_FORMAT_VERSION</code> with <code class="cls">SnapshotVersionMismatch</code>.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">💾</span><h4>Atomic write + name guard</h4></div><p>The <code>.state</code> is written to a <code>.tmp</code> sibling and <code class="func">os.replace</code>d so a crash never leaves a truncated blob. <code class="func">_validate_name()</code> rejects path separators / <code>..</code> / odd unicode.</p></div>
+</div>
+<p><code class="func">save_snapshot</code>/<code class="func">load_snapshot</code> resolve <code>save_state</code>/<code>load_state</code> either on the engine directly or on its inner <code>_model</code>; engines without that API raise (KV snapshots are llama-cpp-python-only).</p>
+<h3>Speculative Decoding (llama_cpp.py, V4 F5)</h3>
+<p>The llama-cpp backend can run a draft model to propose tokens the target verifies in a single pass. Selected at load time through the <code>draft_model_path</code> kwarg (surfaced from a Modelfile); <code class="cls">GenerationConfig</code> also carries a <code>draft_model</code> field. Two modes share the one kwarg:</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🔁</span><h4>prompt-lookup</h4></div>
+    <p><code>draft_model_path="prompt-lookup"</code> uses llama-cpp-python's <code class="cls">LlamaPromptLookupDecoding</code> (<code>num_pred_tokens=10, max_ngram_size=2</code>). Zero VRAM, a documented 1.3-2× speedup on repetitive prompts (RAG, code, structured output). If unavailable it logs and continues without speculation.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">📐</span><h4>draft model</h4></div>
+    <p><code>draft_model_path="&lt;draft.gguf&gt;"</code> loads a second small <code class="cls">Llama</code> and routes it through <code class="cls">_LlamaModelDraftAdapter</code>. Only safe with a same-tokenizer-family draft (e.g. Qwen3-14B ↔ Qwen3-0.6B). A failed draft load logs and falls back to no speculation.</p>
+  </div>
+</div>
+<p><code class="cls">_LlamaModelDraftAdapter</code> bridges a plain <code class="cls">Llama</code> into the <code class="cls">LlamaDraftModel</code> protocol (a bare Llama returns a completion dict, not a token-ids array). It is deliberately <em>incremental</em>: <code class="func">_align_and_eval_suffix()</code> finds the longest common prefix with the previously-processed ids and evaluates only the suffix, preserving the draft's KV cache across steps. A naive reset-per-call would pay the full prefill N times and make speculation 2-3× <em>slower</em>; on divergence (fresh request / rejected predictions) it resets and replays. The draft Llama is tracked as <code>self._draft_model</code> and freed in <code class="func">unload()</code> so a subsequent load doesn't double up VRAM.</p>
+<h3>LoRA Hot-Swap &amp; Multi-LoRA (lora.py, V4 F4)</h3>
+<p><code>lora.py</code> applies / removes LoRA adapters on a running model without reloading base weights, backing <code>POST /api/lora/apply</code>, <code>/remove</code>, <code>GET /api/lora</code> and <code>/api/lora/{model}</code>. The public surface:</p>
+<pre><code><span class="keyword">def</span> <span class="func">apply_lora</span>(engine, *, lora_path, scale=<span class="string">1.0</span>, name=<span class="keyword">None</span>) -&gt; <span class="cls">AdapterInfo</span>
+<span class="keyword">def</span> <span class="func">remove_lora</span>(engine, adapter_id) -&gt; <span class="cls">bool</span>
+<span class="keyword">def</span> <span class="func">list_loras</span>(engine=<span class="keyword">None</span>) -&gt; <span class="cls">list</span>[<span class="cls">AdapterInfo</span>]</code></pre>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🧩</span><h4>LoraRegistry (multi-LoRA)</h4></div>
+    <p>A process-wide, lock-guarded singleton (<code class="func">get_registry()</code>) maps <code>adapter_id</code> → <code class="cls">AdapterInfo</code> (path, name, scale, engine_id). Keyed by <code class="func">_engine_id()</code> = <code>engine-{id(engine)}</code> so several loaded models each carry their own adapter set. Multiple adapters stack at fractional <code>scale</code> (e.g. 0.7 + 0.3); <code>scale</code> is validated to <code>[0.0, 5.0]</code>.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🔌</span><h4>Engine bridge</h4></div>
+    <p><code class="func">_set_lora()</code> tries <code>engine.apply_lora</code> first, then the inner <code>_model.set_lora_adapter</code> (llama-cpp-python ≥ 0.3) and the legacy <code>apply_lora_from_file</code>. <code class="func">_unset_lora()</code> mirrors that with <code>remove_lora_adapter</code> / <code>unload_lora</code>; no API → RuntimeError (surfaced as 503).</p>
+  </div>
+</div>
+<p><code class="func">remove_lora</code> detaches from the live engine <em>first</em> and only drops the registry entry on success — if the engine refuses the unset, the entry stays tracked so the client's retry can succeed instead of leaving a ghost adapter mixed into every generation but unremovable. At load time, <code class="func">LlamaCppEngine.load()</code> also accepts a <code>lora_paths</code> list but wires only the first into llama-cpp's single <code>lora_path</code> kwarg, logging that any extras are ignored (post-load stacking is the multi-LoRA route).</p>
+<h3>Flash Attention — architecture-aware gating</h3>
+<p>The doc lists <code>flash_attn</code> as a load parameter; the backend now resolves it through a three-level precedence in <code class="func">LlamaCppEngine.load()</code>, because llama-cpp-python's flash-attn path is historically crash-prone on new architectures:</p>
+<table>
+  <tr><th>#</th><th>Source</th><th>Behaviour</th></tr>
+  <tr><td>1</td><td>per-load <code>flash_attn=</code> kwarg</td><td>Explicit value (e.g. from a Modelfile) wins outright.</td></tr>
+  <tr><td>2</td><td><code>HFL_FLASH_ATTENTION</code> / <code>OLLAMA_FLASH_ATTENTION</code></td><td>Falsy (<code>0</code>/<code>false</code>/...) forces off globally. Truthy still defers to the per-arch safety list — operators don't get crashes on known-bad arches "for free".</td></tr>
+  <tr><td>3</td><td>architecture default</td><td><code>False</code> for arches in <code>_ARCHITECTURE_NO_FLASH_ATTN</code> (currently <code>{"gemma4"}</code>), <code>True</code> otherwise.</td></tr>
+</table>
+<p>The resolved value is passed into the <code class="cls">Llama</code> constructor alongside the architecture-aware context cap (<code>_ARCHITECTURE_CTX_CAP</code>, e.g. Gemma 3/4 capped at 8192 to avoid pinning unified memory on Apple Silicon) and optional KV-cache quantisation (<code>kv_cache_type</code> → <code>type_k</code>/<code>type_v</code> q4_0/q8_0/f16).</p>
+<h3>Engine-Side Model Lifetime — keep-alive &amp; eviction</h3>
+<p>HFL has no literal <code>pin()</code>/<code>unpin()</code> on the engine; a model's residency is governed by the <code class="cls">ModelPool</code> (<code>model_pool.py</code>) and keep-alive deadlines, so "pinning" is an emergent property rather than an API call. The pool keeps multiple loaded engines and evicts on three signals: LRU (capacity), idle timeout (default <code>idle_timeout_seconds=3600</code>), and memory pressure (estimates). A background loop (<code>background_eviction_interval=60s</code>) sweeps idle models via <code class="func">start_background_eviction()</code>.</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">📌</span><h4>Pin = keep-alive deadline</h4></div>
+    <p>The route layer's <code class="func">apply_keep_alive()</code> translates Ollama's <code>keep_alive</code> into a deadline on <code class="cls">ServerState</code>. <code>keep_alive=-1</code> ("never expire") clears the deadline so the model is effectively pinned in residence; a positive duration sets an expiry; <code>0</code> unloads after the response (<code class="func">unload_after_response()</code>). <code>keep_alive_default</code> in config seeds the baseline.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🧹</span><h4>Race-safe eviction</h4></div>
+    <p><code class="func">_evict_over_capacity_locked(keep=...)</code> runs after a load and never evicts the model just inserted (pinned to the LRU back via <code>move_to_end</code>), closing a window where a concurrent load of a different model could evict the fresh one against an inconsistent <code>_models</code>/<code>_loading</code> view (part of the Phase 0 model-lifecycle UAF fixes).</p>
+  </div>
+</div>
+<h3>Other Engines in the Package</h3>
+<p>Beyond the three text backends, <code>engine/</code> ships audio, diffusion and embedding engines the original section never mentioned. They are loaded lazily behind their own extras.</p>
+<table>
+  <tr><th>Engine</th><th>File / class</th><th>Role</th></tr>
+  <tr><td>Bark TTS</td><td><code>bark_engine.py</code> · <code class="cls">BarkEngine(AudioEngine)</code></td><td>Text-to-speech via transformers; <code class="func">synthesize()</code> / <code class="func">synthesize_stream()</code>.</td></tr>
+  <tr><td>Coqui TTS</td><td><code>coqui_engine.py</code> · <code class="cls">CoquiEngine(AudioEngine)</code></td><td>XTTS/VITS/Tacotron-family TTS.</td></tr>
+  <tr><td>Whisper STT</td><td><code>whisper_engine.py</code> · <code class="cls">WhisperEngine</code></td><td>Speech-to-text; <code class="func">transcribe()</code> returning <code class="cls">WhisperResult</code>/<code class="cls">WhisperSegment</code>.</td></tr>
+  <tr><td>Diffusion</td><td><code>diffusers_engine.py</code> · <code class="cls">DiffusersEngine</code></td><td>Text-to-image (<code class="func">generate()</code> → <code class="cls">ImageResult</code>). Deliberately does not implement <code class="cls">InferenceEngine</code>.</td></tr>
+  <tr><td>Embeddings</td><td><code>embedding_engine.py</code> · <code class="cls">LlamaCppEmbeddingEngine</code>, <code class="cls">TransformersEmbeddingEngine</code></td><td>Text/image embeddings (<code class="cls">EmbeddingEngine</code> ABC + pooling helpers).</td></tr>
+</table>
+<p>The base module defines the parallel <code class="cls">AudioEngine</code> ABC (<code class="cls">TTSConfig</code> / <code class="cls">AudioResult</code>), and <code class="func">select_tts_engine()</code> in <code>selector.py</code> auto-routes a TTS model to Bark or Coqui (name/<code>config.json</code> architecture sniffing, Bark as the transformers-pipeline default).</p>
+</section>
+
+<section id="core">
+<h2>10. Module core — Concurrency, Dispatcher &amp; Sessions</h2>
+<p>The <code>hfl.core</code> package is the cross-cutting infrastructure layer added after the v0.1.0 freeze. It holds the dependency-injection <span class="cls">Container</span>, request tracing, optional process sandboxing, the events→metrics bridge, and chat-session persistence. Its single most important companion is the <span class="cls">InferenceDispatcher</span> — the bounded-concurrency primitive that serialises every inference call against the shared, non-reentrant model.</p>
+<p><strong>Where it lives.</strong> The dispatcher class itself is defined in <code>hfl/engine/dispatcher.py</code>, but it is wired as a singleton inside the core container and always reached through <code>hfl.core.get_dispatcher()</code>. Treat it as part of the core concurrency story.</p>
+
+<h3>10.1 InferenceDispatcher — a bounded Bulkhead</h3>
+<div class="card"><div class="card-header"><span class="icon">🚦</span><h3>Why it exists</h3></div>
+<p>The llama.cpp and transformers-GPU backends share <em>one</em> non-reentrant model instance. Two overlapping requests corrupt each other's KV cache and produce empty or truncated replies. The dispatcher is therefore a <strong>Bulkhead</strong>: it caps how many inferences run at once and how many may wait, shedding the rest with backpressure rather than letting load melt the model.</p></div>
+<p><span class="cls">InferenceDispatcher</span> (<code>hfl/engine/dispatcher.py</code>) is async-aware and backed by an <code>asyncio.Semaphore</code> whose capacity tracks <code>max_inflight</code> exactly. All counters mutate under a single <code>_counter_lock</code> so fast-path and slow-path decisions observe one consistent view.</p>
+<table>
+<tr><th>Parameter</th><th>Default</th><th>Config / env</th><th>Meaning</th></tr>
+<tr><td><code>max_inflight</code></td><td>1</td><td><code>queue_max_inflight</code> &larr; <code>HFL_QUEUE_MAX_INFLIGHT</code> / <code>HFL_NUM_PARALLEL</code> / <code>OLLAMA_NUM_PARALLEL</code></td><td>How many requests may execute simultaneously. Default 1 preserves single-flight V1 behaviour.</td></tr>
+<tr><td><code>max_queued</code></td><td>16</td><td><code>queue_max_size</code> &larr; <code>HFL_QUEUE_MAX_SIZE</code> / <code>HFL_MAX_QUEUE</code> / <code>OLLAMA_MAX_QUEUE</code></td><td>How many <em>more</em> may wait in line. When full, new callers are rejected immediately.</td></tr>
+<tr><td><code>acquire_timeout</code></td><td>60 s</td><td><code>queue_acquire_timeout_seconds</code> &larr; <code>HFL_QUEUE_ACQUIRE_TIMEOUT</code></td><td>Cap on how long a queued caller waits for a slot before giving up.</td></tr>
+</table>
+<p>The factory <span class="func">build_default_dispatcher()</span> reads these from <code>hfl.config</code>; the container's <span class="func">_create_dispatcher()</span> wraps it in the lazy singleton.</p>
+
+<h4>The acquire lifecycle — fast path, slow path, rejection</h4>
+<p>The async context manager <span class="func">slot()</span> drives a four-phase protocol. Under the counter lock it decides between the fast path (capacity now) and the slow path (must wait); a full wait queue is rejected <em>before</em> queueing, so the client gets an immediate 429 rather than blocking.</p>
+<pre><code><span class="keyword">async</span> <span class="keyword">with</span> self._counter_lock:
+    <span class="keyword">if</span> self._in_flight &lt; self._max_inflight:
+        self._in_flight += <span class="string">1</span>          <span class="comment"># fast path: reserve a slot</span>
+        fast_path = <span class="keyword">True</span>
+    <span class="keyword">else</span>:
+        <span class="keyword">if</span> self._depth &gt;= self._max_queued:
+            self._rejected_full_total += <span class="string">1</span>
+            <span class="keyword">raise</span> <span class="cls">QueueFullError</span>(...)  <span class="comment"># &rarr; HTTP 429 + Retry-After</span>
+        self._depth += <span class="string">1</span>            <span class="comment"># slow path: enqueue and wait</span>
+        fast_path = <span class="keyword">False</span></code></pre>
+<p>Phase 2 acquires the semaphore <em>outside</em> the counter lock (so releasing callers never deadlock). Slow-path callers wrap the acquire in <code>asyncio.wait_for(..., timeout=acquire_timeout)</code>; a timeout decrements <code>depth</code>, bumps <code>rejected_timeout_total</code>, and raises <span class="cls">QueueTimeoutError</span>. Cancellation safety is explicit: a cancel while waiting unwinds <code>depth</code>; a cancel after reserving the fast-path slot rolls back <code>in_flight</code>; a slot held during execution is always released in the <code>finally</code> of phase 4 (decrement <code>in_flight</code>, then <code>sem.release()</code> — chosen so a snapshot taken mid-release over-counts load rather than under-counting it).</p>
+<div class="flow"><span class="flow-step">request</span><span class="flow-arrow">&rarr;</span><span class="flow-step">slot() acquire</span><span class="flow-arrow">&rarr;</span><span class="flow-step">in_flight &lt; max?</span><span class="flow-arrow">&rarr;</span><span class="flow-step">run func() on thread</span><span class="flow-arrow">&rarr;</span><span class="flow-step">release</span></div>
+<div class="grid-3">
+<div class="card"><div class="card-header"><span class="icon">✅</span><h3>accepted_total</h3></div><p>Counter incremented once a caller actually holds a slot (fast or slow path).</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛑</span><h3>rejected_full_total</h3></div><p><span class="cls">QueueFullError</span> &rarr; <span class="badge badge-red">429</span> with <code>Retry-After</code>. The wait queue was already at <code>max_queued</code>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">⏱️</span><h3>rejected_timeout_total</h3></div><p><span class="cls">QueueTimeoutError</span> &rarr; <span class="badge badge-yellow">503</span>. The caller waited past <code>acquire_timeout</code> — the server is simply saturated.</p></div>
+</div>
+
+<h4>snapshot() — the metrics surface</h4>
+<p><span class="func">snapshot()</span> returns an immutable <span class="cls">DispatcherSnapshot</span> (six ints: <code>max_inflight</code>, <code>max_queued</code>, <code>in_flight</code>, <code>depth</code>, <code>accepted_total</code>, <code>rejected_full_total</code>, <code>rejected_timeout_total</code>). It is read-only and cheap, so it is exported on every surface:</p>
+<table>
+<tr><th>Surface</th><th>Source</th><th>Exposes</th></tr>
+<tr><td><code>/healthz</code> / <code>/healthz/ready</code></td><td><code>routes_health.py</code></td><td><code>queue_depth</code>, <code>queue_in_flight</code></td></tr>
+<tr><td><code>/metrics</code> (Prometheus)</td><td><code>metrics.py</code></td><td><code>hfl_inference_concurrency_max</code>, <code>…_inflight</code>, <code>hfl_inference_queue_depth</code> + saturation counters</td></tr>
+<tr><td>Every HTTP response</td><td><code>middleware.py</code></td><td>headers <code>X-Queue-Depth</code>, <code>X-Queue-In-Flight</code>, <code>X-Queue-Max-Inflight</code>, <code>X-Queue-Max-Size</code></td></tr>
+</table>
+<p>How routes consume it: <span class="func">run_dispatched()</span> in <code>api/helpers.py</code> acquires a slot, runs the sync engine call on a thread (<code>asyncio.to_thread</code>), and applies the generation timeout. Critically it holds the slot until the worker thread <em>actually</em> exits — a sync engine call cannot be cancelled, so on a 504/client-cancel the dispatcher slot is kept (<span class="func">_release_when_worker_exits</span>) to stop a queued request starting a second inference that would corrupt the model mid-generation. Streaming routes pre-acquire via <span class="func">acquire_stream_slot()</span>, which returns either an entered context manager or a ready 429/503 <span class="cls">JSONResponse</span>.</p>
+
+<h3>10.2 exclusive() — the drain barrier for admin work</h3>
+<div class="card"><div class="card-header"><span class="icon">🧯</span><h3>Zero inference in flight</h3></div>
+<p><span class="func">exclusive()</span> acquires <strong>all</strong> <code>max_inflight</code> semaphore permits, so the guarded block runs with no inference executing. Unlike <span class="func">slot()</span> it never raises <span class="cls">QueueFull</span>/<span class="cls">QueueTimeout</span> (admin work must not be dropped — it simply waits) and it does <em>not</em> touch the queue counters (an unload is not an inference request). New inference callers block on the semaphore until the block exits — exactly the serialisation a model swap needs.</p></div>
+<p>It guards three operations against the shared model:</p>
+<div class="grid-3">
+<div class="card"><div class="card-header"><span class="icon">🔄</span><h3>Model hot-swap</h3></div><p><code>ServerState.set_llm_engine()</code> drains via <code>exclusive()</code> before retiring the displaced engine, so no slot-holding HTTP request is mid-read of the old model when it is freed.</p></div>
+<div class="card"><div class="card-header"><span class="icon">💾</span><h3>Snapshot save</h3></div><p><code>routes_snapshot.py</code> runs the multi-GB <code>save_state()</code> + pickle + write under <code>exclusive()</code> + <code>to_thread</code> — off-loop and with inference/swaps drained.</p></div>
+<div class="card"><div class="card-header"><span class="icon">📥</span><h3>Snapshot load</h3></div><p><code>load_state()</code> writes KV tensors into the live model; same drain barrier or it corrupts the model mid-generation.</p></div>
+</div>
+
+<h3>10.3 Engine refcount pin/unpin — the hot-swap use-after-free guard</h3>
+<p><span class="func">exclusive()</span> only covers paths that hold a dispatcher slot. The WebSocket chat turn (<code>routes_ws.py</code>) reads the engine <em>directly</em> and does <strong>not</strong> hold a slot, so a concurrent swap could <code>unload()</code> the model mid-stream — a use-after-free of the non-reentrant model. <span class="cls">ServerState</span> closes that gap with a reference count.</p>
+<table>
+<tr><th>Member</th><th>Role</th></tr>
+<tr><td><code>_engine_inuse: dict[int,int]</code></td><td>Per-engine (keyed by <code>id()</code>) refcount of non-slot readers currently using it.</td></tr>
+<tr><td><code>_engine_retired: dict[int,InferenceEngine]</code></td><td>Engines a swap displaced but could not unload because they were still pinned.</td></tr>
+<tr><td><code>_engine_ref_lock: asyncio.Lock</code></td><td>Guards both maps.</td></tr>
+<tr><td><span class="func">pin_engine(engine)</span></td><td>Increment the refcount; while pinned a hot-swap defers the unload.</td></tr>
+<tr><td><span class="func">unpin_engine(engine)</span></td><td>Decrement; if this was the last reader of a retired engine, unload it now (off-loop via <code>to_thread</code>).</td></tr>
+</table>
+<p>The swap logic in <span class="func">set_llm_engine()</span> performs an <em>atomic</em> retire-then-assign: it retires the old engine before assigning the new one, so an unload failure leaves the old engine in place (callers observe "replacement failed", not a half-updated state). Inside the <code>exclusive()</code> drain it checks <code>_engine_inuse</code>: if the displaced engine is still pinned it goes into <code>_engine_retired</code> and the unload is deferred to the last <span class="func">unpin_engine</span>; otherwise it unloads immediately off-loop. The WS producer pins for the lifetime of the producer thread and unpins in its <code>finally</code> (which can outlive a client cancel, since the engine call cannot be preempted).</p>
+<div class="flow"><span class="flow-step">WS turn pins engine</span><span class="flow-arrow">&rarr;</span><span class="flow-step">swap drains dispatcher</span><span class="flow-arrow">&rarr;</span><span class="flow-step">old engine pinned? defer unload</span><span class="flow-arrow">&rarr;</span><span class="flow-step">producer ends, unpins</span><span class="flow-arrow">&rarr;</span><span class="flow-step">last reader unloads it</span></div>
+
+<h3>10.4 Container — dependency injection &amp; singletons</h3>
+<p><code>core/container.py</code> centralises global state. <span class="cls">Singleton[T]</span> is a thread-safe lazy holder (double-checked locking around a factory, with <code>reset()</code> for tests). The <span class="cls">Container</span> dataclass holds one <code>Singleton</code> per shared service and exposes convenience accessors:</p>
+<pre><code><span class="keyword">from</span> hfl.core <span class="keyword">import</span> get_config, get_registry, get_state, get_dispatcher</code></pre>
+<table>
+<tr><th>Accessor</th><th>Singleton</th></tr>
+<tr><td><span class="func">get_config()</span></td><td><span class="cls">HFLConfig</span> (the global config instance)</td></tr>
+<tr><td><span class="func">get_registry()</span></td><td><span class="cls">ModelRegistry</span></td></tr>
+<tr><td><span class="func">get_event_bus()</span></td><td><span class="cls">EventBus</span></td></tr>
+<tr><td><span class="func">get_state()</span></td><td><span class="cls">ServerState</span></td></tr>
+<tr><td><span class="func">get_metrics()</span></td><td><span class="cls">Metrics</span></td></tr>
+<tr><td><span class="func">get_rate_limiter()</span></td><td><span class="cls">RateLimiter</span> (in-memory by default)</td></tr>
+<tr><td><span class="func">get_dispatcher()</span></td><td><span class="cls">InferenceDispatcher</span></td></tr>
+</table>
+<p><span class="func">reset_container()</span> rebuilds everything from scratch — the standard test fixture for clean state.</p>
+
+<h3>10.5 Tracing, Sessions, Sandbox, Observability</h3>
+<div class="grid-2">
+<div class="card"><div class="card-header"><span class="icon">🧵</span><h3>tracing.py</h3></div><p>Request-ID propagation via <code>contextvars</code> (survives asyncio tasks and thread-pool hops). <span class="func">set_request_id()</span> / <span class="func">get_request_id()</span> generate short 8-char hex IDs; <span class="cls">RequestContext</span> and <span class="func">with_request_id</span> scope them; <span class="func">format_log_prefix()</span> renders the <code>[abc123de]</code> log prefix.</p></div>
+<div class="card"><div class="card-header"><span class="icon">💬</span><h3>sessions.py</h3></div><p>Human-readable chat persistence under <code>~/.hfl/sessions/&lt;name&gt;.json</code> (no pickle). <span class="cls">ChatSession</span> holds model, options, messages, system. <span class="func">save_session</span> writes atomically (tmp + replace) and touches <code>updated_at</code>; names are validated against a strict regex (<span class="cls">InvalidSessionNameError</span>) to prevent directory escape; <span class="func">list_sessions</span> skips malformed files, newest first.</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛡️</span><h3>sandbox.py</h3></div><p>Opt-in process hardening for <code>hfl serve</code> via <code>--sandbox</code> / <code>HFL_SANDBOX</code>. <code>seccomp</code> (Linux): <code>PR_SET_NO_NEW_PRIVS</code> + a minimal seccomp-bpf filter blocking <code>ptrace</code>/<code>kexec_*</code>/<code>reboot</code>/<code>unshare</code>/<code>setuid</code>; <code>macos</code>: advisory App-Sandbox hint (real enforcement from the signed DMG entitlement). Fully defensive — any failure logs a WARNING and continues; <span class="func">apply_sandbox</span> returns an inspectable <span class="cls">SandboxResult</span>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">📈</span><h3>observability_setup.py</h3></div><p><span class="func">setup_event_listeners()</span> bridges the event bus to metrics: on <code>MODEL_LOADED</code>/<code>MODEL_UNLOADED</code>/<code>GENERATION_COMPLETED</code>/<code>GENERATION_FAILED</code> it records load duration, generation tokens/latency, and error type. Idempotent (registers once).</p></div>
+</div>
 </section>
 
 <!-- ========== 10. CONVERTER ========== -->
 <section id="converter">
-  <h2>10. Module converter — Format Conversion</h2>
+  <h2>11. Module converter — Format Conversion</h2>
 
   <h3>formats.py — Format Detection</h3>
   <p>Enum <code>ModelFormat</code>: GGUF, SAFETENSORS, PYTORCH, UNKNOWN. The <code>detect_format(path)</code> function inspects extensions (.gguf, .safetensors, .pt/.pth/.bin) both in individual files and directories (rglob). <code>find_model_file()</code> locates the main model file.</p>
@@ -759,11 +1079,30 @@
     <tr><td>Q8_0</td><td>~8.0</td><td>~98%+</td><td>Maximum quantized quality</td></tr>
     <tr><td>F16</td><td>16.0</td><td>100%</td><td>No quantization</td></tr>
   </table>
+<h3>11. Architecture coverage, Modelfile parser &amp; Go-template renderer (current state)</h3>
+<p>The converter cluster spans format/type detection (<code>formats.py</code>), the GGUF pipeline (<code>gguf_converter.py</code>), a full bidirectional Modelfile parser/renderer (<code>modelfile_parser.py</code>) and a minimal Go-template engine (<code>go_template.py</code>).</p>
+
+<h4>30+ LLM architectures + MLX detection</h4>
+<p><code>hfl/converter/formats.py</code> recognises <strong>33</strong> causal-LM architectures in <code>LLM_ARCHITECTURES</code> (Llama, Mistral, Mixtral, Qwen2/Qwen2Moe, Gemma/Gemma2, Phi/Phi3, Falcon, Cohere/CommandR, DeepseekV2, InternLM/InternLM2, Yi, StarCoder2, CodeLlama, Olmo/Olmo2, Mamba, Jamba, Arctic, StableLm, OPT, Bloom, GPT2/NeoX/J, …), plus 16 other architecture families (TTS, STT, embeddings, vision-QA, seq2seq, depth, …) used by <span class="func">detect_model_type()</span> to classify any HF <code>config.json</code>. <span class="func">is_mlx_quantized_repo()</span> flags MLX-packed repos (<code>mlx</code> in the repo id, or a <code>quantization</code> object with <code>group_size</code>+<code>bits</code> in <code>config.json</code>) so they're routed to the MLX backend instead of llama.cpp's converter, which rejects MLX-packed graphs.</p>
+
+<h4>GGUF conversion pipeline</h4>
+<p><code>hfl/converter/gguf_converter.py</code> runs <code>safetensors &rarr; convert_hf_to_gguf.py (F16) &rarr; llama-quantize &rarr; final GGUF</code>. <span class="func">check_model_convertibility()</span> rejects LoRA adapters, diffusion/image, and audio/TTS configs up front. <span class="func">convert_with_cache()</span> normalises the quant token <em>before</em> building the lock key (so <code>q4_k_m</code> and <code>Q4_K_M</code> can't race onto the same output file) and serialises duplicate conversions with a per-key lock; <span class="func">_gguf_variant_path()</span> deliberately avoids <code>with_suffix</code> so version dots in repo names (<code>Qwen2.5-7B</code>) aren't truncated into colliding filenames. The F16 intermediate is resumable, and <span class="func">_check_conversion_environment()</span> probes the host Python for a compatible transformers/huggingface_hub combo before launching the real conversion.</p>
+
+<h4>Modelfile parser — escapes, INCLUDE guards, round-trip</h4>
+<p><code>hfl/converter/modelfile_parser.py</code> closes the loop for <code>POST /api/create</code>: <span class="func">parse_modelfile()</span> handles FROM, PARAMETER, TEMPLATE, SYSTEM, ADAPTER, LICENSE, MESSAGE, REQUIRES, ENV, CAPABILITIES, DRAFT and INCLUDE; <span class="func">render_modelfile_document()</span> serialises back with a tested round-trip invariant. Hardening:</p>
+<ul>
+<li><strong>Escape decoding</strong> — <span class="func">_decode_quoted()</span> interprets <code>\n \t \r \" \\</code> inside single- and triple-quoted values; the encoder escapes backslashes (and embedded <code>"""</code>) symmetrically so a Jinja template carrying a literal <code>\n</code> survives parse&rarr;render&rarr;parse unchanged.</li>
+<li><strong>INCLUDE path-injection guard</strong> — <span class="func">_expand_includes()</span> walks the base dir once into an allow-list dict; every downstream open() consumes a dictionary-indexed string, never raw user input. <span class="func">_is_safe_include_rel()</span> refuses <code>..</code>, absolute paths, backslashes and NUL; cycles and a depth-16 cap are enforced.</li>
+<li><strong>Hand-written INCLUDE matcher</strong> (no regex) so CodeQL's polynomial-ReDoS pass has nothing to flag.</li>
+</ul>
+
+<h4>Go-template renderer with recursion guard</h4>
+<p><code>hfl/converter/go_template.py</code> implements the Go <code>text/template</code> subset real Modelfiles use — <code>{{ .Field }}</code>, nested paths, <code>{{ range }}</code>, <code>{{ if }}/{{ else }}/{{ end }}</code>, string literals, and <code>{{- -}}</code> whitespace trimming. <span class="func">render_go_template()</span> is a convenience layer, never a gate: on <span class="cls">GoTemplateError</span> it falls back to the literal source with a warning, and it catches <span class="cls">RecursionError</span> explicitly so a crafted, deeply-nested <code>{{ if }}/{{ range }}</code> can't exhaust the Python stack and surface as an unhandled 500.</p>
 </section>
 
 <!-- ========== 11. API ========== -->
 <section id="api">
-  <h2>11. Module api — REST Server</h2>
+  <h2>12. Module api — REST Server</h2>
 
   <div class="diagram-container">
     <div class="diagram-title">Endpoints and API Compatibility</div>
@@ -833,13 +1172,13 @@
   <p><strong>APIKeyMiddleware</strong> — Optional authentication via <code>--api-key</code> flag. Supports <code>Authorization: Bearer &lt;key&gt;</code> and <code>X-API-Key: &lt;key&gt;</code> headers. Public endpoints (<code>/health</code>, <code>/</code>) exempt.</p>
   <p><strong>RateLimitMiddleware</strong> — IP-based rate limiting, configurable via env vars. Supports per-model rate limiting.</p>
   <p><strong>DisclaimerMiddleware</strong> — Adds <code>X-AI-Disclaimer</code> header to AI generation endpoint responses (R9).</p>
-  <p><strong>CORSMiddleware</strong> — Allows all origins, methods, and headers (local development).</p>
+  <p><strong>CORSMiddleware</strong> — Origin allow-list configurable via <code>cors_origins</code> / <code>cors_allow_all</code> (not unconditionally all origins). WebSocket upgrades bypass this middleware, so <code>/ws/chat</code> re-checks the same API-key and Origin policy inline in <code>_check_ws_auth_and_origin()</code>.</p>
 
   <h3>Exception Handlers</h3>
-  <p>Centralized exception handling via <code>register_exception_handlers(app)</code>. Maps the entire <code>HFLError</code> hierarchy to HTTP responses with appropriate status codes (400 for validation, 429 for rate limit, 500 for internal errors).</p>
+  <p>Centralized exception handling via <code>register_exception_handlers(app)</code>. Maps the entire <code>HFLError</code> hierarchy to HTTP responses, and additionally registers a <code>RequestValidationError</code> handler (per-dialect 400 on <code>/v1/*</code>) and a catch-all <code>Exception</code> handler. All three reshape the body per API dialect via <code>render_envelope()</code> (see "Per-Dialect Error Envelopes" below).</p>
 
   <h3>OpenAPI Documentation</h3>
-  <p>All endpoints include <code>tags</code>, <code>summary</code>, and <code>responses</code> in their decorators for auto-generated OpenAPI documentation. Tags: OpenAI, Ollama, TTS, Health, Metrics.</p>
+  <p>All endpoints include <code>tags</code>, <code>summary</code>, and <code>responses</code> in their decorators for auto-generated OpenAPI documentation. Tags include: OpenAI, Anthropic, Ollama, TTS, Health, Metrics, and "HFL Beyond" (the WebSocket <code>/ws/chat</code> surface).</p>
 
   <h3>Structured Logging</h3>
   <p>All logging uses %-style format strings (<code>logger.info('Model loaded: %s', name)</code>) instead of f-strings, avoiding unnecessary evaluation when the log level is disabled.</p>
@@ -852,11 +1191,110 @@
     <tr><td><code>/metrics</code></td><td>Prometheus-format metrics.</td></tr>
     <tr><td><code>/metrics/json</code></td><td>JSON-format metrics.</td></tr>
   </table>
+<h3>Shared Chat Core (<code>chat_core.py</code>)</h3>
+<p>Every chat surface — OpenAI <code>/v1/chat/completions</code>, Ollama <code>/api/chat</code> and Anthropic <code>/v1/messages</code> — has to make the same decision once the engine has produced text: <em>did the model emit a tool call, and if so what is it?</em> Historically the OpenAI route drifted behind the Ollama route and silently dropped tool calling. That decision now lives in a single place so routes can only differ in their wire-format translation, never in this logic.</p>
+<div class="card"><div class="card-header"><span class="icon">🧩</span><h3><code>resolve_chat_output()</code> → <code>ChatOutput</code></h3></div>
+<p>The frozen dataclass <code>ChatOutput(content, tool_calls)</code> is the canonical resolved turn, independent of dialect. <code>resolve_chat_output()</code> takes the raw engine text, the model name, the declared <code>tools</code>, and any structured <code>engine_tool_calls</code>, and applies three rules:</p></div>
+<table>
+<tr><th>Condition</th><th>Result</th></tr>
+<tr><td><code>tools_disabled</code> (client sent <code>tool_choice: "none"</code>)</td><td>Text returned verbatim; markers are <strong>never</strong> scanned (required, since the per-family parser fires on a marker regardless of the tools list)</td></tr>
+<tr><td>Engine returned a real non-empty <code>tool_calls</code> list</td><td>Trusted as-is; <code>content=""</code></td></tr>
+<tr><td>Otherwise</td><td>Fall back to parsing markers out of the text via <code>tool_parsers.dispatch()</code></td></tr>
+</table>
+<p>The canonical tool-call shape is <code>{"function": {"name": str, "arguments": dict}}</code>; each route maps it to its own wire format. <code>arguments</code> is always a parsed object, never a string (rule C3). When a turn is a tool call, <code>content</code> is <code>""</code> (rule C4) and <code>tool_calls</code> is always a list — empty when none (rule C7).</p>
+<pre><code><span class="keyword">def</span> <span class="func">resolve_chat_output</span>(raw_text, model_name, tools, engine_tool_calls=<span class="keyword">None</span>, *, tools_disabled=<span class="keyword">False</span>) -> <span class="cls">ChatOutput</span>:
+    <span class="keyword">if</span> tools_disabled:
+        <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=raw_text)
+    <span class="keyword">if</span> <span class="func">isinstance</span>(engine_tool_calls, <span class="cls">list</span>) <span class="keyword">and</span> engine_tool_calls:
+        <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=<span class="string">""</span>, tool_calls=engine_tool_calls)
+    cleaned, parsed = <span class="func">parse_tool_calls</span>(raw_text, model_name, tools)
+    <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=<span class="string">""</span>, tool_calls=parsed) <span class="keyword">if</span> parsed <span class="keyword">else</span> <span class="cls">ChatOutput</span>(content=cleaned)</code></pre>
+<h3>Tool Calling (3 surfaces)</h3>
+<p>Function/tool calling is implemented uniformly across all three chat dialects. Each route maps <em>into</em> the engine's OpenAI-function payload on the way in, and maps the canonical <code>ChatOutput.tool_calls</code> <em>out</em> to its own wire shape on the way back.</p>
+<div class="grid-3">
+  <div class="card"><div class="card-header"><span class="icon">🟦</span><h3>OpenAI <code>/v1/chat/completions</code></h3></div>
+  <p><code>routes_openai.py</code>. <code>_tools_payload()</code> honours <code>tool_choice</code>: <code>"none"</code> drops tools entirely (hard guarantee, no <code>tool_calls</code>), <code>{"type":"function","function":{"name":"X"}}</code> narrows to tool X, and <code>"auto"</code>/<code>"required"</code>/unset forward all (<code>"required"</code> behaves like <code>"auto"</code> — it cannot be hard-enforced without constrained decoding). On output, <code>_to_openai_tool_calls()</code> emits <code>{"id","type":"function","function":{"name","arguments":<em>str</em>}}</code> with <code>arguments</code> re-serialised to a JSON string, <code>content: null</code>, and <code>finish_reason: "tool_calls"</code>.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🟩</span><h3>Ollama <code>/api/chat</code></h3></div>
+  <p><code>routes_native.py</code>. <code>_build_chat_message()</code> wraps <code>resolve_chat_output()</code> and keeps <code>tool_calls</code> in the canonical dict shape Ollama expects. MCP tools from connected servers are folded in via <code>_merge_mcp_tools()</code>. A prior assistant <code>tool_calls</code> turn and the matching <code>role=tool</code> results are forwarded back to the model for multi-turn convergence.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🟪</span><h3>Anthropic <code>/v1/messages</code></h3></div>
+  <p><code>routes_anthropic.py</code>. <code>_anthropic_tools_to_payload()</code> maps <code>{name, description, input_schema}</code> to the OpenAI-function shape and honours <code>tool_choice: {"type":"none"|"tool"}</code>. On output, <code>_to_anthropic_tool_use()</code> emits <code>tool_use</code> content blocks (<code>arguments</code>→<code>input</code> dict, <code>toolu_…</code> ids) with <code>stop_reason: "tool_use"</code>. Inbound <code>tool_use</code>/<code>tool_result</code> blocks are reconstructed into the engine message list (Claude Code path).</p></div>
+</div>
+<h4>Per-family marker parsers (<code>tool_parsers.py</code>)</h4>
+<p>When a backend does not surface structured <code>tool_calls</code> itself, HFL parses the model's native tool-call markers out of the generated text. <code>dispatch(text, model_name, tools)</code> selects a parser by model-name substring, runs it first, and only falls through to the generic JSON-envelope fallback when <code>tools</code> are declared (so ordinary chat that happens to contain JSON is never misread as a tool call).</p>
+<table>
+<tr><th>Family</th><th>Marker</th></tr>
+<tr><td>Qwen 2.5 / Qwen 3</td><td><code>&lt;tool_call&gt;{json}&lt;/tool_call&gt;</code></td></tr>
+<tr><td>Llama 3.x</td><td><code>&lt;|python_tag|&gt;{json}&lt;|eom_id|&gt;</code> or <code>&lt;function=name&gt;{json}&lt;/function&gt;</code></td></tr>
+<tr><td>Mistral / Mixtral</td><td><code>[TOOL_CALLS][{json array}]</code></td></tr>
+<tr><td>Gemma 4</td><td>split-pipe DSL <code>&lt;|tool_call&gt;call:NAME{…}&lt;tool_call|&gt;</code> (bare keys, strings wrapped in Gemma 4's <code>&lt;|"|&gt;</code> delimiter)</td></tr>
+<tr><td>Fallback</td><td>fenced <code>json</code> block, <code>{"tool_call":{…}}</code> wrapper, or bare <code>{"name","arguments"}</code></td></tr>
+</table>
+<p>Streaming with declared tools is <strong>buffered</strong>: every dialect accumulates the full generation and emits the structured <code>tool_calls</code> in one terminal delta, so a raw <code>&lt;tool_call&gt;</code> marker never leaks as a content token (API-7).</p>
+<h4>Native agent loop (<code>agent_loop.py</code>)</h4>
+<p>On <code>/api/chat</code>, opting in with <code>agent_loop=true</code> drives the tool-use cycle server-side: call the model, dispatch any emitted <code>tool_calls</code> (MCP tools only — the model must not hallucinate external names), append <code>role=tool</code> results, and re-call until a tool-call-free reply or <code>max_iterations</code> (default 6). Tool calls within one turn fire concurrently via <code>asyncio.gather</code>. <code>run_agent_loop()</code> returns the final message plus a <code>tool_trace</code> for replay/debugging.</p>
+<h3>Responses API (<code>POST /v1/responses</code>)</h3>
+<p><code>routes_openai_responses.py</code>. OpenAI's higher-level wrapper (the path <code>client.responses.create(...)</code> hits) is implemented on top of the existing chat-completion machinery — no new engine path. It is <strong>not stateful</strong>: every request is self-contained and the server does <em>not</em> persist a <code>response_id</code> chain.</p>
+<table>
+<tr><th>Responses request</th><th>Chat-completion equivalent</th></tr>
+<tr><td><code>input</code> (str | list of message dicts)</td><td><code>messages</code> via <code>_input_to_messages()</code> (role defaults to <code>user</code>; list-of-parts text is concatenated, image parts dropped — image support not in scope)</td></tr>
+<tr><td><code>instructions</code></td><td>leading <code>system</code> message</td></tr>
+<tr><td><code>tools</code></td><td>forwarded to the engine; parsed back via <code>tool_parsers.dispatch()</code></td></tr>
+<tr><td><code>reasoning.effort</code> (low/medium/high)</td><td><code>GenerationConfig.thinking_level</code> via <code>_resolve_thinking()</code></td></tr>
+<tr><td><code>response_format</code></td><td>normalised through <code>normalize_openai_response_format()</code></td></tr>
+<tr><td><code>stream: false</code></td><td>renders the <code>output[]</code> envelope</td></tr>
+<tr><td><code>stream: true</code></td><td>SSE with <code>response.created</code> / <code>response.output_text.delta</code> / <code>response.completed</code> events</td></tr>
+</table>
+<p>The non-stream response is built by <code>_render_response()</code> as a heterogeneous ordered <code>output</code> list: <code>reasoning</code> summaries first, then the assistant <code>message</code> (<code>output_text</code> blocks), then any <code>function_call</code> items — plus a <code>usage</code> block with <code>input_tokens</code>/<code>output_tokens</code>/<code>total_tokens</code>. Streaming buffers tool-aware turns and only emits structured <code>function_call</code> items in the final <code>response.completed</code> event; both modes run through the inference dispatcher (a slot is held for the whole stream).</p>
+<h3>WebSocket <code>/ws/chat</code> (cancellable)</h3>
+<p><code>routes_ws.py</code>. The streaming HTTP endpoints are one-shots: cancellation relies on TCP close and carries no actionable signal back. The WebSocket endpoint adds a persistent connection across multiple chat turns, a <code>cancel</code> frame that interrupts the in-flight generation, and token-level server frames so a client renders UI without parsing NDJSON or SSE.</p>
+<h4>Frame grammar (JSON, one per WS message)</h4>
+<table>
+<tr><th>Direction</th><th>Frames</th></tr>
+<tr><td>client → server</td><td><code>{type:"chat", model, messages, options?}</code>, <code>{type:"cancel"}</code>, <code>{type:"ping"}</code></td></tr>
+<tr><td>server → client</td><td><code>{type:"ready", model}</code>, <code>{type:"token", delta}</code>, <code>{type:"done", tokens}</code>, <code>{type:"cancelled", tokens}</code>, <code>{type:"error", message}</code>, <code>{type:"pong"}</code></td></tr>
+</table>
+<div class="flow"><span class="flow-step">chat</span><span class="flow-arrow">→</span><span class="flow-step">ready</span><span class="flow-arrow">→</span><span class="flow-step">token…</span><span class="flow-arrow">→</span><span class="flow-step">done / cancelled</span></div>
+<p>The receive loop reads frames continuously while one turn runs in a background <code>asyncio.Task</code> (<code>_drive_chat</code>), so a <code>cancel</code> can arrive mid-flight. The driver races a per-turn <code>asyncio.Event</code> against each produced token via <code>asyncio.wait(FIRST_COMPLETED)</code> and exits cleanly, leaving the connection open for the next prompt.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Cancellation honesty</h3></div>
+<p>The sync engine producer thread <em>cannot</em> be preempted (llama-cpp-python exposes no cancel API). On cancel, the consumer stops but the producer keeps running until the engine returns by itself, so the dispatcher slot stays busy. The engine is pinned via <code>state.pin_engine()</code> for the producer's lifetime to defer a concurrent hot-swap unload (model-lifecycle UAF guard), and the orphaned slot is logged + counted in <code>hfl_ws_cancel_orphans_total</code>.</p></div>
+<h4>Pre-accept gate</h4>
+<p>WebSocket upgrades bypass the HTTP <code>APIKeyMiddleware</code> and <code>CORSMiddleware</code>, so <code>_check_ws_auth_and_origin()</code> mirrors both inline: API key via <code>?api_key=</code>, <code>Authorization: Bearer</code> or <code>X-API-Key</code> (constant-time compare), and an <code>Origin</code> allow-list check (strict same-origin by default). Rejections accept-then-close with code <code>1008</code> so the browser surfaces the reason.</p>
+<h3>Per-Dialect Error Envelopes</h3>
+<p>HFL's native (flat) <code>{"error": str, "code": …, "category", "retryable", "details", "request_id"}</code> shape matches no real provider. <code>errors.py:render_envelope(path, status_code, flat)</code> reshapes it by request-path prefix so real OpenAI/Anthropic SDKs (which branch on <code>error.type</code>) parse it correctly, keeping HFL's rich diagnostic fields as SDK-ignored extensions <em>inside</em> the error object.</p>
+<table>
+<tr><th>Path prefix</th><th>Envelope</th></tr>
+<tr><td><code>/v1/messages*</code> (Anthropic)</td><td><code>{"type":"error", "error":{type, message, …}, "request_id"}</code> — <code>type</code> from <code>_ANTHROPIC_TYPE</code> (e.g. 401→<code>authentication_error</code>, 503→<code>overloaded_error</code>)</td></tr>
+<tr><td><code>/v1/*</code> (OpenAI)</td><td><code>{"error":{message, type, param, code, …}}</code> — <code>type</code> from <code>_OPENAI_TYPE</code> (e.g. 429→<code>rate_limit_error</code>)</td></tr>
+<tr><td><code>/api/*</code> (Ollama) + everything else</td><td>flat HFL body, <strong>unchanged</strong></td></tr>
+</table>
+<p>Every error code carries a <code>(category, retryable)</code> policy from <code>_ERROR_POLICY</code> (e.g. <code>RATE_LIMIT_EXCEEDED</code>→retryable, <code>VALIDATION_ERROR</code>→not), so a client's retry / circuit-breaker logic decides without parsing prose. Factory helpers (<code>service_unavailable</code>, <code>model_loading</code>, <code>queue_full</code>, <code>queue_timeout</code>, …) all take an optional <code>path</code> for per-dialect rendering.</p>
+<h4>Validation handler (400)</h4>
+<p><code>exception_handlers.py</code> registers three handlers via <code>register_exception_handlers(app)</code>. The <code>RequestValidationError</code> handler emits a per-dialect <strong>400</strong> on <code>/v1/*</code> surfaces (real OpenAI/Anthropic return 400, not FastAPI's default 422 <code>{"detail":[…]}</code>), flattening the first error to <code>"loc: msg"</code>; <code>/api/*</code> and everything else keep the native 422. The <code>HFLError</code> handler and a catch-all <code>Exception</code> handler both run their bodies through <code>render_envelope</code> too, so even an unhandled 500 reaches an OpenAI/Anthropic SDK as a parseable error <em>object</em>.</p>
+<h3>Dispatcher Integration (spec §5.3)</h3>
+<p>Every chat surface routes its engine call through the shared inference dispatcher via <code>helpers.py</code>, serialising concurrent requests against the non-reentrant llama.cpp / transformers model (concurrent use corrupts the KV cache).</p>
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🚦</span><h3><code>run_dispatched()</code></h3></div>
+  <p>One-stop entry for non-stream handlers: acquires a slot, runs the sync engine call in a thread, applies the generation timeout. A timed-out / cancelled sync call cannot be preempted, so the slot is held until the worker thread <em>actually</em> exits — the next queued request can't start a second inference that corrupts the model mid-generation.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🚦</span><h3><code>prepare_stream_response()</code> / <code>acquire_stream_slot()</code></h3></div>
+  <p>Streaming endpoints pre-acquire a slot held for the whole stream. On <code>QueueFullError</code> / <code>QueueTimeoutError</code> the helper returns a pre-built <strong>429</strong> / <strong>503</strong> envelope (with <code>Retry-After</code> / <code>X-Queue-Depth</code>), rendered for the request's dialect.</p></div>
+</div>
+<h3>Metrics &amp; Health (updated)</h3>
+<p><code>routes_metrics.py</code> exposes <code>GET /metrics</code> (Prometheus text via <code>get_metrics().export_prometheus()</code>) and <code>GET /metrics/json</code> (structured JSON). The <code>RequestLogger</code> middleware (<code>middleware.py</code>) feeds every request into <code>Metrics.record_request()</code>, accumulating per-endpoint / per-status / per-method counters plus all-time latency histograms (<code>_bucket</code>/<code>_sum</code>/<code>_count</code> for Prometheus).</p>
+<h4>New counters since v0.1.0</h4>
+<table>
+<tr><th>Metric</th><th>Meaning</th></tr>
+<tr><td><code>hfl_ws_cancels_total</code></td><td>every <code>/ws/chat</code> cancel frame received</td></tr>
+<tr><td><code>hfl_ws_cancel_orphans_total</code></td><td>cancels that left the dispatcher slot busy (engine still running)</td></tr>
+<tr><td><code>hfl_stream_cancel_orphans_total</code></td><td>SSE/HTTP streams torn down while the engine producer thread was still running</td></tr>
+</table>
+<p>The orphan counters exist because a sync engine call run via <code>asyncio.to_thread</code> cannot be cancelled — they let capacity planning see how often a cancel/disconnect leaves an inference running to completion in the background.</p>
+<h4><code>GET /healthz</code> (orchestrator, spec §5.5)</h4>
+<p>Beyond the existing <code>/health*</code> probes, <code>routes_health.py</code> adds <code>/healthz</code>: returns <strong>200</strong> <code>status=ok</code> when an LLM engine is loaded and ready, else <strong>503</strong> <code>status=degraded</code>. The body carries <code>models_loaded</code>, live <code>queue_depth</code> / <code>queue_in_flight</code> from the dispatcher snapshot, and <code>uptime_seconds</code> — one scrape for orchestration.</p>
 </section>
 
 <!-- ========== 12. I18N ========== -->
 <section id="i18n">
-  <h2>12. Module i18n — Internationalization</h2>
+  <h2>13. Module i18n — Internationalization</h2>
   <div class="card">
     <p><strong>File:</strong> <code>src/hfl/i18n/__init__.py</code></p>
     <p>Complete internationalization system that allows the CLI to display all messages in multiple languages. Uses JSON translation files with nested keys and dot-notation access.</p>
@@ -873,17 +1311,146 @@
   </table>
 
   <h3>Translation Files</h3>
-  <p>Each language has a JSON file (~193 lines) in <code>src/hfl/i18n/locales/</code>:</p>
+  <p>Each language has a JSON file (~441 lines, ~294 keys) in <code>src/hfl/i18n/locales/</code>:</p>
   <p><code>en.json</code> (English) and <code>es.json</code> (Spanish). Keys follow the structure <code>module.action.message</code>, for example: <code>commands.pull.downloading</code>, <code>commands.search.no_results</code>, <code>errors.model_not_found</code>.</p>
 
   <div class="highlight highlight-info">
     <strong>Usage:</strong> Set language with <code>export HFL_LANG=es</code>. All CLI commands use <code>t()</code> for their messages, allowing language changes without modifying code.
   </div>
+<h3>Current State (v0.14.0)</h3>
+  <p>Still exactly two locales — <code>en.json</code> and <code>es.json</code> — but each has grown to <strong>441 lines (~294 leaf keys)</strong> as every new command (discover, recommend, bench, snapshot, lora, …) registers its <code>commands.&lt;name&gt;.description</code> / option help strings through <code>t()</code> at import time. Language resolution is <code>HFL_LANG</code> → system locale (<code>LC_ALL</code>/<code>LC_MESSAGES</code>/<code>LANG</code>) → <code>en</code>. A missing key falls back to English and, failing that, returns the key verbatim, so an untranslated string degrades gracefully rather than crashing the CLI.</p>
+</section>
+
+<section id="tray">
+  <h2>14. Module tray — System Tray Icon</h2>
+  <div class="card">
+    <p><strong>Files:</strong> <code>src/hfl/tray/icon.py</code>, <code>src/hfl/tray/controller.py</code></p>
+    <p>Optional cross-platform system-tray front-end for the server, reached with <code>hfl serve --tray</code> (alias <code>--gui</code>). Built on <code>pystray</code> + <code>Pillow</code> (extra <code>[tray]</code>); the icon image is generated programmatically — no asset files ship with the package. If the extra is missing, <code>serve</code> prints an install hint and exits.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="icon">🔴</span><h3>TrayServerController</h3></div>
+      <p>Runs <code>uvicorn</code> in a daemon background thread with its own event loop, exposing <span class="func">start()</span> / <span class="func">stop()</span> / <code>status</code> from the non-async tray callbacks. State is a <code>ServerStatus</code> enum: <code>STOPPED</code>, <code>STARTING</code>, <code>RUNNING</code>, <code>STOPPING</code>, <code>ERROR</code>. <span class="func">stop()</span> sets <code>server.should_exit</code> and joins with a 35 s budget (30 s graceful + 5 s margin). Can pre-load a model via <code>select_engine</code> before serving.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🧩</span><h3>HFLTrayIcon</h3></div>
+      <p><span class="func">_generate_icon_image()</span> draws a 64×64 RGBA circle (colour keyed to status) with a centred “H”. The menu offers Start/Stop (enabled by current status), a status line, the server URL, the <code>HFL v{__version__}</code> string and Exit. On macOS <span class="func">run()</span> must be called from the main thread; a background poller transitions the icon <code>STARTING→RUNNING</code>.</p>
+    </div>
+  </div>
+
+  <div class="highlight highlight-info">
+    <strong>Convenience entry:</strong> <span class="func">run_tray(host, port, api_key, model, log_level, json_logs, auto_start)</span> wires a controller to an icon and (optionally) auto-starts the server on launch.
+  </div>
+</section>
+
+<section id="observability">
+<h2>15. Module <code>observability</code> — Metrics, Signing &amp; Audit</h2>
+<p>Two distinct concerns live here, at two distinct maturity levels. <strong>Metrics</strong> (<code>src/hfl/metrics.py</code>) is the production telemetry path: it backs <code>/metrics</code> and the SLI view, and now emits aggregatable Prometheus histograms plus dispatcher saturation counters. The <code>src/hfl/observability/</code> package — ed25519 manifest <strong>signing</strong>, a structured <strong>audit</strong> log, and OpenTelemetry <strong>tracing</strong> — is fully implemented and test-covered but <strong>dormant</strong>: no module under <code>src/hfl/</code> imports <code>hfl.observability</code> yet, so these helpers ship as opt-in plumbing with zero production call sites. We document what the code does and flag the wiring gap explicitly.</p>
+
+<h3>Prometheus histograms</h3>
+<p><code>Metrics</code> (a thread-safe <span class="cls">@dataclass</span> guarded by a single <code>threading.Lock</code>) keeps two latency families as <em>all-time, monotonic histograms</em> in addition to the bounded <code>deque(maxlen=1000)</code> ring buffers used for the local JSON percentile view. The deques silently shrink under load (their window is the last 1000 samples), so the exported series is the cumulative bucket array instead — that is what makes <code>histogram_quantile()</code> and <code>rate(..._count)</code> correct across any scrape window and across replicas.</p>
+<p>Bucket boundaries (<code>_LATENCY_BUCKETS_MS</code>) are 13 fixed millisecond edges from <code>5</code> to <code>60000</code>, plus a <code>+Inf</code> overflow bucket. <code>_bucket_index()</code> finds the first boundary <code>&gt;= value</code>; <code>record_request()</code> and <code>record_generation()</code> increment the matching bucket and the running <code>_sum_ms</code>. <code>_append_histogram()</code> renders the cumulative <code>_bucket{le=...}</code> / <code>_sum</code> / <code>_count</code> triple.</p>
+<pre><code><span class="keyword">def</span> <span class="func">_bucket_index</span>(value_ms: <span class="cls">float</span>) -&gt; <span class="cls">int</span>:
+    <span class="keyword">for</span> i, boundary <span class="keyword">in</span> enumerate(_LATENCY_BUCKETS_MS):
+        <span class="keyword">if</span> value_ms &lt;= boundary:
+            <span class="keyword">return</span> i
+    <span class="keyword">return</span> len(_LATENCY_BUCKETS_MS)  <span class="comment"># +Inf overflow</span>
+</code></pre>
+<p>Two histogram series are exported: <code>hfl_request_latency_ms</code> and <code>hfl_generation_latency_ms</code>, each with the canonical <code>_bucket</code>/<code>_sum</code>/<code>_count</code> lines. The JSON view (<code>export_json()</code>) and <code>get_sli()</code> still compute p50/p95/p99 locally over the deque via linear-interpolation <code>_percentile()</code>.</p>
+
+<h3>Dispatcher saturation metrics</h3>
+<p>On every scrape, <code>export_prometheus()</code> pulls a <span class="cls">DispatcherSnapshot</span> (from <code>src/hfl/engine/dispatcher.py</code>, a frozen six-int dataclass) via <code>get_dispatcher().snapshot()</code> and exports the load-shedding signals that were previously un-alertable. Reading the snapshot is cheap, so it happens inline under a best-effort <code>try/except</code> (config may not be loaded in some tests).</p>
+<table>
+<tr><th>Metric</th><th>Type</th><th>Source field</th><th>Meaning</th></tr>
+<tr><td><code>hfl_inference_concurrency_max</code></td><td>gauge</td><td><code>max_inflight</code></td><td>Configured max in-flight inference requests</td></tr>
+<tr><td><code>hfl_inference_concurrency_inflight</code></td><td>gauge</td><td><code>in_flight</code></td><td>Requests currently executing</td></tr>
+<tr><td><code>hfl_inference_queue_depth</code></td><td>gauge</td><td><code>depth</code></td><td>Requests waiting for a slot</td></tr>
+<tr><td><code>hfl_inference_accepted_total</code></td><td>counter</td><td><code>accepted_total</code></td><td>Requests admitted to the dispatcher</td></tr>
+<tr><td><code>hfl_inference_rejected_full_total</code></td><td>counter</td><td><code>rejected_full_total</code></td><td>Rejected because the wait queue was full (HTTP 429)</td></tr>
+<tr><td><code>hfl_inference_rejected_timeout_total</code></td><td>counter</td><td><code>rejected_timeout_total</code></td><td>Rejected after waiting too long for a slot (HTTP 503)</td></tr>
+</table>
+<p>Alongside these, the exporter publishes streaming-cancel diagnostics: <code>hfl_ws_cancels_total</code> / <code>hfl_ws_cancel_orphans_total</code> (WebSocket cancel frames, and the subset that left an engine call running in the background with the dispatcher slot still busy) and the SSE/HTTP parity counter <code>hfl_stream_cancel_orphans_total</code>.</p>
+
+<h3>ed25519 manifest signing <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/signing.py</code> implements opt-in provenance over model manifests. <code>manifest_digest()</code> carves a stable subset of the envelope (<code>name</code>, <code>repo_id</code>, <code>file_hash</code>, <code>hash_algorithm</code>, <code>size_bytes</code>, <code>quantization</code>, <code>architecture</code>, <code>adapter_paths</code>, <code>parent_digest</code>) — deliberately dropping mutable metadata like <code>last_used</code> so a <code>hfl show</code> never invalidates a signature — and SHA-256s its canonical JSON. <code>sign_manifest_envelope()</code> attaches an <code>{alg:"ed25519", key_id, digest, sig}</code> block; <code>verify_manifest_envelope()</code> checks it against a <span class="cls">TrustRoot</span> keyring the operator curates at <code>~/.hfl/trusted-publishers.json</code> (<code>key_id → base64url public key</code>).</p>
+<div class="flow"><span class="flow-step">carve envelope</span><span class="flow-arrow">→</span><span class="flow-step">SHA-256 digest</span><span class="flow-arrow">→</span><span class="flow-step">ed25519 sign</span><span class="flow-arrow">→</span><span class="flow-step">verify vs TrustRoot</span></div>
+<p>The crypto backend is selected at runtime: it tries <code>pynacl</code> first, then <code>cryptography</code>, raising <code>SignatureUnavailableError</code> if neither is importable; a bad/unauthorized block raises <code>SignatureInvalidError</code> (intended to become a 400 in strict mode). Unsigned manifests stay valid — <code>verify_manifest_envelope()</code> simply returns <code>False</code>.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Wiring gap</h3></div><p>No code under <code>src/hfl/</code> imports <code>signing</code>; it is exercised only by <code>tests/test_signing.py</code> and <code>tests/test_signing_edge_cases.py</code>. Note in particular that the digest emitted by <code>/api/ps</code> is computed by a <em>separate, local</em> helper <code>_manifest_digest()</code> in <code>src/hfl/api/routes_ps.py</code> (it stamps the manifest's stored <code>file_hash</code>), <strong>not</strong> by this module.</p></div>
+
+<h3>Audit log <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/audit.py</code> writes one JSON object per line to <code>HFL_AUDIT_LOG_PATH</code> via a <code>RotatingFileHandler</code> (default 100&nbsp;MB &times; 5 backups, tunable through <code>HFL_AUDIT_LOG_MAX_BYTES</code> / <code>HFL_AUDIT_LOG_BACKUPS</code>). It is opt-in: with no path configured, <code>audit_event()</code> is a zero-cost no-op. The event envelope carries <code>ts</code> (UTC, microseconds, <code>Z</code>-suffixed), <code>event</code>, <code>actor</code> (an SHA-256 prefix, never the raw API key), <code>resource</code>, <code>metadata</code>, and <code>outcome</code>. The catalogue is a frozen set <code>AUDIT_EVENTS</code> — <code>model.create</code>/<code>delete</code>/<code>copy</code>/<code>pull</code>/<code>stop</code>/<code>unload</code>/<code>load</code>, <code>blob.upload</code>, <code>mcp.connect</code>/<code>disconnect</code>, <code>api_key.mint</code>/<code>revoke</code>. The emitter never raises; an unknown event name logs a warning but still emits.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Wiring gap</h3></div><p><code>audit_event()</code> has no production call site under <code>src/hfl/</code>; despite the docstring's claim that "every privileged route / CLI command records exactly one event", the instrumentation is not yet wired in. Covered only by <code>tests/test_audit.py</code> / <code>tests/test_audit_log.py</code>.</p></div>
+
+<h3>OpenTelemetry tracing <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/tracing.py</code> wraps the OTEL SDK behind a <code>trace_span(name, attributes=...)</code> context manager that becomes a <code>nullcontext()</code> no-op when tracing is off — so call sites never have to check <code>is_enabled()</code>. <code>configure_tracing()</code> is gated on <code>HFL_OTEL_ENABLED</code>; when on it builds a <code>TracerProvider</code> with a <code>BatchSpanProcessor</code> + OTLP/HTTP exporter (endpoint <code>HFL_OTEL_EXPORTER_ENDPOINT</code>, default <code>http://localhost:4318/v1/traces</code>; service name <code>HFL_OTEL_SERVICE_NAME</code>, default <code>hfl</code>). The SDK ships behind the <code>[otel]</code> extra; if it's missing, configuration logs a warning and stays disabled.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Wiring gap</h3></div><p>No <code>trace_span()</code> / <code>configure_tracing()</code> call sites exist under <code>src/hfl/</code> outside the module itself. The helper is ready but no operation is yet instrumented; exercised by <code>tests/test_tracing.py</code> / <code>tests/test_otel_tracing.py</code>.</p></div>
+</section>
+
+<section id="tools-mcp">
+<h2>16. Modules <code>tools</code> &amp; <code>mcp</code></h2>
+<p>The agentic surface. <code>src/hfl/tools/</code> provides the two built-in tools — web search and URL fetch — exposed Ollama-compatibly at <code>/api/web_search</code> and <code>/api/web_fetch</code> (<code>src/hfl/api/routes_web.py</code>). <code>src/hfl/mcp/</code> implements both halves of the Model Context Protocol: HFL as a <em>host</em> that connects to external MCP servers and folds their tools into chat, and HFL as a <em>server</em> that publishes its own tools to other hosts. Both are wired into production; MCP rides behind the optional <code>[mcp]</code> extra.</p>
+
+<h3>Built-in tools (<code>src/hfl/tools/</code>)</h3>
+<div class="grid-2">
+<div class="card"><div class="card-header"><span class="icon">🔎</span><h3>web_search</h3></div><p><code>web_search.py</code> exposes one async <code>search(query, max_results)</code> that dispatches to a backend chosen by <code>HFL_WEB_SEARCH_BACKEND</code>. Every backend returns the same Ollama envelope <code>{"results":[{title,url,content}]}</code>. <code>max_results</code> is clamped to <code>[1,10]</code>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛡️</span><h3>web_fetch</h3></div><p><code>web_fetch.py</code> exposes async <code>fetch(url)</code> returning <code>{title, content, links, url}</code> extracted by a single std-lib <code>HTMLParser</code> (no BeautifulSoup). The HTTP-level errors never raise — only protocol/security/timeout failures raise <code>WebFetchError</code> (turned into a 400).</p></div>
+</div>
+<p>The search backends form a small registry behind an abstract <span class="cls">WebSearchBackend</span>:</p>
+<table>
+<tr><th>Backend</th><th>Endpoint</th><th>Key</th></tr>
+<tr><td><code>duckduckgo</code> (default, alias <code>ddg</code>)</td><td><code>html.duckduckgo.com/html/</code> (regex-scraped)</td><td>none</td></tr>
+<tr><td><code>tavily</code></td><td><code>api.tavily.com/search</code></td><td><code>TAVILY_API_KEY</code></td></tr>
+<tr><td><code>brave</code></td><td><code>api.search.brave.com/res/v1/web/search</code></td><td><code>BRAVE_API_KEY</code></td></tr>
+<tr><td><code>serpapi</code></td><td><code>serpapi.com/search</code> (engine=google)</td><td><code>SERPAPI_API_KEY</code></td></tr>
+</table>
+<p><code>get_backend()</code> resolves the name (falling back to DuckDuckGo with a warning for unknown values, so the server never 500s on startup). DDG's <code>/l/?uddg=</code> redirect wrappers are unwrapped to the real target URL.</p>
+
+<h4>SSRF / DNS-rebinding hardening</h4>
+<p><code>web_fetch</code> is hardened against server-side request forgery in depth. The flow:</p>
+<div class="flow"><span class="flow-step">scheme check</span><span class="flow-arrow">→</span><span class="flow-step">resolve + reject private IP</span><span class="flow-arrow">→</span><span class="flow-step">pin validated IP</span><span class="flow-arrow">→</span><span class="flow-step">dial IP, real Host/SNI</span><span class="flow-arrow">→</span><span class="flow-step">re-validate each redirect</span></div>
+<ul>
+<li><strong>Scheme allowlist</strong> — only <code>http</code>/<code>https</code> (<code>_ALLOWED_SCHEMES</code>).</li>
+<li><strong>Pre-flight resolution</strong> — <code>_resolve_and_validate()</code> calls <code>socket.getaddrinfo()</code> and rejects the URL if <em>any</em> resolved address is private, loopback, link-local, multicast, reserved or unspecified (<code>_is_private_ip()</code>; an unparseable address is treated as unsafe). This blocks the cloud-metadata endpoint <code>169.254.169.254</code> and internal services.</li>
+<li><strong>IP pinning (closes the DNS-rebinding TOCTOU window)</strong> — the validated IP is <em>pinned</em> for the actual connection. <code>_pinned_request()</code> rewrites the URL host to the vetted IP literal while preserving the original authority in the <code>Host</code> header and, for HTTPS, the TLS <code>sni_hostname</code> extension — so httpx cannot re-resolve at connect time and an attacker with TTL-0 authoritative DNS cannot answer public-here / private-to-httpx. Userinfo (<code>user:pass@</code>) is preserved so Basic-auth fetches keep working.</li>
+<li><strong>Manual redirect following</strong> — <code>follow_redirects=False</code>; up to <code>_MAX_REDIRECTS</code> (3) hops are followed by hand, each re-run through the full scheme + private-IP guard and re-pinned, so a public URL cannot 302 onto an internal/metadata address.</li>
+<li><strong>Streamed byte budget</strong> — the body is read incrementally via <code>resp.aiter_bytes()</code> with a hard <code>max_bytes</code> cap (default 5&nbsp;MiB). A non-streaming <code>get</code> would buffer the whole (model-controlled) URL into RAM and could OOM the process; streaming caps actual memory, not just parser input.</li>
+</ul>
+<pre><code><span class="keyword">def</span> <span class="func">_is_private_ip</span>(ip_str: <span class="cls">str</span>) -&gt; <span class="cls">bool</span>:
+    <span class="keyword">try</span>:
+        ip = ipaddress.<span class="func">ip_address</span>(ip_str)
+    <span class="keyword">except</span> <span class="cls">ValueError</span>:
+        <span class="keyword">return</span> <span class="keyword">True</span>  <span class="comment"># unparseable == unsafe</span>
+    <span class="keyword">return</span> (ip.is_private <span class="keyword">or</span> ip.is_loopback <span class="keyword">or</span> ip.is_link_local
+            <span class="keyword">or</span> ip.is_multicast <span class="keyword">or</span> ip.is_reserved <span class="keyword">or</span> ip.is_unspecified)
+</code></pre>
+<p>The route layer (<code>routes_web.py</code>) validates request bodies with Pydantic (<code>query</code> 1–2048 chars; <code>max_results</code> 1–10; <code>url</code> 1–2048 chars), maps <code>WebSearchError</code>/<code>WebFetchError</code> to HTTP 400, and a crash to 500 with a non-leaking message.</p>
+
+<h3>Model Context Protocol (<code>src/hfl/mcp/</code>)</h3>
+<p>The official <code>mcp</code> Python SDK is an optional dependency. Both modules import unconditionally and degrade gracefully: a missing SDK raises <code>MCPClientUnavailableError</code> / <code>MCPServerUnavailableError</code> only at the point of use, never at import, so installations without the <code>[mcp]</code> extra keep working.</p>
+
+<h4>HFL as host — <code>mcp/client.py</code></h4>
+<p><span class="cls">MCPClient</span> (a singleton via <code>get_client()</code>) holds live sessions to every configured server. <code>connect(server_id, target)</code> accepts two transports — <code>stdio://&lt;cmd&gt; &lt;args&gt;</code> (launches a subprocess speaking JSON-RPC) and <code>sse://&lt;url&gt;</code> (HTTP + Server-Sent Events) — calls <code>session.initialize()</code> + <code>list_tools()</code>, and wraps each result as an <span class="cls">MCPTool</span>. Tool names are namespaced as <code>server_id__tool</code> (<code>qualified_name</code>) to prevent collisions across servers, and <code>to_ollama_tool()</code> converts them to the <code>{type:"function", function:{...}}</code> schema the model sees. <code>autoload_servers()</code> connects every entry in the JSON file pointed to by <code>HFL_MCP_AUTOLOAD</code>; a broken entry is logged but never aborts <code>hfl serve</code>.</p>
+<p><strong>Chat integration</strong> (<code>src/hfl/api/routes_native.py</code>): <code>_merge_mcp_tools()</code> folds every connected MCP tool into the <code>tools</code> array of an <code>/api/chat</code> request that didn't already declare them (best-effort — a failed read is logged and ignored). When <code>agent_loop=true</code>, the route passes <code>mcp_client.call_tool</code> as the <code>mcp_caller</code> into <code>run_agent_loop()</code>, which dispatches tool calls and re-submits results until a tool-free reply or <code>max_iterations</code> (default 6).</p>
+
+<h4>HFL as server — <code>mcp/server.py</code></h4>
+<p><span class="cls">HFLMCPServer</span> publishes a minimal, safe-by-default registry <code>HFL_TOOLS</code>: <code>web_search</code>, <code>web_fetch</code>, <code>model_list</code> and <code>model_show</code>. The first two delegate to <code>hfl.tools</code>; the latter two read <code>hfl.models.registry</code>. <code>--capabilities</code> narrows the published set (<code>_filter_tools()</code>). <code>build_server()</code> wires the SDK's <code>@server.list_tools()</code> / <code>@server.call_tool()</code> handlers; a handler <code>ValueError</code> becomes an MCP <code>IsError</code> <code>TextContent</code> response, any other exception is logged and surfaced as a generic internal error. Two transports are served: <code>serve_stdio()</code> (for subprocess hosts) and <code>serve_sse(host, port)</code> (a Starlette app under uvicorn, <code>/sse</code> + <code>/messages/</code>).</p>
+
+<h4>CLI surface — <code>hfl mcp</code></h4>
+<p>The <code>mcp</code> command in <code>src/hfl/cli/main.py</code> drives both halves:</p>
+<table>
+<tr><th>Command</th><th>Effect</th></tr>
+<tr><td><code>hfl mcp list</code></td><td>Print every tool across connected servers (qualified name + description)</td></tr>
+<tr><td><code>hfl mcp connect &lt;id&gt; stdio://… | sse://…</code></td><td>Open a session and enumerate its tools</td></tr>
+<tr><td><code>hfl mcp disconnect &lt;id&gt;</code></td><td>Close the session (idempotent)</td></tr>
+<tr><td><code>hfl mcp serve --transport stdio</code></td><td>Run HFL as an MCP server over stdio</td></tr>
+<tr><td><code>hfl mcp serve --transport sse --host … --port … --capabilities web_search,web_fetch</code></td><td>Run as an SSE server with a narrowed tool set</td></tr>
+</table>
 </section>
 
 <!-- ========== 13. EXCEPTIONS ========== -->
 <section id="exceptions">
-  <h2>13. Exception Hierarchy</h2>
+  <h2>17. Exception Hierarchy</h2>
   <div class="diagram-container">
     <div class="diagram-title">Custom Exception Tree</div>
     <svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -953,7 +1520,7 @@
 
 <!-- ========== 14. PULL FLOW ========== -->
 <section id="flujo-pull">
-  <h2>14. Complete Flow: hfl pull</h2>
+  <h2>18. Complete Flow: hfl pull</h2>
   <div class="diagram-container">
     <div class="diagram-title">Model Download and Registration Pipeline</div>
     <svg viewBox="0 0 1100 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1100px;margin:0 auto;display:block;">
@@ -989,7 +1556,7 @@
 
 <!-- ========== 15. RUN FLOW ========== -->
 <section id="flujo-run">
-  <h2>15. Complete Flow: hfl run</h2>
+  <h2>19. Complete Flow: hfl run</h2>
   <div class="diagram-container">
     <div class="diagram-title">Interactive Chat Pipeline</div>
     <svg viewBox="0 0 900 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1016,7 +1583,7 @@
 
 <!-- ========== 16. SERVE FLOW ========== -->
 <section id="flujo-serve">
-  <h2>16. Complete Flow: hfl serve</h2>
+  <h2>20. Complete Flow: hfl serve</h2>
   <div class="diagram-container">
     <div class="diagram-title">API Server Pipeline</div>
     <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1044,14 +1611,14 @@
       <rect x="780" y="70" width="100" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/><text x="830" y="92" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="bold">Response</text><text x="830" y="107" text-anchor="middle" fill="#8b949e" font-size="8">JSON / SSE</text>
 
       <!-- Pre-load annotation -->
-      <text x="540" y="148" text-anchor="middle" fill="#d29922" font-size="8">Auto-load: if different model requested, unloads current and loads new</text>
+      <text x="540" y="148" text-anchor="middle" fill="#d29922" font-size="8">Auto-load: if different model requested, unloads current and loads new — then the engine call runs through the inference dispatcher (slot acquire, spec §5.3)</text>
     </svg>
   </div>
 </section>
 
 <!-- ========== 17. LEGAL ========== -->
 <section id="legal">
-  <h2>17. Legal Compliance and Audit</h2>
+  <h2>21. Legal Compliance and Audit</h2>
   <p>HFL implements a comprehensive legal compliance system documented with audit references (R1-R9):</p>
 
   <div class="grid-2">
@@ -1073,7 +1640,7 @@
     </div>
     <div class="card">
       <h4><span class="badge badge-purple">R8</span> HuggingFace ToS</h4>
-      <p>Rate limiting (0.5s between API calls). Identifying User-Agent (<code>hfl/0.1.0</code>). Respect for gating system: does NOT bypass license acceptance. User must accept on huggingface.co first.</p>
+      <p>Rate limiting (0.5s between API calls). Identifying User-Agent (<code>hfl/0.14.0</code>). Respect for gating system: does NOT bypass license acceptance. User must accept on huggingface.co first.</p>
     </div>
     <div class="card">
       <h4><span class="badge badge-green">R9</span> AI Disclaimer</h4>
@@ -1083,8 +1650,8 @@
 
   <h3>Project Legal Files</h3>
   <table>
-    <tr><td><code>LICENSE</code></td><td>HRUL v1.0 — Project's custom license</td></tr>
-    <tr><td><code>LICENSE-FAQ.md</code></td><td>Frequently asked questions about the HRUL v1.0 license</td></tr>
+    <tr><td><code>LICENSE</code></td><td>Apache-2.0</td></tr>
+    <tr><td><code>LICENSE-FAQ.md</code></td><td>Apache-2.0 license text</td></tr>
     <tr><td><code>LICENSE-DEPENDENCIES.md</code></td><td>Licenses of all third-party dependencies</td></tr>
     <tr><td><code>PRIVACY.md</code></td><td>Privacy policy (no data collection)</td></tr>
     <tr><td><code>NOTICE-EU-AI-ACT.md</code></td><td>EU AI Act compliance</td></tr>
@@ -1094,7 +1661,7 @@
 
 <!-- ========== 18. PATTERNS ========== -->
 <section id="patrones">
-  <h2>18. Design Patterns</h2>
+  <h2>22. Design Patterns</h2>
 
   <div class="grid-2">
     <div class="card">
@@ -1142,11 +1709,30 @@
     <tr><td><code>0005</code></td><td>License Classification (5 levels)</td><td><span class="badge badge-green">Accepted</span></td></tr>
     <tr><td><code>0006</code></td><td>Rate Limiting Strategy</td><td><span class="badge badge-green">Accepted</span></td></tr>
   </table>
+<h3>New Patterns (added since v0.1.0)</h3>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="icon">🚧</span><h4>Bulkhead / Bounded Dispatcher</h4></div>
+      <p><code>engine/dispatcher.py</code> — <code>InferenceDispatcher</code> serialises access to the non-reentrant model behind a bounded-concurrency, bounded-wait-queue primitive: <code>max_inflight</code> (default 1), <code>max_queued</code> (16), <code>acquire_timeout</code> (60 s). A full queue raises <code>QueueFullError</code> → HTTP 429 + <code>Retry-After</code>; a slot timeout raises <code>QueueTimeoutError</code> → 503. Live state is exposed via <span class="func">snapshot()</span> for <code>/healthz</code> and the <code>X-Queue-Depth</code> header.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🚰</span><h4>Drain Barrier (hot-swap safety)</h4></div>
+      <p><code>api/state.py · set_llm_engine</code> wraps the retire-and-assign of the previous engine inside <code>dispatcher.exclusive()</code>, which waits for every inference slot to clear before the old model is freed. The teardown runs off-loop via <code>asyncio.to_thread(prev.unload)</code> so a slow GPU/Metal context cleanup never freezes <code>/healthz</code> or <code>/metrics</code>. The swap is atomic: an unload failure leaves the old engine in place.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">📌</span><h4>Refcount Pin / Unpin</h4></div>
+      <p>Inference paths that do <em>not</em> hold a dispatcher slot — notably the WebSocket chat turn — call <span class="func">pin_engine()</span> / <span class="func">unpin_engine()</span> around their use of the engine. While an engine is pinned, a concurrent hot-swap defers its <code>unload</code> (stashing it in <code>_engine_retired</code>) until the last reader unpins. This closes the use-after-free window on the shared non-reentrant model that a drain alone would miss.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🔀</span><h4>Shared Chat-Core</h4></div>
+      <p><code>api/chat_core.py</code> — <span class="func">resolve_chat_output()</span> is the single dialect-agnostic decision point: given raw engine text it produces a canonical <code>ChatOutput(content, tool_calls)</code>, honouring <code>tool_choice:"none"</code> and preferring the engine's structured tool-calls over marker parsing. OpenAI, Ollama and Anthropic routes now differ only in wire-format translation — the historical bug where the OpenAI route silently dropped tool-calling can no longer recur.</p>
+    </div>
+  </div>
 </section>
 
 <!-- ========== 19. DEPENDENCIES ========== -->
 <section id="dependencias">
-  <h2>19. Dependencies and Extras</h2>
+  <h2>23. Dependencies and Extras</h2>
   <div class="diagram-container">
     <div class="diagram-title">Dependency Map by Group</div>
     <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1186,13 +1772,29 @@
       <text x="450" y="260" text-anchor="middle" fill="#8b949e" font-size="10">Build system: hatchling  |  Target: Python >=3.10  |  Linting: ruff (E, F, W, I)  |  Line length: 100</text>
     </svg>
   </div>
+<h3>New Optional Extras (since v0.1.0)</h3>
+  <p>The extras matrix expanded well beyond the original four. Heavy native deps now carry upper bounds (cap at the next major) because they are the largest vuln/breakage surface. <code>[all]</code> = <code>llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx,stt,imagegen</code>.</p>
+  <table>
+    <tr><th>Extra</th><th>Pulls in</th><th>Purpose</th></tr>
+    <tr><td><code>[vulkan]</code></td><td>references <code>[llama]</code></td><td>Vulkan GPU backend (Intel Arc, AMD w/o ROCm); built with <code>CMAKE_ARGS="-DGGML_VULKAN=ON"</code>.</td></tr>
+    <tr><td><code>[rocm]</code></td><td>references <code>[llama]</code></td><td>AMD HIP path; built with <code>-DGGML_HIPBLAS=ON</code>. Same wheel, different CMake flag.</td></tr>
+    <tr><td><code>[mlx]</code></td><td><code>mlx-lm&gt;=0.31.2,&lt;1.0</code> (darwin/arm64)</td><td>Apple Silicon native backend.</td></tr>
+    <tr><td><code>[coqui]</code></td><td><code>coqui-tts</code>, torch, torchaudio, soundfile</td><td>Coqui TTS engine (alongside the Bark-via-transformers <code>[tts]</code>).</td></tr>
+    <tr><td><code>[audio]</code></td><td><code>sounddevice</code>, <code>soundfile</code></td><td>Local audio playback.</td></tr>
+    <tr><td><code>[tray]</code></td><td><code>pystray</code>, <code>Pillow</code></td><td>System-tray GUI for <code>serve --tray</code>.</td></tr>
+    <tr><td><code>[mcp]</code></td><td><code>mcp&gt;=1.0.0</code></td><td>Model Context Protocol client/server.</td></tr>
+    <tr><td><code>[stt]</code></td><td><code>faster-whisper&gt;=1.0.0,&lt;2.0</code></td><td>Speech-to-text (Whisper).</td></tr>
+    <tr><td><code>[imagegen]</code></td><td><code>diffusers</code>, torch, safetensors, Pillow, accelerate</td><td>SDXL / FLUX image generation (~2 GB of wheels).</td></tr>
+    <tr><td><code>[otel]</code></td><td>opentelemetry api/sdk + OTLP-HTTP exporter</td><td>Distributed tracing.</td></tr>
+  </table>
+  <p><strong>Pin bumps:</strong> core now targets <code>transformers&gt;=5.0,&lt;6.0</code> + <code>torch&gt;=2.5,&lt;3.0</code> (the 5.x / hub-1.x line), <code>huggingface-hub&gt;=1.5,&lt;2.0</code>, <code>fastapi~=0.135</code>, <code>starlette&gt;=1.3.1</code> and <code>python-multipart&gt;=0.0.31</code> (both floors set by CVE fixes). <code>llama-cpp-python&gt;=0.3.20</code> (gemma4 support). <code>[dev]</code> added <code>mypy&gt;=1.10</code> and <code>numpy&gt;=1.24</code>.</p>
 </section>
 
 <!-- ========== 20. TESTING ========== -->
 <section id="tests">
-  <h2>20. Testing</h2>
+  <h2>24. Testing</h2>
   <div class="highlight highlight-success">
-    <strong>Coverage: 90%+ with 1,900 tests</strong> — Comprehensive suite with <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 80+ test files with shared fixtures in <code>conftest.py</code>.
+    <strong>Coverage: ~89% with ~3,537 tests</strong> — Comprehensive suite with <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). ~201 test files (incl. a <code>tests/stress/</code> dir) with shared fixtures in <code>conftest.py</code>.
   </div>
 
   <h3>Test Categories</h3>
@@ -1281,7 +1883,7 @@
   <p><strong>Main fixtures</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (temp directory), <code>mock_hf_api</code> (HfApi mock), <code>sample_manifest</code> (sample model), <code>populated_registry</code> (pre-populated registry), <code>mock_engine</code> (mocked inference engine), <code>test_client</code> (FastAPI TestClient).</p>
 
   <pre><code><span class="comment"># Run tests with coverage</span>
-pytest --cov=hfl --cov-report=html --cov-fail-under=80
+pytest --cov=hfl --cov-report=html --cov-report=term-missing  <span class="comment"># fail_under=75 (pyproject)</span>
 
 <span class="comment"># Tests by category</span>
 pytest tests/test_api*.py -v          <span class="comment"># API only</span>
@@ -1291,7 +1893,7 @@ pytest -k "not slow" -v               <span class="comment"># Exclude slow tests
 
 <!-- ========== 21. BUILD ========== -->
 <section id="build">
-  <h2>21. Build and Distribution</h2>
+  <h2>25. Build and Distribution</h2>
   <div class="grid-2">
     <div class="card">
       <h4>Build System: Hatchling</h4>
@@ -1317,31 +1919,44 @@ pytest -k "not slow" -v               <span class="comment"># Exclude slow tests
 
 <!-- ========== 22. CI/CD ========== -->
 <section id="ci">
-  <h2>22. CI/CD & GitHub</h2>
+  <h2>26. CI/CD & GitHub</h2>
 
   <h3>GitHub Actions Workflows</h3>
   <table>
     <tr><th>Workflow</th><th>Trigger</th><th>Description</th></tr>
-    <tr><td><code>ci.yml</code></td><td>Push/PR to main</td><td>Full pipeline: lint (ruff) + tests (pytest matrix Python 3.10/3.11/3.12) + type-check</td></tr>
-    <tr><td><code>pages.yml</code></td><td>Push to main</td><td>Auto-deploy HTML docs to GitHub Pages</td></tr>
+    <tr><td><code>ci.yml</code></td><td>Manual (workflow_dispatch)</td><td>Full pipeline: tests (pytest matrix ubuntu+macos × Python 3.10/3.11/3.12 + coverage) + lint (ruff check & format) + type-check (mypy)</td></tr>
+    <tr><td><code>pages.yml</code></td><td>Manual (workflow_dispatch)</td><td>Deploy HTML docs to GitHub Pages (manual trigger only)</td></tr>
     <tr><td><code>build-executables.yml</code></td><td>Release/manual</td><td>Cross-platform executable builds with PyInstaller</td></tr>
-    <tr><td><code>lint.yml</code></td><td>Push/PR</td><td>Linting with ruff (E, F, W, I)</td></tr>
-    <tr><td><code>test.yml</code></td><td>Push/PR</td><td>Tests with pytest + coverage</td></tr>
-    <tr><td><code>security.yml</code></td><td>Scheduled/manual</td><td>Dependency security audit</td></tr>
-    <tr><td><code>license-check.yml</code></td><td>Push/PR</td><td>Dependency license verification</td></tr>
+    <tr><td><code>lint.yml</code></td><td>Manual (workflow_dispatch)</td><td>Linting with ruff (E, F, W, I)</td></tr>
+    <tr><td><code>test.yml</code></td><td>Manual (workflow_dispatch)</td><td>Tests with pytest + coverage</td></tr>
+    <tr><td><code>security.yml</code></td><td>Manual (workflow_dispatch)</td><td>Dependency security audit</td></tr>
+    <tr><td><code>license-check.yml</code></td><td>Manual (workflow_dispatch)</td><td>Dependency license verification</td></tr>
   </table>
 
   <h3>GitHub Templates</h3>
   <p><strong>Issue Templates:</strong> <code>bug_report.yml</code> (structured form with system info, reproduction steps, logs) and <code>feature_request.yml</code> (problem statement, proposed solution, affected component).</p>
-  <p><strong>PR Template:</strong> Checklist including verification of all 5 Compliance Modules (license, provenance, disclaimer, privacy, gating) per HRUL requirements.</p>
+  <p><strong>PR Template:</strong> Checklist including verification of all 5 Compliance Modules (license, provenance, disclaimer, privacy, gating) as project responsible-use norms.</p>
   <p><strong>Community files:</strong> <code>CONTRIBUTING.md</code> (dev setup, code style, PR process), <code>CODE_OF_CONDUCT.md</code> (Contributor Covenant v2.1), <code>SECURITY.md</code> (vulnerability reporting policy).</p>
+<h3>Manual-Only Workflows (v0.14.0)</h3>
+  <p>Every one of the 14 workflows under <code>.github/workflows/</code> is now declared <code>on: workflow_dispatch</code> — the automatic <code>push</code> / <code>pull_request</code> / <code>schedule</code> / tag triggers were intentionally removed. The owner runs each pipeline by hand from the Actions tab. There is <strong>no automatic publish</strong>: <code>publish-pypi.yml</code> has its tag trigger removed and runs only on manual dispatch (with a <code>testpypi</code> input), using PyPI Trusted Publisher (OIDC, no stored token) plus a Sigstore attestation. <code>build-executables.yml</code> additionally keeps a <code>release:</code> trigger for asset uploads.</p>
+  <table>
+    <tr><th>Workflow</th><th>Trigger</th><th>What it runs</th></tr>
+    <tr><td><code>ci.yml</code></td><td>dispatch</td><td>Test matrix (ubuntu+macos × Py 3.10/3.11/3.12) with coverage, ruff lint+format, mypy on <code>api/</code>+<code>cli/</code>.</td></tr>
+    <tr><td><code>test.yml</code> / <code>lint.yml</code></td><td>dispatch</td><td>Standalone pytest+coverage / ruff (legacy split jobs).</td></tr>
+    <tr><td><code>security.yml</code></td><td>dispatch</td><td>Dependency security audit.</td></tr>
+    <tr><td><code>license-check.yml</code></td><td>dispatch</td><td>Dependency license verification.</td></tr>
+    <tr><td><code>publish-pypi.yml</code></td><td>dispatch</td><td>Build + twine check + OIDC publish to PyPI/TestPyPI + Sigstore.</td></tr>
+    <tr><td><code>docker.yml</code> / <code>homebrew.yml</code></td><td>dispatch</td><td>Container images / Homebrew formula.</td></tr>
+    <tr><td><code>macos-dmg.yml</code> / <code>windows-msi.yml</code> / <code>build-executables.yml</code></td><td>dispatch (+ release)</td><td>Native installers and PyInstaller bundles.</td></tr>
+    <tr><td><code>pages.yml</code> / <code>release.yml</code></td><td>dispatch</td><td>Docs to GitHub Pages / release packaging.</td></tr>
+  </table>
 </section>
 
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
-  <p><strong>HFL v0.1.0</strong> — Comprehensive Architecture Documentation</p>
-  <p>Updated on March 7, 2026 — All diagrams are interactive SVGs</p>
-  <p>License: HRUL v1.0 (source-available)</p>
+  <p><strong>HFL v0.14.0</strong> — Comprehensive Architecture Documentation</p>
+  <p>Updated on June 19, 2026 — All diagrams are interactive SVGs</p>
+  <p>License: Apache-2.0</p>
 </div>
 
 </div>

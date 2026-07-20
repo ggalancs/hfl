@@ -117,9 +117,9 @@
   <h1>HFL — Arquitectura Completa</h1>
   <div class="subtitle">Run HuggingFace Models Locally Like Ollama</div>
   <div class="meta">
-    <span>v0.1.0</span>
+    <span>v0.14.0</span>
     <span>Python ≥3.10</span>
-    <span>Licencia HRUL-1.0</span>
+    <span>Licencia Apache-2.0</span>
     <span>Autor: Gabriel Galán Pelayo</span>
     <span>Build: Hatchling</span>
   </div>
@@ -138,9 +138,13 @@
     <a href="#hub">Módulo hub — Integración con HuggingFace</a>
     <a href="#models">Módulo models — Datos y Registro</a>
     <a href="#engine">Módulo engine — Motores de Inferencia</a>
+    <a href="#core">Core — Concurrencia, Dispatcher y Sesiones</a>
     <a href="#converter">Módulo converter — Conversión de Formatos</a>
     <a href="#api">Módulo api — Servidor REST</a>
     <a href="#i18n">Módulo i18n — Internacionalización</a>
+    <a href="#tray">Módulo tray — Bandeja del sistema</a>
+    <a href="#observability">Observabilidad — Métricas, Firma y Auditoría</a>
+    <a href="#tools-mcp">Módulos tools y mcp</a>
     <a href="#exceptions">Jerarquía de Excepciones</a>
     <a href="#flujo-pull">Flujo Completo: hfl pull</a>
     <a href="#flujo-run">Flujo Completo: hfl run</a>
@@ -217,21 +221,21 @@
 <pre><span class="dir">hfl/</span>
 ├── <span class="file">pyproject.toml</span>           <span class="desc">— Definición del paquete, deps, scripts, herramientas</span>
 ├── <span class="file">hfl.spec</span>                 <span class="desc">— PyInstaller spec para ejecutable standalone</span>
-├── <span class="file">LICENSE</span>                  <span class="desc">— HRUL v1.0 (licencia propia)</span>
+├── <span class="file">LICENSE</span>                  <span class="desc">— Apache-2.0</span>
 ├── <span class="file">LICENSE-DEPENDENCIES.md</span>  <span class="desc">— Licencias de todas las dependencias</span>
 ├── <span class="file">PRIVACY.md</span>               <span class="desc">— Política de privacidad</span>
 ├── <span class="file">NOTICE-EU-AI-ACT.md</span>     <span class="desc">— Cumplimiento EU AI Act</span>
 ├── <span class="file">DISCLAIMER.md</span>            <span class="desc">— Exención de responsabilidad</span>
 ├── <span class="file">README.md</span>                <span class="desc">— Documentación principal</span>
 ├── <span class="file">README.es.md</span>             <span class="desc">— Documentación principal (español)</span>
-├── <span class="file">LICENSE-FAQ.md</span>            <span class="desc">— Preguntas frecuentes sobre la licencia HRUL</span>
+├── <span class="file">LICENSE-FAQ.md</span>            <span class="desc">— Texto de la licencia Apache-2.0</span>
 ├── <span class="file">CONTRIBUTING.md</span>           <span class="desc">— Guía de contribución</span>
 ├── <span class="file">CODE_OF_CONDUCT.md</span>        <span class="desc">— Código de conducta (Contributor Covenant 2.1)</span>
 ├── <span class="file">CHANGELOG.md</span>              <span class="desc">— Historial de cambios (Keep a Changelog)</span>
 ├── <span class="file">SECURITY.md</span>               <span class="desc">— Política de seguridad</span>
 │
 ├── <span class="dir">src/hfl/</span>                 <span class="desc">— CÓDIGO FUENTE PRINCIPAL</span>
-│   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.1.0)</span>
+│   ├── <span class="file">__init__.py</span>          <span class="desc">— Versión del paquete (0.14.0)</span>
 │   ├── <span class="file">config.py</span>            <span class="desc">— HFLConfig dataclass — configuración global</span>
 │   ├── <span class="file">exceptions.py</span>        <span class="desc">— Jerarquía completa de excepciones</span>
 │   ├── <span class="file">events.py</span>            <span class="desc">— EventBus para pub/sub interno</span>
@@ -329,7 +333,7 @@
 │   │   └── <span class="file">0006-rate-limiting-strategy.md</span>
 │   └── <span class="file">*.html</span>               <span class="desc">— Documentación arquitectura</span>
 │
-└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS (80+ archivos, 90%+ cobertura)</span>
+└── <span class="dir">tests/</span>                   <span class="desc">— SUITE DE TESTS (~200 archivos, ~89% cobertura)</span>
     ├── <span class="file">conftest.py</span>          <span class="desc">— Fixtures compartidas</span>
     ├── <span class="file">test_api*.py</span>         <span class="desc">— Tests API (5 archivos)</span>
     ├── <span class="file">test_cli*.py</span>         <span class="desc">— Tests CLI (4 archivos)</span>
@@ -359,7 +363,7 @@
 <section id="diagrama-arquitectura">
   <h2>4. Diagrama de Arquitectura General</h2>
   <div class="diagram-container">
-    <div class="diagram-title">Arquitectura de Alto Nivel — HFL v0.1.0</div>
+    <div class="diagram-title">Arquitectura de Alto Nivel — HFL v0.14.0</div>
     <svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1200px;margin:0 auto;display:block;">
       <!-- Background groups -->
       <!-- CLI Layer -->
@@ -518,7 +522,7 @@
     <tr><td><code>llama_cpp_dir</code></td><td>Path (prop)</td><td><code>~/.hfl/tools/llama.cpp</code></td><td>Herramientas de conversión compiladas</td></tr>
     <tr><td><code>host</code></td><td>str</td><td><code>127.0.0.1</code></td><td>Dirección del servidor API. Override con <code>HFL_HOST</code></td></tr>
     <tr><td><code>port</code></td><td>int</td><td><code>11434</code></td><td>Puerto (igual que Ollama para compatibilidad). Override con <code>HFL_PORT</code></td></tr>
-    <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>4096</code></td><td>Tokens de contexto por defecto</td></tr>
+    <tr><td><code>default_ctx_size</code></td><td>int</td><td><code>0</code> (auto)</td><td>Tokens de contexto por defecto (0 = auto-detecta; vía <code>HFL_DEFAULT_CTX_SIZE</code>)</td></tr>
     <tr><td><code>default_n_gpu_layers</code></td><td>int</td><td><code>-1</code></td><td>Capas GPU (-1 = todas)</td></tr>
     <tr><td><code>hf_token</code></td><td>str|None</td><td>env <code>HF_TOKEN</code></td><td>Token de autenticación (solo memoria, nunca persiste)</td></tr>
     <tr><td><code>rate_limit_enabled</code></td><td>bool</td><td><code>true</code></td><td>Habilitar rate limiting. Override con <code>HFL_RATE_LIMIT_ENABLED</code></td></tr>
@@ -531,13 +535,36 @@
   <div class="highlight highlight-legal">
     <strong>Privacidad (R6):</strong> El <code>hf_token</code> se lee SOLO de la variable de entorno. Nunca se persiste a disco, nunca se guarda en models.json ni en ningún archivo de configuración. Existe solo en memoria durante la ejecución del proceso.
   </div>
+<h3>Nuevos knobs de entorno (desde v0.1.0)</h3>
+  <p>Regla de resolución en cada fila: <strong>nombre específico HFL → alias HFL → equivalente Ollama → valor por defecto</strong>. Así, un host que ya exporta variables Ollama funciona como reemplazo drop-in. Un valor inválido se registra una vez y se ignora — el arranque nunca falla por mala configuración del operador. Referencia completa: <code>docs/env-vars.md</code>.</p>
+  <table>
+    <tr><th>HFL</th><th>Alias Ollama</th><th>Defecto</th><th>Qué hace</th></tr>
+    <tr><td><code>OLLAMA_HOST</code> / <code>OLLAMA_PORT</code></td><td>(nativo)</td><td>—</td><td>Aceptados para <code>host</code>/<code>port</code>: <code>OLLAMA_HOST</code> parsea <code>host</code>, <code>host:port</code> o <code>:port</code> (<code>_parse_ollama_host_env</code>).</td></tr>
+    <tr><td><code>HFL_LLM_LIBRARY</code></td><td><code>OLLAMA_LLM_LIBRARY</code></td><td>(auto)</td><td>Fija el backend: <code>llama-cpp</code>, <code>transformers</code>, <code>vllm</code>, <code>mlx</code>. El <code>backend=</code> por llamada sigue ganando.</td></tr>
+    <tr><td><code>HFL_FLASH_ATTENTION</code></td><td><code>OLLAMA_FLASH_ATTENTION</code></td><td>(auto)</td><td>Activa flash-attention en toda la flota; la lista de seguridad por arquitectura sigue rechazando arquitecturas inseguras.</td></tr>
+    <tr><td><code>HFL_DISABLE_MLX</code></td><td>—</td><td><code>0</code></td><td>Fuerza la ruta Metal de llama-cpp en Apple Silicon (benchmarking).</td></tr>
+    <tr><td><code>HFL_KV_CACHE_TYPE</code></td><td><code>OLLAMA_KV_CACHE_TYPE</code></td><td><code>f16</code></td><td>dtype de caché KV: <code>f16</code> / <code>q8_0</code> / <code>q4_0</code> (reduce VRAM a la mitad / un cuarto).</td></tr>
+    <tr><td><code>HFL_NUM_PARALLEL</code> / <code>HFL_QUEUE_MAX_INFLIGHT</code></td><td><code>OLLAMA_NUM_PARALLEL</code></td><td><code>1</code></td><td>Ranuras de inferencia concurrentes en el dispatcher.</td></tr>
+    <tr><td><code>HFL_MAX_QUEUE</code> / <code>HFL_QUEUE_MAX_SIZE</code></td><td><code>OLLAMA_MAX_QUEUE</code></td><td><code>16</code></td><td>Profundidad de la cola de espera; al superarla las peticiones reciben 429.</td></tr>
+    <tr><td><code>HFL_QUEUE_ACQUIRE_TIMEOUT</code></td><td>—</td><td><code>60</code></td><td>Segundos que un llamante espera una ranura antes de 503.</td></tr>
+    <tr><td><code>HFL_KEEP_ALIVE</code></td><td><code>OLLAMA_KEEP_ALIVE</code></td><td><code>5m</code></td><td>Keep-alive por defecto cuando la petición omite el campo (gramática de duración Ollama; <code>-1</code>=nunca).</td></tr>
+    <tr><td><code>HFL_ORIGINS</code></td><td><code>OLLAMA_ORIGINS</code></td><td>(mismo origen)</td><td>Lista CORS separada por comas; <code>*</code> activa el modo comodín (rechaza credenciales).</td></tr>
+    <tr><td><code>HFL_DEBUG</code></td><td><code>OLLAMA_DEBUG</code></td><td>(off)</td><td>Un valor truthy fuerza el logger raíz <code>hfl</code> a DEBUG.</td></tr>
+    <tr><td><code>HFL_MAX_REQUEST_BYTES</code></td><td>—</td><td><code>10 MiB</code></td><td>Límite del cuerpo de la petición (<code>0</code> lo desactiva). Las subidas de blobs usan <code>HFL_MAX_BLOB_BYTES</code> (por defecto ilimitado).</td></tr>
+    <tr><td><code>HFL_STREAM_QUEUE_PUT/GET_TIMEOUT</code></td><td>—</td><td><code>60</code>/<code>30</code></td><td>Timeouts de contrapresión del streaming (encolado del motor / espera del consumidor).</td></tr>
+    <tr><td><code>HFL_REGISTRY_SQLITE_TIMEOUT</code></td><td>—</td><td><code>30</code></td><td>Busy-timeout en segundos del registro SQLite.</td></tr>
+    <tr><td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td><td>—</td><td>(off)</td><td>Variable estándar de OpenTelemetry; HFL emite spans cuando está activa (extra <code>[otel]</code>).</td></tr>
+  </table>
+  <div class="highlight highlight-info">
+    <strong>Guarda CORS:</strong> <code>HFLConfig.__post_init__</code> rechaza la combinación origen-comodín + <code>allow_credentials</code> en el momento de la construcción, de modo que la mala configuración aflora al arrancar y no tras horas de CORS roto.
+  </div>
 </section>
 
 <!-- ========== 6. CLI ========== -->
 <section id="cli">
   <h2>6. Módulo cli — Interfaz de Línea de Comandos</h2>
   <div class="card">
-    <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~870 líneas)</p>
+    <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~2.350 líneas)</p>
     <p><strong>Framework:</strong> Typer + Rich. Entry point registrado en pyproject.toml como <code>hfl = "hfl.cli.main:app"</code></p>
   </div>
 
@@ -563,6 +590,33 @@
 
   <h3>Funciones Auxiliares del CLI</h3>
   <p><code>_format_size()</code> convierte bytes a formato legible. <code>_get_key()</code> lee una tecla sin Enter (raw terminal). <code>_extract_params_from_name()</code> extrae parámetros del nombre (regex: "70b", "7b", "1.5b"). <code>_estimate_model_size()</code> estima tamaño en disco según parámetros y cuantización. <code>_display_model_row()</code> renderiza una fila de resultado de búsqueda. <code>_get_params_value()</code> extrae el valor numérico para filtrado.</p>
+<h3>Comandos nuevos (desde v0.1.0)</h3>
+  <p><strong>El fichero creció a ~2.350 líneas</strong> en <code>src/hfl/cli/main.py</code>. Se añadieron dos familias: comandos de paridad Ollama (drop-in) y los comandos V4 de descubrimiento/operación. Los imports perezosos mantienen un arranque barato; la mayoría de los comandos V4 ejecutan internamente una corrutina con <code>asyncio.run()</code>.</p>
+  <table>
+    <tr><th>Comando</th><th>Descripción</th><th>Opciones clave</th></tr>
+    <tr><td><code>hfl cp &lt;src&gt; &lt;dst&gt;</code></td><td>Clon de registro sin copia apuntando al mismo blob (compatible Ollama)</td><td>—</td></tr>
+    <tr><td><code>hfl stop [model]</code></td><td>Descarga un modelo (o todos) en un servidor activo vía <code>POST /api/stop</code></td><td><code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl show &lt;model&gt;</code></td><td>Resumen estilo Ollama: arquitectura, parámetros, capacidades, licencia</td><td><code>--modelfile</code>, <code>--parameters</code>, <code>--template</code>, <code>--license</code></td></tr>
+    <tr><td><code>hfl ps</code></td><td>Lista modelos residentes en memoria vía <code>/api/ps</code> (NAME/ID/SIZE/PROCESSOR/UNTIL)</td><td><code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl create &lt;model&gt;</code></td><td>Crea un modelo desde un Modelfile; transmite NDJSON desde <code>POST /api/create</code></td><td><code>--file</code>, <code>--host</code>, <code>--port</code></td></tr>
+    <tr><td><code>hfl mcp &lt;action&gt;</code></td><td>Model Context Protocol: connect / disconnect / list / serve (stdio o sse)</td><td><code>--transport</code>, <code>--host</code>, <code>--port</code>, <code>--capabilities</code></td></tr>
+    <tr><td><code>hfl doctor</code></td><td>Diagnostica aceleradores (NVIDIA/Metal/ROCm), extras instalados, VRAM + <code>num_ctx</code> recomendado</td><td>—</td></tr>
+    <tr><td><code>hfl check</code></td><td>Disponibilidad de backends (llama-cpp / transformers / vllm / mlx), GPU, deps TTS</td><td>—</td></tr>
+    <tr><td><code>hfl debug</code></td><td>Volcado de sistema / versiones de dependencias / GPU / memoria para informes de bug</td><td>—</td></tr>
+    <tr><td><code>hfl discover [query]</code></td><td>Filtra el catálogo en vivo del HF Hub por capacidad + popularidad (caché en disco 5 min)</td><td><code>--family</code>, <code>--task</code>, <code>--quant</code>, <code>--multimodal</code>, <code>--min-likes</code>, <code>--license</code>, <code>--gated/--open</code>, <code>--refresh</code></td></tr>
+    <tr><td><code>hfl recommend</code></td><td>Top-N consciente del hardware (perfil RAM/VRAM/MLX + score de capacidad)</td><td><code>--task</code>, <code>--family</code>, <code>--quant</code>, <code>--top</code></td></tr>
+    <tr><td><code>hfl pull-smart &lt;model&gt;</code></td><td>Descarga la variante óptima del Hub para este hardware (MLX 4-bit / quant GGUF / fallback CPU)</td><td><code>--max-vram-gb</code></td></tr>
+    <tr><td><code>hfl verify &lt;model&gt;</code></td><td>Chequeo de 5 sondas: round-trip de tokenizer, chat-template, generación de humo, tool-parser, dim de embedding</td><td>—</td></tr>
+    <tr><td><code>hfl bench &lt;model&gt;</code></td><td>Benchmark de TTFT + tok/s con resumen p50/p95</td><td><code>--runs</code>, <code>--max-tokens</code>, <code>--lengths</code></td></tr>
+    <tr><td><code>hfl snapshot &lt;action&gt;</code></td><td>Snapshot de caché KV: save / load / list / delete (omite prefill al reiniciar)</td><td><code>--name</code></td></tr>
+    <tr><td><code>hfl lora &lt;action&gt;</code></td><td>Hot-swap de adaptadores LoRA en un modelo cargado (apply / remove / list)</td><td><code>--path</code>, <code>--id</code>, <code>--scale</code>, <code>--name</code></td></tr>
+    <tr><td><code>hfl draft-recommend &lt;model&gt;</code></td><td>Elige un modelo borrador para decodificación especulativa</td><td><code>--max-ratio</code></td></tr>
+    <tr><td><code>hfl compliance-dashboard</code></td><td>Panorama de riesgo de licencia / EU AI Act del registro local de un vistazo</td><td>—</td></tr>
+  </table>
+  <p>El comando <code>serve</code> también ganó <code>--tray</code>/<code>--gui</code> (bandeja del sistema, ver la sección tray), <code>--log-level</code>, <code>--json-logs</code> y <code>--ctx</code>.</p>
+  <div class="highlight highlight-warning">
+    <strong>Defecto conocido (v0.14.0):</strong> <code>compliance-report</code> aún codifica fijo <code>"hfl_version": "0.1.0"</code> en su salida JSON/Markdown en vez de leer <code>hfl.__version__</code> (ahora <code>0.14.0</code>).
+  </div>
 </section>
 
 <!-- ========== 7. HUB ========== -->
@@ -583,7 +637,7 @@
     <div class="card">
       <h4>downloader.py — Descarga con Progreso</h4>
       <p>Función principal <code>pull_model(resolved)</code>. Para GGUF descarga archivo individual con <code>hf_hub_download()</code>. Para safetensors descarga snapshot completo con <code>snapshot_download()</code> filtrando: <code>*.safetensors</code>, <code>config.json</code>, <code>tokenizer*.json</code>, <code>tokenizer.model</code>.</p>
-      <p>Implementa rate limiting (0.5s entre llamadas API) y User-Agent identificativo (<code>hfl/0.1.0</code>) para cumplir con ToS de HuggingFace.</p>
+      <p>Implementa rate limiting (0.5s entre llamadas API) y User-Agent identificativo (<code>hfl/0.14.0</code>) para cumplir con ToS de HuggingFace.</p>
     </div>
 
     <div class="card">
@@ -599,6 +653,46 @@
       <p><code>check_model_license()</code> consulta la API de HF, clasifica el riesgo, y devuelve <code>LicenseInfo</code>. <code>require_user_acceptance()</code> presenta un panel Rich con la licencia y requiere confirmación explícita para licencias no permisivas.</p>
     </div>
   </div>
+<h3>7. Descubrimiento, Recomendación, Smart Pull y Push del Hub (V4)</h3>
+<p>Más allá del <code>pull</code> básico, la capa Hub expone ahora el catálogo completo de HuggingFace (1,5M+ modelos con metadatos estructurados) como una superficie consultable y consciente del hardware. Cuatro endpoints de lectura/escritura se apoyan en módulos de planificación puros y sin red, de modo que las heurísticas son testeables sin acceso a internet.</p>
+
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🔎</span><h4>GET /api/discover</h4></div>
+  <p>Respaldado por <code>hfl/hub/discovery.py</code>. <span class="func">search_hub()</span> consulta <code>HfApi.list_models</code> (sobre-pidiendo <code>page_size&nbsp;&times;&nbsp;3</code>, ordenado por descargas) y remodela cada <span class="cls">ModelInfo</span> en un <span class="cls">DiscoveryEntry</span> tipado: familia (<code>llama/qwen/gemma/mistral/mixtral/phi/yi/falcon/deepseek/command-r</code>), cuantización (<code>gguf/awq/gptq/mlx/exl2/fp8/int4/int8</code>), bandera multimodal, y un <code>parameter_estimate_b</code> de mejor esfuerzo extraído del repo id. Los post-filtros propios de HFL (likes, descargas, familia, cuant, gated, licencia) se aplican en Python porque la gramática de filtros del Hub no puede expresarlos.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">🧠</span><h4>GET /api/recommend</h4></div>
+  <p>Respaldado por <code>hfl/hub/recommend.py</code>. <span class="func">recommend_models()</span> combina cuatro puntuaciones deterministas — <code>hardware_fit&nbsp;0.45</code>, <code>capability_fit&nbsp;0.30</code>, <code>popularity&nbsp;0.20</code>, <code>recency&nbsp;0.05</code> — sobre una consulta de descubrimiento (página 60, <code>min_likes&nbsp;10</code>). Los candidatos que desbordan el presupuesto de memoria puntúan 0 y se descartan antes de ordenar. La respuesta HTTP siempre incluye el <code>hardware_profile</code> para que el cliente explique las elecciones.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">🎯</span><h4>POST /api/pull/smart</h4></div>
+  <p>Respaldado por <code>hfl/hub/smart_pull.py</code>. <span class="func">build_smart_plan()</span> resuelve un repo <em>base</em> a la mejor variante disponible para el host, probando forks comunitarios en orden, intersectando la escalera de cuants GGUF con los ficheros realmente publicados, y devolviendo el primer <code>(repo, quant)</code> que cabe en el presupuesto como un <span class="cls">SmartPullPlan</span>. La ruta emite un preámbulo NDJSON <code>planning</code> &rarr; <code>planned</code> y luego delega la transferencia de bytes en la maquinaria de pull existente vía <span class="func">iter_pull_events()</span>.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">⬆️</span><h4>POST /api/push</h4></div>
+  <p>Respaldado por <code>hfl/hub/uploader.py</code> + <code>routes_push.py</code>. <span class="func">build_upload_plan()</span> (puro) resuelve un manifest local a un <span class="cls">UploadPlan</span>; <span class="func">stream_push()</span> orquesta <code>HfApi.create_repo(exist_ok=True)</code> + <code>upload_folder</code> y emite NDJSON espejo de <code>/api/pull</code>. Los clientes Ollama pueden pasar <code>name</code> como alias de <code>destination</code>.</p></div>
+</div>
+
+<h4>Sondeo de hardware y presupuestos de VRAM</h4>
+<p><code>hfl/hub/hw_profile.py</code> construye un <span class="cls">HardwareProfile</span> barato y solo de metadatos (sin trabajo de GPU). Presupuestos de memoria usados tanto por <code>recommend</code> como por <code>smart_pull</code>:</p>
+<table>
+<tr><th>Host</th><th>Detección</th><th>Presupuesto</th></tr>
+<tr><td>CUDA</td><td><code>torch.cuda.is_available()</code>; mayor dispositivo visible vía <code>get_device_properties</code></td><td>VRAM completa de la GPU</td></tr>
+<tr><td>Apple Silicon (Metal)</td><td>Darwin + arm64 + <code>mlx_lm</code> importable (<code>has_mlx</code>)</td><td>70% de la RAM unificada</td></tr>
+<tr><td>ROCm</td><td>env <code>HIP_VISIBLE_DEVICES</code> / <code>ROCM_PATH</code></td><td>no sondeado (None)</td></tr>
+<tr><td>Solo CPU / desconocido</td><td>caso por defecto</td><td>70% de la RAM del sistema (psutil)</td></tr>
+</table>
+<p><code>hfl/hub/quant_table.py</code> convierte <code>(params_b, quantization)</code> en un <span class="cls">FitEstimate</span> conservador = (pesos + KV cache de contexto 4k + 1,0&nbsp;GB de overhead) &times; 1,2 de seguridad. Los bits-por-peso están tabulados por cuant (<code>q4_k_m&rarr;4,85</code>, <code>q8_0&rarr;8,5</code>, <code>mlx-4bit&rarr;4,5</code>, …); los recuentos de capas y dimensiones ocultas del KV se agrupan por tamaño, con Qwen 3, Gemma 2 y Mixtral-8x7B (efectivo) añadidos para cerrar la brecha original solo-Llama.</p>
+
+<h4>Orden de candidatos en smart-pull</h4>
+<p><span class="func">_candidate_repos()</span> genera, de más específico a menos:</p>
+<div class="flow"><span class="flow-step">mlx-community/&lt;name&gt;-4bit</span><span class="flow-arrow">→</span><span class="flow-step">-8bit</span><span class="flow-arrow">→</span><span class="flow-step">bartowski/&lt;name&gt;-GGUF</span><span class="flow-arrow">→</span><span class="flow-step">TheBloke/&lt;name&gt;-GGUF</span><span class="flow-arrow">→</span><span class="flow-step">repo base</span></div>
+<p>Las patas MLX solo aparecen cuando <code>has_mlx</code> es cierto. La escalera de cuants es <code>["mlx-8bit","mlx-4bit","q5_k_m","q4_k_m"]</code> en Apple Silicon, si no <code>["q5_k_m","q4_k_m","q4_0","q3_k_m"]</code>; los intentos rechazados se registran en <code>fallback_chain</code> y se muestran tal cual. Cuando nada cabe, <span class="func">build_smart_plan()</span> lanza <span class="cls">ValueError</span> (mapeado a un 400 con una pista "prueba --max-vram-gb o un repo más pequeño").</p>
+
+<pre><code><span class="comment"># POST /api/pull/smart — Apple Silicon, 16 GB unificados</span>
+{<span class="string">"status"</span>: <span class="string">"planned"</span>, <span class="string">"target_repo_id"</span>: <span class="string">"mlx-community/Llama-3.1-8B-Instruct-4bit"</span>,
+ <span class="string">"quantization"</span>: <span class="string">"mlx-4bit"</span>, <span class="string">"estimated_vram_gb"</span>: 6.3,
+ <span class="string">"reason"</span>: <span class="string">"picked mlx-community/... @ mlx-4bit (6.3 GB / 11.2 GB budget)"</span>}</code></pre>
+
+<h4>Caché de descubrimiento y seguridad</h4>
+<p><span class="cls">DiscoveryCache</span> (<code>HFL_HOME/cache/discovery.json</code>) indexa por la consulta serializada a JSON, TTL 300s, acotada a las 32 claves más recientes, con escrituras atómicas a fichero temporal y reseteo ante corrupción — existe para esquivar los 429 no autenticados del Hub en llamadas CLI encadenadas. En el lado del push, <span class="func">redact_secrets()</span> elimina cualquier cosa que coincida con <code>hf_[A-Za-z0-9]{20,}</code> tanto de los logs como de los eventos de error visibles al cliente, y la subida se restringe a <code>allow_patterns</code> = exactamente los ficheros planificados — crítico porque un modelo respaldado por blob (<code>FROM sha256:&lt;digest&gt;</code>) tiene su <code>local_dir</code> apuntando al almacén compartido <code>blobs/</code>, así que un <code>upload_folder</code> sin restringir exfiltraría los bytes de todos los demás modelos.</p>
 </section>
 
 <!-- ========== 8. MODELS ========== -->
@@ -625,6 +719,32 @@
 
   <h3>ProvenanceLog (provenance.py)</h3>
   <p>Log inmutable de conversiones en <code>~/.hfl/provenance.json</code>. Cada <code>ConversionRecord</code> documenta: origen (repo, formato, revisión), destino (formato, path, cuantización), herramienta usada (llama.cpp + versión), licencia original, y timestamps. Sirve para trazabilidad legal y auditoría de cumplimiento (R3).</p>
+<h3>8. Registro, Manifest, Procedencia y Capacidades (estado actual)</h3>
+<p>La capa de modelos se endureció y amplió notablemente. El registro en disco ganó seguridad ante concurrencia; el manifest absorbió campos derivados del Modelfile y legales; y un módulo dedicado computa ahora las capacidades estilo Ollama.</p>
+
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🗄️</span><h4>ModelRegistry</h4></div>
+  <p><code>hfl/models/registry.py</code> es ahora seguro entre hilos (<span class="cls">RLock</span>) y entre procesos vía bloqueo de fichero multiplataforma (<code>fcntl</code> / <code>msvcrt</code>). Mantiene tres índices dict O(1) (<code>by_name</code>, <code>by_alias</code>, <code>by_repo_id</code>), hace guardados atómicos a fichero temporal con copia de seguridad <code>.json.bak</code>, se recupera de un fichero corrupto restaurando la copia (emitiendo un evento <code>ERROR</code>), y añade <span class="func">copy()</span> (paridad con <code>/api/copy</code> de Ollama — duplica el manifest, comparte el blob en disco), <span class="func">repair()</span>, <span class="func">validate_integrity()</span> y <span class="func">set_alias()</span>. El singleton se obtiene a través de <code>hfl.core.container</code>, no de un global de módulo.</p></div>
+
+  <div class="card"><div class="card-header"><span class="icon">📋</span><h4>ModelManifest</h4></div>
+  <p><code>hfl/models/manifest.py</code> lleva mucho más que nombre/ruta/formato: bloque de licencia (id SPDX, nombre, url, restricciones, <code>gated</code>, <code>license_accepted_at</code>), campos del Reglamento de IA de la UE (<code>gpai_classification</code>, <code>training_flops</code>), integridad (<code>file_hash</code> + <span class="func">verify_integrity()</span> / <span class="func">update_hash()</span>), y campos derivados del Modelfile: <code>system</code>, <code>default_parameters</code>, <code>adapter_paths</code>, <code>messages</code>, <code>parent_name</code>/<code>parent_digest</code> (fijados por <code>POST /api/create</code>), además de <code>env_vars</code> y <code>declared_capabilities</code>.</p></div>
+</div>
+
+<h4>Detección de capacidades (compatible con Ollama)</h4>
+<p>Nuevo módulo <code>hfl/models/capabilities.py</code>. <span class="func">detect_capabilities()</span> devuelve la lista que <code>POST /api/show</code> emite, que los clientes del SDK de Ollama (ollama-python, Open WebUI, LangChain) usan para habilitar tool-calling, visión, embeddings y razonamiento. La detección es coincidencia permisiva de subcadenas sobre <code>name</code> + <code>repo_id</code> + <code>architecture</code>:</p>
+<table>
+<tr><th>Capacidad</th><th>Disparador</th></tr>
+<tr><td><code>completion</code></td><td>cualquier modelo cuyo <code>model_type</code> no sea <code>tts</code>/<code>stt</code>/<code>audio</code></td></tr>
+<tr><td><code>tools</code></td><td>qwen, llama/llama3, mistral, mixtral, gemma4 (sincronizado con <code>tool_parsers.dispatch</code>)</td></tr>
+<tr><td><code>insert</code> (FIM)</td><td>codellama, codegemma, starcoder/2, qwen-coder, deepseek-coder</td></tr>
+<tr><td><code>vision</code></td><td>llava, llama-3.2-vision, llama4, gemma-3, qwen2-vl/2.5-vl, internvl, pixtral, molmo, idefics, minicpm-v</td></tr>
+<tr><td><code>embedding</code></td><td>bert/nomic/jina/bge/gte/e5/mxbai/stella/arctic-embed — descarta <code>completion</code></td></tr>
+<tr><td><code>thinking</code></td><td>gemma-4, deepseek-r1, qwen3-thinking, gpt-oss, o1/o3</td></tr>
+</table>
+<p>El orden es determinista: <code>completion</code>/<code>embedding</code> primero, el resto alfabético.</p>
+
+<h4>Registro de procedencia</h4>
+<p><code>hfl/models/provenance.py</code> registra la cadena origen&rarr;conversión&rarr;resultado (<code>~/.hfl/provenance.json</code>) para la salvaguarda de auditoría legal: repo/formato/revisión de origen, ruta destino, cuantización, herramienta + versión, licencia original y marca de tiempo de aceptación. <span class="func">log_conversion()</span> es el punto de entrada de conveniencia, llamado desde el conversor GGUF tras una cuantización exitosa.</p>
 </section>
 
 <!-- ========== 9. ENGINE ========== -->
@@ -656,12 +776,16 @@
       <!-- vLLM -->
       <rect x="630" y="170" width="240" height="70" rx="8" fill="#3a2f1a" stroke="#d29922"/>
       <text x="750" y="195" text-anchor="middle" fill="#d29922" font-size="12" font-weight="bold">VLLMEngine</text>
+      <!-- MLX -->
+      <rect x="330" y="260" width="240" height="48" rx="8" fill="#2d1f4e" stroke="#bc8cff"/>
+      <text x="450" y="282" text-anchor="middle" fill="#bc8cff" font-size="12" font-weight="bold">MLXEngine</text>
+      <text x="350" y="298" fill="#8b949e" font-size="10">safetensors | Apple Silicon Metal (mlx-lm)</text>
       <text x="650" y="215" fill="#8b949e" font-size="10">Producción GPU | NVIDIA CUDA</text>
       <text x="650" y="228" fill="#8b949e" font-size="10">PagedAttention, batching continuo</text>
 
       <!-- Selector -->
       <rect x="250" y="270" width="400" height="40" rx="8" fill="#21262d" stroke="#bc8cff" stroke-dasharray="4"/>
-      <text x="450" y="295" text-anchor="middle" fill="#bc8cff" font-size="11">selector.py → GGUF→LlamaCpp | CUDA+safetensors→Transformers | fallback→LlamaCpp</text>
+      <text x="450" y="295" text-anchor="middle" fill="#bc8cff" font-size="11">selector.py → GGUF→LlamaCpp | safetensors en Darwin-arm64→MLX | CUDA+safetensors→Transformers | fallback→LlamaCpp</text>
 
       <!-- Inheritance arrows -->
       <line x1="150" y1="170" x2="400" y2="110" stroke="#3fb950" stroke-width="1.2"/>
@@ -680,7 +804,7 @@
   <div class="grid-3">
     <div class="card">
       <h4>LlamaCppEngine</h4>
-      <p>Backend principal. Usa <code>llama-cpp-python</code>. Parámetros: n_ctx, n_gpu_layers (-1=todas), n_threads (0=auto), flash_attn, chat_format (auto-detect). Incluye supresión de stderr para silenciar logs de Metal/CUDA cuando verbose=False. Genera resultados con métricas: tokens/s, prompt tokens, stop reason.</p>
+      <p>Backend principal. Usa <code>llama-cpp-python</code>. Parámetros: n_ctx (con tope por arquitectura, p.ej. Gemma 3/4 → 8192), n_gpu_layers (-1=todas), n_threads (0=auto), flash_attn (consciente de la arquitectura, desactivado en arquitecturas inseguras conocidas como gemma4 salvo que se fuerce), chat_format (auto-detect), kv_cache_type (q4_0/q8_0/f16), lora_paths y draft_model_path (decodificación especulativa). Incluye supresión de stderr para silenciar logs de Metal/CUDA cuando verbose=False. Genera resultados con métricas: tokens/s, conteos de tokens prompt/eval y duraciones en nanosegundos, stop reason.</p>
     </div>
     <div class="card">
       <h4>TransformersEngine</h4>
@@ -723,11 +847,207 @@
     <span class="flow-step" style="border-color:#3fb950">LlamaCppEngine (necesitará conversión previa)</span>
   </div>
   <p>Todos los imports son lazy (<code>_get_llama_cpp_engine()</code>, etc.) para no requerir todas las dependencias instaladas.</p>
+<h3>Backend MLX — Apple Silicon (Fase 13)</h3>
+<p><code>mlx_engine.MLXEngine</code> es una cuarta implementación de <code class="cls">InferenceEngine</code> que envuelve <code>mlx-lm</code> de Apple y accede a Metal directamente. El docstring del módulo afirma una ventaja de 3-10% en procesado de prompt y 15-25% en decode a fp16 frente a la ruta Metal de llama-cpp para arquitecturas de la familia Llama, más precisión mixta nativa q4/q5/q8 sin conversión a GGUF. La dependencia vive tras el extra <code>[mlx]</code>.</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🍏</span><h4>Gate de disponibilidad</h4></div>
+    <p><code class="func">is_available()</code> devuelve True solo cuando <code>platform.system() == "Darwin"</code>, <code>platform.machine()</code> es <code>arm64</code>/<code>aarch64</code> y <code>mlx_lm</code> importa. En cualquier otra plataforma el import es un no-op, así que un <code>hfl[mlx]</code> perdido en un contenedor Linux falla rápido en vez de crashear.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🎛️</span><h4>Shim de sampler mlx-lm 0.30+</h4></div>
+    <p><code class="func">_build_sampling()</code> traduce <code class="cls">GenerationConfig</code> a la API posterior a 0.30: un callable <code class="func">make_sampler()</code> (temp / top_p / top_k) más <code class="func">make_logits_processors()</code> para la penalización de repetición, inyectados en <code class="func">generate()</code> / <code class="func">stream_generate()</code>.</p>
+  </div>
+</div>
+<p>mlx-lm no expone seed por llamada ni soporte de stop-strings, así que el engine cubre ambos huecos: <code class="func">_maybe_seed()</code> siembra el RNG global de mlx (<code>mx.random.seed</code>) cuando <code>cfg.seed &gt;= 0</code> (paridad ENG-10/11 con vLLM/diffusers), y <code class="func">_stop_strings()</code> + <code class="func">_earliest_stop()</code> truncan la salida en el primer stop string del llamante. En <code class="func">generate_stream()</code> la aplicación de stops es un filtro a nivel de carácter con buffer que retiene una cola (<code>max_stop</code>) que podría iniciar un marcador de stop para que la salida nunca lo sobrepase. Los conteos de tokens para el envelope de respuesta se recalculan con el tokenizer porque mlx-lm solo devuelve el texto de la completion.</p>
+<h3>Selección de backend — ruta MLX y override forzado</h3>
+<p><code class="func">select_engine()</code> en <code>selector.py</code> incorpora una rama para Apple Silicon y un override a nivel de operador que el flujo antiguo no refleja.</p>
+<div class="flow">
+  <span class="flow-step">¿GGUF?</span><span class="flow-arrow">→ Sí →</span><span class="flow-step" style="border-color:#3fb950">LlamaCppEngine</span>
+</div>
+<div class="flow">
+  <span class="flow-step">¿safetensors/pytorch + _mlx_preferred()?</span><span class="flow-arrow">→ Sí →</span><span class="flow-step" style="border-color:#bc8cff">MLXEngine</span><span class="flow-arrow">→ MissingDependencyError →</span><span class="flow-step">sigue</span>
+</div>
+<div class="flow">
+  <span class="flow-step">¿_has_cuda()?</span><span class="flow-arrow">→ Sí →</span><span class="flow-step" style="border-color:#58a6ff">TransformersEngine</span><span class="flow-arrow">→ si no →</span><span class="flow-step" style="border-color:#3fb950">LlamaCppEngine</span>
+</div>
+<table>
+  <tr><th>Control</th><th>Efecto</th></tr>
+  <tr><td><code>HFL_DISABLE_MLX=1</code></td><td><code class="func">_mlx_preferred()</code> devuelve False — fuerza la ruta llama-cpp clásica en Apple Silicon (paridad para benchmarking).</td></tr>
+  <tr><td><code>HFL_LLM_LIBRARY</code> / <code>OLLAMA_LLM_LIBRARY</code></td><td>Leídos por <code class="func">_resolve_forced_backend()</code>. Acepta <code>llama-cpp</code>, <code>transformers</code>, <code>vllm</code>, <code>mlx</code>; solo se aplica si el llamante pasó <code>backend="auto"</code> (una petición explícita por modelo siempre gana). Los valores no reconocidos registran un warning y vuelven a auto.</td></tr>
+</table>
+<p>GGUF permanece en llama-cpp en todos los casos — MLX no ingiere GGUF. <code class="func">_create_engine("mlx")</code> conecta la petición explícita <code>--backend mlx</code>.</p>
+<h3>Snapshots de KV-cache — arranque en caliente (snapshot.py, V4 F6)</h3>
+<p>La mayoría de servidores reprocesan el prompt de sistema / prefijo few-shot en cada conversación nueva. <code>snapshot.py</code> expone <code class="func">Llama.save_state()</code> / <code class="func">load_state()</code> de llama-cpp-python como función de servidor: un operador puede capturar todo el KV-cache (tokens procesados + tensores) y restaurarlo para TTFT cero sobre el prefijo cacheado, incluso entre reinicios. Respalda <code>POST /api/snapshot/save</code>, <code>/load</code>, <code>GET /api/snapshot</code> y <code>DELETE /api/snapshot/{name}</code>.</p>
+<pre><code><span class="keyword">def</span> <span class="func">save_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...
+<span class="keyword">def</span> <span class="func">load_snapshot</span>(engine, *, name, model_name) -&gt; <span class="cls">SnapshotMeta</span>: ...</code></pre>
+<p>El estado es un pickle de <code class="func">save_state()</code> más un sidecar <code>&lt;name&gt;.meta.json</code> (model, tokens, created_at, bytes, version, mac) bajo <code>HFL_HOME/snapshots/</code>. Propiedades de seguridad del módulo:</p>
+<div class="grid-3">
+  <div class="card"><div class="card-header"><span class="icon">🔐</span><h4>Integridad HMAC</h4></div><p><code>pickle.loads</code> es RCE (CWE-502), así que cada blob se autentica con HMAC-SHA256 con una clave por instalación (<code>HFL_HOME/snapshot.key</code>, 32 bytes aleatorios, <code>0600</code>) y se verifica con <code class="func">hmac.compare_digest</code> <em>antes</em> de despicklear. Un blob manipulado/ajeno lanza <code class="cls">SnapshotIntegrityError</code>. Los snapshots son una caché de la misma máquina, no portables.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🏷️</span><h4>Guardas de modelo + versión</h4></div><p>La carga comprueba que el <code>model</code> del sidecar coincide con <code>model_name</code> (tensores del modelo equivocado corromperían memoria) y rechaza un <code>SNAPSHOT_FORMAT_VERSION</code> ajeno con <code class="cls">SnapshotVersionMismatch</code>.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">💾</span><h4>Escritura atómica + nombre</h4></div><p>El <code>.state</code> se escribe en un hermano <code>.tmp</code> y se hace <code class="func">os.replace</code> para que un fallo no deje un blob truncado. <code class="func">_validate_name()</code> rechaza separadores de ruta / <code>..</code> / unicode extraño.</p></div>
+</div>
+<p><code class="func">save_snapshot</code>/<code class="func">load_snapshot</code> resuelven <code>save_state</code>/<code>load_state</code> en el engine directamente o en su <code>_model</code> interno; los engines sin esa API lanzan (los snapshots de KV son exclusivos de llama-cpp-python).</p>
+<h3>Decodificación especulativa (llama_cpp.py, V4 F5)</h3>
+<p>El backend llama-cpp puede ejecutar un modelo borrador que propone tokens que el modelo objetivo verifica en una sola pasada. Se elige al cargar mediante el kwarg <code>draft_model_path</code> (proveniente de un Modelfile); <code class="cls">GenerationConfig</code> también lleva un campo <code>draft_model</code>. Dos modos comparten el kwarg:</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🔁</span><h4>prompt-lookup</h4></div>
+    <p><code>draft_model_path="prompt-lookup"</code> usa <code class="cls">LlamaPromptLookupDecoding</code> de llama-cpp-python (<code>num_pred_tokens=10, max_ngram_size=2</code>). Cero VRAM, un speedup documentado de 1.3-2× en prompts repetitivos (RAG, código, salida estructurada). Si no está disponible, lo registra y continúa sin especulación.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">📐</span><h4>modelo borrador</h4></div>
+    <p><code>draft_model_path="&lt;draft.gguf&gt;"</code> carga un segundo <code class="cls">Llama</code> pequeño y lo enruta por <code class="cls">_LlamaModelDraftAdapter</code>. Solo es seguro con un borrador de la misma familia de tokenizer (p.ej. Qwen3-14B ↔ Qwen3-0.6B). Un fallo al cargar el borrador se registra y vuelve a sin especulación.</p>
+  </div>
+</div>
+<p><code class="cls">_LlamaModelDraftAdapter</code> adapta un <code class="cls">Llama</code> normal al protocolo <code class="cls">LlamaDraftModel</code> (un Llama desnudo devuelve un dict de completion, no un array de token-ids). Es deliberadamente <em>incremental</em>: <code class="func">_align_and_eval_suffix()</code> halla el prefijo común más largo con los ids ya procesados y evalúa solo el sufijo, preservando el KV-cache del borrador entre pasos. Un reset ingenuo por llamada pagaría el prefill completo N veces y haría la especulación 2-3× <em>más lenta</em>; ante divergencia (petición nueva / predicciones rechazadas) resetea y reproduce. El Llama borrador se guarda en <code>self._draft_model</code> y se libera en <code class="func">unload()</code> para no duplicar VRAM en una carga posterior.</p>
+<h3>LoRA hot-swap y multi-LoRA (lora.py, V4 F4)</h3>
+<p><code>lora.py</code> aplica / elimina adaptadores LoRA sobre un modelo en ejecución sin recargar los pesos base, respaldando <code>POST /api/lora/apply</code>, <code>/remove</code>, <code>GET /api/lora</code> y <code>/api/lora/{model}</code>. La superficie pública:</p>
+<pre><code><span class="keyword">def</span> <span class="func">apply_lora</span>(engine, *, lora_path, scale=<span class="string">1.0</span>, name=<span class="keyword">None</span>) -&gt; <span class="cls">AdapterInfo</span>
+<span class="keyword">def</span> <span class="func">remove_lora</span>(engine, adapter_id) -&gt; <span class="cls">bool</span>
+<span class="keyword">def</span> <span class="func">list_loras</span>(engine=<span class="keyword">None</span>) -&gt; <span class="cls">list</span>[<span class="cls">AdapterInfo</span>]</code></pre>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">🧩</span><h4>LoraRegistry (multi-LoRA)</h4></div>
+    <p>Un singleton de proceso protegido por lock (<code class="func">get_registry()</code>) mapea <code>adapter_id</code> → <code class="cls">AdapterInfo</code> (path, name, scale, engine_id). Se particiona por <code class="func">_engine_id()</code> = <code>engine-{id(engine)}</code> para que varios modelos cargados tengan cada uno su conjunto de adaptadores. Varios adaptadores se apilan a <code>scale</code> fraccional (p.ej. 0.7 + 0.3); <code>scale</code> se valida a <code>[0.0, 5.0]</code>.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🔌</span><h4>Puente al engine</h4></div>
+    <p><code class="func">_set_lora()</code> prueba primero <code>engine.apply_lora</code>, luego el <code>_model.set_lora_adapter</code> interno (llama-cpp-python ≥ 0.3) y el antiguo <code>apply_lora_from_file</code>. <code class="func">_unset_lora()</code> lo refleja con <code>remove_lora_adapter</code> / <code>unload_lora</code>; sin API → RuntimeError (se expone como 503).</p>
+  </div>
+</div>
+<p><code class="func">remove_lora</code> desacopla del engine vivo <em>primero</em> y solo borra la entrada del registro si tiene éxito — si el engine rechaza el unset, la entrada sigue registrada para que el reintento del cliente funcione, en vez de dejar un adaptador fantasma mezclado en cada generación pero imposible de quitar. Al cargar, <code class="func">LlamaCppEngine.load()</code> también acepta una lista <code>lora_paths</code> pero solo conecta el primero al único kwarg <code>lora_path</code> de llama-cpp, registrando que los extras se ignoran (el apilado se hace por la vía multi-LoRA post-carga).</p>
+<h3>Flash Attention — gating por arquitectura</h3>
+<p>El doc lista <code>flash_attn</code> como parámetro de carga; el backend ahora lo resuelve con una precedencia de tres niveles en <code class="func">LlamaCppEngine.load()</code>, porque la ruta flash-attn de llama-cpp-python ha sido históricamente propensa a crashear en arquitecturas nuevas:</p>
+<table>
+  <tr><th>#</th><th>Origen</th><th>Comportamiento</th></tr>
+  <tr><td>1</td><td>kwarg <code>flash_attn=</code> por carga</td><td>El valor explícito (p.ej. de un Modelfile) gana de forma absoluta.</td></tr>
+  <tr><td>2</td><td><code>HFL_FLASH_ATTENTION</code> / <code>OLLAMA_FLASH_ATTENTION</code></td><td>Falsy (<code>0</code>/<code>false</code>/...) lo desactiva globalmente. Truthy sigue respetando la lista de seguridad por arquitectura — los operadores no reciben crashes "gratis" en arquitecturas malas conocidas.</td></tr>
+  <tr><td>3</td><td>default por arquitectura</td><td><code>False</code> para las de <code>_ARCHITECTURE_NO_FLASH_ATTN</code> (hoy <code>{"gemma4"}</code>), <code>True</code> en caso contrario.</td></tr>
+</table>
+<p>El valor resuelto se pasa al constructor de <code class="cls">Llama</code> junto al tope de contexto por arquitectura (<code>_ARCHITECTURE_CTX_CAP</code>, p.ej. Gemma 3/4 limitado a 8192 para no fijar memoria unificada en Apple Silicon) y la cuantización opcional del KV-cache (<code>kv_cache_type</code> → <code>type_k</code>/<code>type_v</code> q4_0/q8_0/f16).</p>
+<h3>Ciclo de vida del modelo en el engine — keep-alive y evicción</h3>
+<p>HFL no tiene un <code>pin()</code>/<code>unpin()</code> literal en el engine; la residencia de un modelo la gobiernan el <code class="cls">ModelPool</code> (<code>model_pool.py</code>) y los deadlines de keep-alive, así que el "pinning" es una propiedad emergente, no una llamada de API. El pool mantiene varios engines cargados y los desaloja por tres señales: LRU (capacidad), timeout de inactividad (default <code>idle_timeout_seconds=3600</code>) y presión de memoria (estimaciones). Un bucle en background (<code>background_eviction_interval=60s</code>) barre modelos ociosos vía <code class="func">start_background_eviction()</code>.</p>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><span class="icon">📌</span><h4>Pin = deadline de keep-alive</h4></div>
+    <p>El <code class="func">apply_keep_alive()</code> de la capa de rutas traduce el <code>keep_alive</code> de Ollama a un deadline en <code class="cls">ServerState</code>. <code>keep_alive=-1</code> ("nunca expira") borra el deadline, dejando el modelo efectivamente fijado en residencia; una duración positiva fija una expiración; <code>0</code> descarga tras la respuesta (<code class="func">unload_after_response()</code>). <code>keep_alive_default</code> en config siembra la base.</p>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="icon">🧹</span><h4>Evicción a prueba de carreras</h4></div>
+    <p><code class="func">_evict_over_capacity_locked(keep=...)</code> se ejecuta tras una carga y nunca desaloja el modelo recién insertado (fijado al fondo del LRU con <code>move_to_end</code>), cerrando una ventana donde la carga concurrente de otro modelo podría desalojar al recién cargado contra una vista inconsistente de <code>_models</code>/<code>_loading</code> (parte de los arreglos UAF de ciclo de vida de modelo de la Fase 0).</p>
+  </div>
+</div>
+<h3>Otros engines del paquete</h3>
+<p>Más allá de los tres backends de texto, <code>engine/</code> incluye engines de audio, difusión y embeddings que la sección original nunca mencionó. Se cargan de forma lazy tras sus propios extras.</p>
+<table>
+  <tr><th>Engine</th><th>Fichero / clase</th><th>Rol</th></tr>
+  <tr><td>Bark TTS</td><td><code>bark_engine.py</code> · <code class="cls">BarkEngine(AudioEngine)</code></td><td>Texto a voz vía transformers; <code class="func">synthesize()</code> / <code class="func">synthesize_stream()</code>.</td></tr>
+  <tr><td>Coqui TTS</td><td><code>coqui_engine.py</code> · <code class="cls">CoquiEngine(AudioEngine)</code></td><td>TTS de la familia XTTS/VITS/Tacotron.</td></tr>
+  <tr><td>Whisper STT</td><td><code>whisper_engine.py</code> · <code class="cls">WhisperEngine</code></td><td>Voz a texto; <code class="func">transcribe()</code> devuelve <code class="cls">WhisperResult</code>/<code class="cls">WhisperSegment</code>.</td></tr>
+  <tr><td>Difusión</td><td><code>diffusers_engine.py</code> · <code class="cls">DiffusersEngine</code></td><td>Texto a imagen (<code class="func">generate()</code> → <code class="cls">ImageResult</code>). Deliberadamente no implementa <code class="cls">InferenceEngine</code>.</td></tr>
+  <tr><td>Embeddings</td><td><code>embedding_engine.py</code> · <code class="cls">LlamaCppEmbeddingEngine</code>, <code class="cls">TransformersEmbeddingEngine</code></td><td>Embeddings de texto/imagen (<code class="cls">EmbeddingEngine</code> ABC + helpers de pooling).</td></tr>
+</table>
+<p>El módulo base define la ABC paralela <code class="cls">AudioEngine</code> (<code class="cls">TTSConfig</code> / <code class="cls">AudioResult</code>), y <code class="func">select_tts_engine()</code> en <code>selector.py</code> enruta automáticamente un modelo TTS a Bark o Coqui (sniffing por nombre/arquitectura en <code>config.json</code>, Bark como default de pipeline transformers).</p>
+</section>
+
+<section id="core">
+<h2>10. Módulo core — Concurrencia, Dispatcher y Sesiones</h2>
+<p>El paquete <code>hfl.core</code> es la capa de infraestructura transversal añadida tras el congelado de la v0.1.0. Contiene el <span class="cls">Container</span> de inyección de dependencias, el trazado de peticiones, el sandboxing opcional del proceso, el puente eventos→métricas y la persistencia de sesiones de chat. Su acompañante más importante es el <span class="cls">InferenceDispatcher</span> — la primitiva de concurrencia acotada que serializa cada llamada de inferencia contra el modelo compartido no reentrante.</p>
+<p><strong>Dónde vive.</strong> La clase del dispatcher se define en <code>hfl/engine/dispatcher.py</code>, pero se cablea como singleton dentro del contenedor del core y siempre se obtiene mediante <code>hfl.core.get_dispatcher()</code>. Forma parte del relato de concurrencia del core.</p>
+
+<h3>10.1 InferenceDispatcher — un Bulkhead acotado</h3>
+<div class="card"><div class="card-header"><span class="icon">🚦</span><h3>Por qué existe</h3></div>
+<p>Los backends llama.cpp y transformers-GPU comparten <em>una sola</em> instancia de modelo no reentrante. Dos peticiones solapadas corrompen mutuamente su caché KV y producen respuestas vacías o truncadas. El dispatcher es por tanto un <strong>Bulkhead</strong>: limita cuántas inferencias corren a la vez y cuántas pueden esperar, descartando el resto con backpressure en vez de dejar que la carga funda el modelo.</p></div>
+<p><span class="cls">InferenceDispatcher</span> (<code>hfl/engine/dispatcher.py</code>) es async-aware y se apoya en un <code>asyncio.Semaphore</code> cuya capacidad sigue exactamente a <code>max_inflight</code>. Todos los contadores mutan bajo un único <code>_counter_lock</code> para que las decisiones de la ruta rápida y la lenta observen una vista consistente.</p>
+<table>
+<tr><th>Parámetro</th><th>Por defecto</th><th>Config / env</th><th>Significado</th></tr>
+<tr><td><code>max_inflight</code></td><td>1</td><td><code>queue_max_inflight</code> &larr; <code>HFL_QUEUE_MAX_INFLIGHT</code> / <code>HFL_NUM_PARALLEL</code> / <code>OLLAMA_NUM_PARALLEL</code></td><td>Cuántas peticiones pueden ejecutarse a la vez. El valor 1 preserva el comportamiento single-flight de V1.</td></tr>
+<tr><td><code>max_queued</code></td><td>16</td><td><code>queue_max_size</code> &larr; <code>HFL_QUEUE_MAX_SIZE</code> / <code>HFL_MAX_QUEUE</code> / <code>OLLAMA_MAX_QUEUE</code></td><td>Cuántas <em>más</em> pueden esperar en cola. Si está llena, los nuevos llamantes se rechazan de inmediato.</td></tr>
+<tr><td><code>acquire_timeout</code></td><td>60 s</td><td><code>queue_acquire_timeout_seconds</code> &larr; <code>HFL_QUEUE_ACQUIRE_TIMEOUT</code></td><td>Tope de cuánto espera un llamante en cola por un slot antes de rendirse.</td></tr>
+</table>
+<p>La factoría <span class="func">build_default_dispatcher()</span> lee estos valores de <code>hfl.config</code>; el <span class="func">_create_dispatcher()</span> del contenedor lo envuelve en el singleton perezoso.</p>
+
+<h4>El ciclo de adquisición — ruta rápida, ruta lenta, rechazo</h4>
+<p>El gestor de contexto asíncrono <span class="func">slot()</span> ejecuta un protocolo de cuatro fases. Bajo el counter lock decide entre la ruta rápida (capacidad ahora) y la lenta (hay que esperar); una cola de espera llena se rechaza <em>antes</em> de encolar, así el cliente recibe un 429 inmediato en vez de bloquearse.</p>
+<pre><code><span class="keyword">async</span> <span class="keyword">with</span> self._counter_lock:
+    <span class="keyword">if</span> self._in_flight &lt; self._max_inflight:
+        self._in_flight += <span class="string">1</span>          <span class="comment"># ruta rápida: reserva un slot</span>
+        fast_path = <span class="keyword">True</span>
+    <span class="keyword">else</span>:
+        <span class="keyword">if</span> self._depth &gt;= self._max_queued:
+            self._rejected_full_total += <span class="string">1</span>
+            <span class="keyword">raise</span> <span class="cls">QueueFullError</span>(...)  <span class="comment"># &rarr; HTTP 429 + Retry-After</span>
+        self._depth += <span class="string">1</span>            <span class="comment"># ruta lenta: encola y espera</span>
+        fast_path = <span class="keyword">False</span></code></pre>
+<p>La fase 2 adquiere el semáforo <em>fuera</em> del counter lock (para que los llamantes que liberan nunca causen deadlock). Los de ruta lenta envuelven el acquire en <code>asyncio.wait_for(..., timeout=acquire_timeout)</code>; un timeout decrementa <code>depth</code>, incrementa <code>rejected_timeout_total</code> y lanza <span class="cls">QueueTimeoutError</span>. La seguridad ante cancelación es explícita: una cancelación mientras se espera deshace <code>depth</code>; una cancelación tras reservar el slot de ruta rápida revierte <code>in_flight</code>; un slot retenido durante la ejecución siempre se libera en el <code>finally</code> de la fase 4 (decrementa <code>in_flight</code>, luego <code>sem.release()</code> — elegido para que un snapshot tomado a mitad de la liberación sobre-cuente la carga en lugar de infra-contarla).</p>
+<div class="flow"><span class="flow-step">petición</span><span class="flow-arrow">&rarr;</span><span class="flow-step">slot() acquire</span><span class="flow-arrow">&rarr;</span><span class="flow-step">¿in_flight &lt; max?</span><span class="flow-arrow">&rarr;</span><span class="flow-step">func() en hilo</span><span class="flow-arrow">&rarr;</span><span class="flow-step">liberar</span></div>
+<div class="grid-3">
+<div class="card"><div class="card-header"><span class="icon">✅</span><h3>accepted_total</h3></div><p>Contador incrementado una vez que un llamante retiene realmente un slot (ruta rápida o lenta).</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛑</span><h3>rejected_full_total</h3></div><p><span class="cls">QueueFullError</span> &rarr; <span class="badge badge-red">429</span> con <code>Retry-After</code>. La cola ya estaba en <code>max_queued</code>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">⏱️</span><h3>rejected_timeout_total</h3></div><p><span class="cls">QueueTimeoutError</span> &rarr; <span class="badge badge-yellow">503</span>. El llamante esperó más de <code>acquire_timeout</code> — el servidor está saturado.</p></div>
+</div>
+
+<h4>snapshot() — la superficie de métricas</h4>
+<p><span class="func">snapshot()</span> devuelve un <span class="cls">DispatcherSnapshot</span> inmutable (seis enteros: <code>max_inflight</code>, <code>max_queued</code>, <code>in_flight</code>, <code>depth</code>, <code>accepted_total</code>, <code>rejected_full_total</code>, <code>rejected_timeout_total</code>). Es de solo lectura y barato, por lo que se exporta en todas las superficies:</p>
+<table>
+<tr><th>Superficie</th><th>Fuente</th><th>Expone</th></tr>
+<tr><td><code>/healthz</code> / <code>/healthz/ready</code></td><td><code>routes_health.py</code></td><td><code>queue_depth</code>, <code>queue_in_flight</code></td></tr>
+<tr><td><code>/metrics</code> (Prometheus)</td><td><code>metrics.py</code></td><td><code>hfl_inference_concurrency_max</code>, <code>…_inflight</code>, <code>hfl_inference_queue_depth</code> + contadores de saturación</td></tr>
+<tr><td>Cada respuesta HTTP</td><td><code>middleware.py</code></td><td>cabeceras <code>X-Queue-Depth</code>, <code>X-Queue-In-Flight</code>, <code>X-Queue-Max-Inflight</code>, <code>X-Queue-Max-Size</code></td></tr>
+</table>
+<p>Cómo lo consumen las rutas: <span class="func">run_dispatched()</span> en <code>api/helpers.py</code> adquiere un slot, ejecuta la llamada síncrona al motor en un hilo (<code>asyncio.to_thread</code>) y aplica el timeout de generación. De forma crítica retiene el slot hasta que el hilo trabajador <em>realmente</em> termina — una llamada síncrona al motor no se puede cancelar, así que ante un 504/cancelación del cliente el slot se mantiene (<span class="func">_release_when_worker_exits</span>) para impedir que una petición en cola arranque una segunda inferencia que corrompería el modelo a mitad de generación. Las rutas de streaming pre-adquieren con <span class="func">acquire_stream_slot()</span>, que devuelve o bien un gestor de contexto ya abierto o una <span class="cls">JSONResponse</span> 429/503 lista.</p>
+
+<h3>10.2 exclusive() — la barrera de drenaje para trabajo admin</h3>
+<div class="card"><div class="card-header"><span class="icon">🧯</span><h3>Cero inferencia en vuelo</h3></div>
+<p><span class="func">exclusive()</span> adquiere <strong>todos</strong> los <code>max_inflight</code> permisos del semáforo, de modo que el bloque protegido corre sin ninguna inferencia ejecutándose. A diferencia de <span class="func">slot()</span> nunca lanza <span class="cls">QueueFull</span>/<span class="cls">QueueTimeout</span> (el trabajo admin no debe descartarse — simplemente espera) y <em>no</em> toca los contadores de cola (una descarga no es una petición de inferencia). Los nuevos llamantes de inferencia se bloquean en el semáforo hasta que el bloque sale — exactamente la serialización que necesita un cambio de modelo.</p></div>
+<p>Protege tres operaciones contra el modelo compartido:</p>
+<div class="grid-3">
+<div class="card"><div class="card-header"><span class="icon">🔄</span><h3>Hot-swap de modelo</h3></div><p><code>ServerState.set_llm_engine()</code> drena vía <code>exclusive()</code> antes de retirar el motor desplazado, así ninguna petición HTTP con slot está leyendo el modelo viejo cuando se libera.</p></div>
+<div class="card"><div class="card-header"><span class="icon">💾</span><h3>Guardado de snapshot</h3></div><p><code>routes_snapshot.py</code> ejecuta el <code>save_state()</code> multi-GB + pickle + escritura bajo <code>exclusive()</code> + <code>to_thread</code> — fuera del loop y con la inferencia/swaps drenados.</p></div>
+<div class="card"><div class="card-header"><span class="icon">📥</span><h3>Carga de snapshot</h3></div><p><code>load_state()</code> escribe tensores KV en el modelo vivo; misma barrera de drenaje o corrompe el modelo a mitad de generación.</p></div>
+</div>
+
+<h3>10.3 Refcount pin/unpin de motores — la guardia contra use-after-free en el hot-swap</h3>
+<p><span class="func">exclusive()</span> solo cubre las rutas que retienen un slot del dispatcher. El turno de chat por WebSocket (<code>routes_ws.py</code>) lee el motor <em>directamente</em> y <strong>no</strong> retiene un slot, así que un swap concurrente podría hacer <code>unload()</code> del modelo a mitad del stream — un use-after-free del modelo no reentrante. <span class="cls">ServerState</span> cierra ese hueco con un contador de referencias.</p>
+<table>
+<tr><th>Miembro</th><th>Rol</th></tr>
+<tr><td><code>_engine_inuse: dict[int,int]</code></td><td>Refcount por motor (clave por <code>id()</code>) de lectores sin slot que lo están usando.</td></tr>
+<tr><td><code>_engine_retired: dict[int,InferenceEngine]</code></td><td>Motores que un swap desplazó pero no pudo descargar por estar aún fijados (pinned).</td></tr>
+<tr><td><code>_engine_ref_lock: asyncio.Lock</code></td><td>Protege ambos mapas.</td></tr>
+<tr><td><span class="func">pin_engine(engine)</span></td><td>Incrementa el refcount; mientras esté fijado, un hot-swap difiere la descarga.</td></tr>
+<tr><td><span class="func">unpin_engine(engine)</span></td><td>Decrementa; si era el último lector de un motor retirado, lo descarga ahora (fuera del loop vía <code>to_thread</code>).</td></tr>
+</table>
+<p>La lógica de swap en <span class="func">set_llm_engine()</span> realiza un retirar-luego-asignar <em>atómico</em>: retira el motor viejo antes de asignar el nuevo, así un fallo de descarga deja el motor viejo en su sitio (los llamantes ven "el reemplazo falló", no un estado a medio actualizar). Dentro del drenaje <code>exclusive()</code> comprueba <code>_engine_inuse</code>: si el motor desplazado sigue fijado pasa a <code>_engine_retired</code> y la descarga se difiere al último <span class="func">unpin_engine</span>; si no, se descarga de inmediato fuera del loop. El productor WS fija el motor durante toda la vida del hilo productor y lo libera en su <code>finally</code> (que puede sobrevivir a una cancelación del cliente, ya que la llamada al motor no se puede interrumpir).</p>
+<div class="flow"><span class="flow-step">turno WS fija el motor</span><span class="flow-arrow">&rarr;</span><span class="flow-step">swap drena el dispatcher</span><span class="flow-arrow">&rarr;</span><span class="flow-step">¿motor viejo fijado? difiere descarga</span><span class="flow-arrow">&rarr;</span><span class="flow-step">el productor acaba, libera</span><span class="flow-arrow">&rarr;</span><span class="flow-step">el último lector lo descarga</span></div>
+
+<h3>10.4 Container — inyección de dependencias y singletons</h3>
+<p><code>core/container.py</code> centraliza el estado global. <span class="cls">Singleton[T]</span> es un contenedor perezoso thread-safe (double-checked locking sobre una factoría, con <code>reset()</code> para tests). El dataclass <span class="cls">Container</span> tiene un <code>Singleton</code> por servicio compartido y expone accesores de conveniencia:</p>
+<pre><code><span class="keyword">from</span> hfl.core <span class="keyword">import</span> get_config, get_registry, get_state, get_dispatcher</code></pre>
+<table>
+<tr><th>Accesor</th><th>Singleton</th></tr>
+<tr><td><span class="func">get_config()</span></td><td><span class="cls">HFLConfig</span> (la instancia global de config)</td></tr>
+<tr><td><span class="func">get_registry()</span></td><td><span class="cls">ModelRegistry</span></td></tr>
+<tr><td><span class="func">get_event_bus()</span></td><td><span class="cls">EventBus</span></td></tr>
+<tr><td><span class="func">get_state()</span></td><td><span class="cls">ServerState</span></td></tr>
+<tr><td><span class="func">get_metrics()</span></td><td><span class="cls">Metrics</span></td></tr>
+<tr><td><span class="func">get_rate_limiter()</span></td><td><span class="cls">RateLimiter</span> (en memoria por defecto)</td></tr>
+<tr><td><span class="func">get_dispatcher()</span></td><td><span class="cls">InferenceDispatcher</span></td></tr>
+</table>
+<p><span class="func">reset_container()</span> reconstruye todo desde cero — el fixture estándar de tests para estado limpio.</p>
+
+<h3>10.5 Tracing, Sesiones, Sandbox, Observabilidad</h3>
+<div class="grid-2">
+<div class="card"><div class="card-header"><span class="icon">🧵</span><h3>tracing.py</h3></div><p>Propagación de request-ID vía <code>contextvars</code> (sobrevive a tareas asyncio y saltos al thread-pool). <span class="func">set_request_id()</span> / <span class="func">get_request_id()</span> generan IDs hex cortos de 8 caracteres; <span class="cls">RequestContext</span> y <span class="func">with_request_id</span> los acotan; <span class="func">format_log_prefix()</span> renderiza el prefijo de log <code>[abc123de]</code>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">💬</span><h3>sessions.py</h3></div><p>Persistencia de chat legible bajo <code>~/.hfl/sessions/&lt;name&gt;.json</code> (sin pickle). <span class="cls">ChatSession</span> guarda modelo, opciones, mensajes y system. <span class="func">save_session</span> escribe atómicamente (tmp + replace) y actualiza <code>updated_at</code>; los nombres se validan contra un regex estricto (<span class="cls">InvalidSessionNameError</span>) para evitar escapar del directorio; <span class="func">list_sessions</span> omite ficheros corruptos, los más nuevos primero.</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛡️</span><h3>sandbox.py</h3></div><p>Hardening opt-in del proceso para <code>hfl serve</code> vía <code>--sandbox</code> / <code>HFL_SANDBOX</code>. <code>seccomp</code> (Linux): <code>PR_SET_NO_NEW_PRIVS</code> + un filtro seccomp-bpf mínimo que bloquea <code>ptrace</code>/<code>kexec_*</code>/<code>reboot</code>/<code>unshare</code>/<code>setuid</code>; <code>macos</code>: pista advisory de App-Sandbox (la imposición real viene de la entitlement del DMG firmado). Totalmente defensivo — cualquier fallo registra un WARNING y continúa; <span class="func">apply_sandbox</span> devuelve un <span class="cls">SandboxResult</span> inspeccionable.</p></div>
+<div class="card"><div class="card-header"><span class="icon">📈</span><h3>observability_setup.py</h3></div><p><span class="func">setup_event_listeners()</span> puentea el event bus a las métricas: ante <code>MODEL_LOADED</code>/<code>MODEL_UNLOADED</code>/<code>GENERATION_COMPLETED</code>/<code>GENERATION_FAILED</code> registra la duración de carga, los tokens/latencia de generación y el tipo de error. Idempotente (se registra una sola vez).</p></div>
+</div>
 </section>
 
 <!-- ========== 10. CONVERTER ========== -->
 <section id="converter">
-  <h2>10. Módulo converter — Conversión de Formatos</h2>
+  <h2>11. Módulo converter — Conversión de Formatos</h2>
 
   <h3>formats.py — Detección de Formatos</h3>
   <p>Enum <code>ModelFormat</code>: GGUF, SAFETENSORS, PYTORCH, UNKNOWN. La función <code>detect_format(path)</code> inspecciona extensiones (.gguf, .safetensors, .pt/.pth/.bin) tanto en archivos individuales como en directorios (rglob). <code>find_model_file()</code> localiza el archivo principal del modelo.</p>
@@ -756,11 +1076,30 @@
     <tr><td>Q8_0</td><td>~8.0</td><td>~98%+</td><td>Máxima calidad cuantizada</td></tr>
     <tr><td>F16</td><td>16.0</td><td>100%</td><td>Sin cuantización</td></tr>
   </table>
+<h3>11. Cobertura de arquitecturas, parser de Modelfile y renderizador Go-template (estado actual)</h3>
+<p>El cluster del conversor abarca detección de formato/tipo (<code>formats.py</code>), el pipeline GGUF (<code>gguf_converter.py</code>), un parser/renderizador bidireccional completo de Modelfile (<code>modelfile_parser.py</code>) y un motor Go-template mínimo (<code>go_template.py</code>).</p>
+
+<h4>30+ arquitecturas LLM + detección MLX</h4>
+<p><code>hfl/converter/formats.py</code> reconoce <strong>33</strong> arquitecturas causal-LM en <code>LLM_ARCHITECTURES</code> (Llama, Mistral, Mixtral, Qwen2/Qwen2Moe, Gemma/Gemma2, Phi/Phi3, Falcon, Cohere/CommandR, DeepseekV2, InternLM/InternLM2, Yi, StarCoder2, CodeLlama, Olmo/Olmo2, Mamba, Jamba, Arctic, StableLm, OPT, Bloom, GPT2/NeoX/J, …), más otras 16 familias de arquitecturas (TTS, STT, embeddings, vision-QA, seq2seq, depth, …) usadas por <span class="func">detect_model_type()</span> para clasificar cualquier <code>config.json</code> de HF. <span class="func">is_mlx_quantized_repo()</span> marca repos empaquetados con MLX (<code>mlx</code> en el repo id, o un objeto <code>quantization</code> con <code>group_size</code>+<code>bits</code> en <code>config.json</code>) para enrutarlos al backend MLX en lugar del conversor de llama.cpp, que rechaza grafos empaquetados con MLX.</p>
+
+<h4>Pipeline de conversión GGUF</h4>
+<p><code>hfl/converter/gguf_converter.py</code> ejecuta <code>safetensors &rarr; convert_hf_to_gguf.py (F16) &rarr; llama-quantize &rarr; GGUF final</code>. <span class="func">check_model_convertibility()</span> rechaza de entrada adaptadores LoRA, modelos de difusión/imagen y configuraciones de audio/TTS. <span class="func">convert_with_cache()</span> normaliza el token de cuant <em>antes</em> de construir la clave de bloqueo (para que <code>q4_k_m</code> y <code>Q4_K_M</code> no compitan por el mismo fichero de salida) y serializa conversiones duplicadas con un bloqueo por clave; <span class="func">_gguf_variant_path()</span> evita deliberadamente <code>with_suffix</code> para que los puntos de versión en los nombres de repo (<code>Qwen2.5-7B</code>) no se trunquen en nombres de fichero colisionantes. El intermedio F16 es reanudable, y <span class="func">_check_conversion_environment()</span> sondea el Python del host en busca de una combinación compatible de transformers/huggingface_hub antes de lanzar la conversión real.</p>
+
+<h4>Parser de Modelfile — escapes, guardas de INCLUDE, round-trip</h4>
+<p><code>hfl/converter/modelfile_parser.py</code> cierra el bucle para <code>POST /api/create</code>: <span class="func">parse_modelfile()</span> maneja FROM, PARAMETER, TEMPLATE, SYSTEM, ADAPTER, LICENSE, MESSAGE, REQUIRES, ENV, CAPABILITIES, DRAFT e INCLUDE; <span class="func">render_modelfile_document()</span> serializa de vuelta con un invariante de round-trip testeado. Endurecimiento:</p>
+<ul>
+<li><strong>Decodificación de escapes</strong> — <span class="func">_decode_quoted()</span> interpreta <code>\n \t \r \" \\</code> dentro de valores con comillas simples y triples; el codificador escapa las barras invertidas (y los <code>"""</code> incrustados) de forma simétrica para que una plantilla Jinja con un <code>\n</code> literal sobreviva un parse&rarr;render&rarr;parse sin cambios.</li>
+<li><strong>Guarda de inyección de rutas en INCLUDE</strong> — <span class="func">_expand_includes()</span> recorre el directorio base una vez hacia un dict allow-list; cada open() posterior consume una cadena indexada por diccionario, nunca entrada de usuario en bruto. <span class="func">_is_safe_include_rel()</span> rechaza <code>..</code>, rutas absolutas, barras invertidas y NUL; se aplican detección de ciclos y un tope de profundidad 16.</li>
+<li><strong>Matcher de INCLUDE escrito a mano</strong> (sin regex) para que el análisis de ReDoS polinómico de CodeQL no tenga nada que marcar.</li>
+</ul>
+
+<h4>Renderizador Go-template con guarda de recursión</h4>
+<p><code>hfl/converter/go_template.py</code> implementa el subconjunto de <code>text/template</code> de Go que usan los Modelfiles reales — <code>{{ .Field }}</code>, rutas anidadas, <code>{{ range }}</code>, <code>{{ if }}/{{ else }}/{{ end }}</code>, literales de cadena, y recorte de espacios <code>{{- -}}</code>. <span class="func">render_go_template()</span> es una capa de conveniencia, nunca una barrera: ante un <span class="cls">GoTemplateError</span> recae en el texto literal con un aviso, y captura <span class="cls">RecursionError</span> explícitamente para que un <code>{{ if }}/{{ range }}</code> profundamente anidado y malicioso no agote la pila de Python y aflore como un 500 no manejado.</p>
 </section>
 
 <!-- ========== 11. API ========== -->
 <section id="api">
-  <h2>11. Módulo api — Servidor REST</h2>
+  <h2>12. Módulo api — Servidor REST</h2>
 
   <div class="diagram-container">
     <div class="diagram-title">Endpoints y Compatibilidad API</div>
@@ -826,7 +1165,7 @@
 
   <h3>Middleware Stack</h3>
   <p>Orden de ejecución Starlette (outer → inner): <code>RequestLogger → APIKey → RateLimit (condicional) → Disclaimer → CORS</code>. El orden de <code>add_middleware()</code> es inverso: CORS, Disclaimer, RateLimit, APIKey, RequestLogger. APIKey se ejecuta ANTES de RateLimit, de modo que las peticiones no autenticadas son rechazadas sin consumir tokens del rate limiter.</p>
-  <p><strong>CORSMiddleware</strong> — Permite todas las orígenes, métodos y headers (desarrollo local).</p>
+  <p><strong>CORSMiddleware</strong> — Lista de orígenes permitidos configurable vía <code>HFL_ORIGINS</code> (por defecto solo localhost); ya no permite todos los orígenes de forma incondicional.</p>
   <p><strong>DisclaimerMiddleware</strong> — Añade header <code>X-AI-Disclaimer</code> a respuestas de endpoints de generación AI (R9).</p>
   <p><strong>RateLimitMiddleware</strong> — Limitación de tasa por IP, configurable vía env vars. Soporta rate limiting por modelo.</p>
   <p><strong>APIKeyMiddleware</strong> — Autenticación opcional via <code>--api-key</code>. Soporta <code>Authorization: Bearer &lt;key&gt;</code> y <code>X-API-Key: &lt;key&gt;</code>. Endpoints públicos (<code>/health</code>, <code>/</code>) exentos.</p>
@@ -846,11 +1185,110 @@
   <p><code>/health/sli</code> — Service Level Indicators con metricas de disponibilidad y latencia.</p>
   <p><code>/metrics</code> — Metricas en formato Prometheus.</p>
   <p><code>/metrics/json</code> — Metricas en formato JSON.</p>
+<h3>Núcleo de Chat Compartido (<code>chat_core.py</code>)</h3>
+<p>Toda superficie de chat — OpenAI <code>/v1/chat/completions</code>, Ollama <code>/api/chat</code> y Anthropic <code>/v1/messages</code> — debe tomar la misma decisión una vez que el motor ha producido texto: <em>¿el modelo emitió una tool call y, de ser así, cuál es?</em> Históricamente la ruta OpenAI quedó por detrás de la de Ollama y dejó caer silenciosamente el tool calling. Esa decisión vive ahora en un único lugar, de modo que las rutas solo pueden diferir en su traducción al formato de cable, nunca en esta lógica.</p>
+<div class="card"><div class="card-header"><span class="icon">🧩</span><h3><code>resolve_chat_output()</code> → <code>ChatOutput</code></h3></div>
+<p>El dataclass inmutable <code>ChatOutput(content, tool_calls)</code> es el turno resuelto canónico, independiente del dialecto. <code>resolve_chat_output()</code> toma el texto crudo del motor, el nombre del modelo, los <code>tools</code> declarados y cualquier <code>engine_tool_calls</code> estructurado, y aplica tres reglas:</p></div>
+<table>
+<tr><th>Condición</th><th>Resultado</th></tr>
+<tr><td><code>tools_disabled</code> (cliente envió <code>tool_choice: "none"</code>)</td><td>Texto devuelto literal; los marcadores <strong>nunca</strong> se escanean (obligatorio, ya que el parser por familia se dispara ante un marcador independientemente de la lista de tools)</td></tr>
+<tr><td>El motor devolvió una lista <code>tool_calls</code> real y no vacía</td><td>Se confía tal cual; <code>content=""</code></td></tr>
+<tr><td>En otro caso</td><td>Se recurre a parsear marcadores del texto vía <code>tool_parsers.dispatch()</code></td></tr>
+</table>
+<p>La forma canónica de tool call es <code>{"function": {"name": str, "arguments": dict}}</code>; cada ruta la mapea a su propio formato de cable. <code>arguments</code> es siempre un objeto parseado, nunca una cadena (regla C3). Cuando un turno es una tool call, <code>content</code> es <code>""</code> (regla C4) y <code>tool_calls</code> es siempre una lista — vacía cuando no hay (regla C7).</p>
+<pre><code><span class="keyword">def</span> <span class="func">resolve_chat_output</span>(raw_text, model_name, tools, engine_tool_calls=<span class="keyword">None</span>, *, tools_disabled=<span class="keyword">False</span>) -> <span class="cls">ChatOutput</span>:
+    <span class="keyword">if</span> tools_disabled:
+        <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=raw_text)
+    <span class="keyword">if</span> <span class="func">isinstance</span>(engine_tool_calls, <span class="cls">list</span>) <span class="keyword">and</span> engine_tool_calls:
+        <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=<span class="string">""</span>, tool_calls=engine_tool_calls)
+    cleaned, parsed = <span class="func">parse_tool_calls</span>(raw_text, model_name, tools)
+    <span class="keyword">return</span> <span class="cls">ChatOutput</span>(content=<span class="string">""</span>, tool_calls=parsed) <span class="keyword">if</span> parsed <span class="keyword">else</span> <span class="cls">ChatOutput</span>(content=cleaned)</code></pre>
+<h3>Tool Calling (3 superficies)</h3>
+<p>El function/tool calling está implementado de forma uniforme en los tres dialectos de chat. Cada ruta mapea <em>hacia</em> el payload OpenAI-function del motor a la entrada, y mapea el canónico <code>ChatOutput.tool_calls</code> <em>hacia</em> su propio formato de cable a la salida.</p>
+<div class="grid-3">
+  <div class="card"><div class="card-header"><span class="icon">🟦</span><h3>OpenAI <code>/v1/chat/completions</code></h3></div>
+  <p><code>routes_openai.py</code>. <code>_tools_payload()</code> respeta <code>tool_choice</code>: <code>"none"</code> descarta los tools por completo (garantía dura, sin <code>tool_calls</code>), <code>{"type":"function","function":{"name":"X"}}</code> restringe al tool X, y <code>"auto"</code>/<code>"required"</code>/sin especificar reenvían todos (<code>"required"</code> se comporta como <code>"auto"</code> — no puede forzarse sin decodificación restringida). A la salida, <code>_to_openai_tool_calls()</code> emite <code>{"id","type":"function","function":{"name","arguments":<em>str</em>}}</code> con <code>arguments</code> re-serializado a cadena JSON, <code>content: null</code> y <code>finish_reason: "tool_calls"</code>.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🟩</span><h3>Ollama <code>/api/chat</code></h3></div>
+  <p><code>routes_native.py</code>. <code>_build_chat_message()</code> envuelve <code>resolve_chat_output()</code> y mantiene <code>tool_calls</code> en la forma dict canónica que Ollama espera. Los tools MCP de servidores conectados se integran vía <code>_merge_mcp_tools()</code>. Un turno previo de assistant con <code>tool_calls</code> y los resultados <code>role=tool</code> correspondientes se reenvían al modelo para convergencia multivuelta.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🟪</span><h3>Anthropic <code>/v1/messages</code></h3></div>
+  <p><code>routes_anthropic.py</code>. <code>_anthropic_tools_to_payload()</code> mapea <code>{name, description, input_schema}</code> a la forma OpenAI-function y respeta <code>tool_choice: {"type":"none"|"tool"}</code>. A la salida, <code>_to_anthropic_tool_use()</code> emite bloques de contenido <code>tool_use</code> (<code>arguments</code>→dict <code>input</code>, ids <code>toolu_…</code>) con <code>stop_reason: "tool_use"</code>. Los bloques entrantes <code>tool_use</code>/<code>tool_result</code> se reconstruyen en la lista de mensajes del motor (ruta de Claude Code).</p></div>
+</div>
+<h4>Parsers de marcadores por familia (<code>tool_parsers.py</code>)</h4>
+<p>Cuando un backend no expone <code>tool_calls</code> estructuradas por sí mismo, HFL parsea los marcadores nativos de tool-call del texto generado. <code>dispatch(text, model_name, tools)</code> selecciona un parser por subcadena del nombre del modelo, lo ejecuta primero y solo recurre al fallback genérico de envoltorio JSON cuando hay <code>tools</code> declarados (de modo que un chat normal que contenga JSON nunca se malinterprete como tool call).</p>
+<table>
+<tr><th>Familia</th><th>Marcador</th></tr>
+<tr><td>Qwen 2.5 / Qwen 3</td><td><code>&lt;tool_call&gt;{json}&lt;/tool_call&gt;</code></td></tr>
+<tr><td>Llama 3.x</td><td><code>&lt;|python_tag|&gt;{json}&lt;|eom_id|&gt;</code> o <code>&lt;function=name&gt;{json}&lt;/function&gt;</code></td></tr>
+<tr><td>Mistral / Mixtral</td><td><code>[TOOL_CALLS][{array json}]</code></td></tr>
+<tr><td>Gemma 4</td><td>DSL split-pipe <code>&lt;|tool_call&gt;call:NAME{…}&lt;tool_call|&gt;</code> (claves desnudas, cadenas envueltas en el delimitador <code>&lt;|"|&gt;</code> de Gemma 4)</td></tr>
+<tr><td>Fallback</td><td>bloque <code>json</code> cercado, envoltorio <code>{"tool_call":{…}}</code>, o <code>{"name","arguments"}</code> desnudo</td></tr>
+</table>
+<p>El streaming con tools declarados se <strong>bufferiza</strong>: cada dialecto acumula la generación completa y emite las <code>tool_calls</code> estructuradas en un único delta terminal, de modo que un marcador <code>&lt;tool_call&gt;</code> crudo nunca se filtra como token de contenido (API-7).</p>
+<h4>Bucle de agente nativo (<code>agent_loop.py</code>)</h4>
+<p>En <code>/api/chat</code>, optar con <code>agent_loop=true</code> conduce el ciclo de uso de tools en el servidor: llama al modelo, despacha las <code>tool_calls</code> emitidas (solo tools MCP — el modelo no debe alucinar nombres externos), añade resultados <code>role=tool</code> y re-llama hasta obtener una respuesta sin tool calls o alcanzar <code>max_iterations</code> (por defecto 6). Las tool calls de un mismo turno se disparan en paralelo vía <code>asyncio.gather</code>. <code>run_agent_loop()</code> devuelve el mensaje final más un <code>tool_trace</code> para replay/depuración.</p>
+<h3>Responses API (<code>POST /v1/responses</code>)</h3>
+<p><code>routes_openai_responses.py</code>. El wrapper de más alto nivel de OpenAI (la ruta que golpea <code>client.responses.create(...)</code>) está implementado sobre la maquinaria existente de chat-completion — sin nuevo camino de motor. <strong>No es stateful</strong>: cada petición es autocontenida y el servidor <em>no</em> persiste una cadena de <code>response_id</code>.</p>
+<table>
+<tr><th>Petición Responses</th><th>Equivalente chat-completion</th></tr>
+<tr><td><code>input</code> (str | lista de dicts de mensaje)</td><td><code>messages</code> vía <code>_input_to_messages()</code> (rol por defecto <code>user</code>; el texto de lista-de-partes se concatena, las partes de imagen se descartan — soporte de imagen fuera de alcance)</td></tr>
+<tr><td><code>instructions</code></td><td>mensaje <code>system</code> inicial</td></tr>
+<tr><td><code>tools</code></td><td>reenviados al motor; reparseados vía <code>tool_parsers.dispatch()</code></td></tr>
+<tr><td><code>reasoning.effort</code> (low/medium/high)</td><td><code>GenerationConfig.thinking_level</code> vía <code>_resolve_thinking()</code></td></tr>
+<tr><td><code>response_format</code></td><td>normalizado vía <code>normalize_openai_response_format()</code></td></tr>
+<tr><td><code>stream: false</code></td><td>renderiza el envelope <code>output[]</code></td></tr>
+<tr><td><code>stream: true</code></td><td>SSE con eventos <code>response.created</code> / <code>response.output_text.delta</code> / <code>response.completed</code></td></tr>
+</table>
+<p>La respuesta sin streaming la construye <code>_render_response()</code> como una lista <code>output</code> heterogénea y ordenada: primero resúmenes de <code>reasoning</code>, luego el <code>message</code> del assistant (bloques <code>output_text</code>), luego cualquier <code>function_call</code> — más un bloque <code>usage</code> con <code>input_tokens</code>/<code>output_tokens</code>/<code>total_tokens</code>. El streaming bufferiza los turnos con tools y solo emite <code>function_call</code> estructuradas en el evento final <code>response.completed</code>; ambos modos pasan por el dispatcher de inferencia (se retiene un slot durante todo el stream).</p>
+<h3>WebSocket <code>/ws/chat</code> (cancelable)</h3>
+<p><code>routes_ws.py</code>. Los endpoints HTTP de streaming son de un solo disparo: la cancelación depende del cierre TCP y no devuelve ninguna señal accionable. El endpoint WebSocket añade una conexión persistente a través de múltiples turnos de chat, un frame <code>cancel</code> que interrumpe la generación en vuelo, y frames de servidor a nivel de token para que el cliente renderice UI sin parsear NDJSON ni SSE.</p>
+<h4>Gramática de frames (JSON, uno por mensaje WS)</h4>
+<table>
+<tr><th>Dirección</th><th>Frames</th></tr>
+<tr><td>cliente → servidor</td><td><code>{type:"chat", model, messages, options?}</code>, <code>{type:"cancel"}</code>, <code>{type:"ping"}</code></td></tr>
+<tr><td>servidor → cliente</td><td><code>{type:"ready", model}</code>, <code>{type:"token", delta}</code>, <code>{type:"done", tokens}</code>, <code>{type:"cancelled", tokens}</code>, <code>{type:"error", message}</code>, <code>{type:"pong"}</code></td></tr>
+</table>
+<div class="flow"><span class="flow-step">chat</span><span class="flow-arrow">→</span><span class="flow-step">ready</span><span class="flow-arrow">→</span><span class="flow-step">token…</span><span class="flow-arrow">→</span><span class="flow-step">done / cancelled</span></div>
+<p>El bucle de recepción lee frames de forma continua mientras un turno corre en una <code>asyncio.Task</code> de fondo (<code>_drive_chat</code>), de modo que un <code>cancel</code> puede llegar en pleno vuelo. El driver compite un <code>asyncio.Event</code> por turno contra cada token producido vía <code>asyncio.wait(FIRST_COMPLETED)</code> y sale limpiamente, dejando la conexión abierta para el siguiente prompt.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Honestidad de la cancelación</h3></div>
+<p>El hilo productor síncrono del motor <em>no</em> puede ser interrumpido (llama-cpp-python no expone API de cancelación). Al cancelar, el consumidor se detiene pero el productor sigue corriendo hasta que el motor retorna por sí mismo, así que el slot del dispatcher queda ocupado. El motor se fija vía <code>state.pin_engine()</code> durante la vida del productor para diferir el unload de un hot-swap concurrente (guarda contra UAF de ciclo de vida del modelo), y el slot huérfano se registra y se cuenta en <code>hfl_ws_cancel_orphans_total</code>.</p></div>
+<h4>Gate previo al accept</h4>
+<p>Las actualizaciones WebSocket se saltan el <code>APIKeyMiddleware</code> y el <code>CORSMiddleware</code> HTTP, así que <code>_check_ws_auth_and_origin()</code> replica ambos en línea: API key vía <code>?api_key=</code>, <code>Authorization: Bearer</code> o <code>X-API-Key</code> (comparación de tiempo constante), y una comprobación de allow-list de <code>Origin</code> (mismo origen estricto por defecto). Los rechazos hacen accept-then-close con código <code>1008</code> para que el navegador muestre la razón.</p>
+<h3>Envelopes de Error por Dialecto</h3>
+<p>La forma nativa (plana) de HFL <code>{"error": str, "code": …, "category", "retryable", "details", "request_id"}</code> no coincide con ningún proveedor real. <code>errors.py:render_envelope(path, status_code, flat)</code> la remodela según el prefijo de ruta para que los SDK reales de OpenAI/Anthropic (que ramifican según <code>error.type</code>) la parseen correctamente, manteniendo los campos de diagnóstico ricos de HFL como extensiones ignoradas por el SDK <em>dentro</em> del objeto de error.</p>
+<table>
+<tr><th>Prefijo de ruta</th><th>Envelope</th></tr>
+<tr><td><code>/v1/messages*</code> (Anthropic)</td><td><code>{"type":"error", "error":{type, message, …}, "request_id"}</code> — <code>type</code> de <code>_ANTHROPIC_TYPE</code> (p.ej. 401→<code>authentication_error</code>, 503→<code>overloaded_error</code>)</td></tr>
+<tr><td><code>/v1/*</code> (OpenAI)</td><td><code>{"error":{message, type, param, code, …}}</code> — <code>type</code> de <code>_OPENAI_TYPE</code> (p.ej. 429→<code>rate_limit_error</code>)</td></tr>
+<tr><td><code>/api/*</code> (Ollama) + todo lo demás</td><td>cuerpo plano de HFL, <strong>sin cambios</strong></td></tr>
+</table>
+<p>Cada código de error lleva una política <code>(category, retryable)</code> de <code>_ERROR_POLICY</code> (p.ej. <code>RATE_LIMIT_EXCEEDED</code>→reintentable, <code>VALIDATION_ERROR</code>→no), de modo que la lógica de reintento / circuit-breaker del cliente decide sin parsear prosa. Los helpers de fábrica (<code>service_unavailable</code>, <code>model_loading</code>, <code>queue_full</code>, <code>queue_timeout</code>, …) aceptan todos un <code>path</code> opcional para el renderizado por dialecto.</p>
+<h4>Handler de validación (400)</h4>
+<p><code>exception_handlers.py</code> registra tres handlers vía <code>register_exception_handlers(app)</code>. El handler de <code>RequestValidationError</code> emite un <strong>400</strong> por dialecto en las superficies <code>/v1/*</code> (OpenAI/Anthropic reales devuelven 400, no el 422 por defecto de FastAPI <code>{"detail":[…]}</code>), aplanando el primer error a <code>"loc: msg"</code>; <code>/api/*</code> y todo lo demás conservan el 422 nativo. El handler de <code>HFLError</code> y un handler catch-all de <code>Exception</code> también pasan sus cuerpos por <code>render_envelope</code>, de modo que incluso un 500 no manejado llega a un SDK OpenAI/Anthropic como un <em>objeto</em> de error parseable.</p>
+<h3>Integración con el Dispatcher (spec §5.3)</h3>
+<p>Toda superficie de chat enruta su llamada al motor a través del dispatcher de inferencia compartido vía <code>helpers.py</code>, serializando las peticiones concurrentes contra el modelo no reentrante de llama.cpp / transformers (el uso concurrente corrompe la KV cache).</p>
+<div class="grid-2">
+  <div class="card"><div class="card-header"><span class="icon">🚦</span><h3><code>run_dispatched()</code></h3></div>
+  <p>Punto de entrada único para handlers sin streaming: adquiere un slot, ejecuta la llamada síncrona al motor en un hilo, aplica el timeout de generación. Una llamada síncrona con timeout / cancelada no puede ser interrumpida, así que el slot se retiene hasta que el hilo trabajador <em>realmente</em> termina — la siguiente petición en cola no puede arrancar una segunda inferencia que corrompa el modelo a media generación.</p></div>
+  <div class="card"><div class="card-header"><span class="icon">🚦</span><h3><code>prepare_stream_response()</code> / <code>acquire_stream_slot()</code></h3></div>
+  <p>Los endpoints de streaming pre-adquieren un slot retenido durante todo el stream. Ante <code>QueueFullError</code> / <code>QueueTimeoutError</code> el helper devuelve un envelope <strong>429</strong> / <strong>503</strong> preconstruido (con <code>Retry-After</code> / <code>X-Queue-Depth</code>), renderizado para el dialecto de la petición.</p></div>
+</div>
+<h3>Métricas y Salud (actualizado)</h3>
+<p><code>routes_metrics.py</code> expone <code>GET /metrics</code> (texto Prometheus vía <code>get_metrics().export_prometheus()</code>) y <code>GET /metrics/json</code> (JSON estructurado). El middleware <code>RequestLogger</code> (<code>middleware.py</code>) alimenta cada petición a <code>Metrics.record_request()</code>, acumulando contadores por-endpoint / por-status / por-método más histogramas de latencia de todo el tiempo (<code>_bucket</code>/<code>_sum</code>/<code>_count</code> para Prometheus).</p>
+<h4>Nuevos contadores desde v0.1.0</h4>
+<table>
+<tr><th>Métrica</th><th>Significado</th></tr>
+<tr><td><code>hfl_ws_cancels_total</code></td><td>cada frame <code>cancel</code> de <code>/ws/chat</code> recibido</td></tr>
+<tr><td><code>hfl_ws_cancel_orphans_total</code></td><td>cancelaciones que dejaron el slot del dispatcher ocupado (motor aún corriendo)</td></tr>
+<tr><td><code>hfl_stream_cancel_orphans_total</code></td><td>streams SSE/HTTP desmontados mientras el hilo productor del motor seguía corriendo</td></tr>
+</table>
+<p>Los contadores de huérfanos existen porque una llamada síncrona al motor vía <code>asyncio.to_thread</code> no puede cancelarse — permiten a la planificación de capacidad ver con qué frecuencia un cancel/desconexión deja una inferencia corriendo hasta el final en segundo plano.</p>
+<h4><code>GET /healthz</code> (orquestador, spec §5.5)</h4>
+<p>Además de las sondas <code>/health*</code> existentes, <code>routes_health.py</code> añade <code>/healthz</code>: devuelve <strong>200</strong> <code>status=ok</code> cuando hay un motor LLM cargado y listo, si no <strong>503</strong> <code>status=degraded</code>. El cuerpo lleva <code>models_loaded</code>, <code>queue_depth</code> / <code>queue_in_flight</code> en vivo del snapshot del dispatcher, y <code>uptime_seconds</code> — un solo scrape para orquestación.</p>
 </section>
 
 <!-- ========== 12. I18N ========== -->
 <section id="i18n">
-  <h2>12. Módulo i18n — Internacionalización</h2>
+  <h2>13. Módulo i18n — Internacionalización</h2>
   <div class="card">
     <p><strong>Archivo:</strong> <code>src/hfl/i18n/__init__.py</code></p>
     <p>Sistema de internacionalización completo que permite al CLI mostrar todos sus mensajes en múltiples idiomas. Utiliza archivos JSON de traducción con claves anidadas y acceso mediante notación de puntos.</p>
@@ -867,17 +1305,146 @@
   </table>
 
   <h3>Archivos de Traducción</h3>
-  <p>Cada idioma tiene un archivo JSON (~193 líneas) en <code>src/hfl/i18n/locales/</code>:</p>
+  <p>Cada idioma tiene un archivo JSON (~441 líneas, ~294 claves) en <code>src/hfl/i18n/locales/</code>:</p>
   <p><code>en.json</code> (inglés) y <code>es.json</code> (español). Las claves siguen la estructura <code>module.action.message</code>, por ejemplo: <code>commands.pull.downloading</code>, <code>commands.search.no_results</code>, <code>errors.model_not_found</code>.</p>
 
   <div class="highlight highlight-info">
     <strong>Uso:</strong> Configurar idioma con <code>export HFL_LANG=es</code>. Todos los comandos CLI utilizan <code>t()</code> para sus mensajes, permitiendo cambiar el idioma sin modificar código.
   </div>
+<h3>Estado actual (v0.14.0)</h3>
+  <p>Siguen siendo exactamente dos locales — <code>en.json</code> y <code>es.json</code> — pero cada uno ha crecido a <strong>441 líneas (~294 claves hoja)</strong>, ya que cada comando nuevo (discover, recommend, bench, snapshot, lora, …) registra sus cadenas <code>commands.&lt;name&gt;.description</code> / ayuda de opciones a través de <code>t()</code> en tiempo de import. La resolución de idioma es <code>HFL_LANG</code> → locale del sistema (<code>LC_ALL</code>/<code>LC_MESSAGES</code>/<code>LANG</code>) → <code>en</code>. Una clave ausente cae a inglés y, en su defecto, devuelve la clave literal, de modo que una cadena sin traducir se degrada con elegancia en vez de tumbar el CLI.</p>
+</section>
+
+<section id="tray">
+  <h2>14. Módulo tray — Icono de bandeja del sistema</h2>
+  <div class="card">
+    <p><strong>Ficheros:</strong> <code>src/hfl/tray/icon.py</code>, <code>src/hfl/tray/controller.py</code></p>
+    <p>Front-end opcional multiplataforma de bandeja para el servidor, accesible con <code>hfl serve --tray</code> (alias <code>--gui</code>). Construido sobre <code>pystray</code> + <code>Pillow</code> (extra <code>[tray]</code>); la imagen del icono se genera programáticamente — el paquete no incluye ficheros de recursos. Si falta el extra, <code>serve</code> imprime una pista de instalación y termina.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="icon">🔴</span><h3>TrayServerController</h3></div>
+      <p>Ejecuta <code>uvicorn</code> en un hilo demonio en segundo plano con su propio bucle de eventos, exponiendo <span class="func">start()</span> / <span class="func">stop()</span> / <code>status</code> desde los callbacks no-async de la bandeja. El estado es un enum <code>ServerStatus</code>: <code>STOPPED</code>, <code>STARTING</code>, <code>RUNNING</code>, <code>STOPPING</code>, <code>ERROR</code>. <span class="func">stop()</span> activa <code>server.should_exit</code> y hace join con un presupuesto de 35 s (30 s gracioso + 5 s de margen). Puede precargar un modelo con <code>select_engine</code> antes de servir.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🧩</span><h3>HFLTrayIcon</h3></div>
+      <p><span class="func">_generate_icon_image()</span> dibuja un círculo RGBA de 64×64 (color según estado) con una “H” centrada. El menú ofrece Start/Stop (habilitados según el estado actual), una línea de estado, la URL del servidor, la cadena <code>HFL v{__version__}</code> y Exit. En macOS <span class="func">run()</span> debe llamarse desde el hilo principal; un poller en segundo plano transiciona el icono <code>STARTING→RUNNING</code>.</p>
+    </div>
+  </div>
+
+  <div class="highlight highlight-info">
+    <strong>Punto de entrada de conveniencia:</strong> <span class="func">run_tray(host, port, api_key, model, log_level, json_logs, auto_start)</span> conecta un controlador a un icono y (opcionalmente) auto-arranca el servidor al lanzar.
+  </div>
+</section>
+
+<section id="observability">
+<h2>15. Módulo <code>observability</code> — Métricas, Firma y Auditoría</h2>
+<p>Aquí conviven dos preocupaciones distintas, en dos niveles de madurez distintos. <strong>Métricas</strong> (<code>src/hfl/metrics.py</code>) es la vía de telemetría en producción: respalda <code>/metrics</code> y la vista de SLI, y ahora emite histogramas Prometheus agregables además de contadores de saturación del dispatcher. El paquete <code>src/hfl/observability/</code> — <strong>firma</strong> ed25519 de manifiestos, un <strong>audit log</strong> estructurado y <strong>tracing</strong> OpenTelemetry — está completamente implementado y cubierto por tests, pero <strong>dormant</strong>: ningún módulo bajo <code>src/hfl/</code> importa todavía <code>hfl.observability</code>, así que estos helpers se distribuyen como fontanería opt-in con cero call sites en producción. Documentamos lo que hace el código y señalamos el hueco de cableado explícitamente.</p>
+
+<h3>Histogramas Prometheus</h3>
+<p><code>Metrics</code> (un <span class="cls">@dataclass</span> thread-safe protegido por un único <code>threading.Lock</code>) mantiene dos familias de latencia como <em>histogramas monotónicos de todo el histórico</em> además de los buffers circulares acotados <code>deque(maxlen=1000)</code> que alimentan la vista de percentiles JSON local. Los deques encogen en silencio bajo carga (su ventana son las últimas 1000 muestras), así que la serie exportada es el array acumulativo de buckets — eso es lo que hace que <code>histogram_quantile()</code> y <code>rate(..._count)</code> sean correctos en cualquier ventana de scrape y entre réplicas.</p>
+<p>Las fronteras de bucket (<code>_LATENCY_BUCKETS_MS</code>) son 13 cortes fijos en milisegundos de <code>5</code> a <code>60000</code>, más un bucket de overflow <code>+Inf</code>. <code>_bucket_index()</code> halla la primera frontera <code>&gt;= valor</code>; <code>record_request()</code> y <code>record_generation()</code> incrementan el bucket correspondiente y el <code>_sum_ms</code> acumulado. <code>_append_histogram()</code> renderiza el triple acumulativo <code>_bucket{le=...}</code> / <code>_sum</code> / <code>_count</code>.</p>
+<pre><code><span class="keyword">def</span> <span class="func">_bucket_index</span>(value_ms: <span class="cls">float</span>) -&gt; <span class="cls">int</span>:
+    <span class="keyword">for</span> i, boundary <span class="keyword">in</span> enumerate(_LATENCY_BUCKETS_MS):
+        <span class="keyword">if</span> value_ms &lt;= boundary:
+            <span class="keyword">return</span> i
+    <span class="keyword">return</span> len(_LATENCY_BUCKETS_MS)  <span class="comment"># overflow +Inf</span>
+</code></pre>
+<p>Se exportan dos series de histograma: <code>hfl_request_latency_ms</code> y <code>hfl_generation_latency_ms</code>, cada una con las líneas canónicas <code>_bucket</code>/<code>_sum</code>/<code>_count</code>. La vista JSON (<code>export_json()</code>) y <code>get_sli()</code> siguen calculando p50/p95/p99 localmente sobre el deque mediante <code>_percentile()</code> con interpolación lineal.</p>
+
+<h3>Métricas de saturación del dispatcher</h3>
+<p>En cada scrape, <code>export_prometheus()</code> obtiene un <span class="cls">DispatcherSnapshot</span> (de <code>src/hfl/engine/dispatcher.py</code>, un dataclass frozen de seis enteros) vía <code>get_dispatcher().snapshot()</code> y exporta las señales de load-shedding que antes no eran alertables. Leer el snapshot es barato, así que se hace inline bajo un <code>try/except</code> best-effort (la config puede no estar cargada en algunos tests).</p>
+<table>
+<tr><th>Métrica</th><th>Tipo</th><th>Campo origen</th><th>Significado</th></tr>
+<tr><td><code>hfl_inference_concurrency_max</code></td><td>gauge</td><td><code>max_inflight</code></td><td>Máximo configurado de inferencias in-flight</td></tr>
+<tr><td><code>hfl_inference_concurrency_inflight</code></td><td>gauge</td><td><code>in_flight</code></td><td>Peticiones ejecutándose ahora mismo</td></tr>
+<tr><td><code>hfl_inference_queue_depth</code></td><td>gauge</td><td><code>depth</code></td><td>Peticiones esperando un slot</td></tr>
+<tr><td><code>hfl_inference_accepted_total</code></td><td>counter</td><td><code>accepted_total</code></td><td>Peticiones admitidas al dispatcher</td></tr>
+<tr><td><code>hfl_inference_rejected_full_total</code></td><td>counter</td><td><code>rejected_full_total</code></td><td>Rechazadas por cola de espera llena (HTTP 429)</td></tr>
+<tr><td><code>hfl_inference_rejected_timeout_total</code></td><td>counter</td><td><code>rejected_timeout_total</code></td><td>Rechazadas tras esperar demasiado por un slot (HTTP 503)</td></tr>
+</table>
+<p>Junto a ellas, el exporter publica diagnósticos de cancelación de streaming: <code>hfl_ws_cancels_total</code> / <code>hfl_ws_cancel_orphans_total</code> (frames de cancel WebSocket, y el subconjunto que dejó una llamada al engine corriendo en background con el slot del dispatcher aún ocupado) y el contador de paridad SSE/HTTP <code>hfl_stream_cancel_orphans_total</code>.</p>
+
+<h3>Firma ed25519 de manifiestos <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/signing.py</code> implementa procedencia opt-in sobre los manifiestos de modelo. <code>manifest_digest()</code> talla un subconjunto estable del envelope (<code>name</code>, <code>repo_id</code>, <code>file_hash</code>, <code>hash_algorithm</code>, <code>size_bytes</code>, <code>quantization</code>, <code>architecture</code>, <code>adapter_paths</code>, <code>parent_digest</code>) — descartando deliberadamente metadata mutable como <code>last_used</code> para que un <code>hfl show</code> nunca invalide una firma — y le aplica SHA-256 a su JSON canónico. <code>sign_manifest_envelope()</code> adjunta un bloque <code>{alg:"ed25519", key_id, digest, sig}</code>; <code>verify_manifest_envelope()</code> lo verifica contra un keyring <span class="cls">TrustRoot</span> que el operador cura en <code>~/.hfl/trusted-publishers.json</code> (<code>key_id → clave pública base64url</code>).</p>
+<div class="flow"><span class="flow-step">tallar envelope</span><span class="flow-arrow">→</span><span class="flow-step">digest SHA-256</span><span class="flow-arrow">→</span><span class="flow-step">firma ed25519</span><span class="flow-arrow">→</span><span class="flow-step">verificar vs TrustRoot</span></div>
+<p>El backend criptográfico se elige en runtime: prueba <code>pynacl</code> primero, luego <code>cryptography</code>, lanzando <code>SignatureUnavailableError</code> si ninguno es importable; un bloque inválido/no autorizado lanza <code>SignatureInvalidError</code> (pensado para convertirse en un 400 en modo estricto). Los manifiestos sin firmar siguen siendo válidos — <code>verify_manifest_envelope()</code> simplemente devuelve <code>False</code>.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Hueco de cableado</h3></div><p>Ningún código bajo <code>src/hfl/</code> importa <code>signing</code>; solo lo ejercitan <code>tests/test_signing.py</code> y <code>tests/test_signing_edge_cases.py</code>. En particular, el digest que emite <code>/api/ps</code> lo calcula un helper <em>separado y local</em> <code>_manifest_digest()</code> en <code>src/hfl/api/routes_ps.py</code> (que estampa el <code>file_hash</code> almacenado del manifiesto), <strong>no</strong> este módulo.</p></div>
+
+<h3>Audit log <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/audit.py</code> escribe un objeto JSON por línea en <code>HFL_AUDIT_LOG_PATH</code> mediante un <code>RotatingFileHandler</code> (por defecto 100&nbsp;MB &times; 5 backups, ajustable con <code>HFL_AUDIT_LOG_MAX_BYTES</code> / <code>HFL_AUDIT_LOG_BACKUPS</code>). Es opt-in: sin ruta configurada, <code>audit_event()</code> es un no-op de coste cero. El envelope de evento lleva <code>ts</code> (UTC, microsegundos, sufijo <code>Z</code>), <code>event</code>, <code>actor</code> (un prefijo SHA-256, nunca la API key cruda), <code>resource</code>, <code>metadata</code> y <code>outcome</code>. El catálogo es un frozenset <code>AUDIT_EVENTS</code> — <code>model.create</code>/<code>delete</code>/<code>copy</code>/<code>pull</code>/<code>stop</code>/<code>unload</code>/<code>load</code>, <code>blob.upload</code>, <code>mcp.connect</code>/<code>disconnect</code>, <code>api_key.mint</code>/<code>revoke</code>. El emisor nunca lanza; un nombre de evento desconocido registra un warning pero igualmente emite.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Hueco de cableado</h3></div><p><code>audit_event()</code> no tiene call site en producción bajo <code>src/hfl/</code>; pese a que el docstring afirma que "cada ruta/comando CLI privilegiado registra exactamente un evento", la instrumentación aún no está cableada. Cubierto solo por <code>tests/test_audit.py</code> / <code>tests/test_audit_log.py</code>.</p></div>
+
+<h3>Tracing OpenTelemetry <span class="badge badge-yellow">dormant</span></h3>
+<p><code>src/hfl/observability/tracing.py</code> envuelve el SDK de OTEL tras un context manager <code>trace_span(name, attributes=...)</code> que se vuelve un no-op <code>nullcontext()</code> cuando el tracing está apagado — así los call sites nunca tienen que comprobar <code>is_enabled()</code>. <code>configure_tracing()</code> se activa con <code>HFL_OTEL_ENABLED</code>; cuando está activo construye un <code>TracerProvider</code> con un <code>BatchSpanProcessor</code> + exporter OTLP/HTTP (endpoint <code>HFL_OTEL_EXPORTER_ENDPOINT</code>, por defecto <code>http://localhost:4318/v1/traces</code>; nombre de servicio <code>HFL_OTEL_SERVICE_NAME</code>, por defecto <code>hfl</code>). El SDK viaja tras el extra <code>[otel]</code>; si falta, la configuración registra un warning y queda deshabilitada.</p>
+<div class="card"><div class="card-header"><span class="icon">⚠️</span><h3>Hueco de cableado</h3></div><p>No existen call sites de <code>trace_span()</code> / <code>configure_tracing()</code> bajo <code>src/hfl/</code> fuera del propio módulo. El helper está listo pero ninguna operación está instrumentada todavía; ejercitado por <code>tests/test_tracing.py</code> / <code>tests/test_otel_tracing.py</code>.</p></div>
+</section>
+
+<section id="tools-mcp">
+<h2>16. Módulos <code>tools</code> y <code>mcp</code></h2>
+<p>La superficie agéntica. <code>src/hfl/tools/</code> aporta las dos tools integradas — búsqueda web y fetch de URL — expuestas de forma compatible con Ollama en <code>/api/web_search</code> y <code>/api/web_fetch</code> (<code>src/hfl/api/routes_web.py</code>). <code>src/hfl/mcp/</code> implementa ambas mitades del Model Context Protocol: HFL como <em>host</em> que se conecta a servidores MCP externos y mezcla sus tools en el chat, y HFL como <em>servidor</em> que publica sus propias tools a otros hosts. Ambos están cableados en producción; MCP viaja tras el extra opcional <code>[mcp]</code>.</p>
+
+<h3>Tools integradas (<code>src/hfl/tools/</code>)</h3>
+<div class="grid-2">
+<div class="card"><div class="card-header"><span class="icon">🔎</span><h3>web_search</h3></div><p><code>web_search.py</code> expone una única <code>search(query, max_results)</code> async que despacha a un backend elegido por <code>HFL_WEB_SEARCH_BACKEND</code>. Todos los backends devuelven el mismo envelope Ollama <code>{"results":[{title,url,content}]}</code>. <code>max_results</code> se acota a <code>[1,10]</code>.</p></div>
+<div class="card"><div class="card-header"><span class="icon">🛡️</span><h3>web_fetch</h3></div><p><code>web_fetch.py</code> expone <code>fetch(url)</code> async devolviendo <code>{title, content, links, url}</code> extraídos por un único <code>HTMLParser</code> de la stdlib (sin BeautifulSoup). Los errores a nivel HTTP nunca lanzan — solo los fallos de protocolo/seguridad/timeout lanzan <code>WebFetchError</code> (convertido en un 400).</p></div>
+</div>
+<p>Los backends de búsqueda forman un pequeño registro tras una <span class="cls">WebSearchBackend</span> abstracta:</p>
+<table>
+<tr><th>Backend</th><th>Endpoint</th><th>Clave</th></tr>
+<tr><td><code>duckduckgo</code> (por defecto, alias <code>ddg</code>)</td><td><code>html.duckduckgo.com/html/</code> (scrapeado con regex)</td><td>ninguna</td></tr>
+<tr><td><code>tavily</code></td><td><code>api.tavily.com/search</code></td><td><code>TAVILY_API_KEY</code></td></tr>
+<tr><td><code>brave</code></td><td><code>api.search.brave.com/res/v1/web/search</code></td><td><code>BRAVE_API_KEY</code></td></tr>
+<tr><td><code>serpapi</code></td><td><code>serpapi.com/search</code> (engine=google)</td><td><code>SERPAPI_API_KEY</code></td></tr>
+</table>
+<p><code>get_backend()</code> resuelve el nombre (cayendo a DuckDuckGo con un warning ante valores desconocidos, así el servidor nunca da un 500 al arrancar). Los wrappers de redirect <code>/l/?uddg=</code> de DDG se desenvuelven a la URL destino real.</p>
+
+<h4>Endurecimiento SSRF / DNS-rebinding</h4>
+<p><code>web_fetch</code> está endurecido en profundidad contra server-side request forgery. El flujo:</p>
+<div class="flow"><span class="flow-step">check de esquema</span><span class="flow-arrow">→</span><span class="flow-step">resolver + rechazar IP privada</span><span class="flow-arrow">→</span><span class="flow-step">pinear IP validada</span><span class="flow-arrow">→</span><span class="flow-step">marcar IP, Host/SNI real</span><span class="flow-arrow">→</span><span class="flow-step">re-validar cada redirect</span></div>
+<ul>
+<li><strong>Allowlist de esquema</strong> — solo <code>http</code>/<code>https</code> (<code>_ALLOWED_SCHEMES</code>).</li>
+<li><strong>Resolución pre-flight</strong> — <code>_resolve_and_validate()</code> llama a <code>socket.getaddrinfo()</code> y rechaza la URL si <em>cualquier</em> dirección resuelta es privada, loopback, link-local, multicast, reserved o unspecified (<code>_is_private_ip()</code>; una dirección no parseable se trata como insegura). Esto bloquea el endpoint de cloud-metadata <code>169.254.169.254</code> y los servicios internos.</li>
+<li><strong>Pineo de IP (cierra la ventana TOCTOU de DNS-rebinding)</strong> — la IP validada se <em>pinea</em> para la conexión real. <code>_pinned_request()</code> reescribe el host de la URL al literal de la IP verificada preservando la autoridad original en la cabecera <code>Host</code> y, para HTTPS, la extensión TLS <code>sni_hostname</code> — así httpx no puede re-resolver al conectar y un atacante con DNS autoritativo TTL-0 no puede responder público-aquí / privado-a-httpx. El userinfo (<code>user:pass@</code>) se preserva para que los fetch con Basic-auth sigan funcionando.</li>
+<li><strong>Seguimiento manual de redirects</strong> — <code>follow_redirects=False</code>; hasta <code>_MAX_REDIRECTS</code> (3) saltos se siguen a mano, cada uno re-pasado por el guard completo de esquema + IP privada y re-pineado, así una URL pública no puede hacer 302 hacia una dirección interna/metadata.</li>
+<li><strong>Presupuesto de bytes por streaming</strong> — el cuerpo se lee incrementalmente vía <code>resp.aiter_bytes()</code> con un tope duro <code>max_bytes</code> (5&nbsp;MiB por defecto). Un <code>get</code> no-streaming bufferizaría toda la URL (controlada por el modelo) en RAM y podría hacer OOM al proceso; el streaming acota la memoria real, no solo la entrada del parser.</li>
+</ul>
+<pre><code><span class="keyword">def</span> <span class="func">_is_private_ip</span>(ip_str: <span class="cls">str</span>) -&gt; <span class="cls">bool</span>:
+    <span class="keyword">try</span>:
+        ip = ipaddress.<span class="func">ip_address</span>(ip_str)
+    <span class="keyword">except</span> <span class="cls">ValueError</span>:
+        <span class="keyword">return</span> <span class="keyword">True</span>  <span class="comment"># no parseable == inseguro</span>
+    <span class="keyword">return</span> (ip.is_private <span class="keyword">or</span> ip.is_loopback <span class="keyword">or</span> ip.is_link_local
+            <span class="keyword">or</span> ip.is_multicast <span class="keyword">or</span> ip.is_reserved <span class="keyword">or</span> ip.is_unspecified)
+</code></pre>
+<p>La capa de ruta (<code>routes_web.py</code>) valida los cuerpos con Pydantic (<code>query</code> 1–2048 chars; <code>max_results</code> 1–10; <code>url</code> 1–2048 chars), mapea <code>WebSearchError</code>/<code>WebFetchError</code> a HTTP 400, y un crash a 500 con un mensaje que no filtra detalles.</p>
+
+<h3>Model Context Protocol (<code>src/hfl/mcp/</code>)</h3>
+<p>El SDK oficial <code>mcp</code> de Python es una dependencia opcional. Ambos módulos se importan incondicionalmente y degradan con gracia: un SDK ausente lanza <code>MCPClientUnavailableError</code> / <code>MCPServerUnavailableError</code> solo en el punto de uso, nunca al importar, así que las instalaciones sin el extra <code>[mcp]</code> siguen funcionando.</p>
+
+<h4>HFL como host — <code>mcp/client.py</code></h4>
+<p><span class="cls">MCPClient</span> (singleton vía <code>get_client()</code>) mantiene sesiones vivas a cada servidor configurado. <code>connect(server_id, target)</code> acepta dos transportes — <code>stdio://&lt;cmd&gt; &lt;args&gt;</code> (lanza un subproceso que habla JSON-RPC) y <code>sse://&lt;url&gt;</code> (HTTP + Server-Sent Events) — llama a <code>session.initialize()</code> + <code>list_tools()</code> y envuelve cada resultado como una <span class="cls">MCPTool</span>. Los nombres de tool se namespacean como <code>server_id__tool</code> (<code>qualified_name</code>) para evitar colisiones entre servidores, y <code>to_ollama_tool()</code> los convierte al esquema <code>{type:"function", function:{...}}</code> que ve el modelo. <code>autoload_servers()</code> conecta cada entrada del fichero JSON apuntado por <code>HFL_MCP_AUTOLOAD</code>; una entrada rota se registra pero nunca aborta <code>hfl serve</code>.</p>
+<p><strong>Integración en chat</strong> (<code>src/hfl/api/routes_native.py</code>): <code>_merge_mcp_tools()</code> pliega cada tool MCP conectada en el array <code>tools</code> de una petición <code>/api/chat</code> que no las declaró ya (best-effort — una lectura fallida se registra y se ignora). Cuando <code>agent_loop=true</code>, la ruta pasa <code>mcp_client.call_tool</code> como el <code>mcp_caller</code> a <code>run_agent_loop()</code>, que despacha las llamadas a tools y re-somete los resultados hasta una respuesta sin tools o <code>max_iterations</code> (6 por defecto).</p>
+
+<h4>HFL como servidor — <code>mcp/server.py</code></h4>
+<p><span class="cls">HFLMCPServer</span> publica un registro mínimo y seguro por defecto <code>HFL_TOOLS</code>: <code>web_search</code>, <code>web_fetch</code>, <code>model_list</code> y <code>model_show</code>. Las dos primeras delegan en <code>hfl.tools</code>; las dos últimas leen <code>hfl.models.registry</code>. <code>--capabilities</code> estrecha el conjunto publicado (<code>_filter_tools()</code>). <code>build_server()</code> cablea los handlers <code>@server.list_tools()</code> / <code>@server.call_tool()</code> del SDK; un <code>ValueError</code> del handler se convierte en una respuesta MCP <code>IsError</code> <code>TextContent</code>, cualquier otra excepción se registra y se expone como un error interno genérico. Se sirven dos transportes: <code>serve_stdio()</code> (para hosts por subproceso) y <code>serve_sse(host, port)</code> (una app Starlette bajo uvicorn, <code>/sse</code> + <code>/messages/</code>).</p>
+
+<h4>Superficie CLI — <code>hfl mcp</code></h4>
+<p>El comando <code>mcp</code> en <code>src/hfl/cli/main.py</code> controla ambas mitades:</p>
+<table>
+<tr><th>Comando</th><th>Efecto</th></tr>
+<tr><td><code>hfl mcp list</code></td><td>Imprime cada tool de los servidores conectados (nombre cualificado + descripción)</td></tr>
+<tr><td><code>hfl mcp connect &lt;id&gt; stdio://… | sse://…</code></td><td>Abre una sesión y enumera sus tools</td></tr>
+<tr><td><code>hfl mcp disconnect &lt;id&gt;</code></td><td>Cierra la sesión (idempotente)</td></tr>
+<tr><td><code>hfl mcp serve --transport stdio</code></td><td>Ejecuta HFL como servidor MCP por stdio</td></tr>
+<tr><td><code>hfl mcp serve --transport sse --host … --port … --capabilities web_search,web_fetch</code></td><td>Ejecuta como servidor SSE con un conjunto de tools estrechado</td></tr>
+</table>
 </section>
 
 <!-- ========== 13. EXCEPTIONS ========== -->
 <section id="exceptions">
-  <h2>13. Jerarquía de Excepciones</h2>
+  <h2>17. Jerarquía de Excepciones</h2>
   <div class="diagram-container">
     <div class="diagram-title">Árbol de Excepciones Personalizadas</div>
     <svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -947,7 +1514,7 @@
 
 <!-- ========== 14. FLUJO PULL ========== -->
 <section id="flujo-pull">
-  <h2>14. Flujo Completo: hfl pull</h2>
+  <h2>18. Flujo Completo: hfl pull</h2>
   <div class="diagram-container">
     <div class="diagram-title">Pipeline de Descarga y Registro de Modelo</div>
     <svg viewBox="0 0 1100 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1100px;margin:0 auto;display:block;">
@@ -983,7 +1550,7 @@
 
 <!-- ========== 15. FLUJO RUN ========== -->
 <section id="flujo-run">
-  <h2>15. Flujo Completo: hfl run</h2>
+  <h2>19. Flujo Completo: hfl run</h2>
   <div class="diagram-container">
     <div class="diagram-title">Pipeline de Chat Interactivo</div>
     <svg viewBox="0 0 900 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1010,7 +1577,7 @@
 
 <!-- ========== 16. FLUJO SERVE ========== -->
 <section id="flujo-serve">
-  <h2>16. Flujo Completo: hfl serve</h2>
+  <h2>20. Flujo Completo: hfl serve</h2>
   <div class="diagram-container">
     <div class="diagram-title">Pipeline del Servidor API</div>
     <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1038,14 +1605,14 @@
       <rect x="780" y="70" width="100" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/><text x="830" y="92" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="bold">Response</text><text x="830" y="107" text-anchor="middle" fill="#8b949e" font-size="8">JSON / SSE</text>
 
       <!-- Pre-load annotation -->
-      <text x="540" y="148" text-anchor="middle" fill="#d29922" font-size="8">Auto-carga: si se pide modelo distinto, descarga el actual y carga el nuevo</text>
+      <text x="540" y="148" text-anchor="middle" fill="#d29922" font-size="8">Auto-carga vía dispatcher (drain barrier): descarga el actual y carga el nuevo sin inferencia en vuelo</text>
     </svg>
   </div>
 </section>
 
 <!-- ========== 17. LEGAL ========== -->
 <section id="legal">
-  <h2>17. Cumplimiento Legal y Auditoría</h2>
+  <h2>21. Cumplimiento Legal y Auditoría</h2>
   <p>HFL implementa un sistema exhaustivo de cumplimiento legal documentado con referencias a auditoría (R1-R9):</p>
 
   <div class="grid-2">
@@ -1067,7 +1634,7 @@
     </div>
     <div class="card">
       <h4><span class="badge badge-purple">R8</span> ToS de HuggingFace</h4>
-      <p>Rate limiting (0.5s entre llamadas API). User-Agent identificativo (<code>hfl/0.1.0</code>). Respeto al sistema de gating: NO se bypasea la aceptación de licencias. El usuario debe aceptar en huggingface.co primero.</p>
+      <p>Rate limiting (0.5s entre llamadas API). User-Agent identificativo (<code>hfl/0.14.0</code>). Respeto al sistema de gating: NO se bypasea la aceptación de licencias. El usuario debe aceptar en huggingface.co primero.</p>
     </div>
     <div class="card">
       <h4><span class="badge badge-green">R9</span> Disclaimer AI</h4>
@@ -1077,8 +1644,8 @@
 
   <h3>Archivos Legales del Proyecto</h3>
   <table>
-    <tr><td><code>LICENSE</code></td><td>HRUL v1.0 — Licencia propia del proyecto</td></tr>
-    <tr><td><code>LICENSE-FAQ.md</code></td><td>Preguntas frecuentes sobre la licencia HRUL v1.0</td></tr>
+    <tr><td><code>LICENSE</code></td><td>Apache-2.0</td></tr>
+    <tr><td><code>LICENSE-FAQ.md</code></td><td>Texto de la licencia Apache-2.0</td></tr>
     <tr><td><code>LICENSE-DEPENDENCIES.md</code></td><td>Licencias de todas las dependencias de terceros</td></tr>
     <tr><td><code>PRIVACY.md</code></td><td>Política de privacidad (no se recopilan datos)</td></tr>
     <tr><td><code>NOTICE-EU-AI-ACT.md</code></td><td>Cumplimiento con EU AI Act</td></tr>
@@ -1088,7 +1655,7 @@
 
 <!-- ========== 18. PATRONES ========== -->
 <section id="patrones">
-  <h2>18. Patrones de Diseño</h2>
+  <h2>22. Patrones de Diseño</h2>
 
   <div class="grid-2">
     <div class="card">
@@ -1136,11 +1703,30 @@
     <tr><td><code>0005</code></td><td>Clasificación de Licencias (5 niveles)</td><td><span class="badge badge-green">Accepted</span></td></tr>
     <tr><td><code>0006</code></td><td>Estrategia de Rate Limiting</td><td><span class="badge badge-green">Accepted</span></td></tr>
   </table>
+<h3>Patrones nuevos (añadidos desde v0.1.0)</h3>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="icon">🚧</span><h4>Bulkhead / Dispatcher acotado</h4></div>
+      <p><code>engine/dispatcher.py</code> — <code>InferenceDispatcher</code> serializa el acceso al modelo no reentrante tras una primitiva de concurrencia acotada y cola de espera acotada: <code>max_inflight</code> (defecto 1), <code>max_queued</code> (16), <code>acquire_timeout</code> (60 s). Una cola llena lanza <code>QueueFullError</code> → HTTP 429 + <code>Retry-After</code>; un timeout de ranura lanza <code>QueueTimeoutError</code> → 503. El estado en vivo se expone con <span class="func">snapshot()</span> para <code>/healthz</code> y la cabecera <code>X-Queue-Depth</code>.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🚰</span><h4>Drain Barrier (seguridad de hot-swap)</h4></div>
+      <p><code>api/state.py · set_llm_engine</code> envuelve el retiro-y-asignación del motor previo dentro de <code>dispatcher.exclusive()</code>, que espera a que se vacíen todas las ranuras de inferencia antes de liberar el modelo viejo. El desmontaje corre fuera del bucle vía <code>asyncio.to_thread(prev.unload)</code>, de modo que una limpieza lenta del contexto GPU/Metal nunca congela <code>/healthz</code> ni <code>/metrics</code>. El swap es atómico: un fallo de unload deja el motor viejo en su sitio.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">📌</span><h4>Refcount Pin / Unpin</h4></div>
+      <p>Las rutas de inferencia que <em>no</em> sostienen una ranura del dispatcher — en particular el turno de chat por WebSocket — llaman a <span class="func">pin_engine()</span> / <span class="func">unpin_engine()</span> alrededor de su uso del motor. Mientras un motor está fijado (pinned), un hot-swap concurrente aplaza su <code>unload</code> (guárdandolo en <code>_engine_retired</code>) hasta que el último lector lo libera. Esto cierra la ventana de use-after-free sobre el modelo compartido no reentrante que un drenaje por sí solo no cubriría.</p>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">🔀</span><h4>Núcleo de chat compartido</h4></div>
+      <p><code>api/chat_core.py</code> — <span class="func">resolve_chat_output()</span> es el único punto de decisión agnóstico al dialecto: dado el texto crudo del motor produce un <code>ChatOutput(content, tool_calls)</code> canónico, respetando <code>tool_choice:"none"</code> y prefiriendo los tool-calls estructurados del motor frente al parseo de marcadores. Las rutas OpenAI, Ollama y Anthropic ahora sólo difieren en la traducción de formato de cable — el bug histórico por el que la ruta OpenAI descartaba silenciosamente el tool-calling ya no puede repetirse.</p>
+    </div>
+  </div>
 </section>
 
 <!-- ========== 19. DEPENDENCIAS ========== -->
 <section id="dependencias">
-  <h2>19. Dependencias y Extras</h2>
+  <h2>23. Dependencias y Extras</h2>
   <div class="diagram-container">
     <div class="diagram-title">Mapa de Dependencias por Grupo</div>
     <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;margin:0 auto;display:block;">
@@ -1180,13 +1766,29 @@
       <text x="450" y="260" text-anchor="middle" fill="#8b949e" font-size="10">Build system: hatchling  |  Target: Python ≥3.10  |  Linting: ruff (E, F, W, I)  |  Line length: 100</text>
     </svg>
   </div>
+<h3>Nuevos extras opcionales (desde v0.1.0)</h3>
+  <p>La matriz de extras creció mucho más allá de los cuatro originales. Las deps nativas pesadas llevan ahora cotas superiores (tope en el siguiente major) por ser la mayor superficie de vulnerabilidades/rupturas. <code>[all]</code> = <code>llama,transformers,vllm,convert,tts,coqui,audio,tray,mcp,mlx,stt,imagegen</code>.</p>
+  <table>
+    <tr><th>Extra</th><th>Arrastra</th><th>Propósito</th></tr>
+    <tr><td><code>[vulkan]</code></td><td>referencia <code>[llama]</code></td><td>Backend GPU Vulkan (Intel Arc, AMD sin ROCm); compilado con <code>CMAKE_ARGS="-DGGML_VULKAN=ON"</code>.</td></tr>
+    <tr><td><code>[rocm]</code></td><td>referencia <code>[llama]</code></td><td>Ruta AMD HIP; compilado con <code>-DGGML_HIPBLAS=ON</code>. Mismo wheel, distinto flag CMake.</td></tr>
+    <tr><td><code>[mlx]</code></td><td><code>mlx-lm&gt;=0.31.2,&lt;1.0</code> (darwin/arm64)</td><td>Backend nativo de Apple Silicon.</td></tr>
+    <tr><td><code>[coqui]</code></td><td><code>coqui-tts</code>, torch, torchaudio, soundfile</td><td>Motor Coqui TTS (junto al <code>[tts]</code> de Bark vía transformers).</td></tr>
+    <tr><td><code>[audio]</code></td><td><code>sounddevice</code>, <code>soundfile</code></td><td>Reproducción de audio local.</td></tr>
+    <tr><td><code>[tray]</code></td><td><code>pystray</code>, <code>Pillow</code></td><td>GUI de bandeja para <code>serve --tray</code>.</td></tr>
+    <tr><td><code>[mcp]</code></td><td><code>mcp&gt;=1.0.0</code></td><td>Cliente/servidor de Model Context Protocol.</td></tr>
+    <tr><td><code>[stt]</code></td><td><code>faster-whisper&gt;=1.0.0,&lt;2.0</code></td><td>Voz a texto (Whisper).</td></tr>
+    <tr><td><code>[imagegen]</code></td><td><code>diffusers</code>, torch, safetensors, Pillow, accelerate</td><td>Generación de imágenes SDXL / FLUX (~2 GB de wheels).</td></tr>
+    <tr><td><code>[otel]</code></td><td>opentelemetry api/sdk + exporter OTLP-HTTP</td><td>Trazado distribuido.</td></tr>
+  </table>
+  <p><strong>Subidas de pins:</strong> el core apunta ahora a <code>transformers&gt;=5.0,&lt;6.0</code> + <code>torch&gt;=2.5,&lt;3.0</code> (la línea 5.x / hub-1.x), <code>huggingface-hub&gt;=1.5,&lt;2.0</code>, <code>fastapi~=0.135</code>, <code>starlette&gt;=1.3.1</code> y <code>python-multipart&gt;=0.0.31</code> (ambos suelos fijados por correcciones de CVE). <code>llama-cpp-python&gt;=0.3.20</code> (soporte gemma4). <code>[dev]</code> añadió <code>mypy&gt;=1.10</code> y <code>numpy&gt;=1.24</code>.</p>
 </section>
 
 <!-- ========== 20. TESTING ========== -->
 <section id="tests">
-  <h2>20. Testing</h2>
+  <h2>24. Testing</h2>
   <div class="highlight highlight-success">
-    <strong>Cobertura: 90%+ con 1900 tests</strong> — Suite exhaustiva con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). 80+ archivos de test con fixtures compartidas en <code>conftest.py</code>.
+    <strong>Cobertura: ~89% con ~3.537 tests</strong> — Suite exhaustiva con <code>pytest</code> + <code>pytest-asyncio</code> (asyncio_mode = "auto"). ~200 archivos de test con fixtures compartidas en <code>conftest.py</code>.
   </div>
 
   <h3>Categorías de Tests</h3>
@@ -1261,7 +1863,7 @@
     <tr><td><code>test_server_lifecycle.py</code></td><td>Startup, shutdown, cleanup</td></tr>
   </table>
 
-  <h3>Tests Adicionales (v0.1.0)</h3>
+  <h3>Tests Adicionales (v0.14.0)</h3>
   <table>
     <tr><td>Signal handling CLI</td><td>Ctrl+C durante streaming preserva respuesta parcial</td></tr>
     <tr><td>Middleware order</td><td>Verifica orden correcto de ejecucion del middleware stack</td></tr>
@@ -1279,7 +1881,7 @@
   <p><strong>Fixtures principales</strong> (<code>conftest.py</code>): <code>tmp_hfl_home</code> (directorio temporal), <code>mock_hf_api</code> (mock HfApi), <code>sample_manifest</code> (modelo ejemplo), <code>populated_registry</code> (registro pre-populado), <code>mock_engine</code> (engine de inferencia mockeado), <code>test_client</code> (FastAPI TestClient).</p>
 
   <pre><code><span class="comment"># Ejecutar tests con cobertura</span>
-pytest --cov=hfl --cov-report=html --cov-fail-under=80
+pytest --cov=hfl --cov-report=html --cov-report=term-missing  <span class="comment"># fail_under=75 (pyproject)</span>
 
 <span class="comment"># Tests por categoría</span>
 pytest tests/test_api*.py -v          <span class="comment"># Solo API</span>
@@ -1289,7 +1891,7 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
 
 <!-- ========== 21. BUILD ========== -->
 <section id="build">
-  <h2>21. Build y Distribución</h2>
+  <h2>25. Build y Distribución</h2>
   <div class="grid-2">
     <div class="card">
       <h4>Build System: Hatchling</h4>
@@ -1315,15 +1917,15 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
 
 <!-- ========== 22. CI/CD ========== -->
 <section id="ci">
-  <h2>22. CI/CD y GitHub</h2>
+  <h2>26. CI/CD y GitHub</h2>
 
   <h3>GitHub Actions Workflows</h3>
   <table>
     <tr><th>Workflow</th><th>Trigger</th><th>Descripción</th></tr>
-    <tr><td><code>ci.yml</code></td><td>Push/PR a main</td><td>Pipeline completo: lint (ruff) + tests (pytest matrix Python 3.10/3.11/3.12) + type-check</td></tr>
-    <tr><td><code>pages.yml</code></td><td>Push a main</td><td>Deploy automático de docs HTML a GitHub Pages</td></tr>
+    <tr><td><code>ci.yml</code></td><td>Manual (workflow_dispatch)</td><td>Pipeline completo: lint (ruff) + tests (pytest matrix Python 3.10/3.11/3.12) + type-check. <strong>Sin disparador push/PR</strong> (política de no-CI/CD automático).</td></tr>
+    <tr><td><code>pages.yml</code></td><td>Manual (workflow_dispatch)</td><td>Deploy de docs HTML a GitHub Pages (manual; sin auto-deploy en push)</td></tr>
     <tr><td><code>build-executables.yml</code></td><td>Release/manual</td><td>Build ejecutables multiplataforma con PyInstaller</td></tr>
-    <tr><td><code>lint.yml</code></td><td>Push/PR</td><td>Linting con ruff (E, F, W, I)</td></tr>
+    <tr><td><code>lint.yml</code></td><td>Manual (workflow_dispatch)</td><td>Linting con ruff (E, F, W, I)</td></tr>
     <tr><td><code>test.yml</code></td><td>Push/PR</td><td>Tests con pytest + coverage</td></tr>
     <tr><td><code>security.yml</code></td><td>Programado/manual</td><td>Auditoría de seguridad de dependencias</td></tr>
     <tr><td><code>license-check.yml</code></td><td>Push/PR</td><td>Verificación de licencias de dependencias</td></tr>
@@ -1331,15 +1933,28 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
 
   <h3>Templates de GitHub</h3>
   <p><strong>Issue Templates:</strong> <code>bug_report.yml</code> (formulario estructurado con info de sistema, pasos para reproducir, logs) y <code>feature_request.yml</code> (problema, solución propuesta, componente afectado).</p>
-  <p><strong>PR Template:</strong> Checklist que incluye verificación de los 5 Compliance Modules (licencia, provenance, disclaimer, privacidad, gating) según requisitos de la HRUL.</p>
+  <p><strong>PR Template:</strong> Checklist que incluye verificación de los 5 Compliance Modules (licencia, provenance, disclaimer, privacidad, gating) como normas de uso responsable del proyecto.</p>
   <p><strong>Archivos de comunidad:</strong> <code>CONTRIBUTING.md</code> (guía de desarrollo, estilo de código, proceso de PR), <code>CODE_OF_CONDUCT.md</code> (Contributor Covenant v2.1), <code>SECURITY.md</code> (política de reporte de vulnerabilidades).</p>
+<h3>Workflows solo manuales (v0.14.0)</h3>
+  <p>Cada uno de los 14 workflows bajo <code>.github/workflows/</code> está ahora declarado <code>on: workflow_dispatch</code> — los disparadores automáticos <code>push</code> / <code>pull_request</code> / <code>schedule</code> / por tag se eliminaron deliberadamente. El propietario ejecuta cada pipeline a mano desde la pestaña Actions. <strong>No hay publicación automática</strong>: <code>publish-pypi.yml</code> tiene su disparador por tag eliminado y corre solo por dispatch manual (con un input <code>testpypi</code>), usando PyPI Trusted Publisher (OIDC, sin token almacenado) más una atestación Sigstore. <code>build-executables.yml</code> además conserva un disparador <code>release:</code> para subir artefactos.</p>
+  <table>
+    <tr><th>Workflow</th><th>Disparador</th><th>Qué ejecuta</th></tr>
+    <tr><td><code>ci.yml</code></td><td>dispatch</td><td>Matriz de tests (ubuntu+macos × Py 3.10/3.11/3.12) con cobertura, lint+format de ruff, mypy sobre <code>api/</code>+<code>cli/</code>.</td></tr>
+    <tr><td><code>test.yml</code> / <code>lint.yml</code></td><td>dispatch</td><td>pytest+cobertura / ruff por separado (trabajos heredados).</td></tr>
+    <tr><td><code>security.yml</code></td><td>dispatch</td><td>Auditoría de seguridad de dependencias.</td></tr>
+    <tr><td><code>license-check.yml</code></td><td>dispatch</td><td>Verificación de licencias de dependencias.</td></tr>
+    <tr><td><code>publish-pypi.yml</code></td><td>dispatch</td><td>Build + twine check + publicación OIDC a PyPI/TestPyPI + Sigstore.</td></tr>
+    <tr><td><code>docker.yml</code> / <code>homebrew.yml</code></td><td>dispatch</td><td>Imágenes de contenedor / fórmula Homebrew.</td></tr>
+    <tr><td><code>macos-dmg.yml</code> / <code>windows-msi.yml</code> / <code>build-executables.yml</code></td><td>dispatch (+ release)</td><td>Instaladores nativos y bundles de PyInstaller.</td></tr>
+    <tr><td><code>pages.yml</code> / <code>release.yml</code></td><td>dispatch</td><td>Docs a GitHub Pages / empaquetado de release.</td></tr>
+  </table>
 </section>
 
 <!-- ========== FOOTER ========== -->
 <div style="text-align:center; padding: 3rem 0; border-top: 1px solid var(--border); margin-top: 3rem; color: var(--text-muted); font-size: 0.85rem;">
-  <p><strong>HFL v0.1.0</strong> — Documentación de Arquitectura Exhaustiva</p>
-  <p>Actualizado el 7 de marzo de 2026 — Todos los diagramas son SVG interactivos</p>
-  <p>Licencia: HRUL v1.0 (source-available) — Copyright © 2026 Gabriel Galán Pelayo</p>
+  <p><strong>HFL v0.14.0</strong> — Documentación de Arquitectura Exhaustiva</p>
+  <p>Actualizado el 19 de junio de 2026 — Todos los diagramas son SVG interactivos</p>
+  <p>Licencia: Apache-2.0 — Copyright © 2026 Gabriel Galán Pelayo</p>
 </div>
 
 </div>
