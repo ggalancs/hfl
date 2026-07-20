@@ -53,6 +53,14 @@ def resolve(
     """
     api = HfApi()
 
+    # Defensive: only a string (or None) is a valid revision. Invoking the
+    # Typer ``pull`` command as a plain function (e.g. from search) leaves the
+    # ``revision`` option at its ``typer.OptionInfo`` sentinel default, which
+    # is truthy and would otherwise reach the Hub's URL quoting and blow up with
+    # ``quote_from_bytes() expected bytes``. Coerce anything non-str to None.
+    if not isinstance(revision, str):
+        revision = None
+
     # Extract an explicit "@<ref>" revision pin: "org/model@abc123".
     # A flag-supplied ``revision`` wins over one embedded in the spec.
     if "@" in model_spec:

@@ -367,3 +367,18 @@ class TestResolveRevisionPinning:
             result = resolve("org/model:Q5_K_M@myref")
             assert result.revision == "myref"
             assert result.quantization == "Q5_K_M"
+
+    def test_non_string_revision_coerced_to_main(self):
+        # Regression: invoking the Typer ``pull`` command as a plain function
+        # (search's _pull_selected_model) leaves ``revision`` at its
+        # ``typer.OptionInfo`` sentinel — truthy and non-str. It must not reach
+        # the Hub's URL quoting (which raised ``quote_from_bytes() expected
+        # bytes``); resolve() coerces any non-str revision to the default.
+        import typer
+
+        for bad in (typer.Option(None, "--revision"), 123, object()):
+            with patch("hfl.hub.resolver.HfApi") as cls:
+                api = self._mock_api(cls)
+                result = resolve("org/model", revision=bad)
+                assert result.revision == "main"
+                api.model_info.assert_called_once_with("org/model", revision="main")

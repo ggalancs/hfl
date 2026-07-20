@@ -641,6 +641,7 @@ def _pull_selected_model(model) -> None:
             model=model_id,
             quantize=quantize,
             format="auto",
+            revision=None,
             alias=None,
             skip_license=False,
         )
