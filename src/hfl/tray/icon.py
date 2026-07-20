@@ -52,7 +52,10 @@ def _generate_icon_image(status: ServerStatus) -> Any:
         fill=color,
     )
 
-    # Draw "H" letter centered
+    # Draw "H" letter centered. ``truetype`` returns FreeTypeFont while
+    # ``load_default`` may return either — widen the annotation so both
+    # branches type-check (no-op at runtime under PEP 563 lazy annotations).
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
         font = ImageFont.truetype("Arial", 32)
     except (OSError, IOError):

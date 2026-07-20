@@ -277,6 +277,6 @@ disallow_untyped_defs = true
 # ``ignore_missing_imports`` above, numpy symbols resolve to ``Any`` (numpy is
 # a test-only [dev] dep, never imported by shipped API/CLI code paths).
 [[tool.mypy.overrides]]
-module = ["numpy"]
+module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true
