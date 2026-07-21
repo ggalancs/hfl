@@ -309,6 +309,37 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
     )
 
 
+# Cumulative owner-acceptance tiers for the non-interactive (HTTP API)
+# pull path. Each tier is a superset of the ones above it. The
+# interactive CLI (``require_user_acceptance``) is independent of this —
+# it always prompts a human. See ``HFLConfig.license_policy``.
+_POLICY_TIERS: dict[str, frozenset[LicenseRisk]] = {
+    "permissive": frozenset({LicenseRisk.PERMISSIVE}),
+    "conditional": frozenset({LicenseRisk.PERMISSIVE, LicenseRisk.CONDITIONAL}),
+    "all": frozenset(LicenseRisk),
+}
+
+
+def policy_allows(license_info: LicenseInfo, policy: str) -> bool:
+    """Whether the server owner's ``policy`` pre-accepts this license.
+
+    Used by the non-interactive server pull path to decide, without a
+    human in the loop, whether a download may proceed. An unrecognised
+    policy string falls back to the safest tier (``permissive``) so a
+    typo never silently widens acceptance.
+
+    Args:
+        license_info: Classified license of the target repo.
+        policy: One of ``"permissive"``, ``"conditional"``, ``"all"``.
+
+    Returns:
+        True if the license risk is within the accepted tier.
+    """
+    key = (policy or "permissive").strip().lower()
+    allowed = _POLICY_TIERS.get(key, _POLICY_TIERS["permissive"])
+    return license_info.risk in allowed
+
+
 def get_license_summary(license_info: LicenseInfo) -> str:
     """
     Generate a short license summary for display in tables.

@@ -56,6 +56,19 @@ the host string does not.
 | `HFL_RATE_LIMIT_WINDOW`      | —                  | `60`                     | Window size in seconds. |
 | `HFL_MAX_REQUEST_BYTES`      | —                  | `10485760` (10 MiB)      | Cap on request body. `0` disables. |
 
+## Compliance / pull governance
+
+`pull`, `push` and smart-pull are **owner** (administrative) operations:
+they download or upload arbitrary repos on the server host. Over the
+network these are refused for remote callers so an API *user* cannot
+provision models or "accept" licenses on the owner's behalf. The
+interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
+
+| HFL                     | Ollama alias | Default        | What it does |
+|-------------------------|--------------|----------------|--------------|
+| `HFL_ALLOW_REMOTE_PULL` | —            | `false`        | When truthy, allows non-loopback callers to hit `/api/pull`, `/api/pull/smart` and `/api/push`. Default refuses them with `403 remote_admin_forbidden`. Enable only if you knowingly administer this server remotely (the API key still guards it). |
+| `HFL_LICENSE_POLICY`    | —            | `permissive`   | Which license risk tiers the owner pre-accepts for non-interactive (HTTP API) pulls. Cumulative: `permissive` (Apache/MIT/BSD-class only) → `conditional` (also Llama/Gemma/Qwen/OpenRAIL) → `all` (also non-commercial / restricted / unknown). A license outside the tier is refused with a `license_not_accepted` event; widen the policy or pull it locally via the CLI. |
+
 ## Observability
 
 | HFL                  | Ollama alias       | Default | What it does |

@@ -19,29 +19,60 @@ from fastapi.testclient import TestClient
 
 from hfl.api.server import app
 
+# Loopback peer == the machine owner: pull is allowed. Any other address is
+# a remote *user* and is refused (see hfl.api.admin_guard). The default
+# TestClient peer is ("testclient", 50000), which would read as remote, so
+# tests pin the peer explicitly.
+LOCAL_PEER = ("127.0.0.1", 5555)
+REMOTE_PEER = ("203.0.113.7", 5555)
+
+
+def _permissive_license():
+    """A PERMISSIVE ``LicenseInfo`` so the owner license gate lets the
+    pull proceed without a real Hub round-trip."""
+    from hfl.hub.license_checker import LicenseInfo, LicenseRisk
+
+    return LicenseInfo(
+        license_id="apache-2.0",
+        license_name="Apache 2.0",
+        risk=LicenseRisk.PERMISSIVE,
+        restrictions=[],
+        url="https://huggingface.co/acme/test-model#license",
+        gated=False,
+    )
+
 
 @pytest.fixture
 def client(temp_config):
-    return TestClient(app)
+    return TestClient(app, client=LOCAL_PEER)
 
 
 @pytest.fixture
-def mock_pull(tmp_path):
-    """Patch the downloader + resolver into a predictable local file."""
+def mock_pull(tmp_path, temp_config):
+    """Patch the downloader + resolver + license checker into a
+    predictable local file. ``check_model_license`` returns a permissive
+    license so the owner policy gate passes; ``temp_config`` isolates the
+    registry/provenance writes the pull now performs."""
     fake_file = tmp_path / "model.gguf"
     fake_file.write_bytes(b"\x00" * 1024)  # 1 KiB dummy content
 
     fake_resolved = MagicMock()
     fake_resolved.repo_id = "acme/test-model"
     fake_resolved.revision = "sha256:" + "a" * 64
+    fake_resolved.commit_sha = "c" * 40
+    fake_resolved.quantization = None
     fake_resolved.format = "gguf"
     fake_resolved.filename = "model.gguf"
 
     with (
         patch("hfl.hub.resolver.resolve", return_value=fake_resolved) as m_resolve,
         patch("hfl.hub.downloader.pull_model", return_value=fake_file) as m_pull,
+        patch(
+            "hfl.hub.license_checker.check_model_license",
+            return_value=_permissive_license(),
+        ) as m_lic,
     ):
-        yield m_resolve, m_pull, fake_file
+        yield m_resolve, m_pull, fake_file, m_lic
 
 
 def _parse_ndjson(body: bytes | str) -> list[dict]:
@@ -119,6 +150,10 @@ class TestPullStreaming:
         with (
             patch("hfl.hub.resolver.resolve", return_value=fake_resolved),
             patch(
+                "hfl.hub.license_checker.check_model_license",
+                return_value=_permissive_license(),
+            ),
+            patch(
                 "hfl.hub.downloader.pull_model",
                 side_effect=OSError("disk full"),
             ),
@@ -193,7 +228,7 @@ class TestPullContractForOpenWebUI:
         host's memory budget (otherwise the resolver re-picks its own default)."""
         from hfl.api.routes_pull import iter_pull_events
 
-        m_resolve, _m_pull, _f = mock_pull
+        m_resolve, _m_pull, _f, _lic = mock_pull
         async for _line in iter_pull_events("acme/test-model", quantization="q3_k_m"):
             pass
 
@@ -208,10 +243,182 @@ class TestPullContractForOpenWebUI:
         applies its own extraction/priority — no behaviour regression."""
         from hfl.api.routes_pull import iter_pull_events
 
-        m_resolve, _m_pull, _f = mock_pull
+        m_resolve, _m_pull, _f, _lic = mock_pull
         async for _line in iter_pull_events("acme/test-model"):
             pass
 
         args, kwargs = m_resolve.call_args
         passed = kwargs.get("quantization", args[1] if len(args) > 1 else None)
         assert passed is None
+
+
+def _make_license(risk, license_id="some-license"):
+    from hfl.hub.license_checker import LicenseInfo
+
+    return LicenseInfo(
+        license_id=license_id,
+        license_name=license_id.title(),
+        risk=risk,
+        restrictions=[],
+        url=f"https://huggingface.co/acme/{license_id}",
+        gated=False,
+    )
+
+
+class TestPullOwnerGuard:
+    """``pull`` is an owner operation: remote API users must be refused
+    (403) unless the owner opted into remote administration."""
+
+    def test_remote_caller_is_forbidden(self, temp_config, mock_pull):
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post("/api/pull", json={"model": "acme/test-model", "stream": True})
+        assert response.status_code == 403
+        detail = response.json()["detail"]
+        assert detail["code"] == "remote_admin_forbidden"
+        # Refused before any download work happened.
+        _m_resolve, m_pull, _f, _lic = mock_pull
+        m_pull.assert_not_called()
+
+    def test_local_caller_is_allowed(self, client, mock_pull):
+        response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+    def test_remote_allowed_when_owner_opts_in(self, temp_config, mock_pull):
+        temp_config.allow_remote_pull = True
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+
+class TestPullLicensePolicy:
+    """The owner's ``license_policy`` decides, without a human in the
+    loop, whether a non-interactive pull may proceed."""
+
+    def _run(self, client, risk, license_id="cc-by-nc-4.0", stream=True):
+        fake_resolved = MagicMock()
+        fake_resolved.repo_id = "acme/test-model"
+        fake_resolved.revision = None
+        fake_resolved.commit_sha = None
+        fake_resolved.quantization = None
+        fake_resolved.format = "gguf"
+        with (
+            patch("hfl.hub.resolver.resolve", return_value=fake_resolved),
+            patch(
+                "hfl.hub.license_checker.check_model_license",
+                return_value=_make_license(risk, license_id),
+            ),
+            patch("hfl.hub.downloader.pull_model") as m_pull,
+        ):
+            self._m_pull = m_pull
+            return client.post("/api/pull", json={"model": "acme/test-model", "stream": stream})
+
+    def test_non_permissive_blocked_under_default_policy_stream(self, client, temp_config):
+        """Default policy is 'permissive' — a non-commercial license is
+        refused with a license_not_accepted error event, no download."""
+        from hfl.hub.license_checker import LicenseRisk
+
+        response = self._run(client, LicenseRisk.NON_COMMERCIAL)
+        events = _parse_ndjson(response.content)
+        err = next(e for e in events if e["status"] == "error")
+        assert err["code"] == "license_not_accepted"
+        assert err["risk"] == "non_commercial"
+        # Never reached the download.
+        self._m_pull.assert_not_called()
+        # And no success event was emitted.
+        assert not any(e["status"] == "success" for e in events)
+
+    def test_non_permissive_blocked_returns_403_non_stream(self, client, temp_config):
+        from hfl.hub.license_checker import LicenseRisk
+
+        response = self._run(client, LicenseRisk.RESTRICTED, stream=False)
+        assert response.status_code == 403
+        assert response.json()["code"] == "license_not_accepted"
+
+    def test_conditional_allowed_when_policy_widened(self, client, temp_config, mock_pull):
+        """With policy='conditional', a Llama-class (CONDITIONAL) license
+        proceeds automatically. Uses ``mock_pull`` for a real download
+        path so the success + registration steps run."""
+        from hfl.hub.license_checker import LicenseRisk
+
+        temp_config.license_policy = "conditional"
+        with patch(
+            "hfl.hub.license_checker.check_model_license",
+            return_value=_make_license(LicenseRisk.CONDITIONAL, "llama3.1"),
+        ):
+            response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+    def test_all_policy_allows_restricted(self, client, temp_config, mock_pull):
+        from hfl.hub.license_checker import LicenseRisk
+
+        temp_config.license_policy = "all"
+        with patch(
+            "hfl.hub.license_checker.check_model_license",
+            return_value=_make_license(LicenseRisk.RESTRICTED, "proprietary"),
+        ):
+            response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+    def test_permissive_emits_verifying_license_event(self, client, mock_pull):
+        response = client.post("/api/pull", json={"model": "acme/test-model", "stream": True})
+        statuses = [e["status"] for e in _parse_ndjson(response.content)]
+        assert "verifying license" in statuses
+
+    def test_license_classification_failure_fails_closed(self, client, temp_config):
+        """If the Hub lookup raises, the license is treated as UNKNOWN and
+        the default policy refuses it (fail closed)."""
+        fake_resolved = MagicMock()
+        fake_resolved.repo_id = "acme/test-model"
+        fake_resolved.revision = None
+        fake_resolved.format = "gguf"
+        with (
+            patch("hfl.hub.resolver.resolve", return_value=fake_resolved),
+            patch(
+                "hfl.hub.license_checker.check_model_license",
+                side_effect=RuntimeError("hub down"),
+            ),
+            patch("hfl.hub.downloader.pull_model") as m_pull,
+        ):
+            response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 403
+        assert response.json()["code"] == "license_not_accepted"
+        m_pull.assert_not_called()
+
+
+class TestPullTraceability:
+    """A successful server pull must register the model with its license
+    and log provenance — the gap that let API pulls slip through
+    untracked."""
+
+    def test_successful_pull_registers_manifest_with_license(self, client, mock_pull):
+        response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+
+        from hfl.models.registry import ModelRegistry
+
+        manifest = ModelRegistry().get("test-model")
+        assert manifest is not None
+        assert manifest.repo_id == "acme/test-model"
+        assert manifest.license == "apache-2.0"
+        assert manifest.license_accepted_at is not None
+
+    def test_successful_pull_logs_provenance(self, client, mock_pull, monkeypatch):
+        # Reset the cached provenance singleton so it re-binds to the
+        # temp_config home for this test.
+        import hfl.models.provenance as prov
+
+        monkeypatch.setattr(prov, "_provenance_log", None)
+
+        response = client.post("/api/pull", json={"model": "acme/test-model", "stream": False})
+        assert response.status_code == 200
+
+        history = prov.get_provenance_log().get_history("acme/test-model")
+        assert history, "expected a provenance record for the pulled repo"
+        record = history[-1]
+        assert record["license_accepted"] is True
+        assert record["original_license"] == "apache-2.0"
+        assert "license policy" in record["notes"]

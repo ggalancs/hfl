@@ -18,11 +18,13 @@ from fastapi.testclient import TestClient
 from hfl.api.server import app
 from hfl.api.state import reset_state
 
+LOCAL_PEER = ("127.0.0.1", 5555)
+
 
 @pytest.fixture
 def client(temp_config):
     reset_state()
-    yield TestClient(app)
+    yield TestClient(app, client=LOCAL_PEER)
     reset_state()
 
 
@@ -198,3 +200,35 @@ class TestPushFailureSurfaces:
         events = [json.loads(line) for line in response.text.splitlines() if line]
         assert events[-1]["status"] == "failed"
         assert "hub said nope" in events[-1]["error"]
+
+
+REMOTE_PEER = ("203.0.113.7", 5555)
+
+
+class TestPushOwnerGuard:
+    """push is an owner operation — a remote user must not be able to
+    publish the owner's models under the owner's token."""
+
+    def test_remote_caller_is_forbidden(self, temp_config, registered_model, fake_hf_api):
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post(
+            "/api/push",
+            json={"model": registered_model.name, "destination": "user/clone"},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "remote_admin_forbidden"
+        # The guard runs before any upload work.
+        fake_hf_api.upload_folder.assert_not_called()
+
+    def test_remote_allowed_when_owner_opts_in(self, temp_config, registered_model, fake_hf_api):
+        temp_config.allow_remote_pull = True
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post(
+            "/api/push",
+            json={
+                "model": registered_model.name,
+                "destination": "user/clone",
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200

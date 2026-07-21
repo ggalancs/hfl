@@ -45,6 +45,30 @@ class TestEnvConfig:
             cfg = HFLConfig()
             assert cfg.rate_limit_requests == 100
 
+    def test_allow_remote_pull_defaults_false(self):
+        """pull is owner-only by default: remote pull is refused."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.allow_remote_pull is False
+
+    def test_allow_remote_pull_via_env(self):
+        """HFL_ALLOW_REMOTE_PULL=true opts into remote administration."""
+        with patch.dict(os.environ, {"HFL_ALLOW_REMOTE_PULL": "true"}):
+            cfg = HFLConfig()
+            assert cfg.allow_remote_pull is True
+
+    def test_license_policy_defaults_permissive(self):
+        """Only permissive licenses auto-proceed on the API by default."""
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = HFLConfig()
+            assert cfg.license_policy == "permissive"
+
+    def test_license_policy_via_env_is_normalised(self):
+        """HFL_LICENSE_POLICY is lower-cased and stripped."""
+        with patch.dict(os.environ, {"HFL_LICENSE_POLICY": "  Conditional  "}):
+            cfg = HFLConfig()
+            assert cfg.license_policy == "conditional"
+
     def test_dispatcher_defaults(self):
         """Default dispatcher values match the spec §5.3 guidance:
         serialize to 1 in-flight with a 16-slot wait queue and 60 s

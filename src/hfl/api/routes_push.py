@@ -32,7 +32,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -113,14 +113,21 @@ async def _stream_ndjson(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator
         404: {"description": "Model not found in local registry"},
     },
 )
-async def api_push(req: PushRequest) -> StreamingResponse | JSONResponse:
+async def api_push(req: PushRequest, request: Request) -> StreamingResponse | JSONResponse:
     """Ollama-compatible ``POST /api/push``.
 
     Uploads ``req.model`` (a local registry entry) to the HuggingFace
-    Hub at ``req.destination`` (or ``req.name``). Streams NDJSON
-    progress events when ``stream=true`` (the Ollama default), or
-    returns a single JSON envelope when ``stream=false``.
+    Hub at ``req.destination`` (or ``req.name``). This is an owner
+    operation (see :mod:`hfl.api.admin_guard`): remote callers get
+    ``403`` unless ``HFL_ALLOW_REMOTE_PULL`` is set — a remote user must
+    not be able to publish the owner's models under the owner's token.
+    Streams NDJSON progress events when ``stream=true`` (the Ollama
+    default), or returns a single JSON envelope when ``stream=false``.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "push")
+
     # Resolve the local manifest first — fail fast on a missing model.
     from hfl.core.container import get_registry
     from hfl.hub.uploader import build_upload_plan, stream_push

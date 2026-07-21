@@ -208,6 +208,35 @@ class HFLConfig:
         default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_WINDOW", "60"))
     )
 
+    # Compliance — server-side pull governance (owner-vs-user trust boundary).
+    #
+    # ``pull`` / ``push`` / smart-pull are *owner* (administrative)
+    # operations: they download or upload arbitrary repos on the server
+    # host. A remote API *user* must not be able to trigger them, or they
+    # could fill the owner's disk with arbitrary models and implicitly
+    # "accept" licenses that are not theirs to accept. By default these
+    # endpoints are therefore refused for non-loopback callers.
+    #
+    # Set ``HFL_ALLOW_REMOTE_PULL=true`` only if you knowingly administer
+    # this server remotely (the API key still guards the endpoint).
+    allow_remote_pull: bool = field(
+        default_factory=lambda: os.environ.get("HFL_ALLOW_REMOTE_PULL", "false").lower() == "true"
+    )
+
+    # Which license risk tiers the *owner* pre-accepts for non-interactive
+    # (HTTP API) pulls. The interactive CLI (``hfl pull``) always prompts
+    # for non-permissive licenses and is unaffected by this knob. Tiers are
+    # cumulative:
+    #   "permissive"  (default) — only Apache/MIT/BSD-class auto-proceed
+    #   "conditional"           — also Llama/Gemma/Qwen/OpenRAIL-class
+    #   "all"                   — also non-commercial / restricted / unknown
+    # A license the policy does not cover is refused with a ``license``
+    # error event; the owner must widen the policy or pull it locally via
+    # the CLI (which records their explicit acceptance).
+    license_policy: str = field(
+        default_factory=lambda: os.environ.get("HFL_LICENSE_POLICY", "permissive").strip().lower()
+    )
+
     # LLM Inference (0 = auto-detect from model's GGUF metadata)
     default_ctx_size: int = field(
         default_factory=lambda: int(os.environ.get("HFL_DEFAULT_CTX_SIZE", "0"))

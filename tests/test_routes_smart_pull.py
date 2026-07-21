@@ -19,11 +19,14 @@ from fastapi.testclient import TestClient
 from hfl.api.server import app
 from hfl.api.state import reset_state
 
+LOCAL_PEER = ("127.0.0.1", 5555)
+REMOTE_PEER = ("203.0.113.7", 5555)
+
 
 @pytest.fixture
 def client(temp_config):
     reset_state()
-    yield TestClient(app)
+    yield TestClient(app, client=LOCAL_PEER)
     reset_state()
 
 
@@ -253,3 +256,24 @@ class TestSmartPullValidation:
             json={"model": "x/y", "max_vram_gb": -1.0},
         )
         assert response.status_code in (400, 422)
+
+
+class TestSmartPullOwnerGuard:
+    """smart-pull is an owner operation, guarded like /api/pull."""
+
+    def test_remote_caller_is_forbidden(self, temp_config, fake_smart_plan):
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post(
+            "/api/pull/smart", json={"model": "meta-llama/Llama-3.1-8B-Instruct"}
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "remote_admin_forbidden"
+
+    def test_remote_allowed_when_owner_opts_in(self, temp_config, fake_smart_plan, fake_pull_iter):
+        temp_config.allow_remote_pull = True
+        remote = TestClient(app, client=REMOTE_PEER)
+        response = remote.post(
+            "/api/pull/smart",
+            json={"model": "meta-llama/Llama-3.1-8B-Instruct", "stream": True},
+        )
+        assert response.status_code == 200

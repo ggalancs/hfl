@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -92,7 +92,9 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
         400: {"description": "Malformed request"},
     },
 )
-async def api_pull_smart(req: SmartPullRequest) -> StreamingResponse | JSONResponse:
+async def api_pull_smart(
+    req: SmartPullRequest, request: Request
+) -> StreamingResponse | JSONResponse:
     """pick the optimal Hub variant for this host and pull it.
 
     Body:
@@ -101,12 +103,21 @@ async def api_pull_smart(req: SmartPullRequest) -> StreamingResponse | JSONRespo
     { "model": "meta-llama/Llama-3.1-8B-Instruct", "max_vram_gb": 12.0 }
     ```
 
+    Like ``/api/pull`` this is an owner operation (see
+    :mod:`hfl.api.admin_guard`): remote callers get ``403`` unless
+    ``HFL_ALLOW_REMOTE_PULL`` is set. The delegated download still runs
+    through the same license gate as the plain pull.
+
     On Apple Silicon with mlx-lm installed, this resolves to the
     matching ``mlx-community`` fork at MLX-4bit/8bit. On a 24 GB
     CUDA host without MLX it picks Q5_K_M from the
     ``bartowski/<name>-GGUF`` fork. On CPU-only it falls back to
     the smallest quant that fits.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "smart-pull")
+
     if not req.stream:
         # Drain the stream into a single envelope (last event wins).
         last: dict[str, Any] = {"status": "planning"}
