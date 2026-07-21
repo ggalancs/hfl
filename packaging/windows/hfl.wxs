@@ -45,7 +45,7 @@
     </Directory>
 
     <ComponentGroup Id="HflFiles" Directory="INSTALLFOLDER">
-      <Component Id="HflExecutable" Guid="*">
+      <Component Id="HflExecutable" Guid="*" Win64="yes">
         <File
           Id="HflExe"
           Source="dist\hfl.exe"

@@ -77,7 +77,11 @@ jobs:
             throw "WiX candle.exe not found under 'C:\Program Files (x86)\WiX Toolset*'. Did choco install WiX v3?"
           }
           Write-Host "Using WiX bin: $wixBin"
-          & "$wixBin\candle.exe" -out dist\hfl.wixobj packaging\windows\hfl.rendered.wxs
+          # -arch x64: in WiX v3 the *component* bitness (and the
+          # ProgramFiles64Folder mapping) is driven by candle's -arch
+          # switch, NOT by Package/@Platform. Without it components default
+          # to 32-bit and ICE80 fires against the 64-bit install dir.
+          & "$wixBin\candle.exe" -arch x64 -out dist\hfl.wixobj packaging\windows\hfl.rendered.wxs
           & "$wixBin\light.exe" -ext WixUIExtension `
              -out dist\hfl-${{ steps.ver.outputs.version }}.msi dist\hfl.wixobj
 
