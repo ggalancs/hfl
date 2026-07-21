@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-21
+
+### Added
+
+- **Owner-vs-user trust boundary on the server pull path.** `pull`,
+  smart-pull and `push` are administrative (owner) operations: they
+  download or upload arbitrary repositories on the server host. Over the
+  network they are now refused for non-loopback callers with
+  `403 remote_admin_forbidden`, so a remote API *user* can no longer
+  trigger arbitrary downloads or "accept" model licenses on the owner's
+  behalf. Opt into remote administration with `HFL_ALLOW_REMOTE_PULL=true`
+  (the API key still guards the endpoint). See `hfl.api.admin_guard`.
+- **Server-side license policy for non-interactive pulls.**
+  `HFL_LICENSE_POLICY` (`permissive` → `conditional` → `all`, cumulative)
+  lets the owner pre-accept a license risk tier once, server-side. A pull
+  whose license is outside the policy is refused with a
+  `license_not_accepted` event (streaming) or `403` (non-streaming),
+  before any bytes transfer; classification failures fail closed. The
+  interactive CLI (`hfl pull`) keeps its per-model human prompt and is
+  unaffected. Successful server pulls now also register the model with its
+  license and log provenance — closing a gap where API pulls were
+  untracked. Documented in `docs/env-vars.md`.
+
+### Changed
+
+- **`hfl rm` gains `--yes`** to skip the confirmation prompt, and `hfl
+  verify` skips the tokenizer probe on GGUF models (llama.cpp bundles the
+  tokenizer, so the probe was a false negative).
+
+### Fixed
+
+- **Multimodal support silently lost on newer llama-cpp-python.** The
+  Gemma vision handler was renamed `Gemma3ChatHandler` →
+  `Gemma4ChatHandler`; because it was imported alongside the other vision
+  handlers in one statement, its absence raised `ImportError` and took
+  *all* multimodal handlers (LLaVA, Qwen-VL, Moondream) down with it. The
+  Gemma handler is now resolved dynamically (Gemma4 → Gemma3), guarded.
+- **`src/hfl` is mypy-clean again under installed optional backends** —
+  fixes for API drift in `llama-cpp-python`, `mlx-lm`, `torch` and
+  `cryptography` type surfaces (typed locals instead of redundant casts,
+  starred unpack for `mlx_lm.load`'s optional config tuple, `TYPE_CHECKING`
+  guard for the optional `Llama` import). No runtime behaviour change.
+- **Docker multi-arch manifest** creation failed on `latest-arm64: not
+  found`; the per-arch tags are now resolved before the manifest assembles.
+
 ## [0.15.2] - 2026-07-20
 
 ### Fixed
