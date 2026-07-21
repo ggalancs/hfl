@@ -77,7 +77,10 @@ class MLXEngine(InferenceEngine):
         from mlx_lm import load
 
         start = time.perf_counter()
-        self._model, self._tokenizer = load(model_path)
+        # ``load`` returns ``(model, tokenizer)`` by default and
+        # ``(model, tokenizer, config)`` when ``return_config=True``; the
+        # starred target accepts either arity (we only want the first two).
+        self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
 

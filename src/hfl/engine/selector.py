@@ -216,7 +216,8 @@ def _has_cuda() -> bool:
     try:
         import torch
 
-        return cast(bool, torch.cuda.is_available())
+        available: bool = torch.cuda.is_available()
+        return available
     except ImportError:
         return False
 

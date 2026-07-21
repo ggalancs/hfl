@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from contextlib import contextmanager
-from typing import Any, Iterator, cast
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
@@ -28,10 +28,15 @@ from hfl.engine.base import (
 # test that monkeypatches ``hfl.engine.llama_cpp.Llama`` — can be
 # imported and exercised in environments without llama-cpp-python (CI
 # default, doc generators, type checkers).
-try:
+if TYPE_CHECKING:
+    # Keep the real ``Llama`` type visible to type checkers regardless of
+    # whether the optional backend is installed in the checking env.
     from llama_cpp import Llama
-except ImportError:  # pragma: no cover — exercised by the [dev] CI matrix
-    Llama = None
+else:
+    try:
+        from llama_cpp import Llama
+    except ImportError:  # pragma: no cover — exercised by the [dev] CI matrix
+        Llama = None
 
 logger = logging.getLogger(__name__)
 
@@ -579,8 +584,8 @@ def _build_vision_chat_handler(
     arch = (architecture or "").lower()
 
     try:
+        from llama_cpp import llama_chat_format as _lcf
         from llama_cpp.llama_chat_format import (
-            Gemma3ChatHandler,
             Llava15ChatHandler,
             Llava16ChatHandler,
             MoondreamChatHandler,
@@ -595,10 +600,26 @@ def _build_vision_chat_handler(
         )
         return None
 
+    # The Gemma vision handler was renamed ``Gemma3ChatHandler`` ->
+    # ``Gemma4ChatHandler`` across llama-cpp-python releases. Resolve it
+    # dynamically so a version bump neither crashes the import (which
+    # would take *all* vision handlers down with it) nor pins us to one
+    # spelling. ``None`` when this build ships neither.
+    gemma_handler = getattr(_lcf, "Gemma4ChatHandler", None) or getattr(
+        _lcf, "Gemma3ChatHandler", None
+    )
+
     # Arch → handler. Order matters: most-specific substring first
     # so e.g. ``llava-v1.6`` doesn't match the v1.5 handler.
     if "gemma" in arch and ("3" in arch or "4" in arch):
-        handler_cls = Gemma3ChatHandler
+        if gemma_handler is None:
+            logger.warning(
+                "this llama-cpp-python build has no Gemma vision handler; "
+                "loading %s without vision support.",
+                arch or "model",
+            )
+            return None
+        handler_cls = gemma_handler
     elif "qwen" in arch and "vl" in arch:
         handler_cls = Qwen25VLChatHandler
     elif "moondream" in arch:
@@ -1002,6 +1023,7 @@ class LlamaCppEngine(InferenceEngine):
                 # library picks its own default.
                 kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
                 if kv_type and kv_type != "f16":
+                    _lcpp: Any
                     try:
                         from llama_cpp import llama_cpp as _lcpp
                     except Exception:
@@ -1075,7 +1097,9 @@ class LlamaCppEngine(InferenceEngine):
                 #       a known-good baseline.
                 draft_spec = kwargs.get("draft_model_path") or None
                 draft_llama: Llama | None = None
-                draft_callable = None
+                # Either a prompt-lookup decoder or a draft-model adapter,
+                # both duck-typed as llama-cpp's ``draft_model``.
+                draft_callable: Any = None
                 if draft_spec == "prompt-lookup":
                     try:
                         from llama_cpp.llama_speculative import (

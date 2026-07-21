@@ -27,7 +27,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,10 @@ def _sign_raw(private_key: bytes, message: bytes) -> bytes:
             "No ed25519 backend installed (need pynacl or cryptography)"
         ) from exc
     key = Ed25519PrivateKey.from_private_bytes(private_key)
-    return cast(bytes, key.sign(message))
+    # Typed local rather than ``cast``: clean whether the installed backend
+    # types ``sign`` as ``bytes`` (cast would be redundant) or as ``Any``.
+    signature: bytes = key.sign(message)
+    return signature
 
 
 def _verify_raw(public_key: bytes, signature: bytes, message: bytes) -> bool:
