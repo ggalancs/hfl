@@ -45,9 +45,18 @@ jobs:
       - name: Derive version
         id: ver
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $version = $tag.TrimStart('v')
+          $ref = $env:GITHUB_REF_NAME
+          if ($ref -match '^v\d') {
+            $version = $ref.TrimStart('v')
+          } else {
+            # Manual/test dispatch on a branch (not a v* tag): take the
+            # version from pyproject so the MSI is still named correctly.
+            $m = Select-String -Path pyproject.toml -Pattern '^version = "(.+)"' |
+                 Select-Object -First 1
+            $version = $m.Matches[0].Groups[1].Value
+          }
           echo "version=$version" >>"$env:GITHUB_OUTPUT"
+          Write-Host "Resolved MSI version: $version (ref=$ref)"
 
       - name: Render wxs
         run: |
@@ -57,10 +66,19 @@ jobs:
 
       - name: Build MSI
         run: |
-          & "$env:ProgramFiles(x86)\WiX Toolset v3.14\bin\candle.exe" `
-             -out dist\hfl.wixobj packaging\windows\hfl.rendered.wxs
-          & "$env:ProgramFiles(x86)\WiX Toolset v3.14\bin\light.exe" `
-             -ext WixUIExtension `
+          # Locate the WiX v3 bin dir rather than hard-coding "v3.14": the
+          # choco package version can move, and a wrong path is a silent
+          # break. Fail loudly if candle.exe can't be found.
+          $wixBin = Get-ChildItem "C:\Program Files (x86)" -Directory -Filter "WiX Toolset*" -ErrorAction SilentlyContinue |
+                    ForEach-Object { Join-Path $_.FullName "bin" } |
+                    Where-Object { Test-Path (Join-Path $_ "candle.exe") } |
+                    Select-Object -First 1
+          if (-not $wixBin) {
+            throw "WiX candle.exe not found under 'C:\Program Files (x86)\WiX Toolset*'. Did choco install WiX v3?"
+          }
+          Write-Host "Using WiX bin: $wixBin"
+          & "$wixBin\candle.exe" -out dist\hfl.wixobj packaging\windows\hfl.rendered.wxs
+          & "$wixBin\light.exe" -ext WixUIExtension `
              -out dist\hfl-${{ steps.ver.outputs.version }}.msi dist\hfl.wixobj
 
       - name: Decode code-sign certificate
@@ -89,6 +107,10 @@ jobs:
           path: dist/hfl-*.msi
 
       - name: Attach to release
+        # Only attach on a real version tag. A manual/test dispatch on a
+        # branch still builds + uploads the artefact above, but must not
+        # create a junk "main" GitHub Release.
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: dist/hfl-*.msi
