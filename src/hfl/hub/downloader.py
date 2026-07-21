@@ -54,13 +54,23 @@ def _rate_limit() -> None:
     _last_api_call = time.time()
 
 
-# Network exceptions that should trigger retry
-# Use stdlib/httpx exceptions for compatibility with huggingface-hub >=1.0 (uses httpx)
-_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, OSError)
+# Only genuine transport/network failures should be retried — NOT HTTP
+# status errors. In huggingface_hub 1.x, ``HfHubHTTPError`` (and thus
+# ``GatedRepoError`` / ``RepositoryNotFoundError`` / 401 / 403 / 404)
+# inherits from ``OSError``, so the old blanket ``OSError`` here silently
+# retried *permanent* failures 4× and masked them as ``RetryExhausted``:
+# a gated model ("accept the license on huggingface.co") looked like a
+# network timeout. ``httpx.TransportError`` is the base for
+# connection/timeout/protocol errors only — it excludes ``HTTPStatusError``
+# / ``HfHubHTTPError``, so gated/auth/not-found now propagate immediately
+# with their real message. (``ConnectionError``/``TimeoutError`` in the
+# stdlib fallback are the *specific* OSError subclasses, not the broad
+# base, so they likewise don't swallow HTTP errors.)
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
 try:
-    from httpx import ConnectError, TimeoutException
+    from httpx import TransportError
 
-    _RETRYABLE_EXCEPTIONS = (ConnectError, TimeoutException, OSError)
+    _RETRYABLE_EXCEPTIONS = (TransportError,)
 except ImportError:
     pass
 

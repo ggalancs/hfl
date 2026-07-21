@@ -75,9 +75,9 @@ def with_retry(
                         delay = min(delay * 2, max_delay)
 
             raise RetryExhausted(
-                f"Failed after {max_retries + 1} attempts",
+                f"Failed after {max_retries + 1} attempts: {last_exception}",
                 last_exception=last_exception,
-            )
+            ) from last_exception
 
         @functools.wraps(func)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -103,9 +103,9 @@ def with_retry(
                         delay = min(delay * 2, max_delay)
 
             raise RetryExhausted(
-                f"Failed after {max_retries + 1} attempts",
+                f"Failed after {max_retries + 1} attempts: {last_exception}",
                 last_exception=last_exception,
-            )
+            ) from last_exception
 
         if inspect.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
@@ -156,9 +156,9 @@ class RetryContext:
             self._delay = min(self._delay * 2, self.max_delay)
         else:
             raise RetryExhausted(
-                f"Failed after {self.max_retries + 1} attempts",
+                f"Failed after {self.max_retries + 1} attempts: {self._last_exception}",
                 last_exception=self._last_exception,
-            )
+            ) from self._last_exception
 
     def handle_error_sync(self, exception: Exception | None = None) -> None:
         """Handle error and wait before next retry (sync)."""
@@ -169,9 +169,9 @@ class RetryContext:
             self._delay = min(self._delay * 2, self.max_delay)
         else:
             raise RetryExhausted(
-                f"Failed after {self.max_retries + 1} attempts",
+                f"Failed after {self.max_retries + 1} attempts: {self._last_exception}",
                 last_exception=self._last_exception,
-            )
+            ) from self._last_exception
 
     @property
     def attempt(self) -> int:
