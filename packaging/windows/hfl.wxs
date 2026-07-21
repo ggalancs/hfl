@@ -25,6 +25,7 @@
       InstallerVersion="500"
       Compressed="yes"
       InstallScope="perMachine"
+      Platform="x64"
       Description="HFL — Run HuggingFace models locally, Ollama-compatible"
       Comments="Licensed under Apache-2.0" />
 
