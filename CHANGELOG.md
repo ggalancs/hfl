@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-07-21
+
+### Fixed
+
+- **The Windows MSI now builds.** It had never succeeded: PyInstaller
+  aborted on a missing `packaging\windows\hfl.ico`, and the WiX step
+  needed a `packaging\windows\LICENSE.rtf` — neither asset was ever
+  committed. Both are now provided. The `light` step then surfaced a real
+  authoring bug — `ICE80: 32BitComponent uses 64BitDirectory` — fixed by
+  marking the component 64-bit (`Component/@Win64="yes"` + `candle -arch
+  x64`), since the installer targets `ProgramFiles64Folder`. Verified
+  end-to-end: a valid `x64;1033` MSI with `hfl.exe` embedded.
+- **`windows-msi.yml` hardened**: locate the WiX v3 bin dir dynamically
+  instead of hard-coding `WiX Toolset v3.14`; derive the version from
+  `pyproject.toml` when dispatched off-tag; gate the release-attach on tag
+  refs so branch test runs don't create junk releases.
+
+_No functional changes to the `hfl` package itself over 0.16.0 — this is
+a packaging/release-tooling patch so a Windows installer ships._
+
 ## [0.16.0] - 2026-07-21
 
 ### Added
