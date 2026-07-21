@@ -210,27 +210,22 @@ jobs:
       - name: Create + push multi-arch manifest
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
-          EXTRAS_SUFFIX: ${{ matrix.extras == 'all' && '-all' || '' }}
-          VERSION: ${{ github.ref_name }}
         run: |
-          # Each ``TAGS`` line is the unsuffixed / ``-all`` flavour.
-          # Per-arch images were pushed with ``-amd64`` / ``-arm64``
-          # suffixes appended; derive them here and stitch.
+          set -euo pipefail
+          # The build jobs only pushed per-arch images for the *versioned*
+          # tags (``<version><suffix>-amd64`` / ``-arm64``). Tags like
+          # ``latest`` have NO per-arch variant, so the old "append -amd64 to
+          # every target tag" loop died on ``latest-arm64: not found``.
+          #
+          # Instead: stitch ONE multi-arch manifest from the first (version)
+          # tag's per-arch images and apply EVERY target tag to that manifest.
+          base="$(printf '%s\n' "${TAGS}" | head -n1)"   # e.g. ghcr.io/…/hfl:1.2.3-all
+          [ -z "$base" ] && { echo "no tags to stitch"; exit 1; }
+          src_amd64="${base}-amd64"
+          src_arm64="${base}-arm64"
+          tag_args=()
           while IFS= read -r tag; do
-            [ -z "$tag" ] && continue
-            amd64_tag="${tag}-amd64"
-            # docker/metadata-action already adds -all before the -amd64
-            # suffix when extras == 'all', so the per-arch tag for the
-            # 'all' flavour is e.g. ``…:1.2.3-all-amd64``.
-            # For the default flavour, the above construction is also
-            # correct — the ``meta`` step for build-amd64 used
-            # suffix=-amd64 / -all-amd64.
-            arm64_tag="${tag}-arm64"
-            # Remove any leftover flavour suffix duplication:
-            amd64_tag="${amd64_tag//-all-amd64/-all-amd64}"
-            arm64_tag="${arm64_tag//-all-arm64/-all-arm64}"
-            echo "Stitching ${tag} from ${amd64_tag} + ${arm64_tag}"
-            docker buildx imagetools create \
-              --tag "${tag}" \
-              "${amd64_tag}" "${arm64_tag}"
+            [ -n "$tag" ] && tag_args+=(--tag "$tag")
           done <<< "${TAGS}"
+          echo "Stitching ${src_amd64} + ${src_arm64} -> ${tag_args[*]}"
+          docker buildx imagetools create "${tag_args[@]}" "${src_amd64}" "${src_arm64}"
