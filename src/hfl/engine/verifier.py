@@ -35,6 +35,7 @@ class Check:
     name: str
     passed: bool
     detail: str = ""
+    skipped: bool = False  # not-applicable for this engine (doesn't count as a failure)
 
 
 @dataclass
@@ -62,10 +63,14 @@ def _check_tokenizer_round_trip(engine: "InferenceEngine") -> Check:
     sample = "Hello, world."
     tokenizer = getattr(engine, "tokenizer", None) or getattr(engine, "_tokenizer", None)
     if tokenizer is None:
+        # llama.cpp tokenizes internally and exposes no Python tokenizer, so
+        # the round-trip is not applicable — skip it rather than flunk a
+        # perfectly healthy GGUF model.
         return Check(
             name="tokenizer_round_trip",
-            passed=False,
-            detail="engine does not expose a tokenizer attribute",
+            passed=True,
+            skipped=True,
+            detail="skipped: engine exposes no tokenizer (e.g. llama.cpp tokenizes internally)",
         )
     try:
         ids = tokenizer.encode(sample) if hasattr(tokenizer, "encode") else tokenizer(sample)

@@ -63,6 +63,9 @@
       "description": "Delete a local model.",
       "args": {
         "model": "Name of the model to delete"
+      },
+      "options": {
+        "yes": "Skip the confirmation prompt (for scripting)"
       }
     },
     "inspect": {

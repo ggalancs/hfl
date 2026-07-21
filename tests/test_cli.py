@@ -282,6 +282,32 @@ class TestRmCommand:
         registry = ModelRegistry()
         assert registry.get("rm-test-model") is None
 
+    def test_rm_yes_skips_prompt(self, runner, cli_app, temp_config, temp_dir):
+        """``--yes`` deletes without prompting (no stdin input supplied)."""
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import ModelRegistry
+
+        model_path = temp_dir / "rm-yes-model"
+        model_path.mkdir()
+        (model_path / "model.gguf").write_bytes(b"GGUF")
+        ModelRegistry().add(
+            ModelManifest(
+                name="rm-yes-model",
+                repo_id="test/rm-yes",
+                local_path=str(model_path),
+                format="gguf",
+                size_bytes=100,
+                quantization="Q4_K_M",
+            )
+        )
+        # No input piped: without --yes, CliRunner would hit EOF at the
+        # confirm prompt and the model would survive.
+        result = runner.invoke(cli_app, ["rm", "rm-yes-model", "--yes"])
+
+        assert result.exit_code == 0
+        assert "Deleted" in result.stdout
+        assert ModelRegistry().get("rm-yes-model") is None
+
     def test_rm_keeps_blob_shared_with_copy(self, runner, cli_app, temp_config, temp_dir):
         """DATA: ``cp a b`` then ``rm a`` must NOT delete the shared on-disk
         blob — the zero-copy ``cp`` contract promises the copy stays loadable.

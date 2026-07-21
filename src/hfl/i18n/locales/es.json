@@ -63,6 +63,9 @@
       "description": "Elimina un modelo local.",
       "args": {
         "model": "Nombre del modelo a eliminar"
+      },
+      "options": {
+        "yes": "Omite la confirmación (para scripting)"
       }
     },
     "inspect": {

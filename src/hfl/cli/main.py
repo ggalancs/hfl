@@ -1046,6 +1046,7 @@ def search(
 @app.command()
 def rm(
     model: str = typer.Argument(help=t("commands.rm.args.model")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("commands.rm.options.yes")),
 ):
     """Delete a local model."""
     import shutil
@@ -1060,11 +1061,10 @@ def rm(
         console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         raise typer.Exit(1)
 
-    # Confirm
-    confirm = typer.confirm(
+    # Confirm — unless --yes was given (for scripting / automation).
+    if not yes and not typer.confirm(
         t("confirm.delete_model", name=manifest.name, size=manifest.display_size),
-    )
-    if not confirm:
+    ):
         return
 
     # Delete files — but only when no OTHER registry entry shares this blob.
@@ -2109,7 +2109,12 @@ def verify_cmd(
         table.add_column("status")
         table.add_column("detail", style="dim")
         for c in result.checks:
-            badge = "[green]PASS[/]" if c.passed else "[red]FAIL[/]"
+            if getattr(c, "skipped", False):
+                badge = "[yellow]SKIP[/]"
+            elif c.passed:
+                badge = "[green]PASS[/]"
+            else:
+                badge = "[red]FAIL[/]"
             table.add_row(c.name, badge, c.detail)
         console.print(table)
         if not result.overall_pass:

@@ -59,14 +59,18 @@ class TestVerifierFailures:
         assert token_check.passed is False
         assert result.overall_pass is False
 
-    def test_engine_without_tokenizer_fails_check(self):
+    def test_engine_without_tokenizer_is_skipped_not_failed(self):
+        # A GGUF/llama.cpp engine exposes no Python tokenizer; the round-trip
+        # is not applicable and must be SKIPPED, not flunked — otherwise a
+        # perfectly healthy GGUF model fails `hfl verify`.
         engine = MagicMock(spec=[])  # no tokenizer attribute
         # provide chat method so chat_template check passes
         engine.chat = MagicMock()
         engine.generate = MagicMock(return_value=MagicMock(text="x", tokens_generated=1))
         result = verify_model(engine, _Manifest())
         tok_check = next(c for c in result.checks if c.name == "tokenizer_round_trip")
-        assert tok_check.passed is False
+        assert tok_check.skipped is True
+        assert tok_check.passed is True  # skipped must not count as a failure
 
     def test_smoke_generation_failure_is_recorded(self):
         engine = _engine_ok()
