@@ -96,12 +96,15 @@ def pull(
     """Download a model from HuggingFace Hub."""
     from datetime import datetime
 
+    from huggingface_hub.utils import GatedRepoError
+
     from hfl.converter.formats import ModelFormat, detect_format
     from hfl.hub.downloader import pull_model
     from hfl.hub.license_checker import check_model_license, require_user_acceptance
     from hfl.hub.resolver import resolve
     from hfl.models.manifest import ModelManifest
     from hfl.models.registry import ModelRegistry
+    from hfl.utils.retry import RetryExhausted
 
     # 1. Resolve model
     console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
@@ -170,7 +173,20 @@ def pull(
                 raise typer.Exit(0) from e
 
     # 3. Download
-    local_path = pull_model(resolved)
+    try:
+        local_path = pull_model(resolved)
+    except GatedRepoError as e:
+        # Gated repo: HF access control is separate from our local license
+        # acceptance — the user must request access on the Hub and provide a
+        # token. Show a clean, actionable message instead of a traceback.
+        console.print(f"\n[red]{t('errors.gated_model')}[/]")
+        console.print(f"[yellow]{t('errors.gated_model_hint', repo=resolved.repo_id)}[/]")
+        raise typer.Exit(1) from e
+    except RetryExhausted as e:
+        # Network/transport failure that exhausted retries — surface the real
+        # underlying cause (RetryExhausted carries it), not just the wrapper.
+        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.last_exception or e}")
+        raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
 
     # 4. Detect model type and convert if necessary
