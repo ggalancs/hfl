@@ -1023,9 +1023,17 @@ class LlamaCppEngine(InferenceEngine):
                 # library picks its own default.
                 kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
                 if kv_type and kv_type != "f16":
+                    # Import under a second name and assign: binding the
+                    # *annotated* name directly from an ``import`` is a
+                    # redefinition for mypy when llama_cpp is absent (the CI
+                    # venv omits the [llama] extra), while the annotation is
+                    # what lets the ``except`` branch assign ``None`` when it
+                    # is present. Splitting the two satisfies both.
                     _lcpp: Any
                     try:
-                        from llama_cpp import llama_cpp as _lcpp
+                        from llama_cpp import llama_cpp as _lcpp_module
+
+                        _lcpp = _lcpp_module
                     except Exception:
                         _lcpp = None
                     type_map = {}
