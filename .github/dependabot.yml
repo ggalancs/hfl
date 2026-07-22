@@ -26,6 +26,15 @@ updates:
           - "torch*"
           - "transformers*"
           - "llama-cpp*"
+      # Catch-all, evaluated last: groups are matched in declaration order,
+      # so anything not claimed above lands here as a single PR. Without it
+      # every runtime pin got its own PR, the 5-PR quota filled up, and
+      # Dependabot stopped evaluating pip altogether — superseded PRs were
+      # never closed and no new update (security ones included) could be
+      # proposed until the backlog was cleared by hand.
+      runtime-dependencies:
+        patterns:
+          - "*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -37,3 +46,11 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "ci"
+    # One grouped PR for all action bumps instead of one per action — the
+    # five that piled up here (checkout, cache, download-artifact,
+    # setup-python, codecov-action) were all applied by hand long before
+    # anyone got round to closing them.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
