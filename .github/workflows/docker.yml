@@ -71,7 +71,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/hfl
+          # ``latest=false``: these per-arch builds must never produce a
+          # ``latest`` tag. See the manifest job for the full rationale.
           flavor: |
+            latest=false
             suffix=${{ matrix.extras == 'all' && '-all-amd64' || '-amd64' }}
           tags: |
             type=semver,pattern={{version}}
@@ -132,7 +135,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/hfl
+          # ``latest=false``: these per-arch builds must never produce a
+          # ``latest`` tag. See the manifest job for the full rationale.
           flavor: |
+            latest=false
             suffix=${{ matrix.extras == 'all' && '-all-arm64' || '-arm64' }}
           tags: |
             type=semver,pattern={{version}}
@@ -198,14 +204,27 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/hfl
+          # ``latest=false`` is mandatory in EVERY metadata-action step here.
+          # The action's default (``latest=auto``) emits an *extra* ``latest``
+          # tag for any semver ref, and that implicit tag ignores ``suffix`` —
+          # so the four build jobs and the ``all`` manifest job each pushed
+          # their own ``ghcr.io/…/hfl:latest`` and the last writer won. In
+          # 0.16.1 that left ``latest`` pointing at the 5.6 GB ``-all`` image
+          # instead of the 119 MB slim one. The ``type=raw,value=latest``
+          # below is the only place a floating tag may be produced — and
+          # because ``suffix`` DOES apply to ``type=raw`` (unlike the implicit
+          # one), that single line yields ``latest`` for the slim ``llama``
+          # variant and ``latest-all`` for the full one. Each variant gets its
+          # own floating pointer and neither can clobber the other.
           flavor: |
+            latest=false
             suffix=${{ matrix.extras == 'all' && '-all' || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,enable=${{ github.ref_type != 'tag' }}
             type=raw,value=dev,enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && matrix.extras == 'llama' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Create + push multi-arch manifest
         env:
