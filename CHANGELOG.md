@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-07-22
+
+### Fixed
+
+- **Download failures no longer masquerade as network timeouts.** In
+  huggingface_hub 1.x, `HfHubHTTPError` — and therefore `GatedRepoError`,
+  `RepositoryNotFoundError` and every 401/403/404 — inherits from
+  `OSError`, which the download retry set caught wholesale. *Permanent*
+  failures were retried four times and then reported as `RetryExhausted`,
+  so a gated model ("accept the license on huggingface.co") was
+  indistinguishable from a flaky connection. Retry now catches only
+  `httpx.TransportError` (connection/timeout/protocol), so gated, auth and
+  not-found errors propagate immediately with their real message;
+  `hf_hub` already retries transient 5xx/429 internally.
+- **`RetryExhausted` reports its cause.** It stored the triggering
+  exception in `.last_exception` but never chained it or put it in the
+  message, so the only thing a user saw was "Failed after N attempts". The
+  message now includes the cause and the exception is chained with
+  `raise ... from`.
+
+### Changed
+
+- **`hfl pull` prints an actionable error instead of a traceback.** A
+  gated repository now explains that HuggingFace's access control is
+  separate from HFL's local license acceptance, and points at
+  `huggingface.co/<repo>` plus `hfl login` / `HF_TOKEN`. A failed download
+  reports its underlying cause. New i18n keys (en + es):
+  `errors.gated_model`, `errors.gated_model_hint`, `errors.download_failed`.
+
+- **The type gate was red without the `[llama]` extra.** `mypy src/hfl`
+  reported `Name "_lcpp" already defined [no-redef]` in
+  `engine/llama_cpp.py` whenever `llama-cpp-python` was absent — i.e. in
+  every CI run, since that venv deliberately omits the extra. The KV-cache
+  quantisation block annotated `_lcpp` and then bound the same name from an
+  `import`; it now imports under a second name and assigns. No runtime
+  change. (0.16.1 shipped with this latent: it was verified only in a dev
+  venv with the backends installed.)
+
+### Release engineering
+
+- **`ghcr.io/<owner>/hfl:latest` pointed at the wrong image.** It resolved
+  to the full `-all` build (5.6 GB compressed, amd64) instead of the slim
+  one (119 MB): `docker/metadata-action`'s default `latest=auto` emits an
+  extra `latest` that ignores `flavor: suffix`, so every build job raced to
+  write it. `latest` is now minted in exactly one place, and the full
+  variant gets its own floating `latest-all` tag.
+- Dependabot updates are grouped per ecosystem; ten single-dependency PRs
+  had filled the open-PR quota, which stops Dependabot evaluating that
+  ecosystem at all.
+
+_Note: 0.15.0 and 0.15.1 have been yanked on PyPI — a regression in
+0.15.0's revision pinning crashed search-triggered downloads with
+`quote_from_bytes() expected bytes`. Fixed in 0.15.2._
+
 ## [0.16.1] - 2026-07-21
 
 ### Fixed
