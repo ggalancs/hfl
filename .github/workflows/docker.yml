@@ -54,7 +54,7 @@ jobs:
     outputs:
       digest-llama: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -118,7 +118,7 @@ jobs:
       matrix:
         extras: [llama, all]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
