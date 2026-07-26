@@ -259,6 +259,7 @@ class ServerState:
         model_name: str,
         loader: Callable[[], Awaitable[tuple["InferenceEngine", "ModelManifest"]]],
         timeout: float = 300.0,
+        required_ctx: int = 0,
     ) -> tuple["InferenceEngine", "ModelManifest"]:
         """Ensure LLM model is loaded, with serialization per model.
 
@@ -270,6 +271,10 @@ class ServerState:
             model_name: Name of the model to load
             loader: Async function that loads the model and returns (engine, manifest)
             timeout: Maximum time to wait for model loading (seconds)
+            required_ctx: When > 0, a resident engine only satisfies the
+                request if it was opened with this context size. Lets a
+                caller force a reload for an ``options.num_ctx`` change
+                without racing the per-model lock itself.
 
         Returns:
             Tuple of (engine, manifest)
@@ -278,15 +283,26 @@ class ServerState:
             asyncio.TimeoutError: If loading takes longer than timeout
         """
 
+        def _resident_is_usable() -> bool:
+            if (
+                self._current_model is None
+                or self._current_model.name != model_name
+                or self._engine is None
+            ):
+                return False
+            if required_ctx <= 0:
+                return True
+            resident_ctx = self._engine.context_size
+            # ``0`` means the backend doesn't report a context size —
+            # never force a reload we can't justify.
+            return resident_ctx == 0 or resident_ctx == required_ctx
+
         async def _load_with_lock() -> tuple["InferenceEngine", "ModelManifest"]:
             async with self._model_locks[model_name]:
                 # Check state inside lock to prevent race condition
                 # Another thread could clear the engine between check and use
-                if (
-                    self._current_model
-                    and self._current_model.name == model_name
-                    and self._engine is not None
-                ):
+                if _resident_is_usable():
+                    assert self._engine is not None and self._current_model is not None
                     return self._engine, self._current_model
 
                 self._loading_models.add(model_name)

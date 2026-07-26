@@ -76,6 +76,53 @@ class TestOllamaChat:
 
             assert response.status_code == 404
 
+    def test_chat_forwards_num_ctx_to_the_loader(self):
+        """``options.num_ctx`` is a load-time knob in Ollama — the route
+        must hand it to the loader, not silently drop it (which is what
+        made every ``num_ctx`` escape hatch a no-op against a model whose
+        auto-selected context didn't fit)."""
+        mock_engine = MagicMock()
+        mock_engine.is_loaded = True
+        mock_engine.chat.return_value = MagicMock(
+            text="Hello!",
+            tokens_generated=5,
+            tokens_prompt=3,
+            tokens_per_second=50.0,
+            stop_reason="stop",
+        )
+        mock_model = MagicMock()
+        mock_model.name = "test-model"
+        get_state().engine = mock_engine
+        get_state().current_model = mock_model
+
+        client = TestClient(app)
+
+        with patch("hfl.api.model_loader.load_llm") as mock_load:
+
+            async def _load(model_name, num_ctx=None):
+                return mock_engine, mock_model
+
+            mock_load.side_effect = _load
+            response = client.post(
+                "/api/chat",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "options": {"num_ctx": 8192},
+                },
+            )
+
+        assert response.status_code == 200
+        assert mock_load.call_args.kwargs["num_ctx"] == 8192
+
+    @pytest.mark.parametrize("raw", [None, 0, -1, "nope", {"a": 1}])
+    def test_chat_ignores_unusable_num_ctx(self, raw):
+        """Garbage in ``options.num_ctx`` falls through to the loader's own
+        resolution rather than failing the request."""
+        from hfl.api.routes_native import _num_ctx_from_options
+
+        assert _num_ctx_from_options({"num_ctx": raw} if raw is not None else {}) is None
+
 
 class TestOllamaGenerate:
     """Tests for Ollama /api/generate endpoint."""

@@ -48,11 +48,36 @@ def _get_state() -> "ServerState":
     return get_state()
 
 
-async def _ensure_model_loaded(model_name: str) -> None:
-    """Load the model if it is not already in memory (thread-safe)."""
+async def _ensure_model_loaded(model_name: str, options: dict | None = None) -> None:
+    """Load the model if it is not already in memory (thread-safe).
+
+    ``options.num_ctx`` is a *load-time* parameter in Ollama, so it is
+    resolved here rather than in ``_options_to_config`` (which only
+    builds per-generation settings).
+    """
     from hfl.api.model_loader import load_llm
 
-    await load_llm(model_name)
+    await load_llm(model_name, num_ctx=_num_ctx_from_options(options))
+
+
+def _num_ctx_from_options(options: dict | None) -> int | None:
+    """Extract a usable ``options.num_ctx`` from an Ollama request.
+
+    Returns ``None`` for absent / non-numeric / non-positive values so
+    the loader falls through to its own resolution order instead of
+    failing the request on a malformed option.
+    """
+    if not options:
+        return None
+    raw = options.get("num_ctx")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring non-numeric options.num_ctx=%r", raw)
+        return None
+    return value if value > 0 else None
 
 
 def _options_to_config(options: dict | None) -> GenerationConfig:
@@ -247,7 +272,7 @@ async def api_generate(
     immediate unload when set to 0.
     """
     unload_after = apply_keep_alive(req.model, req.keep_alive)
-    await _ensure_model_loaded(req.model)
+    await _ensure_model_loaded(req.model, req.options)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")
@@ -458,7 +483,7 @@ async def api_chat(
     ``keep_alive`` field — see ``api_generate`` for semantics.
     """
     unload_after = apply_keep_alive(req.model, req.keep_alive)
-    await _ensure_model_loaded(req.model)
+    await _ensure_model_loaded(req.model, req.options)
     state = _get_state()
     if state.engine is None:
         return service_unavailable(f"Model '{req.model}' failed to load")

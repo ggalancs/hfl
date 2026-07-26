@@ -163,16 +163,66 @@ class MissingDependencyError(EngineError):
 
 
 class OutOfMemoryError(EngineError):
-    """Not enough memory for the model."""
+    """Not enough memory for the model.
 
-    def __init__(self, required_gb: float, available_gb: float):
-        super().__init__(
-            "Insufficient memory",
-            f"The model requires ~{required_gb:.1f}GB but only {available_gb:.1f}GB are available. "
-            "Try a smaller model or more aggressive quantization (Q4_K_S, Q3_K_M).",
-        )
+    The advice attached to the message depends on *which* half of the
+    footprint blew the budget, because the two have different remedies:
+
+    - The **weights alone** don't fit → no context size saves this load;
+      the user needs a smaller model or a smaller quantisation.
+    - The weights fit but the **KV cache** pushes it over → the load is
+      perfectly possible on this hardware at a smaller context, so we
+      say exactly which context does fit and how to ask for it.
+
+    Being specific matters: a bare "requires ~124.2GB" on a machine with
+    128GB of RAM reads as "this model is too big for your computer" when
+    the real problem was an auto-selected 262144-token context.
+    """
+
+    def __init__(
+        self,
+        required_gb: float,
+        available_gb: float,
+        *,
+        weights_gb: float | None = None,
+        n_ctx: int | None = None,
+        fitting_ctx: int | None = None,
+    ):
+        lines = [
+            f"The model requires ~{required_gb:.1f}GB but only {available_gb:.1f}GB are available."
+        ]
+        if weights_gb is not None and n_ctx:
+            kv_gb = max(0.0, required_gb - weights_gb)
+            lines.append(
+                f"Breakdown: {weights_gb:.1f}GB of weights + {kv_gb:.1f}GB of "
+                f"KV cache for a {n_ctx}-token context."
+            )
+
+        if fitting_ctx:
+            lines.append(
+                f"This model DOES fit on this machine at a smaller context: "
+                f"retry with num_ctx={fitting_ctx} (Ollama API: "
+                f'"options": {{"num_ctx": {fitting_ctx}}}), or start the '
+                f"server with --ctx {fitting_ctx} / HFL_DEFAULT_CTX_SIZE="
+                f"{fitting_ctx}. Quantising the KV cache "
+                f"(HFL_KV_CACHE_TYPE=q8_0) halves that half of the cost."
+            )
+        elif weights_gb is not None and weights_gb > available_gb:
+            lines.append(
+                "The weights alone exceed available memory, so no context "
+                "size will make this load fit. Use a smaller model or a "
+                "more aggressive quantization (Q4_K_S, Q3_K_M), or free "
+                "memory on the host."
+            )
+        else:
+            lines.append("Try a smaller model or more aggressive quantization (Q4_K_S, Q3_K_M).")
+
+        super().__init__("Insufficient memory", " ".join(lines))
         self.required_gb = required_gb
         self.available_gb = available_gb
+        self.weights_gb = weights_gb
+        self.n_ctx = n_ctx
+        self.fitting_ctx = fitting_ctx
 
 
 # --- Authentication Errors ---

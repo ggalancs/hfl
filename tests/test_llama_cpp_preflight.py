@@ -146,6 +146,23 @@ def dummy_gguf(tmp_path):
 
 
 @pytest.fixture
+def sparse_gguf(tmp_path):
+    """A ``.gguf`` file that *reports* a multi-GB size without consuming
+    the disk. The memory helpers only ever call ``stat().st_size``, so a
+    sparse file lets us test against the real 47 GB weights of the model
+    from the incident."""
+
+    def _make(size_bytes: int) -> str:
+        path = tmp_path / "sparse.gguf"
+        with open(path, "wb") as fh:
+            fh.write(b"GGUF\x00\x00\x00\x00")
+            fh.truncate(size_bytes)
+        return str(path)
+
+    return _make
+
+
+@pytest.fixture
 def patched_gguf(monkeypatch):
     """Install a fake ``gguf`` module in ``sys.modules`` with a chosen
     set of layout fields."""
@@ -562,6 +579,158 @@ class TestEstimator:
         # ±10 % tolerance to absorb the negligible file-size term.
         assert 1.10 < at_8k < 1.35, f"at 8192: {at_8k:.2f} GB"
         assert 37.0 < at_max < 41.0, f"at 262144: {at_max:.2f} GB"
+
+
+# --- Memory-aware auto-sizing ------------------------------------------------
+
+
+# Real layout of the Qwen2-72B GGUF (Tess-v2.5.2-Qwen2-72B Q4_K_M) that
+# reproduced the incident below.
+_QWEN2_72B_INFO = {
+    "architecture": "qwen2",
+    "block_count": 80,
+    "embedding_length": 8192,
+    "head_count": 64,
+    "head_count_kv": 8,
+    "max_context": 131072,
+    "has_chat_template": True,
+}
+
+
+class TestAutoCtxFitsMemory:
+    """A second real incident: a 44 GiB (47.4 GB) Qwen2-72B Q4_K_M on a
+    128 GB Apple Silicon host could never be served. The VRAM tier sizes
+    ``n_ctx`` from the *machine* (≥48 GB → 262144 tokens) with no idea
+    how much of that memory the weights already claim, so every load was
+    refused with "requires ~124.2GB" — 44 GiB of weights plus an 80 GiB
+    KV cache. ``hfl run`` worked because the CLI path passes the
+    manifest's own context_length.
+
+    Auto-sizing must therefore clamp to (1) the context the model
+    actually advertises and (2) what is left after the weights.
+    """
+
+    def test_fit_shrinks_ctx_until_weights_plus_kv_fit(self, monkeypatch, sparse_gguf):
+        # The measured numbers from the incident: 47.4 GB of weights,
+        # 91.6 GB available, VRAM tier asking for 262144 tokens.
+        path = sparse_gguf(47_415_712_480)
+        _stub_memory_snapshot(monkeypatch, available_gb=91.6, total_gb=128.0)
+
+        fitted = engine_module._fit_ctx_to_memory(path, _QWEN2_72B_INFO, 262144)
+
+        assert fitted < 262144, "auto-sizing must shrink a context that cannot fit"
+        required = engine_module._estimate_memory_required_gb(path, _QWEN2_72B_INFO, fitted)
+        budget = 91.6 * engine_module._MEMORY_SAFETY_FRACTION
+        assert required <= budget, (
+            f"fitted ctx {fitted} still needs {required:.1f}GB > {budget:.1f}GB"
+        )
+
+    def test_preflight_names_a_context_that_fits(self, monkeypatch, sparse_gguf):
+        """The refusal must be actionable: this model *can* run on this
+        machine, just not at the context that was auto-selected."""
+        path = sparse_gguf(47_415_712_480)
+        _stub_memory_snapshot(monkeypatch, available_gb=91.6, total_gb=128.0)
+
+        with pytest.raises(OutOfMemoryError) as exc_info:
+            engine_module._preflight_memory_check(
+                model_path=path,
+                info=_QWEN2_72B_INFO,
+                n_ctx=262144,
+                architecture="qwen2",
+            )
+
+        err = exc_info.value
+        assert err.fitting_ctx and err.fitting_ctx < 262144
+        assert f"num_ctx={err.fitting_ctx}" in err.details
+        # And the suggested context must actually fit the budget.
+        required = engine_module._estimate_memory_required_gb(
+            path, _QWEN2_72B_INFO, err.fitting_ctx
+        )
+        assert required <= 91.6 * engine_module._MEMORY_SAFETY_FRACTION
+
+    def test_preflight_says_when_weights_alone_dont_fit(self, monkeypatch, sparse_gguf):
+        """No context size saves a load whose weights already exceed
+        memory — don't send the user chasing a knob that can't work."""
+        path = sparse_gguf(47_415_712_480)
+        _stub_memory_snapshot(monkeypatch, available_gb=20.0, total_gb=32.0)
+
+        with pytest.raises(OutOfMemoryError) as exc_info:
+            engine_module._preflight_memory_check(
+                model_path=path,
+                info=_QWEN2_72B_INFO,
+                n_ctx=8192,
+                architecture="qwen2",
+            )
+
+        err = exc_info.value
+        assert err.fitting_ctx is None
+        assert "no context size will make this load fit" in err.details
+
+    def test_fit_is_a_noop_when_everything_fits(self, monkeypatch, dummy_gguf):
+        path = dummy_gguf(size_mb=1.0)
+        _stub_memory_snapshot(monkeypatch, available_gb=512.0, total_gb=512.0)
+        assert engine_module._fit_ctx_to_memory(path, _QWEN2_72B_INFO, 32768) == 32768
+
+    def test_fit_never_goes_below_the_floor(self, monkeypatch, sparse_gguf):
+        """When even the weights blow the budget we hand back the floor
+        and let the preflight reject the load with real numbers, rather
+        than silently serving a 0-token context."""
+        path = sparse_gguf(47_415_712_480)
+        _stub_memory_snapshot(monkeypatch, available_gb=0.5, total_gb=8.0)
+
+        assert engine_module._fit_ctx_to_memory(path, _QWEN2_72B_INFO, 262144) == (
+            engine_module._MIN_AUTO_CTX
+        )
+
+    def test_auto_ctx_is_clamped_to_advertised_max(self, monkeypatch, dummy_gguf, patched_gguf):
+        """The VRAM tier must never hand a model a larger window than it
+        advertises — 262144 on a model whose header says 32768."""
+        patched_gguf(
+            arch="qwen2",
+            block_count=80,
+            embedding_length=8192,
+            context_length=32768,
+            head_count=64,
+            head_count_kv=8,
+            chat_template="{{ messages }}",
+        )
+        path = dummy_gguf(size_mb=0.001)
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+        _stub_memory_snapshot(monkeypatch, available_gb=512.0, total_gb=512.0)
+
+        from hfl.engine import vram as vram_module
+
+        monkeypatch.setattr(
+            vram_module, "pick_ctx_size", lambda *a, **kw: vram_module.CtxTier(128.0, 262144)
+        )
+
+        engine = engine_module.LlamaCppEngine()
+        engine.load(path, n_gpu_layers=0, verbose=True)
+
+        assert captured["n_ctx"] == 32768
+
+    def test_explicit_n_ctx_is_never_clamped(self, monkeypatch, dummy_gguf, patched_gguf):
+        """An explicit ``n_ctx=`` is the caller's decision — only the
+        preflight may veto it."""
+        patched_gguf(
+            arch="qwen2",
+            block_count=80,
+            embedding_length=8192,
+            context_length=32768,
+            head_count=64,
+            head_count_kv=8,
+            chat_template="{{ messages }}",
+        )
+        path = dummy_gguf(size_mb=0.001)
+        captured: dict = {}
+        _install_stub_llama(monkeypatch, captured)
+        _stub_memory_snapshot(monkeypatch, available_gb=512.0, total_gb=512.0)
+
+        engine = engine_module.LlamaCppEngine()
+        engine.load(path, n_ctx=65536, n_gpu_layers=0, verbose=True)
+
+        assert captured["n_ctx"] == 65536
 
 
 # --- Gemma 4 channel marker filter -------------------------------------------

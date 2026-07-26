@@ -219,6 +219,17 @@ class InferenceEngine(ABC):
         """Whether a model is in memory."""
         ...
 
+    @property
+    def context_size(self) -> int:
+        """Context window (tokens) the loaded model was opened with.
+
+        ``0`` means "unknown / not tracked by this backend". Callers use
+        it to decide whether a request asking for a different ``num_ctx``
+        needs a reload, so an engine that can't report its context is
+        simply never reloaded on that account.
+        """
+        return 0
+
     # Context manager support for automatic resource cleanup
     def __enter__(self) -> "InferenceEngine":
         """Enter context manager."""

@@ -195,6 +195,7 @@ class TestLoadLLM:
 
         mock_state = MagicMock()
         mock_state.current_model = None
+        mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
         mock_state.ensure_llm_loaded = AsyncMock(return_value=(mock_engine, mock_manifest))
         mock_get_state.return_value = mock_state
@@ -262,6 +263,7 @@ class TestLoadLLMCleanupOnFailure:
         """
         mock_state = MagicMock()
         mock_state.current_model = None
+        mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
         mock_state.ensure_llm_loaded = self._driving_ensure_loaded()
         mock_get_state.return_value = mock_state
@@ -306,6 +308,7 @@ class TestLoadLLMCleanupOnFailure:
         """
         mock_state = MagicMock()
         mock_state.current_model = None
+        mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
         mock_state.ensure_llm_loaded = self._driving_ensure_loaded()
         mock_get_state.return_value = mock_state
@@ -331,6 +334,163 @@ class TestLoadLLMCleanupOnFailure:
         assert mock_logger.error.called
         args, _ = mock_logger.error.call_args
         assert "cleanup" in args[0].lower()
+
+
+class TestContextResolution:
+    """``options.num_ctx`` is a load-time parameter in Ollama.
+
+    Regression cover for the Qwen2-72B incident: the API path used to
+    drop ``num_ctx`` entirely and pass ``n_ctx=0`` (auto-detect), which
+    on a large host auto-selected a 262144-token window and made every
+    load of a 72B model fail the memory preflight. ``hfl run`` was
+    unaffected because ``load_llm_sync`` honours the manifest, so the
+    same model loaded from the CLI and 500'd from the server.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset(self):
+        reset_state()
+        yield
+        reset_state()
+
+    @staticmethod
+    def _state(**overrides):
+        state = MagicMock()
+        state.current_model = None
+        state.engine = None
+        state.context_size_override = 0
+        state.set_llm_engine = AsyncMock()
+        for key, value in overrides.items():
+            setattr(state, key, value)
+        return state
+
+    @staticmethod
+    def _driving_ensure_loaded(captured: dict):
+        async def _ensure(model_name, loader, **kwargs):
+            captured["kwargs"] = kwargs
+            return await loader()
+
+        return _ensure
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.asyncio.to_thread")
+    @patch("hfl.api.model_loader.select_engine")
+    @patch("hfl.api.model_loader.detect_model_type")
+    @patch("hfl.api.model_loader.get_registry")
+    @patch("hfl.api.model_loader.get_state")
+    @pytest.mark.parametrize(
+        "num_ctx,override,manifest_ctx,expected",
+        [
+            (8192, 4096, 2048, 8192),  # request wins over everything
+            (None, 4096, 2048, 4096),  # --ctx wins over the manifest
+            (None, 0, 2048, 2048),  # manifest is honoured (CLI parity)
+            (None, 0, 0, 0),  # nothing recorded -> engine auto-detect
+            (0, 0, 2048, 2048),  # num_ctx=0 means "unset", not "zero ctx"
+        ],
+    )
+    async def test_context_resolution_order(
+        self,
+        mock_get_state,
+        mock_get_registry,
+        mock_detect,
+        mock_select,
+        mock_to_thread,
+        num_ctx,
+        override,
+        manifest_ctx,
+        expected,
+    ):
+        captured: dict = {}
+        state = self._state(context_size_override=override)
+        state.ensure_llm_loaded = self._driving_ensure_loaded(captured)
+        mock_get_state.return_value = state
+
+        manifest = MockManifest("m", context_length=manifest_ctx)
+        registry = MagicMock()
+        registry.get.return_value = manifest
+        mock_get_registry.return_value = registry
+        mock_detect.return_value = ModelType.LLM
+        mock_select.return_value = MockEngine()
+        mock_to_thread.return_value = None
+
+        await load_llm("m", num_ctx=num_ctx)
+
+        # engine.load was scheduled as to_thread(engine.load, path, n_ctx=...)
+        _, kwargs = mock_to_thread.call_args
+        assert kwargs["n_ctx"] == expected
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.get_state")
+    async def test_resident_engine_reused_when_ctx_matches(self, mock_get_state):
+        engine = MockEngine()
+        engine.context_size = 8192
+        manifest = MockManifest("m")
+        state = self._state(current_model=manifest, engine=engine)
+        mock_get_state.return_value = state
+
+        got_engine, got_manifest = await load_llm("m", num_ctx=8192)
+
+        assert got_engine is engine and got_manifest is manifest
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.asyncio.to_thread")
+    @patch("hfl.api.model_loader.select_engine")
+    @patch("hfl.api.model_loader.detect_model_type")
+    @patch("hfl.api.model_loader.get_registry")
+    @patch("hfl.api.model_loader.get_state")
+    async def test_ctx_change_forces_reload_and_evicts_first(
+        self,
+        mock_get_state,
+        mock_get_registry,
+        mock_detect,
+        mock_select,
+        mock_to_thread,
+    ):
+        """A different ``num_ctx`` must reload — and the resident copy has
+        to be evicted BEFORE the new one is allocated, or the llama.cpp
+        preflight measures free memory with the outgoing model still in
+        it and rejects a load that fits ("requires ~49.2GB but only
+        49.5GB are available")."""
+        resident = MockEngine()
+        resident.context_size = 8192
+        manifest = MockManifest("m")
+
+        captured: dict = {}
+        state = self._state(current_model=manifest, engine=resident)
+        state.ensure_llm_loaded = self._driving_ensure_loaded(captured)
+        mock_get_state.return_value = state
+
+        registry = MagicMock()
+        registry.get.return_value = manifest
+        mock_get_registry.return_value = registry
+        mock_detect.return_value = ModelType.LLM
+        mock_select.return_value = MockEngine()
+        mock_to_thread.return_value = None
+
+        await load_llm("m", num_ctx=16384)
+
+        state.set_llm_engine.assert_awaited_once_with(None, None)
+        _, kwargs = mock_to_thread.call_args
+        assert kwargs["n_ctx"] == 16384
+        # The reload requirement is handed to the coalescing primitive so
+        # a concurrent request can't hand back the stale-ctx engine.
+        assert captured["kwargs"]["required_ctx"] == 16384
+
+    @pytest.mark.asyncio
+    @patch("hfl.api.model_loader.get_state")
+    async def test_backend_without_context_tracking_is_never_reloaded(self, mock_get_state):
+        """``context_size == 0`` means "this backend doesn't report it" —
+        reloading on that would thrash MLX/vLLM on every request."""
+        engine = MockEngine()
+        engine.context_size = 0
+        manifest = MockManifest("m")
+        state = self._state(current_model=manifest, engine=engine)
+        mock_get_state.return_value = state
+
+        got_engine, _ = await load_llm("m", num_ctx=16384)
+
+        assert got_engine is engine
+        state.set_llm_engine.assert_not_awaited()
 
 
 class TestLoadTTS:

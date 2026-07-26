@@ -146,6 +146,44 @@ class TestEngineErrors:
         assert err.required_gb == 16.0
         assert err.available_gb == 8.0
 
+    def test_out_of_memory_points_at_a_context_that_fits(self):
+        """When the weights fit and only the KV cache blew the budget, the
+        error must say so and name a context that works — "requires
+        ~124.2GB" on a 128GB machine otherwise reads as "your hardware is
+        too small" when the real cause was an auto-selected 262144-token
+        context."""
+        from hfl.exceptions import OutOfMemoryError
+
+        err = OutOfMemoryError(
+            required_gb=124.2,
+            available_gb=91.6,
+            weights_gb=44.2,
+            n_ctx=262144,
+            fitting_ctx=65536,
+        )
+        text = str(err)
+        assert "DOES fit" in text
+        assert "num_ctx=65536" in text
+        assert "44.2GB of weights" in text
+        assert "80.0GB of KV cache" in text
+        assert err.fitting_ctx == 65536
+
+    def test_out_of_memory_says_when_no_context_can_help(self):
+        """Weights alone over budget → say plainly that no context size
+        saves it, instead of suggesting a knob that cannot work."""
+        from hfl.exceptions import OutOfMemoryError
+
+        err = OutOfMemoryError(
+            required_gb=46.7,
+            available_gb=20.0,
+            weights_gb=44.2,
+            n_ctx=8192,
+            fitting_ctx=None,
+        )
+        text = str(err)
+        assert "no context size will make this load fit" in text
+        assert "num_ctx=" not in text
+
 
 class TestAuthErrors:
     """Tests for authentication errors."""

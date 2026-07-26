@@ -35,7 +35,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
+def _manifest_ctx(manifest: "ModelManifest") -> int:
+    """Context length recorded on a manifest, or 0 when unusable.
+
+    Manifests are rehydrated from ``~/.hfl/models.json``, so the field
+    can be missing or non-numeric on records written by older versions;
+    anything we can't read as a positive int means "auto-detect".
+    """
+    try:
+        value = int(manifest.context_length)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+async def load_llm(
+    model_name: str, num_ctx: int | None = None
+) -> tuple["InferenceEngine", "ModelManifest"]:
     """Load LLM model with proper async handling.
 
     This is the primary entry point for model loading in API routes.
@@ -43,6 +59,10 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
 
     Args:
         model_name: Name, alias, or repo_id of the model
+        num_ctx: Per-request context size (Ollama's ``options.num_ctx``).
+            When it differs from the context the resident engine was
+            opened with, the model is reloaded — matching Ollama, where
+            ``num_ctx`` is a load-time parameter.
 
     Returns:
         Tuple of (InferenceEngine, ModelManifest)
@@ -61,11 +81,25 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
 
     state = get_state()
 
-    # Fast path - already loaded
+    requested_ctx = num_ctx if num_ctx and num_ctx > 0 else 0
+
+    # Fast path - already loaded with a compatible context window.
     if state.current_model and state.current_model.name == model_name:
         if state.engine is None:
             raise ModelNotReadyError(model_name)
-        return state.engine, state.current_model
+        if not requested_ctx:
+            return state.engine, state.current_model
+        # ``0`` from a backend that doesn't track its context window is
+        # "unknown", not "mismatched" — don't reload on a guess.
+        resident_ctx = state.engine.context_size
+        if not resident_ctx or resident_ctx == requested_ctx:
+            return state.engine, state.current_model
+        logger.info(
+            "Reloading %s: request asked for num_ctx=%d, resident engine has %d",
+            model_name,
+            requested_ctx,
+            resident_ctx,
+        )
 
     # Lookup in registry
     manifest = get_registry().get(model_name)
@@ -78,11 +112,47 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
     if model_type != ModelType.LLM:
         raise ModelTypeMismatchError(model_name, expected="llm", got=model_type.value)
 
-    # context_size_override > 0 means explicit user override via --ctx flag;
-    # otherwise pass 0 to let the engine auto-detect from model metadata.
-    n_ctx = state.context_size_override if state.context_size_override > 0 else 0
+    # Context resolution, most specific first:
+    #   1. ``options.num_ctx`` on this request (Ollama semantics).
+    #   2. ``--ctx`` at server start (context_size_override > 0).
+    #   3. The manifest's recorded context_length — what ``hfl run``
+    #      already honours via ``load_llm_sync``. Without this the CLI
+    #      and the server load the same model with different windows.
+    #   4. 0 → let the engine auto-detect from GGUF metadata (clamped
+    #      to the model's advertised max and to available memory).
+    if requested_ctx:
+        n_ctx = requested_ctx
+    elif state.context_size_override > 0:
+        n_ctx = state.context_size_override
+    else:
+        n_ctx = _manifest_ctx(manifest)
 
     async def _loader() -> tuple["InferenceEngine", "ModelManifest"]:
+        # Evict the resident model BEFORE allocating the new one. HFL's
+        # single-model slot loads-then-swaps, which means the outgoing
+        # model's weights are still resident while the incoming ones are
+        # allocated. For multi-GB models that either doubles peak memory
+        # or — because the llama.cpp preflight measures free memory at
+        # load time — rejects a load that would fit perfectly once the
+        # old model is gone ("requires ~49.2GB but only 49.5GB are
+        # available" while a 47GB model is still loaded). Ollama also
+        # unloads before loading. The cost is that a failed load leaves
+        # nothing resident instead of the previous model; that is the
+        # right trade for a slot that can only hold one model anyway.
+        #
+        # Runs under ensure_llm_loaded's per-model lock, after its
+        # residency re-check, so we only get here once we are committed
+        # to loading. set_llm_engine(None, None) is used rather than a
+        # bare unload so the dispatcher drain / pinned-engine deferral
+        # in ServerState is preserved.
+        if state.engine is not None:
+            logger.info(
+                "Evicting resident model %s before loading %s",
+                state.current_model.name if state.current_model else "<unknown>",
+                model_name,
+            )
+            await state.set_llm_engine(None, None)
+
         # Load off the event loop; unload on load failure so a half-loaded
         # engine never leaks. The state swap is performed by ensure_llm_loaded.
         engine = select_engine(model_path)
@@ -106,7 +176,10 @@ async def load_llm(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]
     from hfl.config import config as _hfl_config
 
     return await state.ensure_llm_loaded(
-        model_name, _loader, timeout=_hfl_config.model_load_timeout
+        model_name,
+        _loader,
+        timeout=_hfl_config.model_load_timeout,
+        required_ctx=requested_ctx,
     )
 
 

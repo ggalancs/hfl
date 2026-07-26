@@ -290,6 +290,13 @@ def _filter_gemma4_stream(iterator: Iterator[str]) -> Iterator[str]:
 # same budget.
 _MEMORY_SAFETY_FRACTION = 0.85
 
+# Floor for the memory-aware auto-sizing in ``_fit_ctx_to_memory``. We
+# never shrink an auto-selected context below this — a model that can't
+# hold 2048 tokens is unusable, and the preflight check is the right
+# place to reject that load with real numbers rather than silently
+# serving a crippled context.
+_MIN_AUTO_CTX = 2048
+
 
 def _detect_chat_format_from_gguf(model_path: str) -> str | None:
     """Read ``general.architecture`` from a GGUF and map it to a
@@ -431,6 +438,94 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
     }
 
 
+def _kv_bytes_per_token(info: dict | None) -> int:
+    """Bytes of fp16 KV cache consumed by a single context token.
+
+    ``2 (K+V) * n_layers * n_kv_heads * head_dim * 2 bytes``. Falls back
+    to the non-GQA upper bound (``embedding_length`` in place of
+    ``n_kv_heads * head_dim``) when the GGUF header omits the attention
+    head counts. Returns ``0`` when the header gives us nothing to work
+    with — callers must treat that as "unknown", not as "free".
+    """
+    if not info:
+        return 0
+
+    block_count = info.get("block_count") or 0
+    embedding_length = info.get("embedding_length") or 0
+    head_count = info.get("head_count") or 0
+    head_count_kv = info.get("head_count_kv") or 0
+
+    if block_count and head_count and head_count_kv and embedding_length:
+        head_dim = embedding_length // head_count
+        kv_dim = head_count_kv * head_dim
+        return 2 * block_count * kv_dim * 2
+    if block_count and embedding_length:
+        return 2 * block_count * embedding_length * 2
+    return 0
+
+
+def _fit_ctx_to_memory(model_path: str, info: dict | None, n_ctx: int) -> int:
+    """Shrink an auto-selected ``n_ctx`` until weights + KV cache fit.
+
+    The VRAM tier in :mod:`hfl.engine.vram` sizes the context from the
+    machine's memory alone — it knows nothing about how much of that
+    memory the *weights* already claim. On a 128 GB Apple Silicon host
+    the top tier hands back 262144 tokens, which for a 72B model is an
+    80 GiB KV cache on top of 44 GiB of weights: the load is refused by
+    :func:`_preflight_memory_check` (or, without psutil, thrashes the
+    host). Ollama sizes the context to what is left after the weights;
+    this does the same.
+
+    Returns the largest power-of-two context ``<= n_ctx`` whose weights
+    + KV estimate stays inside ``_MEMORY_SAFETY_FRACTION`` of available
+    memory, floored at ``_MIN_AUTO_CTX``. Returns ``n_ctx`` unchanged
+    when we can't measure either side (no psutil, no GGUF header) —
+    the preflight check remains the backstop.
+    """
+    from pathlib import Path
+
+    if n_ctx <= _MIN_AUTO_CTX:
+        return n_ctx
+
+    kv_per_token = _kv_bytes_per_token(info)
+    if kv_per_token <= 0:
+        return n_ctx
+
+    from hfl.engine.memory import HAS_PSUTIL, get_memory_snapshot
+
+    if not HAS_PSUTIL:
+        return n_ctx
+
+    try:
+        weights_bytes = Path(model_path).stat().st_size
+    except OSError:
+        return n_ctx
+
+    available_bytes = get_memory_snapshot().system_available_gb * (1024**3)
+    kv_budget = available_bytes * _MEMORY_SAFETY_FRACTION - weights_bytes
+    if kv_budget <= 0:
+        # The weights alone blow the budget — nothing we do to the
+        # context saves this load. Leave it to the preflight check,
+        # which reports the real numbers to the user.
+        return _MIN_AUTO_CTX
+
+    fitted = n_ctx
+    while fitted > _MIN_AUTO_CTX and fitted * kv_per_token > kv_budget:
+        fitted //= 2
+
+    if fitted < n_ctx:
+        logger.info(
+            "Auto-sized n_ctx %d → %d to fit weights (%.1fGB) + KV cache "
+            "in %.0f%% of %.1fGB available memory",
+            n_ctx,
+            fitted,
+            weights_bytes / (1024**3),
+            _MEMORY_SAFETY_FRACTION * 100,
+            available_bytes / (1024**3),
+        )
+    return fitted
+
+
 def _estimate_memory_required_gb(model_path: str, info: dict | None, n_ctx: int) -> float:
     """Conservative upper bound for the RAM / unified memory a load will take.
 
@@ -461,24 +556,7 @@ def _estimate_memory_required_gb(model_path: str, info: dict | None, n_ctx: int)
 
     kv_gb = 0.0
     if info is not None and n_ctx > 0:
-        block_count = info.get("block_count") or 0
-        embedding_length = info.get("embedding_length") or 0
-        head_count = info.get("head_count") or 0
-        head_count_kv = info.get("head_count_kv") or 0
-
-        if block_count and head_count and head_count_kv and embedding_length:
-            # GQA-aware: n_kv_heads * head_dim, where head_dim =
-            # embedding_length / n_heads.
-            head_dim = embedding_length // head_count
-            kv_dim = head_count_kv * head_dim
-            kv_bytes = 2 * block_count * n_ctx * kv_dim * 2
-            kv_gb = kv_bytes / (1024**3)
-        elif block_count and embedding_length:
-            # Fallback: no GQA metadata → assume n_kv_heads == n_heads
-            # (i.e. non-GQA worst case). Over-estimates GQA models but
-            # is still the right thing to do when we can't measure.
-            kv_bytes = 2 * block_count * n_ctx * embedding_length * 2
-            kv_gb = kv_bytes / (1024**3)
+        kv_gb = (_kv_bytes_per_token(info) * n_ctx) / (1024**3)
 
     return weights_gb + kv_gb
 
@@ -542,7 +620,27 @@ def _preflight_memory_check(
     )
 
     if required_gb > budget_gb:
-        err = OutOfMemoryError(required_gb=required_gb, available_gb=available_gb)
+        # Split the footprint so the error can tell the user whether the
+        # load is impossible on this hardware (weights don't fit) or just
+        # over-contexted (weights fit, KV cache doesn't) — and, in the
+        # latter case, the largest context that would have worked.
+        weights_gb = _estimate_memory_required_gb(model_path, info, 0)
+        fitting_ctx: int | None = None
+        if n_ctx > 0 and weights_gb < budget_gb:
+            candidate = _fit_ctx_to_memory(model_path, info, n_ctx)
+            # Only advertise a context that genuinely fits — at the floor
+            # ``_fit_ctx_to_memory`` gives up rather than going lower.
+            if candidate < n_ctx and (
+                _estimate_memory_required_gb(model_path, info, candidate) <= budget_gb
+            ):
+                fitting_ctx = candidate
+        err = OutOfMemoryError(
+            required_gb=required_gb,
+            available_gb=available_gb,
+            weights_gb=weights_gb,
+            n_ctx=n_ctx or None,
+            fitting_ctx=fitting_ctx,
+        )
         if architecture and architecture.startswith("gemma"):
             err.details = (
                 f"{err.details}\n\n"
@@ -762,6 +860,11 @@ class LlamaCppEngine(InferenceEngine):
         self._model: Any = None
         self._model_path: str = ""
         self._architecture: str | None = None
+        # Effective context the model was opened with, after the
+        # explicit/arch/VRAM/memory resolution in ``load``. Surfaced via
+        # ``context_size`` so the API layer can reload when a request
+        # asks for a different ``num_ctx``.
+        self._n_ctx: int = 0
         # V4 F5 — companion draft model for speculative decoding.
         # Held here so ``unload()`` can free its memory alongside
         # the target.
@@ -911,6 +1014,30 @@ class LlamaCppEngine(InferenceEngine):
                     logger.info("VRAM probe inconclusive → defaulting num_ctx=%d", n_ctx)
             except Exception:
                 logger.debug("VRAM auto-sizing failed", exc_info=True)
+
+        # Two clamps that only apply to an auto-selected context — an
+        # explicit ``n_ctx=`` is the caller's call and is left alone
+        # (the preflight check below still guards the host).
+        #
+        #   1. Never exceed the context the model was actually trained
+        #      for. The VRAM tier is derived from the machine, not the
+        #      model, so on a large host it happily returns 262144 for
+        #      a model whose GGUF advertises 32768.
+        #   2. Never size the KV cache past what is left after the
+        #      weights. Without this a 72B Q4_K_M on a 128 GB Mac
+        #      auto-selects 262144 tokens = 80 GiB of KV on top of
+        #      44 GiB of weights, and every load 500s with
+        #      "Insufficient memory ... requires ~124.2GB".
+        if not explicit_n_ctx and n_ctx > 0:
+            advertised = (gguf_info or {}).get("max_context") or 0
+            if advertised and n_ctx > advertised:
+                logger.info(
+                    "Clamping auto n_ctx %d → %d (model's advertised context length)",
+                    n_ctx,
+                    advertised,
+                )
+                n_ctx = advertised
+            n_ctx = _fit_ctx_to_memory(model_path, gguf_info, n_ctx)
 
         # Flash-attention is not safe for every architecture: llama-cpp-
         # python's flash-attn path has been historically crash-prone for
@@ -1147,6 +1274,14 @@ class LlamaCppEngine(InferenceEngine):
                 self._draft_model = draft_llama
             self._model_path = model_path
             self._architecture = architecture
+            # ``n_ctx`` may still be 0 here when the caller left it to
+            # llama-cpp-python's own metadata default — read back what
+            # the library actually opened so ``context_size`` never
+            # reports a value the model isn't running with.
+            try:
+                self._n_ctx = int(self._model.n_ctx())
+            except Exception:  # pragma: no cover — defensive
+                self._n_ctx = n_ctx
             # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
             # preference so downstream ``tokenize()`` calls don't
             # double-prepend BOS on Gemma 4 and friends. Default True
@@ -1167,6 +1302,7 @@ class LlamaCppEngine(InferenceEngine):
             del self._model
             self._model = None
             self._architecture = None
+            self._n_ctx = 0
             # V4 F5 — release the speculative-decoding draft alongside
             # the target so a subsequent load doesn't double up.
             if self._draft_model is not None:
@@ -1588,3 +1724,7 @@ class LlamaCppEngine(InferenceEngine):
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
+
+    @property
+    def context_size(self) -> int:
+        return self._n_ctx
