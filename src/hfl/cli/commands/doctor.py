@@ -49,6 +49,11 @@ class DoctorReport:
     vram_gib: float | None = None
     recommended_ctx: int = 0
 
+    # macOS laptops only: "battery" / "AC power" / "unknown". Running on
+    # battery costs 30-50% of throughput with every layer still on the GPU,
+    # so it belongs in the diagnostic next to the accelerator list.
+    power_source: str = "unknown"
+
     recommendations: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,8 +192,20 @@ def build_report() -> DoctorReport:
     except Exception:  # pragma: no cover
         report.recommended_ctx = 4096
 
+    try:
+        from hfl.engine.power import power_source_label
+
+        report.power_source = power_source_label()
+    except Exception:  # pragma: no cover — advisory only
+        report.power_source = "unknown"
+
     # Synthesised recommendations.
     recs: list[str] = []
+    if report.power_source == "battery":
+        recs.append(
+            "Running on battery — macOS clocks the GPU down hard (measured 8x "
+            "slower generation on an M3 Max). Plug in the charger."
+        )
     if not report.llama_cpp_available:
         recs.append("llama-cpp-python missing. Install with `pip install 'hfl[llama]'`.")
     has_accel = bool(report.nvidia_devices) or report.metal_available or bool(report.rocm_devices)
@@ -241,6 +258,8 @@ def format_report(report: DoctorReport) -> str:
     vram_text = f"{report.vram_gib:.1f} GiB" if report.vram_gib is not None else "unknown"
     ctx_rec = report.recommended_ctx
     lines.append(f"Detected VRAM:    {vram_text} → num_ctx recommendation: {ctx_rec}")
+    if report.power_source != "unknown":
+        lines.append(f"Power source:     {report.power_source}")
     if report.recommendations:
         lines.append("")
         lines.append("Recommendations:")

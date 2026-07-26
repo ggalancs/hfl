@@ -7,6 +7,7 @@ This is the main backend for GGUF models.
 Supports CPU, CUDA, Metal, and Vulkan.
 """
 
+import contextlib
 import logging
 import os
 import re
@@ -57,6 +58,164 @@ def _suppress_stderr():
         # Restore stderr
         os.dup2(saved_fd, stderr_fd)
         os.close(saved_fd)
+
+
+@contextmanager
+def _capture_llama_log(sink: list[str]):
+    """Divert ggml/llama.cpp's log into ``sink`` for the duration of a load.
+
+    Replaces the library's global log callback rather than redirecting the
+    stderr file descriptor. Redirecting the fd does not work here: with
+    ``verbose=False`` llama-cpp-python's own callback checks the level of the
+    ``llama-cpp-python`` logger and drops INFO lines *before* they ever reach
+    stderr — and raising that level is futile because ``Llama.__init__``
+    calls ``set_verbose()`` itself, resetting it mid-construction. Swapping
+    the callback is immune to both.
+
+    The user's terminal stays as quiet as it was with the old
+    stderr-to-/dev/null suppression; the difference is that the one line that
+    matters ("offloaded 41/41 layers to GPU") is now kept instead of thrown
+    away, which is why a fully Metal-accelerated load used to look identical
+    to a CPU-only one.
+
+    Capture is strictly best-effort: this is diagnostics, never a reason for
+    a load to fail. Any missing symbol, stubbed module or changed API shape
+    degrades to a no-op (empty ``sink`` -> "acceleration unknown"). Tests that
+    swap ``llama_cpp.llama_cpp`` for a fake module exercise exactly that path.
+    """
+    import ctypes
+
+    installed: Any = None
+    lcpp: Any = None
+    pkg: Any = None
+    try:
+        # Import under a second name and assign: binding an *annotated* name
+        # directly from an ``import`` is a redefinition for mypy when
+        # llama_cpp is absent (the CI venv omits the [llama] extra), while
+        # the annotation is what lets the ``except`` branch leave it None.
+        import llama_cpp as _pkg_module
+        from llama_cpp import llama_cpp as _lcpp_module
+
+        pkg = _pkg_module
+        lcpp = _lcpp_module
+        installed = pkg.llama_log_callback(_make_sink_callback(sink))
+        # Keep a strong reference for the whole window: ctypes callbacks are
+        # garbage-collectable, and letting one die while C still holds the
+        # pointer is a segfault, not an exception.
+        _ACTIVE_LOG_CALLBACKS.append(installed)
+        lcpp.llama_log_set(installed, ctypes.c_void_p(0))
+    except Exception:
+        logger.debug("llama.cpp log capture unavailable", exc_info=True)
+        if installed is not None:
+            with contextlib.suppress(ValueError):
+                _ACTIVE_LOG_CALLBACKS.remove(installed)
+        yield
+        return
+
+    try:
+        yield
+    finally:
+        try:
+            # Restore llama-cpp-python's own callback so normal logging
+            # behaviour resumes for anything outside the load.
+            lcpp.llama_log_set(getattr(pkg._logger, "llama_log_callback", None), ctypes.c_void_p(0))
+        except Exception:  # pragma: no cover — defensive
+            pass
+        with contextlib.suppress(ValueError):
+            _ACTIVE_LOG_CALLBACKS.remove(installed)
+
+
+# Strong references to in-flight ctypes callbacks (see _capture_llama_log).
+_ACTIVE_LOG_CALLBACKS: list[Any] = []
+
+
+def _make_sink_callback(sink: list[str]):
+    """Build the plain Python function a ggml log callback wraps."""
+
+    def _cb(level: int, text: bytes, user_data: Any) -> None:
+        try:
+            sink.append(text.decode("utf-8", errors="replace"))
+        except Exception:  # pragma: no cover — never raise into C
+            pass
+
+    return _cb
+
+
+# ``load_tensors: offloaded 41/41 layers to GPU``
+_OFFLOAD_RE = re.compile(r"offloaded\s+(\d+)\s*/\s*(\d+)\s+layers to GPU")
+# ``load_tensors:  MTL0_Mapped model buffer size =  8579.06 MiB`` — the device
+# prefix identifies the backend (MTL0 = Metal, CUDA0, ROCm0, Vulkan0, ...).
+_DEVICE_BUFFER_RE = re.compile(
+    r"^\s*\S*?:\s+(\w+?)(?:_Mapped)?\s+model buffer size\s*=\s*([\d.]+)\s*MiB",
+    re.MULTILINE,
+)
+# ``ggml_metal_device_init: GPU name:   MTL0 (Apple M3 Max)``
+_GPU_NAME_RE = re.compile(r"GPU name:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _summarize_acceleration(log_text: str) -> str | None:
+    """Turn llama.cpp's loader dump into one human-readable INFO line.
+
+    Returns ``None`` when the text carries no offload information (an old
+    llama.cpp, a captured log we failed to read, or ``verbose=True``, where
+    the output went to the terminal instead).
+    """
+    if not log_text:
+        return None
+
+    parts: list[str] = []
+
+    gpu_name = _GPU_NAME_RE.search(log_text)
+    if gpu_name:
+        parts.append(gpu_name.group(1))
+
+    offload = _OFFLOAD_RE.search(log_text)
+    if offload:
+        done, total = offload.group(1), offload.group(2)
+        parts.append(f"{done}/{total} layers on GPU")
+
+    # Sum the per-device weight buffers, skipping the CPU one, so the line
+    # states how much actually landed on the accelerator.
+    device_mib = 0.0
+    devices: set[str] = set()
+    for device, mib in _DEVICE_BUFFER_RE.findall(log_text):
+        if device.upper() == "CPU":
+            continue
+        devices.add(device)
+        device_mib += float(mib)
+    if device_mib > 0:
+        parts.append(f"{device_mib / 1024:.1f} GiB in {'/'.join(sorted(devices))} buffers")
+
+    if not parts:
+        return None
+    return " · ".join(parts)
+
+
+def _warn_if_on_battery() -> None:
+    """Log once when a macOS host is running inference on battery.
+
+    Worth a WARNING rather than INFO: measured 8x slower token generation
+    on an M3 Max (see :mod:`hfl.engine.power`), and the symptom — every
+    layer offloaded to the GPU and still crawling — otherwise reads as a
+    broken install.
+    """
+    global _BATTERY_WARNED
+    if _BATTERY_WARNED:
+        return
+    try:
+        from hfl.engine.power import on_battery
+    except Exception:  # pragma: no cover — defensive
+        return
+    if on_battery():
+        _BATTERY_WARNED = True
+        logger.warning(
+            "Running on battery power: macOS clocks the GPU down hard — "
+            "measured 8x slower token generation on an M3 Max. Plug in the "
+            "charger for full speed."
+        )
+
+
+_BATTERY_WARNED = False
 
 
 @contextmanager
@@ -865,6 +1024,9 @@ class LlamaCppEngine(InferenceEngine):
         # ``context_size`` so the API layer can reload when a request
         # asks for a different ``num_ctx``.
         self._n_ctx: int = 0
+        # One-line summary of what the load did with the hardware, mined
+        # from llama.cpp's loader output. ``None`` = unknown / CPU-only.
+        self._acceleration: str | None = None
         # V4 F5 — companion draft model for speculative decoding.
         # Held here so ``unload()`` can free its memory alongside
         # the target.
@@ -1132,8 +1294,12 @@ class LlamaCppEngine(InferenceEngine):
         start_time = time.perf_counter()
         try:
             # Suppress Metal/CUDA initialization messages if verbose=False
+            # Capture llama.cpp's loader dump instead of discarding it, so the
+            # acceleration summary can be logged at INFO. With verbose=True the
+            # user already sees everything on the terminal, so we don't capture.
+            captured: list[str] = []
             context = _suppress_stderr if not verbose else _nullcontext
-            with context():
+            with context(), _capture_llama_log(captured):
                 llama_kwargs: dict = {
                     "model_path": model_path,
                     "n_ctx": n_ctx,
@@ -1291,6 +1457,21 @@ class LlamaCppEngine(InferenceEngine):
             elapsed = time.perf_counter() - start_time
             mm_note = " (multimodal)" if self._is_multimodal else ""
             logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
+
+            # Report what the load actually did with the hardware. Without
+            # this the only way to know whether Metal/CUDA picked up the
+            # weights was to re-run with verbose=True and read llama.cpp's
+            # raw dump — so a fully accelerated load was indistinguishable
+            # from a CPU-only one.
+            self._acceleration = _summarize_acceleration("".join(captured))
+            if self._acceleration:
+                logger.info("Acceleration: %s", self._acceleration)
+            elif not verbose:
+                logger.info(
+                    "Acceleration: no GPU offload reported by llama.cpp "
+                    "(running on CPU). Check 'hfl doctor'."
+                )
+            _warn_if_on_battery()
         except Exception as e:
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
@@ -1728,3 +1909,7 @@ class LlamaCppEngine(InferenceEngine):
     @property
     def context_size(self) -> int:
         return self._n_ctx
+
+    @property
+    def acceleration(self) -> str | None:
+        return self._acceleration

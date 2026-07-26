@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The server now says what hardware it is using.** After every llama.cpp
+  load it logs one INFO line — `Acceleration: MTL0 (Apple M3 Max) · 81/81
+  layers on GPU · 44.2 GiB in MTL0 buffers` — and `GET /api/ps` carries the
+  same string plus `context_size` in each model's `details` (extra keys on
+  top of Ollama's schema, so existing clients are unaffected). Previously
+  `load()` wrapped the Llama constructor in a stderr suppressor, so a fully
+  Metal-accelerated load and a CPU-only one produced byte-identical output
+  and the only way to tell them apart was to re-run with `verbose=True`.
+  Capture works by swapping ggml's global log callback for the duration of
+  the load rather than redirecting the file descriptor: with `verbose=False`
+  llama-cpp-python drops INFO lines inside its own callback before they
+  reach stderr, and raising that logger's level does not help because
+  `Llama.__init__` calls `set_verbose()` itself. Purely best-effort — a
+  stubbed or older llama-cpp-python degrades to "unknown", never to an error.
+- **Battery warning on macOS.** Apple Silicon laptops clock the GPU down on
+  battery: measured on an M3 Max with Qwen3-14B Q4_K_M, 113 → 393 tok/s
+  prefill and **4.7 → 38.7 tok/s generation** when plugged in. Every layer
+  still reports as offloaded either way, so the symptom reads as a broken
+  install. `hfl doctor` now reports the power source, and a load on battery
+  logs a warning. New `hfl.engine.power` module; `InferenceEngine` gained an
+  `acceleration` property (default `None` = "not reported", which is not the
+  same as "no acceleration").
+- **`docs/apple-silicon-and-docker-clients.md`** — running HFL on a Mac
+  behind a containerized client: why HFL must stay on the host (Docker
+  Desktop only passes GPUs through on Windows/WSL2), how to size the Docker
+  VM so it stops competing with Metal for the shared power and memory
+  budget, and the client-side settings that matter (one `num_ctx` across all
+  services now that changing it reloads the model, `keep_alive`, honouring
+  429/`Retry-After`).
+
 ## [0.17.0] - 2026-07-26
 
 ### Fixed

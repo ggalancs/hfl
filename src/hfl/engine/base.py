@@ -230,6 +230,17 @@ class InferenceEngine(ABC):
         """
         return 0
 
+    @property
+    def acceleration(self) -> str | None:
+        """Human-readable summary of the hardware the model is running on.
+
+        E.g. ``"MTL0 (Apple M3 Max) · 41/41 layers on GPU · 8.4 GiB in
+        MTL0 buffers"``. ``None`` means the backend doesn't report it —
+        which is not the same as "no acceleration", so callers should
+        present it as unknown rather than as CPU-only.
+        """
+        return None
+
     # Context manager support for automatic resource cleanup
     def __enter__(self) -> "InferenceEngine":
         """Enter context manager."""

@@ -74,15 +74,30 @@ def _manifest_digest(manifest: "ModelManifest") -> str:
     return "sha256:" + hashlib.sha256(stamp.encode()).hexdigest()
 
 
-def _manifest_details(manifest: "ModelManifest") -> dict[str, Any]:
-    """Compose the Ollama ``details`` sub-object from an HFL manifest."""
-    return {
+def _manifest_details(manifest: "ModelManifest", engine: Any | None = None) -> dict[str, Any]:
+    """Compose the Ollama ``details`` sub-object from an HFL manifest.
+
+    ``acceleration`` / ``context_size`` are HFL extensions on top of
+    Ollama's schema (extra keys, so ollama-python and Open WebUI ignore
+    them). They exist so "is this model actually on the GPU, and at what
+    context?" is answerable over the API instead of only by re-reading
+    the server log.
+    """
+    details: dict[str, Any] = {
         "format": manifest.format or "unknown",
         "family": manifest.architecture or "unknown",
         "families": [manifest.architecture] if manifest.architecture else None,
         "parameter_size": manifest.parameters,
         "quantization_level": manifest.quantization,
     }
+    if engine is not None:
+        accel = getattr(engine, "acceleration", None)
+        if accel:
+            details["acceleration"] = accel
+        ctx = getattr(engine, "context_size", 0)
+        if isinstance(ctx, int) and ctx > 0:
+            details["context_size"] = ctx
+    return details
 
 
 def _size_vram_estimate(manifest: "ModelManifest", engine: Any | None) -> int:
@@ -136,7 +151,7 @@ def _render_model(manifest: "ModelManifest", engine: Any | None) -> dict[str, An
         "model": manifest.name,
         "size": int(manifest.size_bytes or 0),
         "digest": _manifest_digest(manifest),
-        "details": _manifest_details(manifest),
+        "details": _manifest_details(manifest, engine),
         "expires_at": _expires_at_iso(manifest),
         "size_vram": _size_vram_estimate(manifest, engine),
     }
