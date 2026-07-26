@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-07-26
+
+### Fixed
+
+- **Large models could not be loaded through the server at all.** A 72B
+  Q4_K_M (44 GiB of weights) on a 128 GB Apple Silicon host failed every
+  `/api/chat` request with `Insufficient memory: the model requires
+  ~124.2GB`. The context auto-sizer picked `num_ctx` from the *machine*
+  alone — the VRAM tier maps ≥48 GB to 262144 tokens — with no regard for
+  how much memory the weights already claim, nor for the context the
+  model actually advertises. 262144 tokens of fp16 KV cache for that
+  layout is 80 GiB on top of 44 GiB of weights. An auto-selected context
+  is now clamped twice: to the model's advertised `context_length`, and
+  then, halving until it fits, to what is left after the weights. On the
+  model above this resolves `262144 → 131072 → 65536` and the model
+  loads. An explicit `n_ctx=` / `--ctx` is never clamped.
+- **`options.num_ctx` was silently ignored.** The Ollama converter never
+  read it and the API loader never received one, so the documented escape
+  hatch for exactly the failure above was a no-op. It is now honoured on
+  `/api/chat` and `/api/generate`, and — matching Ollama, where `num_ctx`
+  is a load-time parameter — a value that differs from the resident
+  engine's context triggers a reload. Non-numeric or non-positive values
+  fall through to the normal resolution instead of failing the request.
+- **The CLI and the server disagreed about the same model.** `hfl run`
+  honours `manifest.context_length` via `load_llm_sync`; the server path
+  ignored it and passed 0 (auto-detect). The same model therefore loaded
+  from the CLI and 500'd from the server. The API loader now resolves the
+  context as: `options.num_ctx` → `--ctx` → manifest → auto.
+- **Switching or reloading a model reported a false OOM.** The single
+  model slot loads the new engine *before* retiring the old one, so the
+  llama.cpp preflight measured free memory with the outgoing model still
+  resident — "requires ~49.2GB but only 49.5GB are available" while a
+  47 GB model was loaded. The resident model is now evicted before the
+  replacement is allocated (as Ollama does), via `set_llm_engine(None,
+  None)` so the dispatcher drain and pinned-engine deferral still apply.
+
+### Changed
+
+- **Out-of-memory errors say what to do about it.** The message now
+  breaks the estimate into weights vs KV cache and distinguishes the two
+  cases: when the weights fit and only the context blew the budget it
+  names a context that *does* work (`retry with num_ctx=65536`, plus the
+  `--ctx` / `HFL_DEFAULT_CTX_SIZE` / `HFL_KV_CACHE_TYPE=q8_0`
+  equivalents); when the weights alone exceed available memory it says
+  plainly that no context size can help. `OutOfMemoryError` gained the
+  optional `weights_gb`, `n_ctx` and `fitting_ctx` fields.
+- **`InferenceEngine.context_size`** — new property on the engine ABC
+  (default `0`, "not tracked"), implemented by `LlamaCppEngine` from the
+  context llama.cpp actually opened. `ServerState.ensure_llm_loaded`
+  takes a matching `required_ctx` so a reload decision can't race the
+  per-model lock. Backends that report `0` are never reloaded on this
+  account.
+
 ## [0.16.2] - 2026-07-22
 
 ### Fixed
