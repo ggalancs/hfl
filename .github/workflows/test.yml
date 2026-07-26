@@ -26,14 +26,9 @@ jobs:
           pip install -e ".[dev]"
           pip install pytest-cov
 
+      # See ci.yml: the coverage floor is the gate; the Codecov upload was
+      # dead weight (tokenless uploads are rejected, and the failure was
+      # swallowed by fail_ci_if_error: false).
       - name: Run tests with coverage
         run: |
-          pytest --cov=hfl --cov-report=xml --cov-report=term-missing --cov-fail-under=80
-
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-          verbose: true
+          pytest --cov=hfl --cov-report=term-missing --cov-fail-under=80

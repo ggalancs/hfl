@@ -36,16 +36,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # Coverage is enforced here, not published to a third party: the
+      # `fail_under` floor in pyproject.toml fails this step below the
+      # threshold. The Codecov upload that used to live here never worked
+      # ("Token required - not valid tokenless upload") and, with
+      # fail_ci_if_error disabled, failed silently on every run.
       - name: Run tests
         run: |
-          pytest tests/ --cov=hfl --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
+          pytest tests/ --cov=hfl --cov-report=term-missing
 
   lint:
     name: Lint
