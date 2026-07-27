@@ -92,7 +92,17 @@ async def load_llm(
         # ``0`` from a backend that doesn't track its context window is
         # "unknown", not "mismatched" — don't reload on a guess.
         resident_ctx = state.engine.context_size
-        if not resident_ctx or resident_ctx == requested_ctx:
+        # A resident window that is at least as large as the request already
+        # satisfies it: a model opened at 32768 serves an 8192-token request
+        # perfectly. Only *growing* the window needs a reload.
+        #
+        # Reloading on any difference (the 0.17.0 behaviour) made a client
+        # that varies num_ctx per request thrash the model: observed 16
+        # reloads across 86 requests on a 44 GiB model, six of which were
+        # shrinks and therefore pure waste — each one evicting the weights
+        # and throwing away the KV cache, so the next request had to
+        # re-prefill its whole prompt from scratch.
+        if not resident_ctx or resident_ctx >= requested_ctx:
             return state.engine, state.current_model
         logger.info(
             "Reloading %s: request asked for num_ctx=%d, resident engine has %d",

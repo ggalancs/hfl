@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-07-27
+
+### Fixed
+
+- **A client that varies `num_ctx` no longer thrashes the model.** 0.17.0
+  made any difference between the requested and the resident context force a
+  reload; a resident window that is *larger* than the request already serves
+  it. On a live server this cost 16 reloads across 86 requests against a
+  44 GiB model — six of them shrinks (32768→8192 and friends) and therefore
+  pure waste. Every reload evicts the weights and discards the KV cache, so
+  the next request re-prefills its whole prompt from scratch. Only growing
+  the window reloads now; `ensure_llm_loaded`'s in-lock re-check applies the
+  same rule so a concurrent request can't undo it.
+- **`hfl_tokens_generated_total` and `hfl_tokens_input_total` were always
+  `0`.** The counters, their Prometheus export and the event listener that
+  feeds them all existed, but the only emitter of `GENERATION_COMPLETED`
+  lives in `EngineObserver`, which is wired to nothing — so a server that
+  had served 65 inferences still reported zero tokens. Accounting now
+  happens in `run_dispatched`, the single choke point every non-streaming
+  inference already passes through, independent of that dormant path.
+
+### Added
+
+- **Per-request throughput logging**, at INFO:
+
+      chat throughput: prompt 3021 tok in 32.4s (93.2 tok/s) ·
+      generated 264 tok in 29.0s (9.1 tok/s) · 61.4s total
+
+  Without the split, a 61 s request is indistinguishable between "550 tokens
+  at 9 tok/s" and "32 s spent reading the prompt, then 264 tokens" — and a
+  client computing tokens ÷ wall-clock sees ~4 tok/s in the second case
+  while generation is in fact running at full hardware speed. The two have
+  entirely different remedies, so the server now states which one it is.
+
 ## [0.18.0] - 2026-07-26
 
 ### Added

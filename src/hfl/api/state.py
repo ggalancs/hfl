@@ -294,8 +294,10 @@ class ServerState:
                 return True
             resident_ctx = self._engine.context_size
             # ``0`` means the backend doesn't report a context size —
-            # never force a reload we can't justify.
-            return resident_ctx == 0 or resident_ctx == required_ctx
+            # never force a reload we can't justify. A window at least as
+            # large as the request already satisfies it; only growing it
+            # needs a reload (see ``load_llm`` for why shrinking must not).
+            return resident_ctx == 0 or resident_ctx >= required_ctx
 
         async def _load_with_lock() -> tuple["InferenceEngine", "ModelManifest"]:
             async with self._model_locks[model_name]:

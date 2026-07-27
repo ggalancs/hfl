@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from contextlib import AbstractAsyncContextManager, suppress
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar
@@ -28,6 +29,80 @@ if TYPE_CHECKING:
     from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+
+def _account_generation(result: Any, operation: str) -> None:
+    """Record token counters and log the prefill/generation split.
+
+    Two gaps this closes, both found while trying to answer "how fast is
+    inference actually running?" on a live server and having no way to tell:
+
+    1. ``hfl_tokens_generated_total`` / ``hfl_tokens_input_total`` were
+       always ``0``. The counters and their Prometheus export existed, and
+       the event listener that feeds them was registered — but the only
+       emitter of ``GENERATION_COMPLETED`` lives in ``EngineObserver``,
+       which is wired to nothing. Recording here, where every non-streaming
+       inference already passes, does not depend on that dormant path.
+    2. Nothing logged tokens, so a request that took 61 s was
+       indistinguishable between "generated 550 tokens at 9 tok/s" and
+       "spent 32 s reading a 3000-token prompt then generated 264". Those
+       have completely different remedies, and the wall-clock rate a client
+       computes (tokens ÷ total time) hides the difference.
+
+    Best-effort and duck-typed: ``run_dispatched`` also carries embedding
+    and TTS calls whose results have none of these attributes. Never raises.
+    """
+
+    def _as_int(name: str) -> int:
+        """Read a numeric field, treating anything unusable as 0.
+
+        Engines are duck-typed and tests hand in mocks whose auto-attributes
+        are not numbers, so every field here has to survive garbage without
+        turning a successful generation into a 500.
+        """
+        value = getattr(result, name, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return 0
+        return int(value)
+
+    tokens_out = getattr(result, "tokens_generated", None)
+    if isinstance(tokens_out, bool) or not isinstance(tokens_out, int):
+        return  # not a GenerationResult — nothing to account for
+    tokens_in = _as_int("tokens_prompt")
+    prompt_ns = _as_int("prompt_eval_duration")
+    eval_ns = _as_int("eval_duration")
+    total_ns = _as_int("total_duration")
+
+    try:
+        from hfl.metrics import get_metrics
+
+        get_metrics().record_generation(
+            duration_ms=total_ns / 1e6,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+    except Exception:  # pragma: no cover — metrics must never break a request
+        logger.debug("failed to record generation metrics", exc_info=True)
+
+    if not logger.isEnabledFor(logging.INFO):
+        return
+
+    def _rate(tokens: int, ns: int) -> str:
+        return f"{tokens / (ns / 1e9):.1f} tok/s" if ns > 0 and tokens else "n/a"
+
+    logger.info(
+        "%s throughput: prompt %d tok in %.1fs (%s) · generated %d tok in %.1fs (%s) · %.1fs total",
+        operation,
+        tokens_in,
+        prompt_ns / 1e9,
+        _rate(tokens_in, prompt_ns),
+        tokens_out,
+        eval_ns / 1e9,
+        _rate(tokens_out, eval_ns),
+        total_ns / 1e9,
+    )
 
 
 # =============================================================================
@@ -152,6 +227,7 @@ async def run_dispatched(
         raise
     else:
         await slot_cm.__aexit__(None, None, None)
+        _account_generation(result, operation)
         return result
 
 
