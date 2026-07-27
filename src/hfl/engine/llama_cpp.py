@@ -191,6 +191,74 @@ def _summarize_acceleration(log_text: str) -> str | None:
     return " · ".join(parts)
 
 
+def _perf_reset(model: Any) -> None:
+    """Zero llama.cpp's per-context perf counters before a generation.
+
+    They accumulate across calls, so without a reset the "this request"
+    numbers would be lifetime totals. Best-effort: silently does nothing on
+    builds that don't expose the API.
+    """
+    try:
+        from llama_cpp import llama_cpp as _lcpp
+
+        _lcpp.llama_perf_context_reset(model._ctx.ctx)
+    except Exception:  # pragma: no cover — optional/older backend
+        logger.debug("llama_perf_context_reset unavailable", exc_info=True)
+
+
+def _perf_read(model: Any) -> tuple[int, int, int, int] | None:
+    """Read llama.cpp's *measured* prompt-eval and eval timings.
+
+    Returns ``(prompt_ns, n_prompt_eval, eval_ns, n_eval)`` or ``None`` when
+    the backend doesn't expose the counters.
+
+    This exists because the previous approach — splitting total wall-clock in
+    proportion to the token counts — is not a measurement, it is an
+    assumption that prefill and generation run at the same tokens/second.
+    They do not: prefill is compute-bound and roughly an order of magnitude
+    faster per token than memory-bound generation. On a 72B with a
+    4161-token prompt and 250 generated tokens, the proportional split
+    attributed 94% of the time to the prompt and reported generation at
+    44.8 tok/s — a physically impossible figure on hardware whose ceiling is
+    about 9 tok/s. llama.cpp measures both phases properly; use its numbers.
+    """
+    try:
+        from llama_cpp import llama_cpp as _lcpp
+
+        data = _lcpp.llama_perf_context(model._ctx.ctx)
+        return (
+            int(data.t_p_eval_ms * 1_000_000),
+            int(data.n_p_eval),
+            int(data.t_eval_ms * 1_000_000),
+            int(data.n_eval),
+        )
+    except Exception:  # pragma: no cover — optional/older backend
+        logger.debug("llama_perf_context unavailable", exc_info=True)
+        return None
+
+
+def _split_durations(model: Any, total_ns: int, n_prompt: int, n_gen: int) -> tuple[int, int]:
+    """Return ``(prompt_eval_ns, eval_ns)`` for a finished generation.
+
+    Prefers llama.cpp's measured counters (see :func:`_perf_read`). Falls
+    back to the old token-proportional estimate only when the backend can't
+    report them — that estimate is documented as approximate precisely
+    because it assumes both phases run at the same rate, which is wrong by
+    roughly an order of magnitude.
+    """
+    perf = _perf_read(model)
+    if perf is not None:
+        prompt_ns, _, eval_ns, n_eval = perf
+        # Trust the counters only when they actually recorded this call;
+        # a zeroed struct means the build reports nothing useful.
+        if eval_ns > 0 or prompt_ns > 0:
+            return prompt_ns, eval_ns
+        del n_eval
+    total_tokens = max(1, n_prompt + n_gen)
+    prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
+    return prompt_eval_ns, total_ns - prompt_eval_ns
+
+
 def _warn_if_on_battery() -> None:
     """Log once when a macOS host is running inference on battery.
 
@@ -1537,6 +1605,9 @@ class LlamaCppEngine(InferenceEngine):
         if cfg.logprobs and cfg.logprobs > 0:
             call_kwargs["logprobs"] = cfg.logprobs
 
+        # llama.cpp's perf counters accumulate per context; zero them so the
+        # prompt-eval / eval split below describes THIS call.
+        _perf_reset(self._model)
         start_ns = time.monotonic_ns()
         output = self._model(effective_prompt, **call_kwargs)
         total_ns = time.monotonic_ns() - start_ns
@@ -1589,10 +1660,7 @@ class LlamaCppEngine(InferenceEngine):
             (n_gen / elapsed if elapsed > 0 else 0.0),
         )
 
-        # See chat() for the rationale behind this split.
-        total_tokens = max(1, n_prompt + n_gen)
-        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
-        eval_ns = total_ns - prompt_eval_ns
+        prompt_eval_ns, eval_ns = _split_durations(self._model, total_ns, n_prompt, n_gen)
 
         # Phase 7 P2-4: populate the legacy ``context`` array when
         # the caller opted in via ``keep_context=True``. llama-cpp's
@@ -1778,6 +1846,8 @@ class LlamaCppEngine(InferenceEngine):
         # is the right clock for wall-clock deltas — perf_counter_ns
         # has the same resolution but ``monotonic_ns`` is what Ollama
         # uses internally.
+        # See generate(): zero the per-context perf counters first.
+        _perf_reset(self._model)
         start_ns = time.monotonic_ns()
         try:
             output = self._model.create_chat_completion(**kwargs)
@@ -1837,11 +1907,7 @@ class LlamaCppEngine(InferenceEngine):
         # Estimate prompt_eval / eval split from token counts.
         # llama-cpp-python doesn't surface the pre-first-token delta
         # natively, so we apportion total_ns proportionally to
-        # prompt vs. generated tokens — the ratio is what matters
-        # for monitoring (tokens/sec stays consistent).
-        total_tokens = max(1, n_prompt + n_gen)
-        prompt_eval_ns = int(total_ns * n_prompt / total_tokens)
-        eval_ns = total_ns - prompt_eval_ns
+        prompt_eval_ns, eval_ns = _split_durations(self._model, total_ns, n_prompt, n_gen)
 
         return GenerationResult(
             text=text,

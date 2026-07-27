@@ -102,6 +102,64 @@ class TestAccounting:
             _account_generation(_Result(), "chat")  # must not raise
 
 
+class TestDurationSplit:
+    """``prompt_eval_duration`` / ``eval_duration`` must be *measured*.
+
+    They used to be derived by splitting total wall-clock in proportion to
+    token counts, which silently assumes prefill and generation run at the
+    same tokens/second. They differ by roughly an order of magnitude. On a
+    real 72B request — 4161-token prompt, 250 generated, 99 s total — the
+    proportional split handed 94 % of the time to the prompt and reported
+    generation at 44.8 tok/s, on hardware whose ceiling is about 9 tok/s.
+    Reading llama.cpp's own counters gave 69 tok/s prefill and 7.2 tok/s
+    generation, which is physically coherent.
+    """
+
+    def test_uses_measured_counters_when_available(self):
+        from hfl.engine import llama_cpp as m
+
+        # 60.1 s of prefill, 7.2 s of generation — the measured numbers.
+        perf = (60_100_000_000, 4161, 7_200_000_000, 52)
+        with patch.object(m, "_perf_read", return_value=perf):
+            prompt_ns, eval_ns = m._split_durations(MagicMock(), 73_000_000_000, 4161, 52)
+
+        assert prompt_ns == 60_100_000_000
+        assert eval_ns == 7_200_000_000
+        # Sanity: the resulting generation rate is physically possible.
+        assert 52 / (eval_ns / 1e9) == pytest.approx(7.2, rel=0.01)
+
+    def test_falls_back_to_estimate_without_counters(self):
+        """Older backends report nothing; the approximation is better than
+        zeroes, and it is the only reason the old code existed."""
+        from hfl.engine import llama_cpp as m
+
+        with patch.object(m, "_perf_read", return_value=None):
+            prompt_ns, eval_ns = m._split_durations(MagicMock(), 100_000_000_000, 90, 10)
+
+        assert prompt_ns == 90_000_000_000
+        assert eval_ns == 10_000_000_000
+
+    def test_zeroed_counters_fall_back_too(self):
+        """A build that exposes the struct but never fills it must not make
+        every request report 0 s of generation."""
+        from hfl.engine import llama_cpp as m
+
+        with patch.object(m, "_perf_read", return_value=(0, 0, 0, 0)):
+            prompt_ns, eval_ns = m._split_durations(MagicMock(), 100_000_000_000, 50, 50)
+
+        assert prompt_ns > 0 and eval_ns > 0
+
+    def test_perf_helpers_never_raise(self):
+        """They run on the hot generation path; a missing symbol must not
+        turn a successful generation into a 500."""
+        from hfl.engine import llama_cpp as m
+
+        broken = MagicMock()
+        del broken._ctx
+        m._perf_reset(broken)  # must not raise
+        assert m._perf_read(broken) is None
+
+
 class TestContextReloadDecision:
     """A reload evicts 44 GiB and discards the KV cache, so it must only
     happen when the resident window genuinely cannot serve the request."""

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-07-27
+
+### Fixed
+
+- **`prompt_eval_duration` / `eval_duration` were derived, not measured.**
+  Both were produced by splitting total wall-clock in proportion to the
+  token counts, which assumes prefill and generation run at the same
+  tokens/second. They differ by roughly an order of magnitude, so the split
+  was wrong by that much whenever a prompt was large. On a real 72B request
+  — 4161-token prompt, 250 generated, 99 s total — it attributed 94 % of the
+  time to the prompt and reported generation at **44.8 tok/s** on hardware
+  whose memory-bandwidth ceiling is about 9 tok/s. llama.cpp measures both
+  phases properly (`llama_perf_context`); HFL now resets those counters
+  before each generation and reads them afterwards. The same request then
+  reports 69 tok/s prefill and 7.2 tok/s generation, which is coherent.
+  The old estimate remains as a fallback for backends that expose no
+  counters, and is documented as approximate.
+
+  This matters beyond cosmetics: these fields are what Ollama clients use to
+  compute throughput, and 0.18.1's new per-request log line was built on
+  them — so it was confidently reporting impossible numbers.
+
 ## [0.18.1] - 2026-07-27
 
 ### Fixed
