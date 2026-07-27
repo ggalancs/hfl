@@ -7,6 +7,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from hfl.api.server import app
@@ -16,7 +17,7 @@ from hfl.api.state import get_state, reset_state
 @pytest.fixture
 def client(temp_config):
     reset_state()
-    yield TestClient(app)
+    yield TestClient(app, client=("127.0.0.1", 50000))
     reset_state()
 
 
@@ -218,7 +219,21 @@ class TestSnapshotOffLoop:
         monkeypatch.setattr(routes_snapshot, "save_snapshot", _fake_save)
         monkeypatch.setattr(routes_snapshot, "load_llm", _fake_load)
 
-        await api_snapshot_save(SnapshotRequest(model=llm_manifest.name, name="snap"))
+        # The handler now takes the Request so it can enforce the owner
+        # boundary; present a loopback peer, which is what a local caller is.
+        local_request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/snapshot/save",
+                "headers": [],
+                "query_string": b"",
+                "client": ("127.0.0.1", 50000),
+            }
+        )
+        await api_snapshot_save(
+            SnapshotRequest(model=llm_manifest.name, name="snap"), local_request
+        )
 
         # save_snapshot ran on a worker thread, not the event-loop thread.
         assert captured["thread"] != loop_thread

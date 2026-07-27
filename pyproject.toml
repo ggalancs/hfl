@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hfl"
-version = "0.18.2"
+version = "0.19.0"
 description = "Run HuggingFace models locally like Ollama"
 readme = "README.md"
 license = "Apache-2.0"
@@ -139,7 +139,14 @@ audio = [
 
 tray = [
     "pystray>=0.19.0",
-    "Pillow>=10.0.0",
+    # Floor at 12.3.0: 12.2.x and earlier carry 13 advisories, incl. HIGH
+    # heap out-of-bounds writes in Image.paste()/crop(), ImageCmsTransform
+    # and ImageFilter.RankFilter, plus five decompression-bomb bypasses.
+    # HFL only uses PIL to draw the tray icon (api/image_validator.py
+    # parses image headers by hand and never hands user bytes to PIL), so
+    # none were reachable — this is defence in depth for any future code
+    # that does decode a user-supplied image. See local security audit L-15.
+    "Pillow>=12.3.0",
 ]
 
 # Model Context Protocol client/server (Phase 9+)
@@ -167,7 +174,14 @@ imagegen = [
     "diffusers>=0.30.0,<1.0",
     "torch>=2.5.0,<3.0",
     "safetensors>=0.4.0,<1.0",
-    "Pillow>=10.0.0",
+    # Floor at 12.3.0: 12.2.x and earlier carry 13 advisories, incl. HIGH
+    # heap out-of-bounds writes in Image.paste()/crop(), ImageCmsTransform
+    # and ImageFilter.RankFilter, plus five decompression-bomb bypasses.
+    # HFL only uses PIL to draw the tray icon (api/image_validator.py
+    # parses image headers by hand and never hands user bytes to PIL), so
+    # none were reachable — this is defence in depth for any future code
+    # that does decode a user-supplied image. See local security audit L-15.
+    "Pillow>=12.3.0",
     "accelerate>=1.2.0,<2.0",
 ]
 

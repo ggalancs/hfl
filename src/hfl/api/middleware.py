@@ -132,7 +132,14 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
     # ``_MAX_AUDIO_BYTES`` (100 MB) limit; without this exclusion the
     # advertised 100 MB ceiling is unreachable (any audio over the
     # global cap is 413'd before the route runs).
-    EXCLUDED_PREFIXES: tuple[str, ...] = ("/api/blobs/", "/api/transcribe")
+    # SEC: exact paths, not prefixes. A ``startswith`` test also exempted
+    # ``/api/transcribe-anything`` from the body cap — the same class of bug
+    # as the auth-bypass prefix match fixed in APIKeyMiddleware. ``/api/blobs``
+    # keeps a prefix because the digest is a path parameter, but it is
+    # anchored with the separator and the route validates the digest against
+    # a 64-hex regex before touching disk.
+    EXCLUDED_PATHS: frozenset[str] = frozenset({"/api/transcribe"})
+    BLOB_PREFIX = "/api/blobs/"
 
     def __init__(self, app: Any, max_bytes: int) -> None:
         super().__init__(app)
@@ -156,7 +163,8 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
         if self.max_bytes <= 0:
             response: Response = await call_next(request)
             return response
-        if request.url.path.startswith(self.EXCLUDED_PREFIXES):
+        path = request.url.path.rstrip("/") or "/"
+        if path in self.EXCLUDED_PATHS or request.url.path.startswith(self.BLOB_PREFIX):
             response = await call_next(request)
             return response
 
@@ -207,7 +215,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     # Paths excluded from rate limiting (used by health checks, monitoring)
-    EXCLUDED_PREFIXES = ("/health",)
+    # SEC: exact paths (see RequestBodyLimitMiddleware). A prefix test let
+    # ``/health-anything`` skip rate limiting.
+    EXCLUDED_PATHS = frozenset(
+        {"/health", "/healthz", "/health/live", "/health/ready", "/health/deep", "/health/sli"}
+    )
 
     def __init__(
         self,
@@ -227,7 +239,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _is_excluded(self, path: str) -> bool:
         """Check if path is excluded from rate limiting."""
-        return path.startswith(self.EXCLUDED_PREFIXES)
+        return (path.rstrip("/") or "/") in self.EXCLUDED_PATHS
 
     def reset(self) -> None:
         """Clear all rate limit tracking. Used for testing."""

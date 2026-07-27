@@ -18,6 +18,8 @@ Language:
 """
 
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -436,9 +438,28 @@ def run(
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
 
 
+def _is_public_bind(host: str) -> bool:
+    """Whether binding to ``host`` exposes the server beyond this machine.
+
+    Anything that is not a loopback address counts as exposure, including
+    ``0.0.0.0``, ``::`` and any concrete LAN address. A value that does not
+    parse as an IP (a hostname) is also treated as exposure: this gate
+    exists to prevent an accidental opening, so the unknown case must fail
+    toward warning rather than toward silence.
+    """
+    import ipaddress
+
+    if host in ("0.0.0.0", "::", ""):  # noqa: S104 - detection, not a bind
+        return True
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
+
+
 @app.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", "--host", help=t("commands.serve.options.host")),
+    host: str | None = typer.Option(None, "--host", help=t("commands.serve.options.host")),
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
@@ -473,6 +494,22 @@ def serve(
     # Connect events to metrics
     setup_event_listeners()
 
+    # Host resolution: --host wins, then HFL_HOST / OLLAMA_HOST via config,
+    # then the loopback default. The flag's default used to be the literal
+    # "127.0.0.1", so ``config.host`` (which reads both env vars, and is
+    # documented in docs/env-vars.md) could never be reached from `serve`.
+    # The failure was in the safe direction — the server stayed on loopback
+    # — but an operator who set HFL_HOST expecting exposure got a server
+    # that silently ignored them.
+    #
+    # Resolved BEFORE the tray branch so tray mode binds the same address
+    # the headless path would, and before the exposure check below so that
+    # a host coming from the environment is warned about too.
+    if host is None:
+        from hfl.config import config as _cfg
+
+        host = _cfg.host
+
     # Tray mode: launch system tray icon with server control
     if tray:
         try:
@@ -495,14 +532,37 @@ def serve(
             )
             raise typer.Exit(1) from None
 
-    # R6 - Privacy warning when exposing to the network
-    if host == "0.0.0.0":
+    # R6 - Privacy warning when exposing to the network.
+    #
+    # SEC: this used to test ``host == "0.0.0.0"`` literally, so `--host ::`
+    # (every IPv6 interface) and `--host 192.168.1.10` (a LAN address)
+    # exposed the server with no warning at all. Anything that is not a
+    # loopback address is an exposure; an unparseable value is treated as
+    # one too, because guessing in the permissive direction is what this
+    # check exists to prevent.
+    if _is_public_bind(host):
         console.print(f"[yellow]Warning:[/] {t('warnings.network_exposure')}")
         if api_key:
             console.print(f"[green]{t('messages.api_key_enabled')}[/]")
         else:
             console.print(f"[yellow]{t('warnings.no_api_key')}[/]")
-        if not typer.confirm(t("warnings.continue_question"), default=True):
+        # Without a TTY (systemd, Docker, launchd) ``typer.confirm`` cannot
+        # ask anyone — and those are exactly the deployments where an
+        # accidental exposure matters most. Require an explicit opt-in
+        # instead of silently taking the default.
+        if not sys.stdin.isatty():
+            if os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() not in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                console.print(
+                    f"[red]Refusing to bind {host} without a terminal to confirm on. "
+                    "Set HFL_ACCEPT_NETWORK_EXPOSURE=true to proceed unattended.[/]"
+                )
+                raise typer.Exit(1)
+        elif not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 
     # Store context size override in state for lazy-load path

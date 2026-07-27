@@ -19,7 +19,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from hfl.api.model_loader import load_llm
@@ -51,7 +51,10 @@ class SnapshotRequest(BaseModel):
         503: {"description": "Engine unavailable / snapshot unsupported"},
     },
 )
-async def api_snapshot_save(req: SnapshotRequest) -> dict[str, Any]:
+async def api_snapshot_save(req: SnapshotRequest, request: Request) -> dict[str, Any]:
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "snapshot save")
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
@@ -90,7 +93,10 @@ async def api_snapshot_save(req: SnapshotRequest) -> dict[str, Any]:
         503: {"description": "Engine unavailable"},
     },
 )
-async def api_snapshot_load(req: SnapshotRequest) -> dict[str, Any]:
+async def api_snapshot_load(req: SnapshotRequest, request: Request) -> dict[str, Any]:
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "snapshot load")
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
@@ -133,7 +139,10 @@ async def api_snapshot_list() -> dict[str, list[dict[str, Any]]]:
         404: {"description": "Snapshot not found"},
     },
 )
-async def api_snapshot_delete(name: str) -> dict[str, Any]:
+async def api_snapshot_delete(name: str, request: Request) -> dict[str, Any]:
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "snapshot delete")
     try:
         deleted = delete_snapshot(name)
     except ValueError as exc:

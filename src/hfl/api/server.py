@@ -17,7 +17,8 @@ Implemented endpoints:
     POST /api/chat
     GET  /api/tags
     POST /api/pull
-    DELETE /api/delete
+    (model deletion is CLI-only — `hfl rm`; there is deliberately no
+     DELETE /api/delete route, so the API cannot destroy local models.)
 
 Legal Compliance (R9 - Audit):
 - Disclaimer header in all AI responses
@@ -26,7 +27,11 @@ Security:
 - Optional API key authentication via --api-key flag
 """
 
+import asyncio
+import logging
+import os
 import secrets
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Callable
@@ -73,19 +78,97 @@ from hfl.api.routes_ws import router as ws_router
 from hfl.api.state import get_state
 from hfl.config import config
 
+logger = logging.getLogger(__name__)
+
+
+# Consecutive failed-auth counters, keyed by peer address. Bounded so a
+# spoofed-source flood can't grow it without limit; the map is advisory
+# (a lost entry only means one attacker gets a fresh budget).
+_AUTH_FAILURES: "OrderedDict[str, int]" = OrderedDict()
+_AUTH_FAILURES_MAX = 4096
+_AUTH_BACKOFF_AFTER = 3  # first failures answer immediately
+_AUTH_BACKOFF_CAP_S = 2.0
+
+
+async def _record_auth_failure(request: Request) -> None:
+    """Count a failed authentication and sleep proportionally.
+
+    The delay starts only after a few failures so a human who mistypes a
+    key is not punished, and it is capped so a flood of bad keys can't be
+    turned into a self-inflicted denial of service by tying up workers.
+    """
+    peer = request.client.host if request.client else "unknown"
+    count = _AUTH_FAILURES.get(peer, 0) + 1
+    _AUTH_FAILURES[peer] = count
+    _AUTH_FAILURES.move_to_end(peer)
+    while len(_AUTH_FAILURES) > _AUTH_FAILURES_MAX:
+        _AUTH_FAILURES.popitem(last=False)
+
+    if count > _AUTH_BACKOFF_AFTER:
+        delay = min(_AUTH_BACKOFF_CAP_S, 0.1 * (2 ** (count - _AUTH_BACKOFF_AFTER - 1)))
+        await asyncio.sleep(delay)
+    if count in (_AUTH_BACKOFF_AFTER + 1, 25, 100):
+        logger.warning("repeated API key failures from %s (%d consecutive)", peer, count)
+
+
+def _clear_auth_failures(request: Request) -> None:
+    """Reset a peer's counter after a successful authentication."""
+    peer = request.client.host if request.client else "unknown"
+    _AUTH_FAILURES.pop(peer, None)
+
 
 # API Key Authentication Middleware
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware that validates API key if configured."""
 
-    # Endpoints that don't require authentication (exact match).
+    # Endpoints that don't require authentication — EXACT match only.
     # /api/tags is intentionally kept out of the public set so auth policy
     # is deterministic (spec §5.1): when an API key is configured, /api/tags
     # always requires it, matching /api/chat.
-    PUBLIC_ENDPOINTS = {"/", "/api/version", "/healthz"}
+    #
+    # SEC: this used to be a ``startswith`` prefix test over
+    # ``("/health", "/metrics")``. Two problems, both verified:
+    #
+    #  1. uvicorn does NOT normalise ``..`` in the request path, so the
+    #     middleware saw ``/health/../api/chat`` verbatim and skipped auth
+    #     for it. Nothing was reachable behind it (Starlette's router does
+    #     not resolve ``..`` either, so such paths 404), but any future
+    #     route registered under a public prefix would have turned that
+    #     into a live bypass.
+    #  2. A prefix test also exempts ``/health-anything`` and
+    #     ``/metricsfoo``.
+    #
+    # An exact-match frozenset has neither property. Adding a public path
+    # is now a deliberate act, and a typo fails closed.
+    PUBLIC_ENDPOINTS = frozenset(
+        {
+            "/",
+            "/api/version",
+            "/healthz",
+            "/health",
+            "/health/live",
+            "/health/ready",
+            "/health/deep",
+            "/health/sli",
+        }
+    )
 
-    # Path prefixes that don't require authentication
-    PUBLIC_PREFIXES = ("/health", "/metrics")
+    @staticmethod
+    def _metrics_is_public() -> bool:
+        """Whether ``/metrics`` may be served without the API key.
+
+        Off by default. The metrics surface exposes request and token
+        volumes, per-endpoint counters and live queue depth — a usage
+        side-channel that has no business being readable by anyone the
+        operator deliberately locked out with an API key. Operators whose
+        Prometheus cannot authenticate can opt back in.
+        """
+        return os.environ.get("HFL_METRICS_PUBLIC", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         state = get_state()
@@ -95,13 +178,14 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             response: Response = await call_next(request)
             return response
 
-        # Skip auth for public endpoints (exact match)
-        if request.url.path in self.PUBLIC_ENDPOINTS:
+        # Skip auth for public endpoints — exact match, no prefixes.
+        path = request.url.path.rstrip("/") or "/"
+        if path in self.PUBLIC_ENDPOINTS:
             response = await call_next(request)
             return response
 
-        # Skip auth for public prefixes (e.g., /health, /health/ready, /health/live)
-        if request.url.path.startswith(self.PUBLIC_PREFIXES):
+        # /metrics is authenticated unless the operator opts out.
+        if path in ("/metrics", "/metrics/json") and self._metrics_is_public():
             response = await call_next(request)
             return response
 
@@ -111,6 +195,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             if secrets.compare_digest(token.encode(), state.api_key.encode()):
+                _clear_auth_failures(request)
                 response = await call_next(request)
                 return response
 
@@ -119,11 +204,20 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if api_key_header and secrets.compare_digest(
             api_key_header.encode(), state.api_key.encode()
         ):
+            _clear_auth_failures(request)
             response = await call_next(request)
             return response
 
-        # Authentication failed — return a structured envelope so clients
-        # can decide retry policy without parsing prose (spec §5.4).
+        # Authentication failed. Record it and apply a backoff before
+        # answering: the global rate limiter caps request *volume* but
+        # treats a 401 like any other request, so it does nothing to slow
+        # a key-guessing loop specifically. A per-peer delay that grows
+        # with consecutive failures makes brute force impractical while
+        # staying invisible to a client that simply mistyped its key once.
+        await _record_auth_failure(request)
+
+        # Structured envelope so clients can decide retry policy without
+        # parsing prose (spec §5.4).
         return JSONResponse(
             status_code=401,
             content={
@@ -167,6 +261,32 @@ class DisclaimerMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Baseline browser-hardening headers on every response.
+
+    HFL is a JSON API, so the blast radius is small — but not zero:
+    ``/api/web_fetch`` returns content derived from third-party pages and
+    ``routes_web`` serves a browser-facing surface. ``nosniff`` stops a
+    browser from re-interpreting a JSON body as HTML and executing it,
+    ``DENY`` keeps any response out of an attacker's iframe, and
+    ``no-referrer`` prevents a URL that may carry an API key in its query
+    string (the WebSocket handshake form) from leaking to third parties.
+    """
+
+    HEADERS = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    }
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
+        response: Response = await call_next(request)
+        for name, value in self.HEADERS.items():
+            response.headers.setdefault(name, value)
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Server lifecycle."""
@@ -205,6 +325,9 @@ app = FastAPI(
 
 # R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)
+
+# Baseline browser-hardening headers on every response (see the class).
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Middleware execution order (Starlette runs in reverse add order):
 # CORS → RequestLogger → BodyLimit → APIKey → RateLimit → Disclaimer

@@ -21,7 +21,7 @@ from hfl.models.registry import ModelRegistry
 
 @pytest.fixture
 def client(temp_config):
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 @pytest.fixture

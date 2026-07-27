@@ -55,14 +55,33 @@ class TestPrometheusMetrics:
         assert "hfl_requests_total" in content
         assert "hfl_tokens_generated_total" in content
 
-    def test_metrics_bypass_auth(self):
-        """Metrics endpoint should bypass authentication."""
+    def test_metrics_requires_auth_by_default(self):
+        """Metrics are authenticated when an API key is configured.
+
+        This test asserted the opposite until the 2026-07-27 audit: /metrics
+        was exempt via a public-prefix match, so request volumes, token
+        counts, per-endpoint counters and live queue depth were readable by
+        anyone the operator had deliberately locked out. Exposing that is now
+        an explicit opt-in (HFL_METRICS_PUBLIC).
+        """
         get_state().api_key = "test-secret-key"
         client = TestClient(app)
+        try:
+            assert client.get("/metrics").status_code == 401
+            authed = client.get("/metrics", headers={"X-API-Key": "test-secret-key"})
+            assert authed.status_code == 200
+        finally:
+            get_state().api_key = None
 
-        # Should work without auth
-        response = client.get("/metrics")
-        assert response.status_code == 200
+    def test_metrics_public_opt_in(self, monkeypatch):
+        """Operators whose Prometheus cannot authenticate can opt back in."""
+        monkeypatch.setenv("HFL_METRICS_PUBLIC", "true")
+        get_state().api_key = "test-secret-key"
+        client = TestClient(app)
+        try:
+            assert client.get("/metrics").status_code == 200
+        finally:
+            get_state().api_key = None
 
     def test_metrics_records_requests(self):
         """Metrics should record requests from middleware."""
@@ -120,13 +139,16 @@ class TestJsonMetrics:
         assert "request_p95_ms" in latencies
         assert "request_p99_ms" in latencies
 
-    def test_json_metrics_bypass_auth(self):
-        """JSON metrics endpoint should bypass authentication."""
+    def test_json_metrics_requires_auth_by_default(self):
+        """Same rule as /metrics — see test_metrics_requires_auth_by_default."""
         get_state().api_key = "test-secret-key"
         client = TestClient(app)
-
-        response = client.get("/metrics/json")
-        assert response.status_code == 200
+        try:
+            assert client.get("/metrics/json").status_code == 401
+            authed = client.get("/metrics/json", headers={"X-API-Key": "test-secret-key"})
+            assert authed.status_code == 200
+        finally:
+            get_state().api_key = None
 
 
 class TestMetricsRecording:

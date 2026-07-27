@@ -107,7 +107,10 @@ class TestPostBlob:
         # route still accepts the payload.
         from hfl.api.middleware import RequestBodyLimitMiddleware
 
-        assert "/api/blobs/" in RequestBodyLimitMiddleware.EXCLUDED_PREFIXES
+        # The blob path keeps a prefix (the digest is a path parameter) but
+        # is anchored with its separator; the route validates the digest
+        # against a 64-hex regex before touching disk.
+        assert RequestBodyLimitMiddleware.BLOB_PREFIX == "/api/blobs/"
         data = b"x" * (256 * 1024)  # 256 KiB — well over typical text caps
         digest = _sha256(data)
         resp = client.post(f"/api/blobs/sha256:{digest}", content=data)

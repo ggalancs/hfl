@@ -208,6 +208,20 @@ class HFLConfig:
         default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_WINDOW", "60"))
     )
 
+    # Security — the native agent loop dispatches MCP tool calls on the
+    # server's behalf. The operator picks which MCP servers exist
+    # (HFL_MCP_AUTOLOAD), but the *request body* decides whether the loop
+    # runs at all — and the request also controls the prompt, which is what
+    # steers which tool gets called with which arguments. When the connected
+    # servers have real capabilities (filesystem, shell, network), that
+    # hands the tools' reach to anyone who can POST /api/chat. Closed by
+    # default; the operator opts in knowingly.
+    allow_agent_loop: bool = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_ALLOW_AGENT_LOOP", "").strip().lower() in ("1", "true", "yes", "on")
+        )
+    )
+
     # Compliance — server-side pull governance (owner-vs-user trust boundary).
     #
     # ``pull`` / ``push`` / smart-pull are *owner* (administrative)

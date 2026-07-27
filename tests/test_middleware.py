@@ -452,7 +452,10 @@ class TestRequestBodyLimitMiddleware:
         global text-oriented limit must not 413 it."""
         from hfl.api.middleware import RequestBodyLimitMiddleware
 
-        assert "/api/transcribe" in RequestBodyLimitMiddleware.EXCLUDED_PREFIXES
+        # Exemptions are exact paths now (a startswith test also exempted
+        # "/api/transcribe-anything" from the cap — audit N-02).
+        assert "/api/transcribe" in RequestBodyLimitMiddleware.EXCLUDED_PATHS
+        assert "/api/transcribe-evil" not in RequestBodyLimitMiddleware.EXCLUDED_PATHS
 
         app = FastAPI()
         app.add_middleware(RequestBodyLimitMiddleware, max_bytes=8)

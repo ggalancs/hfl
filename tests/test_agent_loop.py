@@ -240,7 +240,12 @@ def _mk_mcp_tool():
 
 
 class TestChatRouteAgentLoop:
-    def test_agent_loop_runs_two_hops_and_records_trace(self, client):
+    def test_agent_loop_runs_two_hops_and_records_trace(self, client, monkeypatch):
+        # The agent loop dispatches MCP tools server-side, so it is off
+        # unless the operator opts in (audit H-03). Open the gate here.
+        from hfl.config import config as _cfg
+
+        monkeypatch.setattr(_cfg, "allow_agent_loop", True)
         _mk_mcp_tool()
         manifest = ModelManifest(
             name="m",

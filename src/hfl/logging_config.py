@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -178,6 +179,46 @@ def configure_logging(
 
     # Don't propagate to root logger
     logger.propagate = False
+
+    _install_query_redaction()
+
+
+# Query parameters whose value must never reach a log line. HFL's own
+# request logger only records ``request.url.path``, but **uvicorn's access
+# log records the path *with* its query string**
+# (``get_path_with_query_string``), and access logging is on by default —
+# so a WebSocket handshake carrying ``?api_key=…`` (the only form the
+# browser WebSocket API allows, since it cannot set headers) writes the key
+# straight into the log file. Redacting at the handler is the smallest fix
+# that keeps the access log useful.
+_SENSITIVE_QUERY_PARAMS = ("api_key", "token", "access_token", "key", "password")
+_QUERY_REDACTION_RE = re.compile(r"(?i)\b(" + "|".join(_SENSITIVE_QUERY_PARAMS) + r")=[^&\s\"']+")
+
+
+class SensitiveQueryFilter(logging.Filter):
+    """Replace sensitive query-parameter values in a log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if record.args:
+                record.args = tuple(
+                    _QUERY_REDACTION_RE.sub(r"\1=***", a) if isinstance(a, str) else a
+                    for a in (record.args if isinstance(record.args, tuple) else (record.args,))
+                )
+            if isinstance(record.msg, str):
+                record.msg = _QUERY_REDACTION_RE.sub(r"\1=***", record.msg)
+        except Exception:  # pragma: no cover — logging must never raise
+            pass
+        return True
+
+
+def _install_query_redaction() -> None:
+    """Attach the redaction filter to the loggers that can emit a full URL."""
+    _filter = SensitiveQueryFilter()
+    for name in ("uvicorn.access", "uvicorn.error", "hfl"):
+        target = logging.getLogger(name)
+        if not any(isinstance(f, SensitiveQueryFilter) for f in target.filters):
+            target.addFilter(_filter)
 
 
 def get_logger(name: str = "hfl") -> logging.Logger:

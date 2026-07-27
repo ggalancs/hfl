@@ -42,7 +42,16 @@ async def api_transcribe(
             status_code=501,
             detail="Whisper backend not installed. `pip install 'hfl[stt]'`.",
         )
-    audio = await file.read()
+    # SEC: read a bounded amount. This route is exempt from the global
+    # request-body limit (audio files are legitimately larger than a JSON
+    # body), and the size check used to run *after* an unbounded
+    # ``file.read()`` — so a caller could make the server buffer an
+    # arbitrarily large upload, spilling it to the temp directory via
+    # Starlette's SpooledTemporaryFile and then pulling the whole thing into
+    # a bytes object, before being told 413. Reading one byte past the limit
+    # is enough to detect an oversized upload without ever holding more than
+    # the limit in memory.
+    audio = await file.read(_MAX_AUDIO_BYTES + 1)
     if len(audio) > _MAX_AUDIO_BYTES:
         raise HTTPException(
             status_code=413,

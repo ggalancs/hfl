@@ -3,6 +3,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from hfl.cli.main import app
@@ -34,12 +35,37 @@ class TestServeCommand:
             call_kwargs = mock_start.call_args[1]
             assert call_kwargs["api_key"] == "secret-key"
 
-    def test_serve_network_exposure_warning_declined(self):
-        """Test serve command network warning when user declines."""
+    def test_serve_refuses_public_bind_without_a_tty(self):
+        """Without a terminal there is nobody to answer the prompt.
+
+        CliRunner is not a TTY, which is exactly the shape of a systemd /
+        Docker / launchd start — the deployments where an accidental
+        exposure matters most. Before the 2026-07-27 audit fix the prompt
+        silently took its default there; now it refuses and asks for an
+        explicit opt-in.
+        """
         with patch("hfl.api.server.start_server") as mock_start:
             result = runner.invoke(app, ["serve", "--host", "0.0.0.0"], input="n\n")
 
+            assert result.exit_code == 1
+            mock_start.assert_not_called()
+
+    def test_serve_public_bind_allowed_with_explicit_opt_in(self, monkeypatch):
+        """HFL_ACCEPT_NETWORK_EXPOSURE is the unattended consent."""
+        monkeypatch.setenv("HFL_ACCEPT_NETWORK_EXPOSURE", "true")
+        with patch("hfl.api.server.start_server") as mock_start:
+            result = runner.invoke(app, ["serve", "--host", "0.0.0.0"])
+
             assert result.exit_code == 0
+            mock_start.assert_called_once()
+
+    @pytest.mark.parametrize("host", ["::", "192.168.1.10"])
+    def test_serve_refuses_other_public_binds_too(self, host):
+        """The check used to match only the literal '0.0.0.0'."""
+        with patch("hfl.api.server.start_server") as mock_start:
+            result = runner.invoke(app, ["serve", "--host", host])
+
+            assert result.exit_code == 1
             mock_start.assert_not_called()
 
 

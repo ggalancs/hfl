@@ -9,6 +9,7 @@ so routes can raise domain exceptions instead of HTTPException.
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -112,12 +113,24 @@ def register_exception_handlers(app: FastAPI) -> None:
         # API-3: shape the body for the OpenAI/Anthropic dialect on /v1/* routes
         # (real SDKs parse ``body["error"]`` as an OBJECT, so a flat string-valued
         # ``error`` breaks them); /api/* and everything else keep the flat body.
+        # SEC: never put ``str(exc)`` or the exception class name in the
+        # response. An unhandled exception's message routinely carries
+        # absolute filesystem paths, credentials that happened to be in a
+        # failing call, or library internals — a verified audit finding
+        # (a synthetic RuntimeError carrying a path and a token-shaped
+        # string was echoed to the client verbatim). This is the same rule
+        # the streaming path in routes_native already applies; the
+        # last-resort handler was the one place that broke it.
+        #
+        # ``request_id`` is what lets the operator find the full traceback
+        # in the server log, so it must never be null: fall back to a
+        # freshly-minted id when no request-id middleware ran.
+        request_id = get_request_id() or uuid4().hex
+        logger.error("unhandled exception correlation id: %s", request_id)
         flat = {
             "error": "Internal server error",
             "code": "UnhandledError",
-            "error_type": type(exc).__name__,
-            "message": str(exc)[:500],
-            "request_id": get_request_id(),
+            "request_id": request_id,
         }
         return JSONResponse(
             status_code=500,

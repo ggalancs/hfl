@@ -18,7 +18,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import hfl.config
@@ -54,7 +54,10 @@ class RemoveLoraRequest(BaseModel):
         503: {"description": "Engine does not support LoRA hot-swap"},
     },
 )
-async def api_lora_apply(req: ApplyLoraRequest) -> dict[str, Any]:
+async def api_lora_apply(req: ApplyLoraRequest, request: Request) -> dict[str, Any]:
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "lora apply")
     # Contain the adapter path to the HFL data dir BEFORE loading anything:
     # over HTTP, lora_path is untrusted and must not be allowed to point at
     # arbitrary files (e.g. /etc/passwd, ~/.ssh/id_rsa) for the engine to read.
@@ -92,7 +95,10 @@ async def api_lora_apply(req: ApplyLoraRequest) -> dict[str, Any]:
         503: {"description": "Engine does not support LoRA removal"},
     },
 )
-async def api_lora_remove(req: RemoveLoraRequest) -> dict[str, Any]:
+async def api_lora_remove(req: RemoveLoraRequest, request: Request) -> dict[str, Any]:
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "lora remove")
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:

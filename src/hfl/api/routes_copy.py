@@ -18,7 +18,7 @@ Shape reference: https://docs.ollama.com/api#copy-a-model
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from hfl.exceptions import (
@@ -49,8 +49,11 @@ class CopyRequest(BaseModel):
         404: {"description": "Source model not found."},
     },
 )
-async def copy_model(req: CopyRequest) -> dict[str, str]:
+async def copy_model(req: CopyRequest, request: Request) -> dict[str, str]:
     """Ollama-compatible ``POST /api/copy``."""
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "copy")
     from hfl.validators import ValidationError as RegistryValidationError
     from hfl.validators import validate_model_name
 

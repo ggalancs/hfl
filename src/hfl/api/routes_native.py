@@ -11,7 +11,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
@@ -482,6 +482,34 @@ async def api_chat(
     over the generated text (spec rule C4). Honours Ollama's
     ``keep_alive`` field — see ``api_generate`` for semantics.
     """
+    # SEC: the agent loop dispatches MCP tool calls server-side. The
+    # operator chooses which MCP servers are connected, but the request
+    # body decides whether the loop runs *and* supplies the prompt that
+    # steers which tool is invoked — so an un-gated loop hands the reach of
+    # every connected tool to any caller. Closed unless the operator opted
+    # in with HFL_ALLOW_AGENT_LOOP.
+    #
+    # Checked FIRST, before the model load: a refusal must not depend on
+    # whether the requested model happens to exist, or the gate reports 404
+    # instead of 403 and leaks model existence in the process.
+    if req.agent_loop:
+        from hfl.config import config as _hfl_config
+
+        if not _hfl_config.allow_agent_loop:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": (
+                        "The native agent loop dispatches MCP tool calls on the server. "
+                        "It is disabled by default; the operator must set "
+                        "HFL_ALLOW_AGENT_LOOP=true to enable it."
+                    ),
+                    "code": "agent_loop_disabled",
+                    "category": "auth",
+                    "retryable": False,
+                },
+            )
+
     unload_after = apply_keep_alive(req.model, req.keep_alive)
     await _ensure_model_loaded(req.model, req.options)
     state = _get_state()

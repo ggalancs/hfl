@@ -44,6 +44,52 @@ def is_local_request(request: Request) -> bool:
     return client.host in _LOOPBACK_HOSTS
 
 
+def _reject_browser_origin(request: Request, operation: str) -> None:
+    """Refuse an administrative call that carries a cross-origin ``Origin``.
+
+    "Loopback peer == the owner" is the premise of this module, and it has
+    one hole: **the owner's browser is also a loopback peer**. Any page the
+    owner visits can issue requests to ``http://127.0.0.1:11434`` and they
+    arrive looking exactly like the owner working locally. CORS is what
+    stops this today — the default allow-list is empty, so a browser's
+    preflight for a JSON POST fails and the request is never sent — but
+    CORS is a *browser* control, not an authorization control: verified in
+    audit, a request that does reach the server is executed in full and
+    only the response is hidden from the page. And the project documents
+    ``cors_allow_all=True`` as a development option, which removes the
+    protection entirely.
+
+    So: a non-browser caller (CLI, container, SDK) never sends ``Origin``.
+    A cross-origin browser always does. Refusing administrative operations
+    that carry a foreign ``Origin`` closes the CSRF path without breaking
+    any legitimate client.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return  # CLI / SDK / container — no browser involved.
+
+    from hfl.config import config
+
+    if config.cors_allow_all:
+        return
+    if origin in (config.cors_origins or []):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": (
+                f"{operation} is an owner (administrative) operation and cannot be "
+                f"triggered from a web page (Origin: {origin}). Use the CLI or an "
+                "HTTP client, or add the origin to HFL_ORIGINS if you trust it."
+            ),
+            "code": "cross_origin_admin_forbidden",
+            "category": "auth",
+            "retryable": False,
+        },
+    )
+
+
 def require_owner(request: Request, operation: str = "this operation") -> None:
     """Refuse ``operation`` for remote callers unless remote admin is on.
 
@@ -53,8 +99,14 @@ def require_owner(request: Request, operation: str = "this operation") -> None:
 
     Raises:
         HTTPException: ``403`` when the caller is remote and
-            ``allow_remote_pull`` is not enabled.
+            ``allow_remote_pull`` is not enabled, or when the call carries
+            a cross-origin ``Origin`` header (see
+            :func:`_reject_browser_origin`).
     """
+    # Always first: a browser on the loopback interface passes the peer
+    # test below, so the Origin check has to run for local callers too.
+    _reject_browser_origin(request, operation)
+
     if is_local_request(request):
         return
 

@@ -2,6 +2,8 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for exception_handlers.py."""
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -108,18 +110,32 @@ class TestUnhandledExceptionHandler:
         assert resp.status_code == 500
         body = resp.json()  # must be JSON, not plain text
         assert body["code"] == "UnhandledError"
-        assert body["error_type"] == "RuntimeError"
-        assert "engine crashed" in body["message"]
+        assert body["request_id"]  # correlates with the server-side traceback
+
+    def test_exception_details_are_not_disclosed(self, client):
+        """The 2026-07-27 audit verified that this handler echoed
+        ``str(exc)`` and the exception class name to the client — a
+        synthetic error carrying a filesystem path and a token-shaped string
+        came back verbatim. Neither may appear in the response; the full
+        traceback belongs in the server log, found via ``request_id``.
+        """
+        body = client.get("/test-runtime-error").json()
+        blob = json.dumps(body)
+        assert "engine crashed" not in blob
+        assert "RuntimeError" not in blob
+        assert "error_type" not in body
+        assert "message" not in body
 
     def test_value_error_returns_structured_500(self, client):
         resp = client.get("/test-value-error")
         assert resp.status_code == 500
         body = resp.json()
-        assert body["error_type"] == "ValueError"
+        assert body["code"] == "UnhandledError"
+        assert "ValueError" not in json.dumps(body)
 
-    def test_message_is_capped_to_500_chars(self, client, app_with_handlers):
-        """Don't let a pathological exception message blow up the
-        response (or leak long internals)."""
+    def test_huge_exception_message_is_not_echoed(self, client, app_with_handlers):
+        """Previously the message was merely truncated to 500 chars. Now it
+        is not returned at all, so the response stays small regardless."""
 
         @app_with_handlers.get("/test-huge-msg")
         async def _huge():
@@ -128,7 +144,8 @@ class TestUnhandledExceptionHandler:
         client2 = TestClient(app_with_handlers, raise_server_exceptions=False)
         resp = client2.get("/test-huge-msg")
         assert resp.status_code == 500
-        assert len(resp.json()["message"]) <= 500
+        assert "x" * 100 not in resp.text
+        assert len(resp.text) < 500
 
     def test_unhandled_handler_logs_traceback(self, client):
         """Every 500 must produce a server-side traceback for diagnosis.

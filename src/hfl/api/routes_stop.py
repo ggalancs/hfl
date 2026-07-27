@@ -23,7 +23,7 @@ the ``status`` field to tell the three outcomes apart:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 from hfl.api.state import get_state
@@ -78,6 +78,7 @@ async def _unload_tts() -> None:
 async def stop_model(
     req: StopRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict[str, str | None]:
     """Unload the named model (or all models) from memory.
 
@@ -86,6 +87,9 @@ async def stop_model(
     Metal that can be seconds of delay a caller shouldn't have to wait
     for.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "stop")
     state = get_state()
 
     # Clear any keep-alive deadlines for the target model so /api/ps

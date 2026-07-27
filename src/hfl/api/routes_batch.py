@@ -42,7 +42,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -75,6 +75,7 @@ class BatchRequest(BaseModel):
 async def api_batch(
     req: BatchRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict[str, Any] | JSONResponse:
     """Run every prompt in ``req.requests`` against ``req.model``.
 
@@ -82,6 +83,9 @@ async def api_batch(
     abort the rest: they surface as ``{"error": "..."}`` entries at
     the matching index so clients can retry only the broken items.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "batch")
     unload_after = apply_keep_alive(req.model, req.keep_alive)
     try:
         await load_llm(req.model)

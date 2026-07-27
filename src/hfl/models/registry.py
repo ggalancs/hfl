@@ -14,6 +14,7 @@ Features:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -239,6 +240,13 @@ class ModelRegistry:
         temp_path = self.path.with_suffix(".json.tmp")
         try:
             temp_path.write_text(json.dumps(data, indent=2))
+            # SEC: owner-only. The registry records local filesystem paths,
+            # repo ids, license-acceptance state and provenance metadata.
+            # Under the default umask it lands 0644, readable by every other
+            # account on the host. chmod before the rename so the file is
+            # never briefly world-readable at its final name.
+            with contextlib.suppress(OSError):
+                temp_path.chmod(0o600)
             temp_path.replace(self.path)  # Atomic on POSIX
             logger.debug("Saved registry with %s models", len(self._models))
         except Exception as e:

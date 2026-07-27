@@ -37,14 +37,33 @@ backend on a Mac.
 
 ### Reaching the host from a container
 
-HFL binds to `127.0.0.1` by default, which a container cannot reach. Either:
+**On Docker Desktop for Mac, keep the default `127.0.0.1` bind — you do not
+need to widen it.** Docker Desktop proxies `host.docker.internal` through a
+userspace process on the host, so a connection from a container arrives at
+HFL as an ordinary loopback client. Verified in the server log, where
+requests originating inside containers appear as:
 
-- point clients at `http://host.docker.internal:11434` **and** start the
-  server with `HFL_HOST=0.0.0.0` (or `OLLAMA_HOST=0.0.0.0:11434`), or
-- keep the default bind and use `--network host` (Linux only).
+```
+INFO: 127.0.0.1:55806 - "POST /api/chat HTTP/1.1" 200 OK
+```
 
-Exposing `0.0.0.0` puts the inference API on your LAN. Set `HFL_API_KEY` if
-the machine is not on a trusted network.
+So:
+
+- point clients at `http://host.docker.internal:11434`, and change nothing
+  else. This is the correct and safest configuration.
+- on **Linux**, where there is no such proxy, either use `--network host` or
+  bind an address the container's network can reach.
+
+Widening the bind is a real exposure, not a formality: `0.0.0.0` publishes
+the inference API on every interface, and HFL's owner/user trust boundary
+then becomes the only thing standing between a stranger on the network and
+your models. If you genuinely need it, set an API key at the same time
+(`hfl serve --api-key …`) and read the warning `hfl serve` prints.
+
+> An earlier revision of this document recommended `HFL_HOST=0.0.0.0` for
+> containerised clients. That was wrong on both counts: it is unnecessary on
+> macOS, and until 0.19.0 `hfl serve` ignored `HFL_HOST` entirely (the flag's
+> default shadowed it), so the advice would not even have taken effect.
 
 ## 2. Plug the laptop in
 

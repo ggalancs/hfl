@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -197,13 +198,37 @@ def _parse(source: str) -> _Block:
 
 
 def _resolve_field(data: Any, path: tuple[str, ...]) -> Any:
+    """Walk a dotted template path over ``data``.
+
+    SEC: this used to fall back to a bare ``getattr`` on any object, and
+    the rendered value is stringified straight into the prompt. Templates
+    are attacker-controlled (``template`` in an /api/chat body, ``TEMPLATE``
+    in a Modelfile), so ``{{ .Prompt.__class__.__mro__ }}`` walked out of
+    the data dict and into Python's object graph — verified in audit. With
+    only primitives in the context there is no path to code execution (the
+    grammar has no call syntax), but it is a disclosure primitive that
+    would turn real the moment a richer object is passed as context.
+
+    Two rules close it without changing any legitimate template:
+
+    1. Segments starting with ``_`` never resolve — no dunder traversal.
+    2. Primitives have no template fields, so a lookup on one ends the
+       walk instead of exposing ``str``/``list`` internals.
+
+    Mapping and attribute lookup on ordinary objects still work, which is
+    what Modelfile templates (``{{ .Messages }}``, ``{{ .System }}``) need.
+    """
     current: Any = data
     for segment in path:
         if current is None:
             return None
-        if isinstance(current, dict):
+        if segment.startswith("_"):
+            return None
+        if isinstance(current, Mapping):
             current = current.get(segment)
             continue
+        if isinstance(current, (str, bytes, bytearray, int, float, bool, complex)):
+            return None
         current = getattr(current, segment, None)
     return current
 

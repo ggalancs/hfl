@@ -18,10 +18,13 @@ from hfl.api.admin_guard import is_local_request, require_owner
 from hfl.hub.license_checker import LicenseInfo, LicenseRisk, policy_allows
 
 
-def _request(host: str | None):
+def _request(host: str | None, headers: dict | None = None):
     """A stand-in for starlette's Request carrying only ``.client.host``."""
     client = None if host is None else SimpleNamespace(host=host)
-    return SimpleNamespace(client=client)
+    # ``headers`` is required: require_owner also rejects administrative
+    # calls carrying a cross-origin Origin (the browser-CSRF path), and a
+    # real Request always has them.
+    return SimpleNamespace(client=client, headers=headers or {})
 
 
 class TestIsLocalRequest:

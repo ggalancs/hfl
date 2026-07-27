@@ -5,6 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-07-27
+
+### Security
+
+A full audit of the API surface (44 HTTP routes + 1 WebSocket) found 14
+issues, then a second pass over the remediation itself found 3 more. All are
+closed and pinned by 52 regression tests in `tests/test_security_authz.py`.
+Reports live in `local/SECURITY_AUDIT_*.md`.
+
+- **The owner/user trust boundary now covers every administrative route.**
+  `require_owner()` guarded 3 of ~12; a remote peer could reach the other 8.
+  Verified before the fix: `POST /api/stop` returned 200 (evicting a 44 GiB
+  model), `POST /api/create` returned 200, and `/api/copy`, `/api/lora/*`,
+  `/api/snapshot/*` and `/api/batch` all executed their handler. In a
+  multi-consumer setup this let any client silently apply a LoRA that skewed
+  every other consumer's answers. A parametrised test over `ADMIN_ROUTES`
+  now fails if a new administrative route is added without a guard.
+- **Unhandled exceptions no longer leak their text.** The last-resort 500
+  handler returned `str(exc)` and the exception class name; a synthetic
+  error carrying a filesystem path and a token-shaped string came back to
+  the client verbatim. The response is now `{error, code, request_id}`, with
+  `request_id` always populated so the operator can still find the full
+  traceback in the log. This is the rule `routes_native` already documented
+  and applied — the generic handler was the one place that broke it.
+- **`agent_loop` is gated behind `HFL_ALLOW_AGENT_LOOP`.** It makes the
+  server dispatch MCP tool calls, and while the operator picks which servers
+  are connected, the *request* decides whether the loop runs and supplies the
+  prompt that steers which tool is invoked. Refused with 403 by default, and
+  checked before the model is resolved so a refusal can't double as a
+  model-existence oracle.
+- **Auth exemptions are exact paths, not prefixes.** uvicorn does not
+  normalise `..`, so the middleware saw `/health/../api/chat` verbatim and
+  skipped authentication for it; `/metricsfoo` was exempt too. Nothing was
+  reachable behind those paths, but any future route under a public prefix
+  would have turned it into a live bypass. The same prefix pattern was found
+  and fixed in the body-limit and rate-limit middlewares during the second
+  pass — fixing one instance had not fixed the class.
+- **`/metrics` requires the API key** when one is configured (opt out with
+  `HFL_METRICS_PUBLIC=true`). It exposes request and token volumes,
+  per-endpoint counters and live queue depth.
+- **Administrative routes refuse cross-origin browser calls.** The owner's
+  browser is also a loopback peer, so "local == owner" had a CSRF-shaped
+  hole; CORS blocked it only because the default allow-list is empty, and a
+  request that does arrive was executed in full with only the response
+  hidden. Requests carrying a foreign `Origin` are now refused outright.
+- **Template field resolution can no longer walk Python objects.**
+  Attacker-supplied templates (`template` in a chat body, `TEMPLATE` in a
+  Modelfile) could do `{{ .Prompt.__class__.__mro__ }}`. There was no path
+  to code execution — the grammar has no call syntax — but it was a
+  disclosure primitive waiting for a richer context object.
+- **`/api/transcribe` reads a bounded amount.** Exempt from the global body
+  limit, it buffered the whole upload before the 100 MB check, so an
+  unauthenticated caller could spill arbitrary data to the temp directory
+  and then into memory.
+- Smaller hardening: WebSocket API keys prefer headers over the query string
+  (which leaks into proxy logs and history); `models.json` is written `0600`;
+  failed authentications get a bounded per-peer backoff; `nosniff`,
+  `DENY` and `no-referrer` on every response; `Pillow>=12.3.0` (13
+  advisories, none reachable — `image_validator` parses headers by hand and
+  never hands user bytes to PIL — but the floor closes future exposure).
+
+### Changed
+
+Four behaviour changes an operator will notice:
+
+- **`hfl serve` on a public address now refuses to start without a TTY**
+  unless `HFL_ACCEPT_NETWORK_EXPOSURE=true`. The confirmation prompt used to
+  silently take its default under systemd/Docker/launchd — exactly where an
+  accidental exposure matters most. The check also now recognises `::` and
+  concrete LAN addresses, not just the literal `0.0.0.0`.
+- **`HFL_HOST` / `OLLAMA_HOST` finally work for `hfl serve`.** The `--host`
+  flag defaulted to the literal `127.0.0.1`, so `config.host` — which reads
+  both variables, and which `docs/env-vars.md` documents — was unreachable.
+  Precedence is now flag → env → loopback. Anyone who set `HFL_HOST=0.0.0.0`
+  expecting it to be ignored will now actually be exposed (with a warning).
+- **Third-party web UIs must be allow-listed for administrative calls.**
+  Browsers send `Origin` on same-origin POSTs too, so a UI such as Open
+  WebUI will get 403 when pulling a model until its origin is added to
+  `HFL_ORIGINS`. Non-browser clients (CLI, SDK, containers) send no `Origin`
+  and are unaffected.
+- **`/metrics` is authenticated** when an API key is set (see above).
+
+### Fixed
+
+- `docs/apple-silicon-and-docker-clients.md` recommended `HFL_HOST=0.0.0.0`
+  for containerised clients. It was wrong twice over: unnecessary on macOS,
+  where Docker Desktop proxies `host.docker.internal` so container traffic
+  arrives as loopback, and inert anyway because `hfl serve` ignored the
+  variable.
+- `server.py`'s module docstring advertised a `DELETE /api/delete` route
+  that does not exist. Deletion is deliberately CLI-only.
+
 ## [0.18.2] - 2026-07-27
 
 ### Fixed

@@ -52,7 +52,7 @@ import logging
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -320,7 +320,7 @@ async def _collect_final(gen: AsyncIterator[str]) -> dict[str, Any]:
 
 
 @router.post("/api/create")
-async def api_create(req: CreateRequest) -> Any:
+async def api_create(req: CreateRequest, request: Request) -> Any:
     """Create a new model from a Modelfile.
 
     Streaming is the default (Ollama parity); pass ``stream=false`` to
@@ -329,6 +329,9 @@ async def api_create(req: CreateRequest) -> Any:
     events on the stream (HTTP 200) so the connection semantics match
     Ollama exactly.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "create")
     generator = _create_generator(req)
     if req.stream:
         return StreamingResponse(

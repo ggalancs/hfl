@@ -219,7 +219,7 @@ class TestLlamaCppEngineLoraWiring:
 def client(temp_config):
     reset_state()
     reset_registry()
-    yield TestClient(app)
+    yield TestClient(app, client=("127.0.0.1", 50000))
     reset_state()
 
 

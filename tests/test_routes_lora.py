@@ -24,7 +24,7 @@ def fresh_lora_registry():
 @pytest.fixture
 def client(temp_config):
     reset_state()
-    yield TestClient(app)
+    yield TestClient(app, client=("127.0.0.1", 50000))
     reset_state()
 
 

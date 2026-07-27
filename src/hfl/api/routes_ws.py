@@ -269,14 +269,29 @@ def _check_ws_auth_and_origin(ws: WebSocket) -> tuple[bool, str | None]:
     state = get_state()
 
     # Step 1: API key.
+    #
+    # SEC: headers are tried FIRST and the query string is the last resort.
+    # A full URL ends up in reverse-proxy access logs, browser history and
+    # ``Referer`` headers, so a key carried there is a key that leaks. The
+    # query form cannot simply be removed — the browser WebSocket API
+    # cannot set custom headers on the handshake — but nothing forces a
+    # CLI or SDK client to use it, and until this change the query string
+    # took priority even when a proper header was present.
     if state.api_key:
-        provided: str | None = ws.query_params.get("api_key")
-        if not provided:
-            auth = ws.headers.get("authorization", "")
-            if auth.startswith("Bearer "):
-                provided = auth[7:]
+        provided: str | None = None
+        auth = ws.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            provided = auth[7:]
         if not provided:
             provided = ws.headers.get("x-api-key")
+        if not provided:
+            provided = ws.query_params.get("api_key")
+            if provided:
+                logger.warning(
+                    "WebSocket API key supplied in the query string; it will appear "
+                    "in proxy logs and browser history. Prefer the Authorization or "
+                    "X-API-Key header where the client allows it."
+                )
         expected = state.api_key.encode()
         if not provided or not _secrets.compare_digest(provided.encode(), expected):
             return False, "unauthorized"
