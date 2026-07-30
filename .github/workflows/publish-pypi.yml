@@ -93,6 +93,6 @@ jobs:
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
       - name: Sigstore attestation
-        uses: sigstore/gh-action-sigstore-python@v3.4.0
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
         with:
           inputs: ./dist/*.whl ./dist/*.tar.gz
