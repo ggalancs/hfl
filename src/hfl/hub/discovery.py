@@ -188,34 +188,17 @@ def _is_multimodal(tags: Iterable[str], pipeline_tag: str | None) -> bool:
 
 
 def _parameter_estimate_b(repo_id: str, tags: Iterable[str]) -> float | None:
-    """Best-effort parameter count from id / tags.
+    """Best-effort TOTAL parameter count from id / tags, in billions.
 
-    Hub model names usually advertise size: ``Llama-3.2-1B``,
-    ``Qwen2.5-7B``, ``Mixtral-8x7B``. Returns billions as float, or
-    ``None`` when no signal. Tolerant to variants like ``8x7B``
-    (Mixtral) — falls back to the second number.
+    Delegates to :mod:`hfl.hub.params`, which knows that the trailing
+    number in ``Qwen3-30B-A3B`` is the *active* count and not the model's
+    size. Returns ``None`` when the name cannot answer — discovery runs
+    over search results and must not pay a Hub round-trip per row, so it
+    reports "unknown" rather than guessing.
     """
-    import re
+    from hfl.hub.params import parse_params_from_name
 
-    full = repo_id + " " + " ".join(tags)
-    # Match ``<N>B`` where N may carry a decimal.
-    #
-    # The leading ``(?<!\d)`` and the bounded repetitions are what keep
-    # this linear. With a bare ``\d+(?:\.\d+)?`` the scanner can start a
-    # match at every digit of a long run and backtrack over the rest, so a
-    # Hub tag of a few thousand ``9``s costs O(n^2) (CodeQL
-    # ``py/polynomial-redos``). Anchoring the start to a non-digit means
-    # each run of digits is attempted once. The bounds are far above any
-    # real parameter count ("405B", "8x7B", "1.5B").
-    matches = re.findall(r"(?<!\d)(\d{1,6}(?:\.\d{1,3})?)\s*[Bb](?![A-Za-z])", full)
-    if not matches:
-        return None
-    try:
-        # Prefer the LAST match — repo names like ``Llama-3.1-8B-Instruct``
-        # have the size right before the variant tag.
-        return float(matches[-1])
-    except ValueError:
-        return None
+    return parse_params_from_name(repo_id + " " + " ".join(tags)).total_b
 
 
 # ---------------------------------------------------------------------------

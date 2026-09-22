@@ -28,6 +28,8 @@ from hfl.hub.quant_table import estimate_vram_gb
 if TYPE_CHECKING:
     from huggingface_hub import HfApi
 
+    from hfl.hub.params import ParamEstimate
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["SmartPullPlan", "build_smart_plan", "try_smart_plan"]
@@ -56,17 +58,28 @@ class SmartPullPlan:
     """Repo IDs probed and rejected (overflow, missing variant, ...).
     Useful for debugging / displayed verbatim by the CLI."""
 
+    total_params_b: float | None = None
+    """Parameters resident in memory, in billions. What the weights cost."""
+
+    active_params_b: float | None = None
+    """Parameters that run per token. Equals ``total_params_b`` on a dense
+    model; on a Mixture-of-Experts model it is much smaller, and it is the
+    figure the KV cache and the throughput follow."""
+
+    is_moe: bool = False
+    """Whether the target is a Mixture-of-Experts model."""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _params_b_from_repo(repo_id: str) -> float | None:
-    """Re-use the discovery heuristic for parameter count detection."""
-    from hfl.hub.discovery import _parameter_estimate_b
+def _params_for(repo_id: str, api: "HfApi | None") -> "ParamEstimate":
+    """Total + active parameter counts, asking the Hub when the name cannot say."""
+    from hfl.hub.params import estimate_params
 
-    return _parameter_estimate_b(repo_id, [])
+    return estimate_params(repo_id, api=api)
 
 
 def _budget_gb(profile: HardwareProfile) -> float:
@@ -220,12 +233,26 @@ def try_smart_plan(
     if profile is None:
         profile = get_hw_profile()
     budget = max_vram_gb or _budget_gb(profile)
-    params_b = _params_b_from_repo(base_repo_id) or 7.0
 
     if api is None:
         from huggingface_hub import HfApi as _HfApi
 
         api = _HfApi()
+
+    # Resolve the size BEFORE probing variants: every fit decision below
+    # depends on it, and the old ``or 7.0`` default turned "we could not
+    # tell" into "it is a 7B" — which planned a 24 GB pull for a 235B
+    # model and only failed after ~130 GB had been downloaded. Refusing
+    # is the smaller harm, and the reason says what to do about it.
+    params = _params_for(base_repo_id, api)
+    if params.total_b is None:
+        return None, (
+            f"cannot determine the size of {base_repo_id}: its name carries no "
+            f"parameter count and the Hub reports no file sizes. Pull it "
+            f"explicitly with `hfl pull {base_repo_id}` if you know it fits."
+        )
+    params_b = params.total_b
+    active_b = params.active_b or params.total_b
 
     fallback: list[str] = []
     candidates = _candidate_repos(base_repo_id, profile)
@@ -251,10 +278,18 @@ def try_smart_plan(
                 quants = ["f16"]
 
         for quant in quants:
-            estimate = estimate_vram_gb(params_b=params_b, quantization=quant)
+            estimate = estimate_vram_gb(
+                params_b=params_b, quantization=quant, active_params_b=active_b
+            )
             if estimate.total_gb <= budget:
+                shape = (
+                    f"{params_b:.0f}B total / {active_b:.0f}B active MoE"
+                    if params.is_moe
+                    else f"{params_b:.0f}B"
+                )
                 reason = (
-                    f"picked {repo} @ {quant} ({estimate.total_gb:.1f} GB / {budget:.1f} GB budget)"
+                    f"picked {repo} @ {quant} ({shape}, "
+                    f"{estimate.total_gb:.1f} GB / {budget:.1f} GB budget)"
                 )
                 return (
                     SmartPullPlan(
@@ -263,6 +298,9 @@ def try_smart_plan(
                         estimated_vram_gb=estimate.total_gb,
                         reason=reason,
                         fallback_chain=fallback,
+                        total_params_b=params_b,
+                        active_params_b=active_b,
+                        is_moe=params.is_moe,
                     ),
                     None,
                 )

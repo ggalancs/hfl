@@ -100,9 +100,17 @@ class TestClassifiers:
             ("Qwen/Qwen2.5-1.5B", [], 1.5),
             ("google/gemma-3-27b-it", [], 27.0),
             ("mistralai/Mistral-7B-v0.3", [], 7.0),
-            # Mixtral name carries 8x7B; we keep the LAST B-suffixed
-            # number, which is "7" here.
-            ("mistralai/Mixtral-8x7B-Instruct", [], 7.0),
+            # ``8x7B`` says "Mixture of Experts" without saying how big.
+            # Reporting 7 here was the bug: that is one expert, and the
+            # model is 46.7B resident. Discovery does not pay a Hub
+            # round-trip per search row, so it reports "unknown" and
+            # smart-pull resolves it from file sizes when it matters.
+            # See tests/test_hub_params.py.
+            ("mistralai/Mixtral-8x7B-Instruct", [], None),
+            # The regression that motivated the split: the trailing A3B
+            # is the ACTIVE count, and reading it as the size under-
+            # estimated this model's memory by 6.5x.
+            ("Qwen/Qwen3-30B-A3B", [], 30.0),
             ("user/no-signal", [], None),
         ],
     )

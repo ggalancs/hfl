@@ -126,22 +126,34 @@ def estimate_vram_gb(
     quantization: str,
     n_ctx: int = 4096,
     kv_cache_type: str = "f16",
+    active_params_b: float | None = None,
 ) -> FitEstimate:
     """Conservative VRAM estimate (GB) for serving this configuration.
 
     Total = weights + KV cache + overhead × 1.2 safety.
 
+    The two terms read different numbers on a Mixture-of-Experts model,
+    which is why ``active_params_b`` exists. Weights scale with every
+    parameter resident in memory, experts included. The KV cache does
+    not: it scales with layer count and hidden size, and a 30B-A3B is
+    built like a small dense model wearing many experts, not like a 30B
+    dense one. Sizing its cache from the total would overstate it as
+    surely as sizing its weights from the active count understates them.
+
     Args:
-        params_b: Parameter count in billions.
+        params_b: TOTAL parameters in billions — sizes the weights.
         quantization: One of the keys in ``_BITS_PER_WEIGHT``.
             Unknown strings fall back to ``f16`` (the worst case).
         n_ctx: Context length used to size the KV cache.
         kv_cache_type: ``f16`` / ``q8_0`` / ``q4_0``.
+        active_params_b: Parameters that run per token — sizes the KV
+            cache. Defaults to ``params_b``, so every dense caller keeps
+            its previous answer to the byte.
     """
     bits = _BITS_PER_WEIGHT.get(quantization.lower(), _BITS_PER_WEIGHT["f16"])
     weights_gb = (params_b * 1e9 * bits) / (8 * 1024**3)
 
-    bucket = _round_to_known_size(params_b)
+    bucket = _round_to_known_size(active_params_b if active_params_b is not None else params_b)
     layers = _LAYERS_BY_SIZE[bucket]
     hidden = _KV_HIDDEN_PER_LAYER_BY_SIZE[bucket]
     kv_bytes = _KV_BYTES_PER_ELEMENT.get(kv_cache_type.lower(), 2.0)
