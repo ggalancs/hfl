@@ -21,12 +21,17 @@ Decision logic for TTS:
   3. Auto-detect based on config.json
 """
 
+import logging
 import os
+import platform
+import re
 from pathlib import Path
 from typing import cast
 
 from hfl.converter.formats import ModelFormat, ModelType, detect_format, detect_model_type
 from hfl.engine.base import AudioEngine, InferenceEngine
+
+logger = logging.getLogger(__name__)
 
 
 class MissingDependencyError(Exception):
@@ -87,6 +92,52 @@ def _mlx_preferred() -> bool:
     return mlx_engine.is_available()
 
 
+# Models already advised about, so a chatty server does not repeat itself
+# on every load. Keyed by path: a different quantisation of the same model
+# is a different decision and deserves its own line.
+_MLX_ADVISED: set[str] = set()
+
+
+def _advise_mlx_alternative(model_path: str | Path) -> None:
+    """Point out that an MLX build of this model would likely be faster.
+
+    Only on Apple Silicon, only when ``mlx-lm`` is already installed, and
+    only for a GGUF — the three conditions under which the operator can
+    act on the advice today.
+
+    Deliberately **offline**. Confirming that ``mlx-community/<model>``
+    exists would mean a Hub round-trip on every model load, and loading a
+    local model must not require the network. So the wording promises a
+    build *may* exist and names the command that checks; it never claims
+    one does. An advisory that overstates what it knows is how a user
+    learns to ignore advisories.
+    """
+    if os.environ.get("HFL_NO_MLX_HINT", "").strip() in ("1", "true", "True", "yes"):
+        return
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        return
+    if not _mlx_preferred():
+        return
+
+    key = str(model_path)
+    if key in _MLX_ADVISED:
+        return
+    _MLX_ADVISED.add(key)
+
+    stem = Path(model_path).stem
+    # Community GGUF names carry the quantisation; the MLX fork will not.
+    base = re.split(r"[.-](?:[IiQq]\d|f16|bf16|f32)", stem)[0]
+
+    logger.info(
+        "Serving %s through llama.cpp (Metal). On Apple Silicon an MLX build of "
+        "the same model is typically faster, most of all on prompt processing. "
+        "Look for one with: hfl search mlx-community/%s    (silence this with "
+        "HFL_NO_MLX_HINT=1)",
+        stem,
+        base,
+    )
+
+
 def _resolve_forced_backend() -> str | None:
     """Read the server-level backend override from the environment.
 
@@ -143,8 +194,12 @@ def select_engine(
 
     # Auto-selection
     if fmt == ModelFormat.GGUF:
-        # GGUF stays on llama-cpp (Metal on macOS). MLX does not
-        # ingest GGUF, so no opportunity to route it there.
+        # GGUF stays on llama-cpp (Metal on macOS). MLX does not ingest
+        # GGUF, so this file cannot be routed there — but on Apple
+        # Silicon an MLX *build* of the same model usually can, and is
+        # markedly faster. Say so once instead of silently serving the
+        # slower path.
+        _advise_mlx_alternative(model_path)
         return _get_llama_cpp_engine()
 
     # Safetensors / pytorch weights. On Apple Silicon with mlx-lm
