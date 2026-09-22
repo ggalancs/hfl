@@ -231,6 +231,23 @@ class InferenceEngine(ABC):
         return 0
 
     @property
+    def supports_concurrent_inference(self) -> bool:
+        """Whether two inferences may run against this engine at once.
+
+        ``False`` for every backend that drives a single non-reentrant model
+        instance — llama.cpp and Transformers-GPU both keep one KV cache, so
+        overlapping calls corrupt each other's state and produce garbage
+        rather than an error. Only a backend with its own internal batching
+        scheduler (vLLM) may report ``True``.
+
+        The dispatcher's ``max_inflight`` is clamped to 1 when the loaded
+        engine reports ``False``, so an operator who sets
+        ``HFL_NUM_PARALLEL`` / ``OLLAMA_NUM_PARALLEL`` out of habit gets a
+        warning and a safe server instead of silent corruption.
+        """
+        return False
+
+    @property
     def acceleration(self) -> str | None:
         """Human-readable summary of the hardware the model is running on.
 

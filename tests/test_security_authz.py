@@ -384,3 +384,56 @@ class TestLogRedaction:
         configure_logging(level="INFO")
         filters = logging.getLogger("uvicorn.access").filters
         assert any(isinstance(f, SensitiveQueryFilter) for f in filters)
+
+
+class TestConcurrencyCannotBeForced:
+    """A misconfiguration must not be able to put two inferences on one
+    non-reentrant model. The failure mode there is silently corrupted output
+    — the KV cache of two conversations interleaved — which no exception
+    surfaces and no test downstream would catch.
+
+    ``HFL_NUM_PARALLEL`` / ``OLLAMA_NUM_PARALLEL`` are accepted for drop-in
+    parity with Ollama, where a parallel slot is a separate model process.
+    HFL has one in-process instance, so the knob must be neutralised rather
+    than trusted.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("configured", [2, 4, 16, 256])
+    async def test_operator_cannot_raise_slots_on_llama_cpp(self, configured):
+        from unittest.mock import MagicMock, patch
+
+        from hfl.api.state import ServerState
+        from hfl.engine.dispatcher import InferenceDispatcher
+
+        state = ServerState()
+        dispatcher = InferenceDispatcher(max_inflight=configured, max_queued=8)
+        engine = MagicMock()
+        engine.supports_concurrent_inference = False
+        engine.is_loaded = True
+
+        with patch.object(ServerState, "_try_get_dispatcher", return_value=dispatcher):
+            await state.set_llm_engine(engine, MagicMock())
+
+        assert dispatcher.max_inflight == 1, (
+            f"HFL_NUM_PARALLEL={configured} survived against a non-reentrant "
+            "backend; two threads could interleave on one KV cache"
+        )
+
+    def test_clamp_cannot_be_undone(self):
+        """Nothing may widen the capacity back after the safety clamp."""
+        from hfl.engine.dispatcher import InferenceDispatcher
+
+        d = InferenceDispatcher(max_inflight=8, max_queued=8)
+        d.clamp_max_inflight(1)
+        for attempt in (2, 8, 1024):
+            assert d.clamp_max_inflight(attempt) is False
+        assert d.max_inflight == 1
+
+    def test_unknown_engine_defaults_to_serialised(self):
+        """An engine that does not declare the property is treated as unsafe.
+        Fail-safe: a plugin backend predating the flag must not be assumed
+        able to batch."""
+        from hfl.engine.base import InferenceEngine
+
+        assert InferenceEngine.supports_concurrent_inference.fget(object()) is False  # type: ignore[attr-defined]

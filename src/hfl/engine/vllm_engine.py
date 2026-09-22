@@ -59,6 +59,17 @@ class VLLMEngine(InferenceEngine):
     def model_name(self) -> str:
         return self._model_path
 
+    @property
+    def supports_concurrent_inference(self) -> bool:
+        """vLLM batches concurrent requests in its own scheduler.
+
+        The only backend HFL ships that may run more than one inference at a
+        time: continuous batching is the whole point of vLLM, and overlapping
+        requests share the paged KV cache safely. So ``HFL_NUM_PARALLEL > 1``
+        is meaningful here, unlike llama.cpp / Transformers.
+        """
+        return True
+
     def _ensure_loop(self) -> None:
         """Start a background event loop for async operations."""
         if self._loop is None or not self._loop.is_running():

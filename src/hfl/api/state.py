@@ -15,10 +15,13 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from datetime import datetime  # noqa: F401 — used in type comments / methods
@@ -150,6 +153,7 @@ class ServerState:
             if prev is None or prev is engine or not prev.is_loaded:
                 self._engine = engine
                 self._current_model = model
+                self._enforce_engine_concurrency(engine)
                 return
 
             # There is a loaded previous engine to retire. Retire it BEFORE
@@ -170,6 +174,9 @@ class ServerState:
                     await asyncio.to_thread(prev.unload)
                 self._engine = engine
                 self._current_model = model
+                # Runs inside ``exclusive()`` below — every slot is drained,
+                # which is the precondition ``clamp_max_inflight`` requires.
+                self._enforce_engine_concurrency(engine)
 
             # Drain in-flight dispatcher inference first, so no slot-holding
             # HTTP request (stream or non-stream) is mid-read of ``prev`` when
@@ -181,6 +188,38 @@ class ServerState:
                     await _retire_and_assign()
             else:  # pragma: no cover — dispatcher always present in running app
                 await _retire_and_assign()
+
+    def _enforce_engine_concurrency(self, engine: "InferenceEngine | None") -> None:
+        """Clamp dispatcher concurrency to 1 for a non-reentrant backend.
+
+        ``HFL_NUM_PARALLEL`` / ``OLLAMA_NUM_PARALLEL`` exist for drop-in
+        parity with Ollama, where each parallel slot is a separate model
+        process. HFL runs one in-process model instance, and llama.cpp /
+        Transformers keep a single KV cache: two overlapping
+        ``create_chat_completion`` calls interleave their state and yield
+        corrupted output — not an exception, just silently wrong text.
+        Neither engine has an internal lock, so nothing else would catch it.
+
+        Rather than trust the operator to know that, honour the engine's own
+        declaration (:attr:`InferenceEngine.supports_concurrent_inference`)
+        and say plainly what happened. vLLM, which batches internally, keeps
+        whatever the operator configured.
+        """
+        if engine is None:
+            return
+        if getattr(engine, "supports_concurrent_inference", False):
+            return
+        dispatcher = self._try_get_dispatcher()
+        if dispatcher is None:
+            return
+        if dispatcher.clamp_max_inflight(1):
+            logger.warning(
+                "%s cannot serve concurrent inference (single non-reentrant model "
+                "instance with one KV cache); dispatcher concurrency clamped to 1. "
+                "HFL_NUM_PARALLEL / OLLAMA_NUM_PARALLEL only takes effect on a "
+                "backend that batches internally, such as vLLM.",
+                type(engine).__name__,
+            )
 
     @staticmethod
     def _try_get_dispatcher() -> "InferenceDispatcher | None":

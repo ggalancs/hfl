@@ -285,8 +285,26 @@ class HFLConfig:
     default_tts_format: str = "wav"  # wav, mp3, ogg
 
     # Timeouts (seconds)
-    model_load_timeout: float = 300.0  # 5 minutes
-    generation_timeout: float = 600.0  # 10 minutes
+    #
+    # ``generation_timeout`` caps a single inference. 600 s is generous for
+    # chat but short for long-form generation on a large model: a 70B at
+    # ~7 tok/s needs ~5 minutes for 2000 tokens *plus* prompt processing,
+    # so a big prompt and a high ``num_predict`` can legitimately exceed it
+    # and surface as a 504. Configurable because the right value depends on
+    # the model and the workload, not on HFL.
+    #
+    # ``model_load_timeout`` bounds a cold load; a 44 GiB GGUF that is not
+    # in the page cache can take minutes on slow storage.
+    model_load_timeout: float = field(
+        default_factory=lambda: float(
+            os.environ.get("HFL_MODEL_LOAD_TIMEOUT")
+            or os.environ.get("OLLAMA_LOAD_TIMEOUT")
+            or "300"
+        )
+    )
+    generation_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("HFL_GENERATION_TIMEOUT", "600"))
+    )
     download_timeout: float = 3600.0  # 1 hour
     conversion_timeout: float = 7200.0  # 2 hours
     api_request_timeout: float = 120.0  # 2 minutes

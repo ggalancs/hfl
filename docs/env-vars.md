@@ -30,6 +30,12 @@ the host string does not.
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
 | `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `1`     | Models kept resident in `ModelPool` (LRU eviction). |
 
+> **`HFL_NUM_PARALLEL` / `OLLAMA_NUM_PARALLEL` only take effect on a backend that
+> batches internally (vLLM).** llama.cpp and Transformers drive a single
+> non-reentrant model instance with one KV cache: two overlapping requests would
+> interleave their state and produce corrupted text, not an error. When such an
+> engine is loaded the dispatcher is clamped to 1 slot and a warning is logged.
+
 ## Lifecycle / keep-alive
 
 | HFL                | Ollama alias        | Default | What it does |
@@ -67,6 +73,8 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 | HFL                     | Ollama alias | Default        | What it does |
 |-------------------------|--------------|----------------|--------------|
 | `HFL_ALLOW_REMOTE_PULL` | —            | `false`        | When truthy, allows non-loopback callers to hit `/api/pull`, `/api/pull/smart` and `/api/push`. Default refuses them with `403 remote_admin_forbidden`. Enable only if you knowingly administer this server remotely (the API key still guards it). |
+| `HFL_GENERATION_TIMEOUT` | —           | `600`          | Seconds a single inference may run before the server answers 504. Generous for chat, short for long-form generation: a 70B at ~7 tok/s needs ~5 min for 2000 tokens *plus* prompt processing, so raise it if you set a high `num_predict`. Your HTTP client's timeout should be larger than this, so the server cuts first and you get a clean 504. |
+| `HFL_MODEL_LOAD_TIMEOUT` | `OLLAMA_LOAD_TIMEOUT` | `300` | Seconds a cold model load may take. A 44 GiB GGUF that is not in the page cache can exceed this on slow storage. |
 | `HFL_ALLOW_AGENT_LOOP`  | —            | `false`        | When truthy, allows `/api/chat` requests to set `agent_loop: true`, which makes the server dispatch MCP tool calls on the caller's behalf. The operator chooses which MCP servers are connected, but the request supplies the prompt that steers *which* tool runs with *which* arguments — so with capable tools connected this hands their reach to anyone who can reach the API. Default refuses with `403 agent_loop_disabled`. |
 | `HFL_METRICS_PUBLIC`    | —            | `false`        | When truthy, serves `/metrics` and `/metrics/json` without the API key. They expose request and token volumes, per-endpoint counters and live queue depth — a usage side-channel. Enable only for a Prometheus that cannot authenticate. Has no effect when no API key is configured (nothing is authenticated then). |
 | `HFL_ACCEPT_NETWORK_EXPOSURE` | —      | `false`        | Unattended consent for binding a non-loopback address. `hfl serve` warns and asks for confirmation before exposing the API; without a TTY (systemd, Docker, launchd) there is nobody to ask, so it refuses unless this is truthy. |

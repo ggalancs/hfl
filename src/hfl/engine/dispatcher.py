@@ -121,6 +121,43 @@ class InferenceDispatcher:
         self._rejected_full_total = 0
         self._rejected_timeout_total = 0
 
+    def clamp_max_inflight(self, limit: int) -> bool:
+        """Lower the in-flight capacity to ``limit``. Returns True if changed.
+
+        Exists for one purpose: the engine that will actually run the
+        inference is not known when the dispatcher is built (no model is
+        loaded yet), so a backend that cannot take concurrent calls can only
+        be honoured once it is loaded. ``ServerState.set_llm_engine`` calls
+        this at that point.
+
+        **Only ever narrows**, never widens: a request to raise the limit is
+        ignored, so this can't be used to undo a safety clamp.
+
+        Replacing the semaphore is safe *only* while nothing holds a slot.
+        The single caller satisfies that: on a first load there is no engine
+        to be running on, and on a swap ``set_llm_engine`` has already
+        drained every slot through ``exclusive()``. Callers outside that
+        contract would leak permits, hence the guard below.
+        """
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if limit >= self._max_inflight:
+            return False
+        if self._in_flight:
+            # Refuse rather than corrupt the permit count. The caller is
+            # violating the drained-state contract.
+            logger.warning(
+                "refusing to clamp dispatcher concurrency to %d with %d request(s) "
+                "in flight; capacity stays at %d",
+                limit,
+                self._in_flight,
+                self._max_inflight,
+            )
+            return False
+        self._max_inflight = limit
+        self._sem = asyncio.Semaphore(limit)
+        return True
+
     # -- Introspection --------------------------------------------------
 
     @property
