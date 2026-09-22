@@ -65,6 +65,14 @@ OLLAMA_PARITY_PLAN*.md
 local/
 coverage.json
 
+# uv lockfile. Deliberately NOT tracked: hfl is a published library, so what
+# users resolve comes from the ranges in pyproject.toml and a lock would not
+# reach them. Nothing in the repo reads it either — every workflow and
+# scripts/ci-local.sh install with `pip install -e ".[dev]"`. Committing it
+# would add ~1.8 MB that goes stale with nothing to catch it. Revisit only
+# alongside switching CI to `uv sync --frozen`.
+uv.lock
+
 # Claude Code (local agent tooling — not part of the project)
 CLAUDE.md
 .claude/
