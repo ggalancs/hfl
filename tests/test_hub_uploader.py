@@ -275,10 +275,11 @@ class TestStreamPushScoping:
 class TestSecretRedaction:
     """V6 ν4 — HF tokens never reach the client error envelope.
 
-    The HF SDK sometimes embeds the bearer token in exception
-    messages; ``stream_push`` yields ``str(exc)`` and logs it. The
-    ``redact_secrets`` helper masks anything matching
-    ``hf_[A-Za-z0-9]{20,}`` before either sink sees it.
+    The HF SDK sometimes embeds the bearer token in exception messages.
+    The client envelope now carries no exception text at all (only a
+    reference to the log line), so the remaining sink is the traceback on
+    its way to the log — ``redact_secrets`` masks anything matching
+    ``hf_[A-Za-z0-9]{20,}`` before it is written.
     """
 
     def test_redact_secrets_masks_hf_token(self):
@@ -314,7 +315,7 @@ class TestSecretRedaction:
         assert "hf_path" in redact_secrets(msg)
 
     @pytest.mark.asyncio
-    async def test_create_repo_failure_redacts_token_in_event(self, tmp_path, manifest_factory):
+    async def test_create_repo_failure_keeps_token_out_of_event(self, tmp_path, manifest_factory):
         """When create_repo's exception carries a token, the failure
         event the client receives must NOT contain the token."""
         (tmp_path / "model.gguf").write_bytes(b"x")
@@ -328,12 +329,13 @@ class TestSecretRedaction:
         events = [event async for event in stream_push(plan, api=api)]
         last = events[-1]
         assert last["status"] == "failed"
-        # The token must NOT have made it into the error string.
+        # The token must NOT have made it into the error string — nor, now,
+        # any other part of the exception.
         assert "hf_leakedtoken1234567890abc" not in last["error"]
-        assert "hf_***REDACTED***" in last["error"]
+        assert "401 Unauthorized" not in last["error"]
 
     @pytest.mark.asyncio
-    async def test_upload_folder_failure_redacts_token_in_event(self, tmp_path, manifest_factory):
+    async def test_upload_folder_failure_keeps_token_out_of_event(self, tmp_path, manifest_factory):
         (tmp_path / "model.gguf").write_bytes(b"x")
         plan = build_upload_plan(manifest_factory(tmp_path), target_repo_id="user/repo")
 
@@ -347,4 +349,31 @@ class TestSecretRedaction:
         last = events[-1]
         assert last["status"] == "failed"
         assert "hf_secrettoken1234567890aaa" not in last["error"]
-        assert "hf_***REDACTED***" in last["error"]
+
+    @pytest.mark.asyncio
+    async def test_token_is_masked_in_the_log_too(self, tmp_path, manifest_factory, caplog):
+        """The log is the other sink, and the one that still carries the
+        exception. ``logger.exception`` has no filter hook, so the previous
+        code wrote the raw token there; the traceback is now masked before
+        it is handed to the handler."""
+        import logging
+
+        (tmp_path / "model.gguf").write_bytes(b"x")
+        plan = build_upload_plan(manifest_factory(tmp_path), target_repo_id="user/repo")
+
+        api = MagicMock()
+        api.create_repo = MagicMock(
+            side_effect=RuntimeError("401 Unauthorized: invalid token hf_leakedtoken1234567890abc")
+        )
+
+        with caplog.at_level(logging.ERROR):
+            events = [event async for event in stream_push(plan, api=api)]
+
+        assert events[-1]["status"] == "failed"
+        assert "hf_leakedtoken1234567890abc" not in caplog.text
+        assert "hf_***REDACTED***" in caplog.text
+        # The log still identifies the failure, and the reference in the
+        # client's envelope points at this line.
+        assert "401 Unauthorized" in caplog.text
+        ref = events[-1]["error"].split("(ref ")[1].split(")")[0]
+        assert ref in caplog.text

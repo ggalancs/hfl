@@ -16,8 +16,10 @@ import json
 import logging
 import re
 import sys
+import traceback
+import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 # Import unified tracing from core module
 from hfl.core.tracing import get_request_id, set_request_id
@@ -31,6 +33,7 @@ __all__ = [
     "log_request",
     "log_model_load",
     "log_error",
+    "log_internal_failure",
 ]
 
 
@@ -274,3 +277,44 @@ def log_error(message: str, exc: Exception | None = None) -> None:
     """Log an error with optional exception."""
     logger = get_logger()
     logger.error(message, exc_info=exc is not None)
+
+
+def log_internal_failure(
+    log: logging.Logger,
+    operation: str,
+    exc: BaseException,
+    *,
+    scrub: Callable[[str], str] | None = None,
+) -> str:
+    """Record an unexpected failure in full and return what a client may see.
+
+    The full exception — type, message, traceback — goes to the server log,
+    where the operator can read it. The string handed back names the
+    operation that failed and a random reference that ties the response to
+    that log line; it carries nothing derived from the exception itself.
+
+    This is the boundary HFL already draws elsewhere: the machine's owner
+    reads the logs, a *remote* caller does not get to learn the server's
+    filesystem layout, library versions or internal state from an error
+    envelope (CodeQL ``py/stack-trace-exposure``). The reference is what
+    keeps the two halves joinable — a user can quote it in a bug report.
+
+    Args:
+        log: Logger of the module that caught the failure.
+        operation: Short name of what failed, e.g. ``"upload_folder"``.
+        exc: The caught exception. Logged with its traceback.
+        scrub: Optional filter applied to the formatted traceback before it
+            is logged. ``logger.exception`` offers no such hook — it hands
+            the traceback straight to the handler — so a caller whose
+            exceptions can carry a credential (the HF SDK embeds the bearer
+            token in some messages) passes its masker here.
+
+    Returns:
+        A message safe to place in a response body.
+    """
+    ref = uuid.uuid4().hex[:12]
+    detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    if scrub is not None:
+        detail = scrub(detail)
+    log.error("%s failed [ref=%s]\n%s", operation, ref, detail.rstrip())
+    return f"{operation} failed (ref {ref}) — see the hfl server log for detail"

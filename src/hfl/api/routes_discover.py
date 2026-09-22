@@ -23,6 +23,7 @@ from hfl.hub.discovery import (
     DiscoveryResult,
     search_hub,
 )
+from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +116,10 @@ async def api_discover(
     try:
         entries = search_hub(query)
     except Exception as exc:
-        logger.exception("Hub discovery failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
+        # huggingface_hub quotes request URLs in its exceptions, and on an
+        # auth failure whatever it was sent. Those stay in the log.
+        detail = log_internal_failure(logger, "Hub discovery", exc)
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     cache.put(query, entries)
     _annotate_local_availability(entries)

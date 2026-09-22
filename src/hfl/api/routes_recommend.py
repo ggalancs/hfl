@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from hfl.hub.hw_profile import get_hw_profile
 from hfl.hub.recommend import Recommendation, recommend_models
+from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,10 @@ async def api_recommend(
             top_n=top_n,
         )
     except Exception as exc:
-        logger.exception("recommendation failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
+        # huggingface_hub quotes request URLs in its exceptions, and on an
+        # auth failure whatever it was sent. Those stay in the log.
+        detail = log_internal_failure(logger, "recommendation", exc)
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     return {
         "hardware_profile": asdict(profile),

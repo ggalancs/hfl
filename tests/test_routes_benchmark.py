@@ -149,6 +149,28 @@ class TestBenchmarkFailureSurfaces:
         # non-stream path reraises as 400.
         assert response.status_code in (400, 404)
 
+    def test_unknown_model_event_names_the_model_not_the_resolver(self, client, monkeypatch):
+        """``/api/benchmark`` carries no owner guard, so the caller may be
+        a remote user. The failure names what they asked for; the
+        resolver's own message — which spells out where on disk we looked
+        — stays server-side (``py/stack-trace-exposure``).
+        """
+        from hfl.api import routes_benchmark as module
+
+        async def _missing(name):
+            raise FileNotFoundError(f"no such file: /Users/secret/.hfl/models/{name}.gguf")
+
+        monkeypatch.setattr(module, "load_llm", _missing)
+
+        response = client.post(
+            "/api/benchmark/does-not-exist",
+            json={"runs_per_length": 1, "prompt_lengths": [16], "stream": True},
+        )
+        events = _parse_ndjson(response.text)
+        assert events[-1]["status"] == "failed"
+        assert events[-1]["error"] == "model not found: does-not-exist"
+        assert "/Users/secret" not in response.text
+
     def test_engine_none_fails_gracefully(self, client, monkeypatch):
         from hfl.api import routes_benchmark as module
 

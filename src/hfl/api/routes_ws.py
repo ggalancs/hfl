@@ -44,6 +44,9 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from hfl.exceptions import HFLError
+from hfl.logging_config import log_internal_failure
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["HFL Beyond"])
@@ -128,8 +131,14 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
 
     try:
         engine, _ = await load_llm(model_name)
+    except HFLError as exc:
+        # HFL's own errors carry a message we wrote for the caller
+        # (ModelNotFoundError, ModelTypeMismatchError, ...).
+        await _send(ws, {"type": "error", "message": str(exc)})
+        return
     except Exception as exc:
-        await _send(ws, {"type": "error", "message": f"load_llm failed: {exc}"})
+        detail = log_internal_failure(logger, "load_llm", exc)
+        await _send(ws, {"type": "error", "message": detail})
         return
 
     if engine is None:
@@ -175,7 +184,11 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
             for token in engine.chat_stream(chat_msgs, cfg):
                 loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
         except Exception as exc:  # pragma: no cover — surface as error frame
-            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
+            # Backend exceptions (llama.cpp, torch) name paths and internals.
+            # The socket gets the reference, the log gets the traceback — the
+            # same posture the OpenAI / Ollama streaming paths already take.
+            detail = log_internal_failure(logger, "chat stream", exc)
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", detail))
         finally:
             # The engine is no longer being read — release the pin so a
             # displaced engine can finally be unloaded.

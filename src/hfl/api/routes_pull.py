@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from hfl.hub.license_checker import LicenseInfo
     from hfl.hub.resolver import ResolvedModel
 
+from hfl.logging_config import log_internal_failure
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ollama"])
@@ -248,7 +250,10 @@ async def _run_pull_streaming(
     try:
         resolved = await asyncio.to_thread(resolve, req.model, quantization, req.revision)
     except Exception as exc:  # pragma: no cover — error envelope tested via mock
-        yield _event("error", error=f"Failed to resolve {req.model!r}: {exc}")
+        # ``resolve`` talks to the Hub and the local cache; its failures quote
+        # URLs and on-disk paths. Reference the log line instead.
+        detail = log_internal_failure(logger, f"resolving {req.model!r}", exc)
+        yield _event("error", error=detail)
         return
 
     # --- License gate: owner policy, no human in the loop here ----------
@@ -303,7 +308,8 @@ async def _run_pull_streaming(
     try:
         local_path = await download_task
     except Exception as exc:
-        yield _event("error", error=str(exc))
+        detail = log_internal_failure(logger, "download", exc)
+        yield _event("error", error=detail)
         return
 
     # Measure the actual on-disk size so the final event reports a

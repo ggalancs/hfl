@@ -285,3 +285,75 @@ class TestLogFunctions:
             raise ValueError("Test error")
         except ValueError as e:
             log_error("An error occurred", exc=e)
+
+
+class TestLogInternalFailure:
+    """``log_internal_failure`` is the split between what the operator may
+    read and what a remote caller may read (CodeQL ``py/stack-trace-exposure``).
+    """
+
+    def test_returned_message_carries_no_exception_text(self):
+        import logging
+
+        from hfl.logging_config import log_internal_failure
+
+        log = logging.getLogger("hfl.test.internal_failure")
+        try:
+            raise RuntimeError("boom at /Users/secret/.hfl/models.json")
+        except RuntimeError as exc:
+            message = log_internal_failure(log, "upload_folder", exc)
+
+        assert "upload_folder failed" in message
+        assert "boom" not in message
+        assert "/Users/secret" not in message
+        assert "RuntimeError" not in message
+
+    def test_reference_joins_the_message_to_the_log_line(self, caplog):
+        import logging
+
+        from hfl.logging_config import log_internal_failure
+
+        log = logging.getLogger("hfl.test.internal_failure")
+        with caplog.at_level(logging.ERROR):
+            try:
+                raise RuntimeError("boom")
+            except RuntimeError as exc:
+                message = log_internal_failure(log, "create_repo", exc)
+
+        ref = message.split("(ref ")[1].split(")")[0]
+        assert ref in caplog.text
+        # The operator's half keeps everything the client's half dropped.
+        assert "boom" in caplog.text
+        assert "RuntimeError" in caplog.text
+        assert "Traceback" in caplog.text
+
+    def test_each_call_gets_a_distinct_reference(self):
+        import logging
+
+        from hfl.logging_config import log_internal_failure
+
+        log = logging.getLogger("hfl.test.internal_failure")
+        exc = RuntimeError("boom")
+        assert log_internal_failure(log, "op", exc) != log_internal_failure(log, "op", exc)
+
+    def test_scrub_filters_the_traceback_before_it_is_logged(self, caplog):
+        """``logger.exception`` offers no filter hook, which is why the
+        traceback is formatted here and handed to ``scrub`` first."""
+        import logging
+
+        from hfl.logging_config import log_internal_failure
+
+        log = logging.getLogger("hfl.test.internal_failure")
+        with caplog.at_level(logging.ERROR):
+            try:
+                raise RuntimeError("token hf_leakedtoken1234567890abc rejected")
+            except RuntimeError as exc:
+                log_internal_failure(
+                    log,
+                    "create_repo",
+                    exc,
+                    scrub=lambda t: t.replace("hf_leakedtoken1234567890abc", "***"),
+                )
+
+        assert "hf_leakedtoken1234567890abc" not in caplog.text
+        assert "***" in caplog.text

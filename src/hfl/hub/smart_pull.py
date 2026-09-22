@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SmartPullPlan", "build_smart_plan"]
+__all__ = ["SmartPullPlan", "build_smart_plan", "try_smart_plan"]
 
 
 @dataclass
@@ -174,7 +174,35 @@ def build_smart_plan(
     api: "HfApi | None" = None,
     max_vram_gb: float | None = None,
 ) -> SmartPullPlan:
+    """Resolve the best available variant for the current host, or raise.
+
+    Thin wrapper over :func:`try_smart_plan` for the in-process callers
+    (CLI, tests) that want the failure as an exception. The HTTP layer uses
+    ``try_smart_plan`` instead, so that the "nothing fits" explanation
+    reaches the client as a plain value rather than as an exception message
+    — text taken off a caught exception is exactly what
+    ``py/stack-trace-exposure`` exists to stop, even when, as here, we wrote
+    the sentence ourselves.
+    """
+    plan, reason = try_smart_plan(base_repo_id, profile=profile, api=api, max_vram_gb=max_vram_gb)
+    if plan is None:
+        raise ValueError(reason)
+    return plan
+
+
+def try_smart_plan(
+    base_repo_id: str,
+    *,
+    profile: HardwareProfile | None = None,
+    api: "HfApi | None" = None,
+    max_vram_gb: float | None = None,
+) -> tuple[SmartPullPlan | None, str | None]:
     """Resolve the best available variant for the current host.
+
+    Returns ``(plan, None)`` on success and ``(None, reason)`` when nothing
+    fits the budget — ``reason`` is the same sentence
+    :func:`build_smart_plan` raises, safe to show a caller because it is
+    built from the request and our own probe log, not from an exception.
 
     Probe order:
 
@@ -185,9 +213,9 @@ def build_smart_plan(
     3. For each (repo, quant), estimate VRAM. First combination
        that fits the budget wins.
 
-    Raises ``ValueError`` when nothing fits — caller should bubble
-    up as 400 with a helpful message ("model too large for this
-    hardware; try ``--max-vram-gb`` or a smaller repo").
+    A ``None`` plan should bubble up as 400 with ``reason`` attached
+    ("model too large for this hardware; try ``--max-vram-gb`` or a
+    smaller repo").
     """
     if profile is None:
         profile = get_hw_profile()
@@ -228,18 +256,21 @@ def build_smart_plan(
                 reason = (
                     f"picked {repo} @ {quant} ({estimate.total_gb:.1f} GB / {budget:.1f} GB budget)"
                 )
-                return SmartPullPlan(
-                    target_repo_id=repo,
-                    quantization=quant,
-                    estimated_vram_gb=estimate.total_gb,
-                    reason=reason,
-                    fallback_chain=fallback,
+                return (
+                    SmartPullPlan(
+                        target_repo_id=repo,
+                        quantization=quant,
+                        estimated_vram_gb=estimate.total_gb,
+                        reason=reason,
+                        fallback_chain=fallback,
+                    ),
+                    None,
                 )
             fallback.append(
                 f"{repo}@{quant}: needs {estimate.total_gb:.1f} GB > budget {budget:.1f} GB"
             )
 
-    raise ValueError(
+    return None, (
         f"no variant of {base_repo_id} fits the {budget:.1f} GB budget. "
         f"Tried: {', '.join(fallback) or 'none'}"
     )

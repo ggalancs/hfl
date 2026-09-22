@@ -263,27 +263,38 @@ def sanitize_path(base_dir: Path, user_path: str) -> Path:
 
     Raises:
         PathTraversalError: If path would escape base_dir
+
+    Containment is ``os.path.realpath`` followed by a single
+    ``startswith`` guard, rather than ``Path.relative_to`` inside a
+    ``try/except``. The two are equivalent to a human reader, but only the
+    first reads as a barrier to a data-flow analyser, so the old shape left
+    ``py/path-injection`` open on every caller that fed a request body
+    through here. Two details are load-bearing and easy to undo by accident:
+
+    * the trailing separator on BOTH sides. Comparing bare prefixes would
+      accept ``/home/u/.hfl-evil`` as living inside ``/home/u/.hfl``;
+      appending the separator to the candidate too is what still lets
+      ``base_dir`` itself through.
+    * the guard is ``if not target.startswith(prefix)`` and nothing else.
+      Folding a second condition in with ``and`` re-opens the finding —
+      on the false edge of ``A and B`` neither operand is known to be
+      false, so the analyser can no longer conclude the prefix held.
     """
-    # Normalize the base directory
-    base_dir = base_dir.resolve()
+    # Resolve both sides to real, symlink-free absolute paths BEFORE
+    # comparing — otherwise a symlink inside base_dir could point out of it
+    # and still compare as contained.
+    base = os.path.realpath(str(base_dir))
+    prefix = base.rstrip(os.sep) + os.sep
 
-    # Handle user path
-    if Path(user_path).is_absolute():
-        # For absolute paths, ensure they're within base_dir
-        target = Path(user_path).resolve()
-    else:
-        # For relative paths, join with base and resolve
-        target = (base_dir / user_path).resolve()
+    raw = user_path if os.path.isabs(user_path) else os.path.join(base, user_path)
+    target = os.path.realpath(raw) + os.sep
 
-    # Verify the target is within base_dir
-    try:
-        target.relative_to(base_dir)
-    except ValueError:
-        raise PathTraversalError(
-            f"Path '{user_path}' would escape base directory '{base_dir}'"
-        ) from None
+    if not target.startswith(prefix):
+        raise PathTraversalError(f"Path '{user_path}' would escape base directory '{base}'")
 
-    return target
+    # ``Path`` drops the trailing separator, so the returned value is the
+    # same object the pre-``startswith`` version returned.
+    return Path(target)
 
 
 def sanitize_model_name(name: str) -> str:

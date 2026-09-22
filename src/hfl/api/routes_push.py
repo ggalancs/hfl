@@ -148,7 +148,14 @@ async def api_push(req: PushRequest, request: Request) -> StreamingResponse | JS
             target_repo_id=target,
             revision=req.revision,
         )
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        # The message names ``manifest.local_path`` — server layout. The
+        # caller only needs to know which model could not be read.
+        raise HTTPException(
+            status_code=400, detail=f"model files are missing or unreadable: {req.model}"
+        ) from exc
+    except ValueError as exc:
+        # Our own sentence about the destination the caller supplied.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     api = _build_api()

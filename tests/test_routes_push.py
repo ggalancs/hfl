@@ -185,21 +185,29 @@ class TestPushValidation:
 
 
 class TestPushFailureSurfaces:
-    def test_hub_failure_emits_failed_event(self, client, registered_model, fake_hf_api):
+    def test_hub_failure_emits_failed_event(self, client, registered_model, fake_hf_api, caplog):
+        import logging
+
         fake_hf_api.upload_folder.side_effect = RuntimeError("hub said nope")
 
-        response = client.post(
-            "/api/push",
-            json={
-                "model": registered_model.name,
-                "destination": "user/qwen-clone",
-                "stream": True,
-            },
-        )
+        with caplog.at_level(logging.ERROR):
+            response = client.post(
+                "/api/push",
+                json={
+                    "model": registered_model.name,
+                    "destination": "user/qwen-clone",
+                    "stream": True,
+                },
+            )
         assert response.status_code == 200  # NDJSON itself succeeds
         events = [json.loads(line) for line in response.text.splitlines() if line]
         assert events[-1]["status"] == "failed"
-        assert "hub said nope" in events[-1]["error"]
+        # The failing step is named so a client can tell "never created the
+        # repo" from "created it and the bytes failed"...
+        assert "upload_folder failed" in events[-1]["error"]
+        # ...but the SDK's own words stay server-side (py/stack-trace-exposure).
+        assert "hub said nope" not in events[-1]["error"]
+        assert "hub said nope" in caplog.text
 
 
 REMOTE_PEER = ("203.0.113.7", 5555)

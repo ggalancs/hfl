@@ -163,7 +163,11 @@ class TestPullStreaming:
         events = _parse_ndjson(response.content)
         assert any(e["status"] == "error" for e in events)
         error = next(e for e in events if e["status"] == "error")
-        assert "disk full" in error["error"]
+        # The downloader's exception names paths and the failing syscall; the
+        # client gets the step plus a reference to the log line that has them
+        # (py/stack-trace-exposure).
+        assert "download failed" in error["error"]
+        assert "disk full" not in error["error"]
 
 
 class TestPullNonStreaming:
@@ -176,8 +180,13 @@ class TestPullNonStreaming:
         # Duration is attached so scripts can log it.
         assert "_duration_seconds" in body
 
-    def test_non_stream_returns_500_on_error(self, client):
-        with patch("hfl.hub.resolver.resolve", side_effect=RuntimeError("boom")):
+    def test_non_stream_returns_500_on_error(self, client, caplog):
+        import logging
+
+        with (
+            caplog.at_level(logging.ERROR),
+            patch("hfl.hub.resolver.resolve", side_effect=RuntimeError("boom")),
+        ):
             response = client.post(
                 "/api/pull",
                 json={"model": "x/y", "stream": False},
@@ -185,7 +194,13 @@ class TestPullNonStreaming:
         assert response.status_code == 500
         body = response.json()
         assert body["status"] == "error"
-        assert "boom" in body["error"]
+        # The resolver's own words stay in the log; the body names the step
+        # and carries the reference that joins the two.
+        assert "resolving 'x/y'" in body["error"]
+        assert "boom" not in body["error"]
+        ref = body["error"].split("(ref ")[1].split(")")[0]
+        assert ref in caplog.text
+        assert "boom" in caplog.text
 
 
 class TestPullValidation:

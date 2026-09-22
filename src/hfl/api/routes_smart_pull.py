@@ -19,6 +19,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from hfl.logging_config import log_internal_failure
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["HFL Beyond"])
@@ -49,16 +51,21 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
     """
     yield json.dumps({"status": "planning"}) + "\n"
 
-    from hfl.hub.smart_pull import build_smart_plan
+    from hfl.hub.smart_pull import try_smart_plan
 
+    # ``try_smart_plan`` hands back the "nothing fits" explanation as a
+    # value, so the helpful message survives without any exception text
+    # reaching the wire. Anything it still *raises* is by definition
+    # unexpected, and only its reference goes out.
     try:
-        plan = build_smart_plan(req.model, max_vram_gb=req.max_vram_gb)
-    except ValueError as exc:
-        yield json.dumps({"status": "failed", "error": str(exc)}) + "\n"
-        return
+        plan, reason = try_smart_plan(req.model, max_vram_gb=req.max_vram_gb)
     except Exception as exc:
-        logger.exception("smart_pull planning failed")
-        yield json.dumps({"status": "failed", "error": f"planning failed: {exc}"}) + "\n"
+        detail = log_internal_failure(logger, "smart-pull planning", exc)
+        yield json.dumps({"status": "failed", "error": detail}) + "\n"
+        return
+
+    if plan is None:
+        yield json.dumps({"status": "failed", "error": reason}) + "\n"
         return
 
     yield (

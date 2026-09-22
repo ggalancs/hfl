@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from hfl.hub.draft_picker import pick_draft_for
+from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,10 @@ async def api_draft_recommend(
     try:
         pick = pick_draft_for(model, max_ratio=max_ratio)
     except Exception as exc:  # pragma: no cover — Hub failure is upstream
-        logger.exception("draft recommender failed")
-        raise HTTPException(status_code=503, detail=f"Hub unavailable: {exc}") from exc
+        # huggingface_hub quotes request URLs in its exceptions, and on an
+        # auth failure whatever it was sent. Those stay in the log.
+        detail = log_internal_failure(logger, "draft recommender", exc)
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     return {
         "target": model,

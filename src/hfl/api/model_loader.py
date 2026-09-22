@@ -288,7 +288,9 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
             try:
                 safe_adapters.append(str(sanitize_path(base, str(adapter))))
             except PathTraversalError as exc:
-                raise ValueError(f"adapter path rejected: {exc}") from exc
+                # Don't echo the containment message: it prints the base
+                # directory. ``from exc`` keeps the detail for the log.
+                raise ValueError("adapter path rejected: outside the HFL data dir") from exc
         load_kwargs["lora_paths"] = safe_adapters
     engine.load(manifest.local_path, **load_kwargs)
 

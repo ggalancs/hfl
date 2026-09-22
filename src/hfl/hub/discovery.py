@@ -199,7 +199,15 @@ def _parameter_estimate_b(repo_id: str, tags: Iterable[str]) -> float | None:
 
     full = repo_id + " " + " ".join(tags)
     # Match ``<N>B`` where N may carry a decimal.
-    matches = re.findall(r"(\d+(?:\.\d+)?)\s*[Bb](?![A-Za-z])", full)
+    #
+    # The leading ``(?<!\d)`` and the bounded repetitions are what keep
+    # this linear. With a bare ``\d+(?:\.\d+)?`` the scanner can start a
+    # match at every digit of a long run and backtrack over the rest, so a
+    # Hub tag of a few thousand ``9``s costs O(n^2) (CodeQL
+    # ``py/polynomial-redos``). Anchoring the start to a non-digit means
+    # each run of digits is attempted once. The bounds are far above any
+    # real parameter count ("405B", "8x7B", "1.5B").
+    matches = re.findall(r"(?<!\d)(\d{1,6}(?:\.\d{1,3})?)\s*[Bb](?![A-Za-z])", full)
     if not matches:
         return None
     try:

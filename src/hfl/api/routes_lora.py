@@ -64,19 +64,35 @@ async def api_lora_apply(req: ApplyLoraRequest, request: Request) -> dict[str, A
     try:
         safe_lora_path = str(sanitize_path(hfl.config.config.home_dir, req.lora_path))
     except PathTraversalError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # ``PathTraversalError`` names the base directory it contained the
+        # path to; that is the server's layout, not the caller's business.
+        # Same wording routes_create.py already uses for this rejection.
+        raise HTTPException(
+            status_code=400,
+            detail="lora_path must be inside the HFL data dir",
+        ) from exc
 
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``load_llm`` raises ``ModelNotFoundError`` for an unregistered
+        # model; a ``FileNotFoundError`` here means the engine could not
+        # open the blob, and the OS message spells out its path. Name the
+        # model the caller asked for instead (py/stack-trace-exposure).
+        raise HTTPException(
+            status_code=404, detail=f"model not found or unreadable: {req.model}"
+        ) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
     try:
         info = apply_lora(engine, lora_path=safe_lora_path, scale=req.scale, name=req.name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``safe_lora_path`` is an absolute path under the HFL home dir;
+        # echo back what the caller sent, not where it landed on disk.
+        raise HTTPException(
+            status_code=404, detail=f"LoRA adapter not found: {req.lora_path}"
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -102,7 +118,13 @@ async def api_lora_remove(req: RemoveLoraRequest, request: Request) -> dict[str,
     try:
         engine, _ = await load_llm(req.model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``load_llm`` raises ``ModelNotFoundError`` for an unregistered
+        # model; a ``FileNotFoundError`` here means the engine could not
+        # open the blob, and the OS message spells out its path. Name the
+        # model the caller asked for instead (py/stack-trace-exposure).
+        raise HTTPException(
+            status_code=404, detail=f"model not found or unreadable: {req.model}"
+        ) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
@@ -131,7 +153,13 @@ async def api_lora_list_for_model(model: str) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(model)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``load_llm`` raises ``ModelNotFoundError`` for an unregistered
+        # model; a ``FileNotFoundError`` here means the engine could not
+        # open the blob, and the OS message spells out its path. Name the
+        # model the caller asked for instead (py/stack-trace-exposure).
+        raise HTTPException(
+            status_code=404, detail=f"model not found or unreadable: {model}"
+        ) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
     return {"model": model, "adapters": [asdict(a) for a in list_loras(engine)]}

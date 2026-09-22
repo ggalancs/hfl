@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Iterable
 
+from hfl.logging_config import log_internal_failure
+
 if TYPE_CHECKING:
     from huggingface_hub import HfApi
 
@@ -37,10 +39,13 @@ logger = logging.getLogger(__name__)
 __all__ = ["UploadPlan", "build_upload_plan", "stream_push", "redact_secrets"]
 
 
-# V6 ν4 — token masking. HF SDK occasionally embeds the bearer token
-# in its exception message (and we ``logger.exception`` those, plus
-# yield ``str(exc)`` to the client). Anything matching ``hf_[A-Za-z0-9]{20,}``
-# is redacted before either sink sees it.
+# V6 ν4 — token masking. The HF SDK occasionally embeds the bearer token
+# in its exception message. The client no longer sees exception text at all
+# (it gets a reference to the log line instead), so this now guards the
+# remaining sink: the formatted traceback on its way to the log. It is
+# passed to ``log_internal_failure`` as ``scrub`` because ``logger.exception``
+# has no filter hook — the previous code called it directly, which wrote the
+# unmasked token to the log despite this comment claiming otherwise.
 _HF_TOKEN_RE = _re.compile(r"hf_[A-Za-z0-9]{20,}")
 
 
@@ -185,8 +190,8 @@ async def stream_push(
             exist_ok=True,
         )
     except Exception as exc:
-        logger.exception("create_repo failed for %s", plan.repo_id)
-        yield {"status": "failed", "error": redact_secrets(f"create_repo: {exc}")}
+        detail = log_internal_failure(logger, "create_repo", exc, scrub=redact_secrets)
+        yield {"status": "failed", "error": detail}
         return
 
     yield {
@@ -224,8 +229,8 @@ async def stream_push(
             allow_patterns=allow_patterns,
         )
     except Exception as exc:
-        logger.exception("upload_folder failed for %s", plan.repo_id)
-        yield {"status": "failed", "error": redact_secrets(f"upload_folder: {exc}")}
+        detail = log_internal_failure(logger, "upload_folder", exc, scrub=redact_secrets)
+        yield {"status": "failed", "error": detail}
         return
 
     revision = plan.revision or "main"

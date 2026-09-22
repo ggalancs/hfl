@@ -32,7 +32,7 @@ def client(temp_config):
 
 @pytest.fixture
 def fake_smart_plan(monkeypatch):
-    """Replace ``build_smart_plan`` with a predictable fake so the
+    """Replace ``try_smart_plan`` with a predictable fake so the
     HF SDK is never reached during these tests."""
     from hfl.hub.smart_pull import SmartPullPlan
 
@@ -45,17 +45,17 @@ def fake_smart_plan(monkeypatch):
     )
 
     def _build(*args, **kwargs):
-        return plan
+        return plan, None
 
     from hfl.api import routes_smart_pull as module
 
-    monkeypatch.setattr(module, "build_smart_plan", _build, raising=False)
+    monkeypatch.setattr(module, "try_smart_plan", _build, raising=False)
 
     # The function is imported lazily inside _stream_smart_pull; patch
     # the source module too so the late binding picks the fake.
     from hfl.hub import smart_pull as src
 
-    monkeypatch.setattr(src, "build_smart_plan", _build)
+    monkeypatch.setattr(src, "try_smart_plan", _build)
     return plan
 
 
@@ -154,17 +154,20 @@ class TestSmartPullStreaming:
 
         def _build(repo_id, *, profile=None, api=None, max_vram_gb=None):
             captured["max_vram_gb"] = max_vram_gb
-            return SmartPullPlan(
-                target_repo_id=repo_id,
-                quantization="q4_k_m",
-                estimated_vram_gb=5.0,
-                reason="ok",
-                fallback_chain=[],
+            return (
+                SmartPullPlan(
+                    target_repo_id=repo_id,
+                    quantization="q4_k_m",
+                    estimated_vram_gb=5.0,
+                    reason="ok",
+                    fallback_chain=[],
+                ),
+                None,
             )
 
         from hfl.hub import smart_pull as src
 
-        monkeypatch.setattr(src, "build_smart_plan", _build)
+        monkeypatch.setattr(src, "try_smart_plan", _build)
 
         client.post(
             "/api/pull/smart",
@@ -193,10 +196,10 @@ class TestSmartPullNonStream:
         message in the detail."""
         from hfl.hub import smart_pull as src
 
-        def _boom(*args, **kwargs):
-            raise ValueError("no variant of meta-llama/foo fits the 8.0 GB budget")
+        def _no_fit(*args, **kwargs):
+            return None, "no variant of meta-llama/foo fits the 8.0 GB budget"
 
-        monkeypatch.setattr(src, "build_smart_plan", _boom)
+        monkeypatch.setattr(src, "try_smart_plan", _no_fit)
 
         response = client.post(
             "/api/pull/smart",
@@ -210,13 +213,15 @@ class TestSmartPullNonStream:
 
 
 class TestSmartPullFailures:
-    def test_streaming_planner_value_error_emits_failed(self, client, monkeypatch):
+    def test_streaming_planner_no_fit_emits_reason_verbatim(self, client, monkeypatch):
+        """ "Nothing fits this host" is an answer, not a crash: the planner
+        returns it as a value and the client gets that sentence intact."""
         from hfl.hub import smart_pull as src
 
-        def _boom(*args, **kwargs):
-            raise ValueError("no variant fits")
+        def _no_fit(*args, **kwargs):
+            return None, "no variant fits"
 
-        monkeypatch.setattr(src, "build_smart_plan", _boom)
+        monkeypatch.setattr(src, "try_smart_plan", _no_fit)
 
         response = client.post(
             "/api/pull/smart",
@@ -227,19 +232,36 @@ class TestSmartPullFailures:
         assert events[-1]["status"] == "failed"
         assert "no variant fits" in events[-1]["error"]
 
-    def test_streaming_planner_unexpected_exception_emits_failed(self, client, monkeypatch):
+    def test_streaming_planner_unexpected_exception_hides_exception_text(
+        self, client, monkeypatch, caplog
+    ):
+        """An unexpected planner crash must not spell itself out on the
+        wire (``py/stack-trace-exposure``): the client gets a reference,
+        the operator gets the traceback in the log."""
+        import logging
+
         from hfl.hub import smart_pull as src
 
         def _boom(*args, **kwargs):
-            raise RuntimeError("hub network broken")
+            raise RuntimeError("hub network broken at /Users/secret/.hfl")
 
-        monkeypatch.setattr(src, "build_smart_plan", _boom)
+        monkeypatch.setattr(src, "try_smart_plan", _boom)
 
-        events = _parse_ndjson(client.post("/api/pull/smart", json={"model": "x/y"}).text)
+        with caplog.at_level(logging.ERROR):
+            events = _parse_ndjson(client.post("/api/pull/smart", json={"model": "x/y"}).text)
+
+        error = events[-1]["error"]
         assert events[-1]["status"] == "failed"
-        # Generic failures are wrapped with a "planning failed" prefix
-        # so the client can distinguish them from value errors.
-        assert "planning failed" in events[-1]["error"]
+        assert "smart-pull planning failed" in error
+        # The exception's own words never reach the client...
+        assert "hub network broken" not in error
+        assert "/Users/secret" not in error
+        # ...but the reference in the response points at the log line that
+        # does carry them, so the failure stays diagnosable.
+        ref = error.split("(ref ")[1].split(")")[0]
+        assert len(ref) == 12
+        assert ref in caplog.text
+        assert "hub network broken" in caplog.text
 
 
 # --- Validation -------------------------------------------------------------

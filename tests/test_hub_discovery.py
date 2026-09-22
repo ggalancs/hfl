@@ -109,6 +109,27 @@ class TestClassifiers:
     def test_parameter_estimate(self, repo_id, tags, expected):
         assert _parameter_estimate_b(repo_id, tags) == expected
 
+    def test_long_digit_run_does_not_blow_up(self):
+        """``py/polynomial-redos`` regression.
+
+        Repo ids and tags come off the Hub, so an attacker-authored model
+        page chooses this input. With the size matcher's digit run left
+        unbounded, the scanner restarts inside every digit and the cost is
+        quadratic: ~1.2 s at 8k digits and ~8 s at 20k on the machine this
+        was written on. The bound keeps it flat, so a budget far above any
+        honest parse still fails loudly if the quantifier is unbounded
+        again.
+        """
+        import time
+
+        payload = "9" * 20_000  # no trailing "B" — the worst case, all backtracking
+
+        start = time.perf_counter()
+        assert _parameter_estimate_b(payload, []) is None
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 1.0, f"size matcher took {elapsed:.2f}s on a 20k digit run"
+
 
 # --- entry conversion -------------------------------------------------------
 

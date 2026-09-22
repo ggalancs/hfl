@@ -55,6 +55,41 @@ class TestSanitizePath:
         result = sanitize_path(temp_dir, ".")
         assert result == temp_dir.resolve()
 
+    def test_sibling_with_shared_prefix_is_blocked(self, temp_dir):
+        """``/x/.hfl-evil`` is not inside ``/x/.hfl``.
+
+        The containment check is a string prefix comparison, so it is only
+        correct because both sides carry a trailing separator. Drop either
+        one and this sibling walks straight in.
+        """
+        base = temp_dir / "hfl"
+        base.mkdir()
+        sibling = temp_dir / "hfl-evil"
+        sibling.mkdir()
+        (sibling / "secret").write_text("s")
+
+        with pytest.raises(PathTraversalError):
+            sanitize_path(base, str(sibling / "secret"))
+
+    def test_base_directory_itself_is_allowed(self, temp_dir):
+        """The trailing separator must not lock out ``base_dir`` itself."""
+        base = temp_dir / "hfl"
+        base.mkdir()
+        assert sanitize_path(base, str(base)) == base.resolve()
+
+    def test_symlink_escaping_base_is_blocked(self, temp_dir):
+        """Containment is decided after ``realpath``, so a symlink planted
+        inside the base directory cannot be used to read outside it."""
+        base = temp_dir / "hfl"
+        base.mkdir()
+        outside = temp_dir / "outside"
+        outside.mkdir()
+        (outside / "secret").write_text("s")
+        (base / "escape").symlink_to(outside)
+
+        with pytest.raises(PathTraversalError):
+            sanitize_path(base, "escape/secret")
+
 
 class TestSanitizeModelName:
     """Tests for sanitize_model_name function."""

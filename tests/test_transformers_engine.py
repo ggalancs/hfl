@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the TransformersEngine backend."""
 
+import contextlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -396,9 +397,18 @@ class _Inputs(dict):
         return self
 
 
+@contextlib.contextmanager
 def _stream_engine(generate_side_effect):
     """Build a TransformersEngine whose generate() is driven by the given
-    side effect, with a real iterable streamer (transformers/torch mocked)."""
+    side effect, with a real iterable streamer (transformers/torch mocked).
+
+    A context manager, not a bare generator. As a bare generator, the
+    ``patch.dict`` was only undone when the object happened to be garbage
+    collected — which lands inside a *later* test and rips
+    ``sys.modules["transformers"]`` back out from under it, so
+    ``generate_stream`` fails on its import. It reproduced whenever
+    coverage was on (which shifts collection timing), i.e. on every CI run.
+    """
     import sys
     from unittest.mock import MagicMock, patch
 
@@ -425,9 +435,7 @@ class TestTransformersStreamLifecycle:
             # Simulate generate() dying mid-stream (OOM / shape / CUDA error).
             raise RuntimeError("CUDA OOM")
 
-        gen = _stream_engine(_boom)
-        engine = next(gen)
-        with pytest.raises(RuntimeError, match="CUDA OOM"):
+        with _stream_engine(_boom) as engine, pytest.raises(RuntimeError, match="CUDA OOM"):
             list(engine.generate_stream("hello"))
 
     def test_successful_stream_yields_all_tokens(self):
@@ -437,6 +445,5 @@ class TestTransformersStreamLifecycle:
                 streamer._q.put(tok)
             streamer.end()
 
-        gen = _stream_engine(_emit)
-        engine = next(gen)
-        assert list(engine.generate_stream("hello")) == ["Hel", "lo", "!"]
+        with _stream_engine(_emit) as engine:
+            assert list(engine.generate_stream("hello")) == ["Hel", "lo", "!"]

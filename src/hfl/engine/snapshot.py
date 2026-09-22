@@ -207,7 +207,8 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     try:
         state = save_fn()
     except Exception as exc:
-        raise RuntimeError(f"engine.save_state() failed: {exc}") from exc
+        logger.exception("engine.save_state() failed for snapshot %r", name)
+        raise RuntimeError("engine.save_state() failed") from exc
 
     state_path = _state_path(name)
     raw = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
@@ -294,7 +295,8 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     try:
         load_fn(state)
     except Exception as exc:
-        raise RuntimeError(f"engine.load_state() failed: {exc}") from exc
+        logger.exception("engine.load_state() failed for snapshot %r", name)
+        raise RuntimeError("engine.load_state() failed") from exc
 
     return SnapshotMeta(**meta_data)
 

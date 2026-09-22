@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from hfl.api.model_loader import load_llm
+from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,11 @@ async def _stream_events(model: str, req: BenchmarkRequest) -> AsyncIterator[str
 
     try:
         engine, _ = await load_llm(model)
-    except FileNotFoundError as exc:
-        yield json.dumps({"status": "failed", "error": str(exc)}) + "\n"
+    except FileNotFoundError:
+        # This endpoint has no owner guard, so the caller may be a remote
+        # *user*: name the model they asked for, never the resolver's
+        # message — that one spells out where on disk we looked.
+        yield json.dumps({"status": "failed", "error": f"model not found: {model}"}) + "\n"
         return
 
     if engine is None:
@@ -49,8 +53,8 @@ async def _stream_events(model: str, req: BenchmarkRequest) -> AsyncIterator[str
         ):
             yield json.dumps(event) + "\n"
     except Exception as exc:
-        logger.exception("benchmark failed for %s", model)
-        yield json.dumps({"status": "failed", "error": f"benchmark: {exc}"}) + "\n"
+        detail = log_internal_failure(logger, "benchmark", exc)
+        yield json.dumps({"status": "failed", "error": detail}) + "\n"
 
 
 @router.post(
