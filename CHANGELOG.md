@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-09-22
+
+### Security
+
+The ten open CodeQL alerts on the repository are closed, and the sites that
+share their shape but that the queries do not model were swept with them.
+
+- **`py/path-injection` (3).** `sanitize_path` did contain the path, but with
+  the check inside a `try/except` no data-flow analyser could see it. It is
+  now `os.path.realpath` followed by a single `startswith` guard. The
+  trailing separator on both sides is load-bearing: it rejects
+  `/home/u/.hfl-evil` as a sibling of `/home/u/.hfl` while still admitting
+  the base directory itself. Behaviour is unchanged — verified against the
+  previous implementation over 21 cases including symlink escape.
+- **`py/polynomial-redos` (1).** The `<N>B` parameter-size matcher restarted
+  inside every digit of a run, and repo ids and tags come off the Hub, so an
+  attacker-authored model page chose the input. Bounded: 20k digits go from
+  ~8 s to 0.2 ms, with identical results over 30k fuzz inputs.
+- **`py/stack-trace-exposure` (6), plus 16 more sites the query cannot see.**
+  Exception text was reaching response bodies. The rule now applied
+  throughout: a message HFL wrote for the caller goes out verbatim, a message
+  from the OS, the Hub SDK or an inference backend does not — it goes to the
+  log, and the caller gets the failing step plus a reference that joins the
+  two. `GET /api/lora/{model}` and `/api/verify/{model}` carry no owner guard
+  and were handing a remote user the on-disk path of the model blob.
+  `tests/test_error_exposure.py` pins both halves of the rule.
+- `uploader.py` claimed to mask the HuggingFace token before "either sink"
+  saw it, but `logger.exception` has no filter hook and wrote it to the log
+  unmasked. The traceback is now scrubbed before it is logged.
+
+**Behaviour change an integrator notices:** error bodies on those endpoints
+no longer echo the underlying exception. A client that matched on the text of
+`detail` must key on the HTTP status instead.
+
+### Added
+
+- `InferenceEngine.supports_concurrent_inference`. `HFL_NUM_PARALLEL` /
+  `OLLAMA_NUM_PARALLEL` exist for drop-in parity with Ollama, where a
+  parallel slot is a separate model process. HFL runs one in-process model
+  instance, and llama.cpp and Transformers-GPU each keep a single KV cache
+  with no internal lock, so raising the knob let two threads interleave
+  `create_chat_completion` on the same object — silently corrupted text, not
+  an exception. The dispatcher is now clamped to one slot when such a backend
+  is loaded, with a warning saying why. vLLM, which batches internally over a
+  paged KV cache, keeps whatever the operator configured.
+- `HFL_GENERATION_TIMEOUT` (default `600`) and `HFL_MODEL_LOAD_TIMEOUT`
+  (default `300`, alias `OLLAMA_LOAD_TIMEOUT`). `generation_timeout` was
+  hard-coded: a 70B at ~7 tok/s needs about five minutes for 2000 tokens plus
+  prompt processing, so long-form generation legitimately exceeded it and
+  surfaced as a 504 with no way to tune it. Both are documented in
+  `docs/env-vars.md`.
+
+### Fixed
+
+- `tests/test_transformers_engine.py` used a bare generator as a fixture, so
+  its `patch.dict` was only undone when the garbage collector happened to
+  collect it — under coverage that landed inside a later test and removed
+  `sys.modules["transformers"]` from under it. `scripts/ci-local.sh` was red
+  on every run because of it. Now a context manager.
+
+### Dependencies
+
+- `fastapi` ceiling raised to `<0.142`, `uvicorn[standard]` to `<0.53`
+  (verified against the top of both ranges: fastapi 0.141.1, uvicorn 0.52.4,
+  starlette 1.6.0).
+- `sigstore/gh-action-sigstore-python` 3.4.0 → 3.5.0.
+
 ## [0.19.0] - 2026-07-27
 
 ### Security
