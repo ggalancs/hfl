@@ -70,10 +70,25 @@ _BYTES_PER_PARAM_BY_MARKER: tuple[tuple[str, float], ...] = (
 
 _WEIGHT_SUFFIXES = (".safetensors", ".gguf", ".bin", ".pt", ".pth", ".npz")
 
-# ``30B-A3B``, ``30B A3B``, ``80b-a3b`` — total first, active after the ``A``.
+# ``30B-A3B``, ``30B A3B``, ``80b-a3b`` — total first, active after the
+# ``A``. The total may be in trillions (``Qwen3.8-2.4T-A95B``, which the
+# dense rule read as 95B) and the active half in millions
+# (``granite-3.0-3b-a800m``).
 _MOE_EXPLICIT = re.compile(
-    r"(?<!\d)(\d{1,6}(?:\.\d{1,3})?)\s*[Bb]\b[\s._-]*[Aa](\d{1,6}(?:\.\d{1,3})?)\s*[Bb]\b"
+    r"(?<!\d)(\d{1,6}(?:\.\d{1,3})?)\s*([BbTt])\b[\s._-]*"
+    r"[Aa](\d{1,6}(?:\.\d{1,3})?)\s*([BbMm])\b"
 )
+
+# ``17B-16E`` (Llama 4 Scout / Maverick): the ``B`` figure is the ACTIVE
+# count and ``E`` the number of experts. Read as dense, Maverick came out
+# 17B against a real 401.6B — 23x under. The total stays unknown.
+_MOE_EXPERTS = re.compile(r"(?<!\d)(\d{1,6}(?:\.\d{1,3})?)\s*[Bb][\s._-]{0,3}(\d{1,4})\s*[Ee]\b")
+
+# ``Qwen1.5-MoE-A2.7B``, ``Hunyuan-A13B``: an active count with no total in
+# front of it. Read as dense these came out 2.7B and 13B against real
+# 14.3B and 80.4B. The ``A`` must start a name token, so a size glued to
+# other letters is not mistaken for one.
+_MOE_ACTIVE_ONLY = re.compile(r"(?:^|[\s/._-])[Aa](\d{1,6}(?:\.\d{1,3})?)\s*[Bb]\b")
 
 # ``8x7B``, ``8 x 22B`` — experts times expert size. Signals MoE; the total
 # is NOT the product, so it stays unknown. See the module docstring.
@@ -125,9 +140,13 @@ def parse_params_from_name(text: str) -> ParamEstimate:
     if moe:
         try:
             total = float(moe.group(1))
-            active = float(moe.group(2))
+            active = float(moe.group(3))
         except ValueError:  # pragma: no cover — the pattern only matches digits
             return ParamEstimate(None, None, False, "unknown")
+        if moe.group(2) in "Tt":
+            total *= 1000.0
+        if moe.group(4) in "Mm":
+            active /= 1000.0
         # Guard against a name that reads as MoE but is not: the active
         # half cannot exceed the total.
         if active > total:
@@ -145,6 +164,18 @@ def parse_params_from_name(text: str) -> ParamEstimate:
         # and the Hub gets asked. The expert size is a usable *active*
         # figure: one expert's worth of parameters runs per token.
         return ParamEstimate(None, expert_b or None, True, "name")
+
+    # Both of these name the ACTIVE count only. Returning it as the total
+    # is the under-estimate this module exists to prevent, so the total
+    # stays unknown and the Hub's file sizes answer instead.
+    for pattern in (_MOE_EXPERTS, _MOE_ACTIVE_ONLY):
+        partial = pattern.search(text)
+        if partial:
+            try:
+                active_b = float(partial.group(1))
+            except ValueError:  # pragma: no cover
+                active_b = 0.0
+            return ParamEstimate(None, active_b or None, True, "name")
 
     dense = _DENSE.findall(text)
     if dense:
