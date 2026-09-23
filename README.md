@@ -412,7 +412,6 @@ engine with a bounded wait queue:
 | Max in-flight | `HFL_QUEUE_MAX_INFLIGHT` | `1` | Parallel requests allowed |
 | Wait queue size | `HFL_QUEUE_MAX_SIZE` | `16` | Requests allowed to wait |
 | Acquire timeout | `HFL_QUEUE_ACQUIRE_TIMEOUT` | `60` | Seconds a request may wait |
-| Enabled | `HFL_QUEUE_ENABLED` | `true` | Master switch |
 
 When the wait queue is saturated, HFL returns **429** with a structured
 envelope and `Retry-After`:

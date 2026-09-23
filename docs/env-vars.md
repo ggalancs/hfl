@@ -102,7 +102,6 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 
 | HFL                            | Default | What it does |
 |--------------------------------|---------|--------------|
-| `HFL_REGISTRY_SQLITE_TIMEOUT`  | `30`    | SQLite busy-timeout in seconds before raising `OperationalError`. |
 | `HF_TOKEN`                     | (none)  | Standard HuggingFace token. Read once at boot, held in memory only. |
 
 ## Notes

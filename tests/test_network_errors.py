@@ -237,13 +237,6 @@ class TestConnectionPooling:
 class TestTimeoutBehavior:
     """Test timeout configuration and behavior."""
 
-    def test_download_respects_timeout_config(self, temp_config):
-        """Downloads should use configured timeout."""
-        # Verify config has timeout values
-        from hfl.config import config
-
-        assert hasattr(config, "download_timeout") or True  # May not be implemented yet
-
     def test_model_load_timeout(self, temp_config):
         """Model loading should have timeout protection."""
         from hfl.api.state import ServerState

@@ -190,6 +190,23 @@ class TestLlamaCppEngine:
 
         assert engine.is_loaded
 
+    def test_load_defaults_come_from_config(
+        self, mock_llama_cpp_module, temp_gguf_file, monkeypatch
+    ):
+        """``hfl config`` prints these two as the inference defaults, so they
+        must be what a load actually uses. The engine carried its own -1 / 0,
+        equal to the config's only by coincidence."""
+        from hfl.config import config
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        monkeypatch.setattr(config, "default_n_gpu_layers", 7)
+        monkeypatch.setattr(config, "default_threads", 3)
+        LlamaCppEngine().load(str(temp_gguf_file), n_ctx=2048)
+
+        kwargs = mock_llama_cpp_module.Llama.call_args.kwargs
+        assert kwargs["n_gpu_layers"] == 7
+        assert kwargs["n_threads"] == 3
+
     def test_unload_model(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies model unloading."""
         from hfl.engine.llama_cpp import LlamaCppEngine

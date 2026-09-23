@@ -75,7 +75,6 @@ class TestEnvConfig:
         acquire cap."""
         with patch.dict(os.environ, {}, clear=True):
             cfg = HFLConfig()
-            assert cfg.queue_enabled is True
             assert cfg.queue_max_inflight == 1
             assert cfg.queue_max_size == 16
             assert cfg.queue_acquire_timeout_seconds == 60.0
@@ -106,7 +105,6 @@ class TestEnvConfig:
             assert cfg.stream_queue_get_timeout == 30.0
             assert cfg.vllm_error_put_timeout == 10.0
             assert cfg.vllm_shutdown_join_timeout == 5.0
-            assert cfg.registry_sqlite_busy_timeout == 30.0
 
     def test_stream_queue_put_timeout_via_env(self):
         """HFL_STREAM_QUEUE_PUT_TIMEOUT overrides default."""
@@ -133,24 +131,16 @@ class TestEnvConfig:
             assert cfg.vllm_error_put_timeout == 2.0
             assert cfg.vllm_shutdown_join_timeout == 1.5
 
-    def test_registry_sqlite_timeout_via_env(self):
-        """HFL_REGISTRY_SQLITE_TIMEOUT overrides default."""
-        with patch.dict(os.environ, {"HFL_REGISTRY_SQLITE_TIMEOUT": "120"}):
-            cfg = HFLConfig()
-            assert cfg.registry_sqlite_busy_timeout == 120.0
-
     def test_dispatcher_env_overrides(self):
         with patch.dict(
             os.environ,
             {
-                "HFL_QUEUE_ENABLED": "false",
                 "HFL_QUEUE_MAX_INFLIGHT": "4",
                 "HFL_QUEUE_MAX_SIZE": "100",
                 "HFL_QUEUE_ACQUIRE_TIMEOUT": "30",
             },
         ):
             cfg = HFLConfig()
-            assert cfg.queue_enabled is False
             assert cfg.queue_max_inflight == 4
             assert cfg.queue_max_size == 100
             assert cfg.queue_acquire_timeout_seconds == 30.0

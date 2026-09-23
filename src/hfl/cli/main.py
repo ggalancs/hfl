@@ -1586,7 +1586,6 @@ def config():
     info.append("\n[bold]Timeouts (seconds)[/]\n")
     info.append(f"  Model Load:   {cfg.model_load_timeout}\n")
     info.append(f"  Generation:   {cfg.generation_timeout}\n")
-    info.append(f"  API Request:  {cfg.api_request_timeout}\n")
 
     info.append("\n[bold]SLO Targets[/]\n")
     info.append(f"  Availability: {cfg.slo.availability_target * 100:.1f}%\n")

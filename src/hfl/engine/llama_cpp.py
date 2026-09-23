@@ -1158,7 +1158,7 @@ class LlamaCppEngine(InferenceEngine):
         # (Gemma's 8192 cap) always take precedence. We only reach
         # the VRAM path when neither the caller nor the architecture
         # pinned a value.
-        n_gpu_layers = kwargs.get("n_gpu_layers", -1)
+        n_gpu_layers = kwargs.get("n_gpu_layers", hfl_config.default_n_gpu_layers)
 
         # Read the GGUF header once and use it for BOTH chat-format
         # detection AND the memory-safety gates below. This replaces the
@@ -1372,7 +1372,7 @@ class LlamaCppEngine(InferenceEngine):
                     "model_path": model_path,
                     "n_ctx": n_ctx,
                     "n_gpu_layers": n_gpu_layers,
-                    "n_threads": kwargs.get("n_threads", 0) or None,
+                    "n_threads": kwargs.get("n_threads", hfl_config.default_threads) or None,
                     "verbose": verbose,
                     "flash_attn": flash_attn,
                     "chat_format": chat_format,

@@ -280,10 +280,6 @@ class HFLConfig:
         )
     )
 
-    # TTS defaults
-    default_tts_sample_rate: int = 22050
-    default_tts_format: str = "wav"  # wav, mp3, ogg
-
     # Timeouts (seconds)
     #
     # ``generation_timeout`` caps a single inference. 600 s is generous for
@@ -305,9 +301,6 @@ class HFLConfig:
     generation_timeout: float = field(
         default_factory=lambda: float(os.environ.get("HFL_GENERATION_TIMEOUT", "600"))
     )
-    download_timeout: float = 3600.0  # 1 hour
-    conversion_timeout: float = 7200.0  # 2 hours
-    api_request_timeout: float = 120.0  # 2 minutes
 
     # Maximum request body size (bytes) — prevents DoS by oversized prompts.
     # Default 10 MiB: comfortably fits legitimate multi-turn conversations
@@ -334,9 +327,6 @@ class HFLConfig:
     # in line before further requests are rejected with 429, and
     # ``queue_acquire_timeout_seconds`` caps how long a caller may wait
     # for a slot before giving up with 503.
-    queue_enabled: bool = field(
-        default_factory=lambda: os.environ.get("HFL_QUEUE_ENABLED", "true").lower() == "true"
-    )
     # Resolution order for the in-flight slot count, in priority:
     #   1. ``HFL_QUEUE_MAX_INFLIGHT`` (explicit, the original key)
     #   2. ``HFL_NUM_PARALLEL`` (Ollama-equivalent name; what most
@@ -400,11 +390,6 @@ class HFLConfig:
     # vLLM worker-thread join timeout during shutdown.
     vllm_shutdown_join_timeout: float = field(
         default_factory=lambda: float(os.environ.get("HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT", "5"))
-    )
-    # SQLite registry backend: busy-timeout (seconds) waiting for a
-    # lock before raising ``OperationalError``.
-    registry_sqlite_busy_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_REGISTRY_SQLITE_TIMEOUT", "30"))
     )
 
     # Service Level Objectives (SLOs)
