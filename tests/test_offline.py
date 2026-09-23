@@ -256,3 +256,138 @@ class TestUnreachableIsNotEmpty:
         api = MagicMock()
         api.model_info = MagicMock(side_effect=RuntimeError("404 Repository Not Found"))
         assert _repo_exists(api, "x/y") is False
+
+
+# ----------------------------------------------------------------------
+# A network that drops packets: every Hub call must still end
+# ----------------------------------------------------------------------
+
+# Run in a fresh interpreter: the fix is armed at ``import hfl`` and acts
+# when huggingface_hub loads its HTTP layer, which in this process has
+# long happened. The subprocess is also the harness's own kill switch —
+# a regression here is a hang, and a hang must not take the suite with it.
+_BLACKHOLE = """
+import socket, sys, time
+
+def getaddrinfo(host, port, *a, **k):
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return _real_gai(host, port, *a, **k)
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
+
+def connect(self, addr):
+    # Packets vanish: wait out whatever timeout the caller set, as a real
+    # blackhole does. None means forever, capped so the child cannot outlive
+    # the parent's watchdog by much.
+    t = self.gettimeout()
+    time.sleep(30 if t is None else t)
+    raise socket.timeout("timed out")
+
+_real_gai = socket.getaddrinfo
+socket.getaddrinfo = getaddrinfo
+socket.socket.connect = connect
+"""
+
+
+def _run_child(body: str, timeout: float = 25):
+    import subprocess
+    import sys
+    import textwrap
+
+    return subprocess.run(
+        [sys.executable, "-c", _BLACKHOLE + textwrap.dedent(body)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env={**__import__("os").environ, "HF_HUB_DISABLE_TELEMETRY": "1"},
+    )
+
+
+_CALL_THE_HUB = """
+import time
+from huggingface_hub import HfApi
+from hfl.hub.connectivity import is_network_error
+start = time.monotonic()
+try:
+    HfApi().model_info("acme/x")
+    print("RESULT no-error")
+except Exception as exc:
+    print("RESULT", is_network_error(exc), round(time.monotonic() - start, 2))
+"""
+
+
+class TestBlackholedHubCallsEnd:
+    def test_an_api_call_times_out_instead_of_hanging(self):
+        """``model_info`` passes ``timeout=None``: before the fix it waited
+        for ever. With the bound it fails in one connect timeout, and as
+        "offline"."""
+        child = _run_child(
+            "import hfl, hfl.hub.timeouts as t\nt.HUB_CONNECT_TIMEOUT = 0.3\n" + _CALL_THE_HUB
+        )
+        line = [x for x in child.stdout.splitlines() if x.startswith("RESULT")]
+        assert line, child.stderr[-2000:]
+        _, offline, elapsed = line[0].split()
+        assert offline == "True"
+        assert float(elapsed) < 5
+
+    def test_the_bound_also_applies_when_huggingface_hub_loaded_first(self):
+        """A caller that imported huggingface_hub before hfl gets it too."""
+        child = _run_child(
+            "import huggingface_hub.utils._http\n"
+            "import hfl, hfl.hub.timeouts as t\nt.HUB_CONNECT_TIMEOUT = 0.3\n" + _CALL_THE_HUB
+        )
+        assert "RESULT True" in child.stdout, child.stderr[-2000:]
+
+    def test_the_control_hangs_without_hfl(self):
+        """The same call without ``import hfl`` must NOT finish. If it did,
+        the blackhole above would not be simulating anything, and the two
+        tests above would pass with no fix at all."""
+        import subprocess
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            _run_child(_CALL_THE_HUB.replace("from hfl.hub.connectivity", "#"), timeout=4)
+
+
+class TestBoundDetails:
+    def test_explicit_timeouts_are_kept(self):
+        from types import SimpleNamespace
+
+        from hfl.hub.timeouts import HUB_CONNECT_TIMEOUT, HUB_READ_TIMEOUT, _fill_unbounded
+
+        request = SimpleNamespace(
+            extensions={"timeout": {"connect": None, "read": 3.0, "write": None, "pool": 7.0}}
+        )
+        _fill_unbounded(request)
+        assert request.extensions["timeout"] == {
+            "connect": HUB_CONNECT_TIMEOUT,
+            "read": 3.0,
+            "write": HUB_READ_TIMEOUT,
+            "pool": 7.0,
+        }
+
+    def test_a_custom_client_factory_is_left_alone(self):
+        """Someone who configured a proxy or CA bundle keeps their client."""
+        child = _run_child(
+            """
+            import httpx
+            from huggingface_hub import set_client_factory, get_session
+            mine = httpx.Client()
+            set_client_factory(lambda: mine)
+            import hfl, hfl.hub.timeouts as t
+            t.install_hub_timeouts()
+            print("RESULT", get_session() is mine,
+                  t._fill_unbounded in get_session().event_hooks["request"])
+            """
+        )
+        assert "RESULT True False" in child.stdout, child.stderr[-2000:]
+
+    def test_import_hfl_does_not_load_the_network_stack(self):
+        """The hook is armed without importing httpx or huggingface_hub:
+        ``hfl version`` should not pay ~85 ms for a network it never uses."""
+        child = _run_child(
+            """
+            import sys
+            import hfl
+            print("RESULT", "httpx" in sys.modules, "huggingface_hub" in sys.modules)
+            """
+        )
+        assert "RESULT False False" in child.stdout, child.stderr[-2000:]
