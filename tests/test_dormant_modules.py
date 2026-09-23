@@ -63,11 +63,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "run_with_timeout under the same name as the live one, which is how "
     "CLAUDE.md came to point at the inert copy. Safe to delete. "
     "See tests/test_timeouts_run.py.",
-    "observability.signing": "VERIFIED UNFINISHED (2026-09-23), not dead. It signs "
-    "provenance manifest envelopes — a feature, not a duplicate. It imports the "
-    "live ProvenanceLog; nothing imports it back. Release artefacts are signed by "
-    "Sigstore/cosign in CI, which is unrelated. Deleting loses a designed "
-    "capability: wire it or drop the capability deliberately.",
     # --- speculative, never found a home --------------------------------
     "engine.failover": "Assumes a multi-backend world HFL is not. Candidate for removal.",
     "utils.circuit_breaker": "Same assumption. Candidate for removal.",
@@ -174,7 +169,7 @@ def test_the_documented_subsystems_carry_their_verdict():
     # ``observability.audit`` left this list when it was wired into
     # ``require_owner`` — resolved entries are struck off rather than kept
     # as history, which is the same rule the inventory itself follows.
-    for name in ("api.timeout", "observability.signing"):
+    for name in ("api.timeout",):
         assert name in KNOWN_ORPHANS, f"{name} dropped out of the inventory"
         assert "VERIFIED" in KNOWN_ORPHANS[name], (
             f"{name} was one of the three the docs presented as active. Its entry "

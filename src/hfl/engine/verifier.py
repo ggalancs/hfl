@@ -194,6 +194,87 @@ _PROBES = (
 )
 
 
+def _check_signature(manifest: "ModelManifest") -> Check:
+    """Report whether this manifest carries a signature we trust.
+
+    ``observability/signing.py`` was written for exactly this and had no
+    caller, so a signed manifest and a forged one verified identically —
+    which is to say, the signature was decoration.
+
+    Three outcomes, and the distinction between the first two is the
+    whole point:
+
+    * **unsigned** — ``skipped``. Signing is opt-in and most manifests
+      have none; failing them would make the probe useless noise and
+      train people to ignore it.
+    * **signed and trusted** — pass, naming the key.
+    * **signed and not trusted** — FAIL. A signature that does not verify
+      is worse than none: it is a claim of provenance that is false.
+
+    A missing trust root is also ``skipped``, not a failure: an operator
+    who never curated one has not made a claim either way. A missing
+    ed25519 backend is skipped for the same reason — that is our gap, not
+    the model's.
+    """
+    from pathlib import Path as _Path
+
+    envelope = getattr(manifest, "__dict__", None) or {}
+    if not isinstance(envelope, dict) or not envelope.get("signature"):
+        return Check(
+            name="signature",
+            passed=True,
+            skipped=True,
+            detail="unsigned (signing is opt-in)",
+        )
+
+    from hfl.config import config
+    from hfl.observability.signing import (
+        SignatureInvalidError,
+        SignatureUnavailableError,
+        TrustRoot,
+        verify_manifest_envelope,
+    )
+
+    trust_path = _Path(config.home_dir) / "trusted-publishers.json"
+    if not trust_path.exists():
+        return Check(
+            name="signature",
+            passed=True,
+            skipped=True,
+            detail=f"signed, but no trust root at {trust_path} to check it against",
+        )
+
+    try:
+        trust_root = TrustRoot.load(trust_path)
+        trusted = verify_manifest_envelope(envelope, trust_root=trust_root)
+    except SignatureUnavailableError as exc:
+        return Check(
+            name="signature",
+            passed=True,
+            skipped=True,
+            detail=f"no ed25519 backend available: {exc}",
+        )
+    except (SignatureInvalidError, ValueError) as exc:
+        return Check(name="signature", passed=False, detail=f"invalid signature: {exc}")
+
+    key_id = (envelope.get("signature") or {}).get("key_id", "?")
+    if trusted:
+        return Check(name="signature", passed=True, detail=f"signed by trusted key {key_id!r}")
+
+    # Unreachable against today's ``verify_manifest_envelope``, which
+    # answers a signed envelope with True or an exception and never False
+    # — the sole ``return False`` is the unsigned case, handled above.
+    # Kept as a contract guard rather than deleted: if that function ever
+    # starts returning False for a rejected signature, this must be a
+    # FAILURE and not an accidental pass. ``test_signature_verify_wired``
+    # pins the contract so the change is noticed here first.
+    return Check(
+        name="signature",
+        passed=False,
+        detail=f"signature by {key_id!r} was rejected without an error",
+    )
+
+
 def verify_model(engine: "InferenceEngine", manifest: "ModelManifest") -> VerifyResult:
     """Run all checks against a loaded engine + manifest.
 
@@ -211,6 +292,7 @@ def verify_model(engine: "InferenceEngine", manifest: "ModelManifest") -> Verify
     checks.append(_check_smoke_generation(engine))
     checks.append(_check_tool_parser(manifest))
     checks.append(_check_embedding_dim(engine, manifest))
+    checks.append(_check_signature(manifest))
 
     duration_ms = (time.perf_counter() - start) * 1000
     overall = all(c.passed for c in checks)
