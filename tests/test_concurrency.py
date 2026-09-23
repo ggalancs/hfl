@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hfl.engine.base import GenerationResult
-
 
 class TestConcurrentModelLoading:
     """Test concurrent model loading scenarios."""
@@ -98,71 +96,6 @@ class TestConcurrentModelLoading:
         assert len(names) == 20
 
 
-class TestAsyncEngineWrapper:
-    """Test async engine wrapper functionality."""
-
-    @pytest.mark.asyncio
-    async def test_async_generate(self, temp_config):
-        """Test async generation."""
-        from hfl.engine.async_wrapper import AsyncEngineWrapper
-
-        mock_engine = MagicMock()
-        mock_engine.is_loaded = True
-        mock_engine.generate.return_value = GenerationResult(
-            text="Hello world",
-            tokens_prompt=5,
-            tokens_generated=2,
-            stop_reason="stop",
-        )
-
-        wrapper = AsyncEngineWrapper(mock_engine)
-
-        result = await wrapper.generate("Test prompt")
-
-        assert result.text == "Hello world"
-        mock_engine.generate.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_async_stream(self, temp_config):
-        """Test async streaming."""
-        from hfl.engine.async_wrapper import AsyncEngineWrapper
-
-        mock_engine = MagicMock()
-        mock_engine.is_loaded = True
-        mock_engine.generate_stream.return_value = iter(["Hello", " ", "world"])
-
-        wrapper = AsyncEngineWrapper(mock_engine)
-
-        tokens = []
-        async for token in wrapper.generate_stream("Test"):
-            tokens.append(token)
-
-        assert tokens == ["Hello", " ", "world"]
-
-    @pytest.mark.asyncio
-    async def test_concurrent_async_operations(self, temp_config):
-        """Test multiple concurrent async operations."""
-        from hfl.engine.async_wrapper import AsyncEngineWrapper
-
-        mock_engine = MagicMock()
-        mock_engine.is_loaded = True
-        mock_engine.generate.return_value = GenerationResult(
-            text="Response",
-            tokens_prompt=5,
-            tokens_generated=1,
-            stop_reason="stop",
-        )
-
-        wrapper = AsyncEngineWrapper(mock_engine)
-
-        # Launch multiple concurrent generations
-        tasks = [wrapper.generate(f"Prompt {i}") for i in range(10)]
-        results = await asyncio.gather(*tasks)
-
-        assert len(results) == 10
-        assert all(r.text == "Response" for r in results)
-
-
 class TestSingletonContainer:
     """Test thread-safe singleton container."""
 
@@ -209,39 +142,6 @@ class TestSingletonContainer:
 
         assert not container.config.is_initialized
         assert not container.registry.is_initialized
-
-
-class TestStreamingConcurrency:
-    """Test streaming operations under concurrent load."""
-
-    @pytest.mark.asyncio
-    async def test_multiple_streams_concurrent(self, temp_config):
-        """Multiple streams should work concurrently."""
-        from hfl.engine.async_wrapper import AsyncEngineWrapper
-
-        def make_stream(n: int):
-            for i in range(n):
-                yield f"token_{i}"
-
-        mock_engine = MagicMock()
-        mock_engine.is_loaded = True
-        mock_engine.generate_stream.side_effect = lambda p, c: make_stream(5)
-
-        wrapper = AsyncEngineWrapper(mock_engine)
-
-        async def collect_stream():
-            tokens = []
-            async for token in wrapper.generate_stream("test"):
-                tokens.append(token)
-            return tokens
-
-        # Run multiple streams concurrently
-        tasks = [collect_stream() for _ in range(5)]
-        results = await asyncio.gather(*tasks)
-
-        # Each should have collected all tokens
-        for tokens in results:
-            assert tokens == ["token_0", "token_1", "token_2", "token_3", "token_4"]
 
 
 class TestRaceConditions:

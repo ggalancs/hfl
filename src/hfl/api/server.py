@@ -298,6 +298,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     configure_tracing()
 
+    # HFL_MAX_LOADED_MODELS / OLLAMA_MAX_LOADED_MODELS is documented and
+    # read, but nothing acts on it: ``ModelPool`` exists and the server
+    # never instantiates it, so exactly one model is resident whatever the
+    # operator sets. Multi-residency is a real architectural change — it
+    # touches the model-lifecycle use-after-free family, the dispatcher's
+    # single-slot assumption and ServerState's single engine — so the
+    # honest move today is to say so rather than accept the number and
+    # drop it. A knob that reads a value and ignores it is worse than no
+    # knob: the operator believes they configured something.
+    from hfl.config import config as _cfg
+
+    _max_models = getattr(_cfg, "max_loaded_models", 1) or 1
+    if _max_models > 1:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "HFL_MAX_LOADED_MODELS=%d requested, but this build keeps one model "
+            "resident at a time; the extra slots are not used. Model swapping is "
+            "still automatic — a request for another model evicts the current one.",
+            _max_models,
+        )
+
     yield
     # Cleanup on shutdown
     await get_state().cleanup()

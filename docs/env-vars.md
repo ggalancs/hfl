@@ -28,7 +28,7 @@ the host string does not.
 | `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Inference slots executing simultaneously per model. |
 | `HFL_QUEUE_MAX_SIZE` / `HFL_MAX_QUEUE`        | `OLLAMA_MAX_QUEUE`         | `16`    | Max wait queue; further requests get 429. |
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
-| `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `1`     | Models kept resident in `ModelPool` (LRU eviction). |
+| `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `1`     | **Accepted for Ollama parity, not yet honoured.** One model stays resident whatever you set; a request for another evicts it. `ModelPool` implements LRU multi-residency but the server does not instantiate it — that change touches the model-lifecycle locking and has not been made. Values above 1 log a warning at startup. |
 
 > **`HFL_NUM_PARALLEL` / `OLLAMA_NUM_PARALLEL` only take effect on a backend that
 > batches internally (vLLM).** llama.cpp and Transformers drive a single

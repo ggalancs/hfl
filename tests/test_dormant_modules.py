@@ -52,25 +52,30 @@ REACHED_OTHERWISE: dict[str, str] = {
     "plugins": "Loaded through importlib at runtime, by design.",
 }
 
-# Orphans as of 2026-09-22, each with the decision it is waiting on.
-# Striking one off is the point of the exercise.
-KNOWN_ORPHANS: dict[str, str] = {
-    # --- the three that were questions, now answered by measurement -----
-    "api.timeout": "VERIFIED DEAD (2026-09-23). Superseded duplicate: "
-    "hfl.api.helpers.run_dispatched enforces the same config.generation_timeout "
-    "and is what 6 routers import. Measured: limit 0.25/0.75/2.0s cuts at "
-    "exactly that, HTTP 504 code=TIMEOUT. This module even exports a "
-    "run_with_timeout under the same name as the live one, which is how "
-    "CLAUDE.md came to point at the inert copy. Safe to delete. "
-    "See tests/test_timeouts_run.py.",
-    # --- speculative, never found a home --------------------------------
-    "engine.failover": "Assumes a multi-backend world HFL is not. Candidate for removal.",
-    "utils.circuit_breaker": "Same assumption. Candidate for removal.",
-    "engine.async_wrapper": "Superseded by asyncio.to_thread at the call sites.",
-    "engine.observability": "EngineObserver; token accounting moved to run_dispatched "
-    "in 0.18.0, which is why nothing calls it.",
-    # --- smaller, unclassified ------------------------------------------
-}
+# The inventory is empty as of 2026-09-23, and that is the point: every
+# entry was either wired to a call site or removed. What remains is the
+# guard — a new orphan fails immediately instead of sitting here for
+# three months the way the last twelve did.
+#
+# Resolved by wiring: engine.embedding_pooling (the `pooling` field on
+# /api/embed reached the engine), core.sessions (`hfl run --session` and
+# `hfl sessions`), core.sandbox (`--sandbox` / HFL_SANDBOX),
+# observability.audit (emitted from `require_owner`),
+# observability.tracing (spans at startup and around every inference),
+# observability.signing (a sixth probe in `hfl verify`), api.deprecation
+# (RFC 8594 headers on the legacy embeddings endpoint).
+#
+# Resolved by removal, because they were not unfinished features:
+# api.timeout (a superseded duplicate of hfl.api.helpers, which even
+# shared a function name and so misled CLAUDE.md), engine.async_wrapper
+# (superseded by asyncio.to_thread, and reviving it would let two
+# coroutines onto one non-reentrant engine), engine.observability
+# (superseded three times over: real timing fields since 0.18.2,
+# `_account_generation`, and the benchmark harness), engine.failover
+# (assumes a multi-backend world HFL is not) and utils.circuit_breaker
+# (the only external service is the Hub, which already has `with_retry`,
+# tuned in 0.16.2 precisely not to swallow permanent errors).
+KNOWN_ORPHANS: dict[str, str] = {}
 
 
 def _module_name(path: Path) -> str:
@@ -122,6 +127,65 @@ def _orphan_modules() -> set[str]:
     return {m for m in modules if m not in imported and m not in REACHED_OTHERWISE}
 
 
+def _test_only_modules() -> set[str]:
+    """Modules that only ``tests/`` imports.
+
+    A sharper signal than the orphan check above, and one it misses. When
+    the five dead modules were removed, three test files still imported
+    them and the suite failed to collect — so "no module under src/hfl
+    imports it" was true while "nothing uses it" was not. A module whose
+    only callers are its own tests is dormant in the way that matters: it
+    is exercised, so it looks alive, and it serves no request.
+    """
+    src_imported: set[str] = set()
+    test_imported: set[str] = set()
+    modules = {_module_name(p) for p in SRC.rglob("*.py") if p.name != "__init__.py"}
+
+    def collect(root: Path, sink: set[str], strip_hfl: bool) -> None:
+        for path in root.rglob("*.py"):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
+                continue
+            me = _module_name(path) if strip_hfl else None
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("hfl."):
+                    target = node.module[len("hfl.") :]
+                    if target != me:
+                        sink.add(target)
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.startswith("hfl."):
+                            target = alias.name[len("hfl.") :]
+                            if target != me:
+                                sink.add(target)
+
+    collect(SRC, src_imported, strip_hfl=True)
+    collect(SRC.parents[1] / "tests", test_imported, strip_hfl=False)
+
+    return {
+        m
+        for m in modules
+        if m in test_imported and m not in src_imported and m not in REACHED_OTHERWISE
+    }
+
+
+def test_no_module_is_exercised_only_by_its_own_tests():
+    """Tested but never called is dormancy wearing a green tick.
+
+    Learned the hard way: the orphan check above passed for five modules
+    that three test files still imported, because it only ever looked at
+    ``src/hfl``. A module can have full coverage and serve no request.
+    """
+    test_only = sorted(_test_only_modules())
+    assert not test_only, (
+        "These modules are imported by tests but by nothing in src/hfl:\n  "
+        + "\n  ".join(test_only)
+        + "\n\nCoverage is not use. Wire them to a call site or remove them "
+        "together with the tests whose only subject they are."
+    )
+
+
 def test_no_new_module_falls_out_of_the_import_graph():
     """A module nobody imports is either a bug or dead weight — never nothing."""
     new = sorted(_orphan_modules() - set(KNOWN_ORPHANS))
@@ -155,23 +219,21 @@ def test_every_known_orphan_still_exists():
     assert not missing, f"KNOWN_ORPHANS names modules that are gone: {missing}"
 
 
-def test_the_documented_subsystems_carry_their_verdict():
-    """The three that looked like they might be absent features.
+def test_the_inventory_is_empty_and_stays_that_way():
+    """The state this file was created to reach.
 
-    All three were measured on 2026-09-23 rather than reasoned about, and
-    they did not come out the same: `api/timeout.py` is a superseded
-    duplicate (timeouts demonstrably run, from `helpers.py`), while
-    `signing` and `audit` are unfinished features with no callers. The
-    distinction decides whether deleting them is free or destructive, so
-    the verdict travels with the entry.
+    It began with twelve entries, three of them modules the docs
+    presented as active. All twelve are resolved — wired or removed — so
+    the dictionary is empty and the tests above are now pure regression
+    guards rather than a backlog.
+
+    If an entry ever reappears, it should carry the decision it is
+    waiting on, not just a name: the reason a module is unreferenced is
+    what decides whether removing it is free or destructive, and
+    rediscovering that costs an afternoon.
     """
-    # ``observability.audit`` left this list when it was wired into
-    # ``require_owner`` — resolved entries are struck off rather than kept
-    # as history, which is the same rule the inventory itself follows.
-    for name in ("api.timeout",):
-        assert name in KNOWN_ORPHANS, f"{name} dropped out of the inventory"
-        assert "VERIFIED" in KNOWN_ORPHANS[name], (
-            f"{name} was one of the three the docs presented as active. Its entry "
-            "must carry the verdict the measurement produced, so nobody has to "
-            "redo the investigation to know whether deleting it is safe."
-        )
+    assert KNOWN_ORPHANS == {}, (
+        f"new dormant modules were accepted into the inventory: "
+        f"{sorted(KNOWN_ORPHANS)}. That is allowed, but each needs its "
+        "verdict written down, and it should not sit here for months."
+    )

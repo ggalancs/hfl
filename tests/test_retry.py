@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hfl.utils.retry import RetryContext, RetryExhausted, with_retry
+from hfl.utils.retry import RetryExhausted, with_retry
 
 
 class TestWithRetry:
@@ -148,58 +148,3 @@ class TestWithRetryAsync:
         result = await flaky_async()
         assert result == "connected"
         assert call_count == 2
-
-
-class TestRetryContext:
-    """Tests for RetryContext class."""
-
-    def test_iteration_count(self):
-        """Should iterate correct number of times."""
-        ctx = RetryContext(max_retries=3)
-        attempts = list(ctx)
-        assert len(attempts) == 4  # 0, 1, 2, 3
-
-    def test_attempts_remaining(self):
-        """Should track remaining attempts."""
-        ctx = RetryContext(max_retries=2)
-
-        for attempt in ctx:
-            if attempt == 0:
-                assert ctx.attempts_remaining == 2
-            elif attempt == 1:
-                assert ctx.attempts_remaining == 1
-            elif attempt == 2:
-                assert ctx.attempts_remaining == 0
-
-    def test_handle_error_sync(self):
-        """Sync error handling should wait and allow retry."""
-        ctx = RetryContext(max_retries=1, base_delay=0.01)
-
-        for attempt in ctx:
-            if attempt == 0:
-                ctx.handle_error_sync(ValueError("test"))
-            else:
-                break
-
-        assert ctx.attempt == 1
-
-    def test_exhaust_sync_retries(self):
-        """Should raise after exhausting retries."""
-        ctx = RetryContext(max_retries=1, base_delay=0.01)
-
-        with pytest.raises(RetryExhausted):
-            for attempt in ctx:
-                ctx.handle_error_sync(ValueError("always fail"))
-
-    @pytest.mark.asyncio
-    async def test_handle_error_async(self):
-        """Async error handling should wait and allow retry."""
-        ctx = RetryContext(max_retries=1, base_delay=0.01)
-
-        for attempt in ctx:
-            if attempt == 0:
-                await ctx.handle_error(ConnectionError("network"))
-            else:
-                break
-
-        assert ctx.attempt == 1

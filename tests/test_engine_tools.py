@@ -8,7 +8,6 @@ Covers:
   native tool-call markers.
 - :class:`LlamaCppEngine` forwards ``tools`` into
   ``create_chat_completion`` and normalises returned ``tool_calls``.
-- :class:`FailoverEngine` and the async wrapper forward the kwarg.
 - :class:`PromptBuilder.build` accepts the kwarg and injects a tool
   preamble.
 """
@@ -129,7 +128,7 @@ class TestTransformersEngineTools:
 # The LlamaCppEngine suite below needs ``llama_cpp`` importable. CI's
 # default ``[dev]`` install does not include the ``[llama]`` extra, so
 # we skip the whole class in environments without it. The rest of the
-# tool-calling test surface is exercised by the transformers, failover,
+# tool-calling test surface is exercised by the transformers,
 # and prompt-builder cases above.
 @pytest.mark.skipif(
     not _HAS_LLAMA_CPP,
@@ -232,18 +231,6 @@ class TestLlamaCppEngineTools:
         assert sent[1]["tool_calls"][0]["function"]["name"] == "get_weather"
         assert sent[2]["role"] == "tool"
         assert sent[2]["name"] == "get_weather"
-
-
-class TestFailoverEngineTools:
-    def test_forwards_tools_to_underlying_engine(self):
-        from hfl.engine.failover import FailoverEngine
-
-        inner = MagicMock()
-        inner.chat.return_value = GenerationResult(text="ok")
-        fe = FailoverEngine([inner])
-        fe.chat([ChatMessage(role="user", content="hi")], tools=TOOL_SPEC)
-        call_kwargs = inner.chat.call_args.kwargs
-        assert call_kwargs["tools"] == TOOL_SPEC
 
 
 class TestPromptBuilderTools:
