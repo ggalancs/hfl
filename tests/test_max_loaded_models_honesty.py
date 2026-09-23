@@ -29,8 +29,6 @@ import re
 import textwrap
 from pathlib import Path
 
-import pytest
-
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "env-vars.md"
 
 
