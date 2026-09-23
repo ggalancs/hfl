@@ -36,7 +36,8 @@
         "host": "Dirección del host",
         "port": "Número de puerto",
         "model": "Pre-cargar un modelo al iniciar",
-        "api_key": "Clave API para autenticación (recomendado para exposición en red)"
+        "api_key": "Clave API para autenticación (recomendado para exposición en red)",
+        "sandbox": "Endurecimiento del proceso al arrancar: none (por defecto), seccomp (Linux), macos. También HFL_SANDBOX."
       }
     },
     "list": {

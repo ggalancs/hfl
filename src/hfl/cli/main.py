@@ -521,6 +521,7 @@ def serve(
         "--gui",
         help="Show system tray icon for server management",
     ),
+    sandbox: str = typer.Option(None, "--sandbox", help=t("commands.serve.options.sandbox")),
 ):
     """Start the API server (OpenAI + Ollama + Anthropic compatible)."""
     from hfl.api.server import start_server
@@ -533,6 +534,24 @@ def serve(
 
     # Connect events to metrics
     setup_event_listeners()
+
+    # Process hardening, before anything is served. Restrictions that drop
+    # privileges only hold if they are applied before the first request, and
+    # ``apply_sandbox`` never raises: an unsupported platform logs a warning
+    # and serves unhardened, because "opt-in hardening" that refuses to boot
+    # is a denial of service the operator did not ask for. The flag falls
+    # back to HFL_SANDBOX so a container can set it without changing its
+    # command line.
+    import os as _os
+
+    from hfl.core.sandbox import apply_sandbox
+
+    _sandbox_result = apply_sandbox(sandbox or _os.environ.get("HFL_SANDBOX"))
+    if _sandbox_result.mode != "none" and not _sandbox_result.applied:
+        console.print(
+            f"[yellow]Sandbox '{_sandbox_result.mode}' requested but not applied: "
+            f"{_sandbox_result.reason}[/]"
+        )
 
     # Host resolution: --host wins, then HFL_HOST / OLLAMA_HOST via config,
     # then the loopback default. The flag's default used to be the literal

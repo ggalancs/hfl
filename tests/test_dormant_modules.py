@@ -82,7 +82,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "in 0.18.0, which is why nothing calls it.",
     # --- smaller, unclassified ------------------------------------------
     "api.deprecation": "Decide whether any endpoint is meant to be marked deprecated.",
-    "core.sandbox": "Decide whether tool execution is meant to go through it.",
 }
 
 

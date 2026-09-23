@@ -36,7 +36,8 @@
         "host": "Host address to bind",
         "port": "Port number",
         "model": "Pre-load a model at startup",
-        "api_key": "API key for authentication (recommended for network exposure)"
+        "api_key": "API key for authentication (recommended for network exposure)",
+        "sandbox": "Process hardening at startup: none (default), seccomp (Linux), macos. Also HFL_SANDBOX."
       }
     },
     "list": {
