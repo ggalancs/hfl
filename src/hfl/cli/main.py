@@ -345,6 +345,7 @@ def run(
     backend: str = typer.Option("auto", "--backend", "-b", help=t("commands.run.options.backend")),
     ctx: int = typer.Option(0, "--ctx", "-c", help=t("commands.run.options.ctx")),
     system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
+    session: str = typer.Option(None, "--session", help=t("commands.run.options.session")),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -401,8 +402,39 @@ def run(
     console.print(f"[dim]{t('legal.ai_disclaimer')}[/]\n")
 
     messages: list[ChatMessage] = []
-    if system:
+    chat_session = None
+    if session:
+        from hfl.core.sessions import ChatSession, load_session, save_session
+
+        try:
+            chat_session = load_session(session)
+        except FileNotFoundError:
+            chat_session = ChatSession(name=session, model=model, system=system)
+            console.print(f"[dim]{t('messages.session_new', name=session)}[/]")
+        else:
+            messages = [ChatMessage(**m) for m in chat_session.messages]
+            console.print(
+                f"[dim]{t('messages.session_resumed', name=session, count=len(messages))}[/]"
+            )
+
+    if system and not any(m.role == "system" for m in messages):
         messages.append(ChatMessage(role="system", content=system))
+
+    def _persist() -> None:
+        """Write after every exchange, not once at exit.
+
+        The feature exists to survive a restart, and the restarts worth
+        surviving are the ones nobody planned — a crash, a Ctrl-C, an OOM
+        kill. Saving only on a clean exit would lose exactly the sessions
+        the user wanted back. A chat session is a few KB of JSON, so the
+        write costs nothing next to a token.
+        """
+        if chat_session is None:
+            return
+        chat_session.messages = [{"role": m.role, "content": m.content} for m in messages]
+        chat_session.model = model
+        chat_session.touch()
+        save_session(chat_session)
 
     while True:
         try:
@@ -433,8 +465,16 @@ def run(
         console.print()  # New line at the end
 
         messages.append(ChatMessage(role="assistant", content="".join(full_response)))
+        _persist()
 
+    _persist()
     engine.unload()
+    if chat_session is not None:
+        from hfl.core.sessions import sessions_dir
+
+        console.print(
+            f"[dim]{t('messages.session_saved', path=sessions_dir() / f'{session}.json')}[/]"
+        )
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
 
 
@@ -2466,6 +2506,66 @@ def draft_recommend_cmd(
     if pick.quantization:
         console.print(f"  quant:    {pick.quantization}")
     console.print(f"  rationale: [dim]{pick.rationale}[/]")
+
+
+# ----------------------------------------------------------------------
+# Saved chat sessions
+# ----------------------------------------------------------------------
+
+sessions_app = typer.Typer(help=t("commands.sessions.description"), no_args_is_help=True)
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("list", help=t("commands.sessions.list.description"))
+def sessions_list() -> None:
+    from rich.table import Table
+
+    from hfl.core.sessions import list_sessions
+
+    saved = list_sessions()
+    if not saved:
+        console.print(f"[dim]{t('messages.no_sessions')}[/]")
+        return
+
+    table = Table(title="Saved Sessions")
+    table.add_column("Name", style="cyan")
+    table.add_column("Model")
+    table.add_column("Messages", justify="right")
+    table.add_column("Updated", style="dim")
+    for item in saved:
+        table.add_row(item.name, item.model, str(len(item.messages)), item.updated_at)
+    console.print(table)
+
+
+@sessions_app.command("show", help=t("commands.sessions.show.description"))
+def sessions_show(
+    name: str = typer.Argument(help=t("commands.sessions.args.name")),
+) -> None:
+    from hfl.core.sessions import SessionNotFoundError, load_session
+
+    try:
+        item = load_session(name)
+    except (SessionNotFoundError, FileNotFoundError) as exc:
+        console.print(f"[red]{t('errors.session_not_found', name=name)}[/]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[bold]{item.name}[/]  [dim]{item.model} · {item.updated_at}[/]\n")
+    for message in item.messages:
+        role = message.get("role", "?")
+        colour = {"user": "blue", "assistant": "green", "system": "yellow"}.get(role, "white")
+        console.print(f"[{colour}]{role}:[/] {message.get('content', '')}")
+
+
+@sessions_app.command("rm", help=t("commands.sessions.rm.description"))
+def sessions_rm(
+    name: str = typer.Argument(help=t("commands.sessions.args.name")),
+) -> None:
+    from hfl.core.sessions import delete_session
+
+    if not delete_session(name):
+        console.print(f"[red]{t('errors.session_not_found', name=name)}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]{t('messages.session_deleted', name=name)}[/]")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,8 @@
         "backend": "Backend de inferencia (auto, llama.cpp, transformers, vllm)",
         "ctx": "Tamaño del contexto en tokens",
         "system": "Prompt del sistema",
-        "verbose": "Mostrar logs del backend (Metal, CUDA)"
+        "verbose": "Mostrar logs del backend (Metal, CUDA)",
+        "session": "Reanuda y guarda este chat con un nombre de sesión (~/.hfl/sessions)."
       }
     },
     "serve": {
@@ -208,6 +209,21 @@
       "options": {
         "max_ratio": "Ratio máximo de tamaño draft/target"
       }
+    },
+    "sessions": {
+      "description": "Gestiona las sesiones de chat guardadas.",
+      "list": {
+        "description": "Lista las sesiones guardadas."
+      },
+      "show": {
+        "description": "Muestra los mensajes de una sesión guardada."
+      },
+      "rm": {
+        "description": "Elimina una sesión guardada."
+      },
+      "args": {
+        "name": "Nombre de la sesión"
+      }
     }
   },
   "messages": {
@@ -260,7 +276,12 @@
     "audio_saved_to": "Audio guardado en",
     "unsupported_tip": "{count} modelo(s) tienen tipos no soportados. Usa --supported-only para ocultarlos.",
     "model_type_detected": "Tipo de modelo detectado",
-    "no_conversion_needed": "No se necesita conversión GGUF para este tipo de modelo."
+    "no_conversion_needed": "No se necesita conversión GGUF para este tipo de modelo.",
+    "session_resumed": "Sesión '{name}' reanudada con {count} mensajes",
+    "session_saved": "Sesión guardada en {path}",
+    "session_new": "Grabando una sesión nueva como '{name}'",
+    "session_deleted": "Sesión '{name}' eliminada",
+    "no_sessions": "Aún no hay sesiones guardadas. Empieza una con: hfl run <modelo> --session <nombre>"
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",
@@ -298,7 +319,8 @@
     "use_run_command": "Para modelos LLM, usa: hfl run <modelo>",
     "unsupported_model_type": "Tipo de modelo no soportado",
     "unsupported_model_type_hint": "HFL aún no soporta modelos {type}. Solo los modelos LLM (generación de texto) están soportados actualmente.",
-    "tts_disabled": "La funcionalidad TTS está temporalmente deshabilitada. Solo se soportan modelos LLM."
+    "tts_disabled": "La funcionalidad TTS está temporalmente deshabilitada. Solo se soportan modelos LLM.",
+    "session_not_found": "No hay ninguna sesión llamada '{name}'. Lístalas con: hfl sessions list"
   },
   "warnings": {
     "download_cancelled": "Descarga cancelada.",
