@@ -240,8 +240,35 @@ async def simple_stream_async(
     producer_task = asyncio.create_task(asyncio.to_thread(producer))
 
     try:
+        # ``HFL_STREAM_QUEUE_GET_TIMEOUT`` is documented as "seconds the
+        # consumer waits for the next token", and until now nothing read it:
+        # this loop waited forever. If the producer thread wedges inside the
+        # engine, its ``finally`` never posts the sentinel and the request
+        # hangs for as long as the client will hold the socket.
+        #
+        # The bound applies from the SECOND item onward, exactly as the
+        # documented wording says. The first one is the end of prompt
+        # processing, which legitimately takes minutes on a large model —
+        # measured at 74.8 ms on a 135M and orders of magnitude more on a
+        # 70B — so a 30-second cap there would kill healthy requests. The
+        # overall ceiling for the first token is the generation timeout the
+        # dispatcher already enforces.
+        first = True
         while True:
-            item = await queue.get()
+            if first:
+                item = await queue.get()
+                first = False
+            else:
+                try:
+                    item = await asyncio.wait_for(
+                        queue.get(), timeout=_hfl_config.stream_queue_get_timeout
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise StreamTimeoutError(
+                        "no token for "
+                        f"{_hfl_config.stream_queue_get_timeout}s mid-stream; the "
+                        "producer stopped without closing the stream"
+                    ) from exc
             if item is None:
                 break
             if isinstance(item, Exception):

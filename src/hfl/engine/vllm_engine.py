@@ -244,7 +244,10 @@ class VLLMEngine(InferenceEngine):
         try:
             while True:
                 try:
-                    item = token_queue.get(timeout=_hfl_config.stream_queue_put_timeout)
+                    # The consumer side takes the consumer knob. This read the
+                    # PUT timeout, so HFL_STREAM_QUEUE_GET_TIMEOUT governed
+                    # nothing and the documented value was never applied here.
+                    item = token_queue.get(timeout=_hfl_config.stream_queue_get_timeout)
                 except Empty:
                     raise TimeoutError("vLLM streaming timed out") from None
                 if item is None:
