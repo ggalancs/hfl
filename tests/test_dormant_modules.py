@@ -70,7 +70,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "engine.observability": "EngineObserver; token accounting moved to run_dispatched "
     "in 0.18.0, which is why nothing calls it.",
     # --- smaller, unclassified ------------------------------------------
-    "api.deprecation": "Decide whether any endpoint is meant to be marked deprecated.",
 }
 
 

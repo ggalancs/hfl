@@ -38,9 +38,10 @@ import struct
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
+from hfl.api.deprecation import add_deprecation_headers
 from hfl.api.helpers import apply_keep_alive
 from hfl.exceptions import (
     ModelNotFoundError,
@@ -347,18 +348,29 @@ async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
     tags=["Ollama"],
     summary="Generate embedding (legacy Ollama alias)",
     response_model=None,
+    deprecated=True,
     responses={
         200: {"description": "Single embedding vector for the provided prompt."},
         400: {"description": "Validation / type mismatch."},
         404: {"description": "Model not found."},
     },
 )
-async def ollama_embeddings_legacy(req: OllamaEmbeddingsLegacyRequest) -> dict[str, Any]:
+async def ollama_embeddings_legacy(
+    req: OllamaEmbeddingsLegacyRequest, response: Response
+) -> dict[str, Any]:
     """Legacy ``POST /api/embeddings`` — single prompt, single vector.
 
     Superseded by ``/api/embed`` but kept for client compatibility
     (older ollama-python releases, some LangChain versions).
+
+    Carries RFC 8594 deprecation headers so a client learns from the
+    response rather than from a changelog. **No ``Sunset`` date** is
+    sent: the endpoint has no removal date, and announcing one in a
+    header would be a commitment nobody made. ``Deprecation: true`` plus
+    a ``Link`` to the successor says what is true — this is superseded,
+    here is what replaces it — and nothing that is not.
     """
+    add_deprecation_headers(response, alternative="/api/embed")
     apply_keep_alive(req.model, req.keep_alive)
     engine = await _load_embedding_model(req.model)
     result = await _run_embed(lambda: engine.embed([req.prompt]))
