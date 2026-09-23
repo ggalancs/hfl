@@ -71,6 +71,12 @@ def fake_mlx(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "mlx_lm", fake)
     monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
+    # No prompt-cache module unless a test seats one (``fake_cache``). Set
+    # explicitly: with a real mlx-lm installed, an earlier test may have
+    # imported the real ``mlx_lm.models.cache``, and a sys.modules hit would
+    # hand these plumbing tests a real cache wrapped around a fake model.
+    monkeypatch.setitem(sys.modules, "mlx_lm.models", None)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", None)
     # Force the availability gate to pass so the engine uses our fake.
     monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
     return {"texts": generated_texts}
@@ -226,3 +232,187 @@ class TestMLXSeedAndStop:
         assert "STOP" not in out
         assert "here" not in out  # nothing past the stop leaks
         assert out == "partial "
+
+
+# ----------------------------------------------------------------------
+# Prompt cache (LRUPromptCache) plumbing
+# ----------------------------------------------------------------------
+
+
+class _Resp:
+    """The fields of mlx-lm's GenerationResponse the engine reads."""
+
+    def __init__(self, text, token, prompt_tokens, n, finish=None):
+        self.text = text
+        self.token = token
+        self.prompt_tokens = prompt_tokens
+        self.prompt_tps = 1000.0
+        self.generation_tokens = n
+        self.generation_tps = 100.0
+        self.finish_reason = finish
+
+
+@pytest.fixture
+def fake_cache(fake_mlx, monkeypatch):
+    """A fake ``mlx_lm.models.cache`` whose store behaves like the real one
+    (longest cached prefix of the request wins) and records every call."""
+    calls: dict = {"stream": [], "inserted": [], "fetched": []}
+
+    class _Store:
+        def __init__(self, max_size, max_bytes):
+            self.max_size, self.max_bytes = max_size, max_bytes
+            self.entries: list[list[int]] = []
+
+        def fetch_nearest_cache(self, model_key, tokens):
+            calls["fetched"].append(list(tokens))
+            best = None
+            for key in self.entries:
+                if tokens[: len(key)] == key and (best is None or len(key) > len(best)):
+                    best = key
+            if best is None:
+                return None, tokens
+            return {"kv": list(best)}, tokens[len(best) :]
+
+        def insert_cache(self, model_key, tokens, prompt_cache, cache_type="assistant"):
+            calls["inserted"].append(list(tokens))
+            self.entries.append(list(tokens))
+
+    cache_mod = ModuleType("mlx_lm.models.cache")
+    cache_mod.LRUPromptCache = _Store  # type: ignore[attr-defined]
+    cache_mod.make_prompt_cache = lambda model: {"kv": []}  # type: ignore[attr-defined]
+    models_mod = ModuleType("mlx_lm.models")
+    models_mod.cache = cache_mod  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx_lm.models", models_mod)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache_mod)
+
+    def _stream_generate(_model, _tokenizer, *, prompt, prompt_cache, **kwargs):
+        calls["stream"].append({"prompt": list(prompt), "cache": prompt_cache})
+        if calls.get("explode"):
+            raise RuntimeError("metal fault")
+        # Three generated tokens with ids 900.., then the final response.
+        pieces = ["A", "B", "C"]
+        for i, piece in enumerate(pieces[:-1]):
+            yield _Resp(piece, 900 + i, len(prompt), i + 1)
+        yield _Resp(pieces[-1], 902, len(prompt), 3, finish="length")
+
+    sys.modules["mlx_lm"].stream_generate = _stream_generate  # type: ignore[attr-defined]
+    return calls
+
+
+def _loaded():
+    engine = mlx_engine.MLXEngine()
+    engine.load("/fake/model")
+    return engine
+
+
+class TestPromptCache:
+    def test_first_request_evaluates_everything_and_stores_prompt_plus_reply(self, fake_cache):
+        engine = _loaded()
+        result = engine.generate("hello", GenerationConfig(max_tokens=3))
+        assert result.text == "ABC"
+        assert fake_cache["stream"][0]["prompt"] == [0, 1, 2, 3, 4]
+        # Key = the prompt ids plus the ids the model produced, not a
+        # re-tokenisation of the text "ABC".
+        assert fake_cache["inserted"] == [[0, 1, 2, 3, 4, 900, 901, 902]]
+
+    def test_a_continuation_evaluates_only_the_new_tokens(self, fake_cache):
+        engine = _loaded()
+        engine.generate("hello", GenerationConfig(max_tokens=3))
+        # The fake tokenizer maps text to range(len), so a longer prompt
+        # shares the stored prefix only up to the reply ids; seat a key that
+        # a longer prompt does extend.
+        engine._prompt_store.entries.append(list(range(8)))
+        result = engine.generate("hello, world", GenerationConfig(max_tokens=3))
+        assert fake_cache["stream"][1]["prompt"] == list(range(8, 12))
+        assert fake_cache["stream"][1]["cache"] == {"kv": list(range(8))}
+        assert engine.last_prompt_tokens_reused == 8
+        # tokens_prompt reports the whole prompt, not the part evaluated.
+        assert result.tokens_prompt == 12
+
+    def test_an_exact_hit_still_evaluates_the_prompt(self, fake_cache):
+        """mlx-lm cannot generate from an empty prompt; an exact hit must
+        fall back to a fresh cache, not pass zero tokens."""
+        engine = _loaded()
+        engine._prompt_store.entries.append(list(range(5)))
+        engine.generate("hello", GenerationConfig(max_tokens=3))
+        assert fake_cache["stream"][0]["prompt"] == [0, 1, 2, 3, 4]
+        assert fake_cache["stream"][0]["cache"] == {"kv": []}
+
+    def test_timings_are_measured_not_apportioned(self, fake_cache):
+        engine = _loaded()
+        result = engine.generate("hello", GenerationConfig(max_tokens=3))
+        # 5 evaluated prompt tokens at 1000 tok/s, 3 generated at 100 tok/s.
+        assert result.prompt_eval_duration == 5_000_000
+        assert result.eval_duration == 30_000_000
+        assert result.stop_reason == "length"
+
+    def test_stream_stores_after_the_consumer_finishes(self, fake_cache):
+        engine = _loaded()
+        assert list(engine.generate_stream("hello", GenerationConfig(max_tokens=3))) == [
+            "A",
+            "B",
+            "C",
+        ]
+        assert fake_cache["inserted"] == [[0, 1, 2, 3, 4, 900, 901, 902]]
+
+    def test_a_stream_closed_early_stores_what_was_generated(self, fake_cache):
+        engine = _loaded()
+        stream = engine.generate_stream("hello", GenerationConfig(max_tokens=3))
+        assert next(stream) == "A"
+        stream.close()
+        assert fake_cache["inserted"] == [[0, 1, 2, 3, 4, 900]]
+
+    def test_a_stop_string_ends_generation_and_keeps_the_cache_consistent(self, fake_cache):
+        engine = _loaded()
+        result = engine.generate("hello", GenerationConfig(max_tokens=3, stop=["B"]))
+        assert result.text == "A"
+        assert fake_cache["inserted"] == [[0, 1, 2, 3, 4, 900, 901]]
+
+    def test_a_failed_request_is_not_stored(self, fake_cache):
+        engine = _loaded()
+        fake_cache["explode"] = True
+        with pytest.raises(RuntimeError, match="metal fault"):
+            engine.generate("hello", GenerationConfig(max_tokens=3))
+        assert fake_cache["inserted"] == []
+
+    def test_a_response_without_token_ids_is_not_stored(self, fake_cache):
+        """Guessing the key from text could name KV it does not hold."""
+        engine = _loaded()
+
+        def _textual(_model, _tokenizer, *, prompt, prompt_cache, **kwargs):
+            yield from ("x", "y")
+
+        sys.modules["mlx_lm"].stream_generate = _textual  # type: ignore[attr-defined]
+        assert engine.generate("hello").text == "xy"
+        assert fake_cache["inserted"] == []
+
+    def test_unload_drops_the_store(self, fake_cache):
+        engine = _loaded()
+        assert engine._prompt_store is not None
+        engine.unload()
+        assert engine._prompt_store is None
+
+    def test_budget_is_the_configured_bytes(self, fake_cache, monkeypatch):
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "mlx_prompt_cache_bytes", 12345)
+        assert _loaded()._prompt_store.max_bytes == 12345
+
+    def test_zero_budget_runs_the_uncached_path(self, fake_cache, monkeypatch):
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "mlx_prompt_cache_bytes", 0)
+        engine = _loaded()
+        assert engine._prompt_store is None
+        assert engine.generate("hi").text == "ECHO:hi"
+        assert fake_cache["stream"] == []
+
+    def test_an_mlx_lm_without_the_cache_runs_uncached(self, fake_mlx):
+        engine = _loaded()
+        assert engine._prompt_store is None
+        assert engine.generate("hi").text == "ECHO:hi"
+
+    def test_the_default_budget_keeps_the_cache_on(self):
+        from hfl.config import HFLConfig
+
+        assert HFLConfig().mlx_prompt_cache_bytes > 0

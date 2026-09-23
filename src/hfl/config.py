@@ -383,6 +383,13 @@ class HFLConfig:
     stream_queue_get_timeout: float = field(
         default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_GET_TIMEOUT", "30"))
     )
+    # MLX prompt cache: the KV of recent prompts, kept so a follow-up turn
+    # only evaluates its new suffix. Bounded in bytes because on Apple
+    # Silicon the cache shares unified memory with the model weights — an
+    # unbounded cache is a slow way to OOM a large model. 0 disables it.
+    mlx_prompt_cache_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("HFL_MLX_PROMPT_CACHE_BYTES", str(2 * 1024**3)))
+    )
     # vLLM-specific: time allowed for the error sentinel to reach the
     # consumer when the worker thread failed. Shorter than the regular
     # put timeout because a dying stream shouldn't wait for

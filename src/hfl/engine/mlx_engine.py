@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import platform
 import time
-from typing import Any, Iterator, cast
+from typing import Any, Generator, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
@@ -64,6 +64,13 @@ class MLXEngine(InferenceEngine):
         self._model: Any = None
         self._tokenizer: Any = None
         self._model_path: str | None = None
+        # KV of recent prompts (``mlx_lm``'s LRUPromptCache), or None when
+        # disabled or when the installed mlx-lm predates it. None means the
+        # engine runs exactly the pre-cache code paths.
+        self._prompt_store: Any = None
+        #: Prompt tokens the last request took from the cache instead of
+        #: evaluating. Diagnostic only — the proof lives in the timings.
+        self.last_prompt_tokens_reused: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -82,12 +89,122 @@ class MLXEngine(InferenceEngine):
         # starred target accepts either arity (we only want the first two).
         self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
+        self._prompt_store = self._new_prompt_store()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
 
     def unload(self) -> None:
         self._model = None
         self._tokenizer = None
         self._model_path = None
+        # The cached KV belongs to the model being dropped; keeping it would
+        # pin memory and could never be matched against another model.
+        self._prompt_store = None
+
+    @staticmethod
+    def _new_prompt_store() -> Any:
+        """A bounded prompt cache, or None to run without one.
+
+        llama.cpp reuses the KV prefix between turns inside
+        ``Llama.generate``; ``mlx_lm.generate`` does not, so every chat turn
+        on the MLX backend re-evaluated the whole conversation — measured on
+        Qwen2.5-0.5B-4bit at ~185 ms per turn for a ~1 550-token prompt, the
+        same cost on turn 5 as on turn 2. ``mlx_lm`` ships the fix as
+        ``LRUPromptCache``, the structure its own server uses.
+
+        Bounded in bytes because on Apple Silicon the cache shares unified
+        memory with the weights. ``HFL_MLX_PROMPT_CACHE_BYTES=0`` disables
+        it, and disabled means the pre-cache code paths run unchanged — the
+        off-switch is a real rollback, not an approximation of one.
+        """
+        from hfl.config import config
+
+        budget = int(getattr(config, "mlx_prompt_cache_bytes", 0) or 0)
+        if budget <= 0:
+            return None
+        try:
+            from mlx_lm.models.cache import LRUPromptCache
+        except ImportError:
+            logger.info("mlx-lm has no LRUPromptCache; running without a prompt cache")
+            return None
+        return LRUPromptCache(max_size=4, max_bytes=budget)
+
+    def _cached_responses(self, prompt: str, cfg: GenerationConfig) -> Generator[Any, None, None]:
+        """Stream ``mlx_lm`` responses, reusing and then refreshing the cache.
+
+        Mirrors ``mlx_lm.server``: fetch the cached KV nearest to this
+        prompt, evaluate only the tokens it does not cover, then store the
+        cache under prompt + generated token ids.
+
+        The key is built from the ids the model actually produced, never by
+        re-tokenising the text. Detokenise-then-encode is not guaranteed to
+        round-trip, and a key that disagrees with the KV it names would let
+        a later request reuse attention state computed for different tokens
+        — silently wrong output. A response without a token id therefore
+        disables the store for that request instead of guessing.
+
+        A consumer that stops early (a stop string, a closed stream) still
+        leaves a consistent cache: every token ``mlx_lm`` yields has already
+        been fed to the model. A request that fails is not stored.
+        """
+        from mlx_lm import stream_generate
+        from mlx_lm.models.cache import make_prompt_cache
+
+        store = self._prompt_store
+        model_key = self._model_path or "mlx-engine"
+        tokens = [int(t) for t in self._tokenizer.encode(prompt)]
+
+        cache, rest = store.fetch_nearest_cache(model_key, tokens)
+        if cache is None or not rest:
+            # No reusable prefix — or an exact hit, which would leave nothing
+            # to evaluate. The latter needs a prompt equal to an earlier
+            # prompt PLUS its whole reply, so a fresh cache costs little.
+            cache, rest = make_prompt_cache(self._model), tokens
+        self.last_prompt_tokens_reused = len(tokens) - len(rest)
+
+        self._maybe_seed(cfg)
+        key: list[int] | None = list(tokens)
+        store_it = False
+        try:
+            for response in stream_generate(
+                self._model,
+                self._tokenizer,
+                prompt=rest,
+                prompt_cache=cache,
+                **self._build_sampling(cfg),
+            ):
+                token = getattr(response, "token", None)
+                if token is None:
+                    key = None
+                elif key is not None:
+                    key.append(int(token))
+                yield response
+            store_it = True
+        except GeneratorExit:
+            store_it = True
+            raise
+        finally:
+            if store_it and key is not None:
+                store.insert_cache(model_key, key, cache)
+
+    @staticmethod
+    def _measured_ns(last: Any) -> tuple[int, int] | None:
+        """Prefill and generation time as mlx-lm measured them, in ns.
+
+        The pre-cache path apportions total time by token count, which is
+        the defect 0.18.2 removed from llama.cpp: it cannot show a cache hit,
+        because it charges every prompt token the same. ``prompt_tps``
+        covers only the tokens actually evaluated, so a reused prefix shows
+        up as the saving it is.
+        """
+        p_tok = getattr(last, "prompt_tokens", 0) or 0
+        p_tps = getattr(last, "prompt_tps", 0) or 0
+        g_tok = getattr(last, "generation_tokens", 0) or 0
+        g_tps = getattr(last, "generation_tps", 0) or 0
+        if p_tps <= 0 and g_tps <= 0:
+            return None
+        prompt_ns = int(p_tok / p_tps * 1e9) if p_tps > 0 else 0
+        eval_ns = int(g_tok / g_tps * 1e9) if g_tps > 0 else 0
+        return prompt_ns, eval_ns
 
     @property
     def is_loaded(self) -> bool:
@@ -241,6 +358,8 @@ class MLXEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
+        if self._prompt_store is not None:
+            return self._generate_cached(prompt, cfg)
         text, n_prompt, n_gen, total_ns = self._run_generate(prompt, cfg)
         elapsed = max(total_ns, 1) / 1e9
         return GenerationResult(
@@ -253,6 +372,53 @@ class MLXEngine(InferenceEngine):
             load_duration=0,
             prompt_eval_duration=int(total_ns * n_prompt / max(1, n_prompt + n_gen)),
             eval_duration=int(total_ns * n_gen / max(1, n_prompt + n_gen)),
+        )
+
+    def _generate_cached(self, prompt: str, cfg: GenerationConfig) -> GenerationResult:
+        """``generate`` through the prompt cache, with measured timings."""
+        start_ns = time.monotonic_ns()
+        stops = self._stop_strings(cfg)
+        text = ""
+        last: Any = None
+        n_gen = 0
+        responses = self._cached_responses(prompt, cfg)
+        try:
+            for response in responses:
+                last = response
+                n_gen = getattr(response, "generation_tokens", n_gen + 1) or n_gen + 1
+                text += response.text if hasattr(response, "text") else str(response)
+                if stops and self._earliest_stop(text, stops) is not None:
+                    # Stop generating, not only stop showing: every token
+                    # past the stop string was compute nobody reads.
+                    break
+        except Exception:
+            logger.exception("MLX generate failed")
+            raise
+        finally:
+            responses.close()
+        if stops:
+            cut = self._earliest_stop(text, stops)
+            if cut is not None:
+                text = text[:cut]
+        total_ns = time.monotonic_ns() - start_ns
+        n_prompt = self.last_prompt_tokens_reused + int(getattr(last, "prompt_tokens", 0) or 0)
+        measured = self._measured_ns(last)
+        if measured is None:
+            prompt_ns, eval_ns = 0, total_ns
+        else:
+            prompt_ns, eval_ns = measured
+        eval_s = eval_ns / 1e9
+        finish = getattr(last, "finish_reason", None)
+        return GenerationResult(
+            text=text,
+            tokens_generated=n_gen,
+            tokens_prompt=n_prompt,
+            tokens_per_second=n_gen / eval_s if eval_s > 0 else 0,
+            stop_reason="length" if finish == "length" else "stop",
+            total_duration=total_ns,
+            load_duration=0,
+            prompt_eval_duration=prompt_ns,
+            eval_duration=eval_ns,
         )
 
     def chat(
@@ -274,17 +440,35 @@ class MLXEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
-        from mlx_lm import stream_generate
-
-        self._maybe_seed(cfg)
-        kwargs = self._build_sampling(cfg)
         stops = self._stop_strings(cfg)
 
         def _piece(token: Any) -> str:
             return token.text if hasattr(token, "text") else str(token)
 
-        gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+        gen: Iterator[Any]
+        if self._prompt_store is not None:
+            gen = self._cached_responses(prompt, cfg)
+        else:
+            from mlx_lm import stream_generate
 
+            self._maybe_seed(cfg)
+            kwargs = self._build_sampling(cfg)
+            gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+
+        try:
+            yield from self._stream_until_stop(gen, stops, _piece)
+        finally:
+            # Close now, on the thread holding the dispatcher slot: that is
+            # when the cached path stores this turn's KV. Left to the
+            # garbage collector it could land later, on another thread,
+            # while the next request is already using the store.
+            close = getattr(gen, "close", None)
+            if close is not None:
+                close()
+
+    def _stream_until_stop(
+        self, gen: Iterator[Any], stops: list[str], _piece: Any
+    ) -> Iterator[str]:
         if not stops:
             for token in gen:
                 yield _piece(token)

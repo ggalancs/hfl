@@ -94,6 +94,7 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 |------------------------------------|---------|--------------|
 | `HFL_STREAM_QUEUE_PUT_TIMEOUT`     | `60`    | Seconds the engine thread will wait to enqueue a token before raising. |
 | `HFL_STREAM_QUEUE_GET_TIMEOUT`     | `30`    | Seconds the consumer waits for the next token. |
+| `HFL_MLX_PROMPT_CACHE_BYTES`      | `2147483648` | Bytes of KV cache the MLX backend keeps for recent prompts, so a follow-up chat turn only evaluates what is new. Shares unified memory with the model weights, hence the cap. `0` disables it. |
 | `HFL_VLLM_ERROR_PUT_TIMEOUT`       | `10`    | Shorter window for the vLLM error sentinel. |
 | `HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT`   | `5`     | vLLM worker join timeout on shutdown. |
 

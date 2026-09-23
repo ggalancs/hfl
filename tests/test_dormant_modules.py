@@ -153,6 +153,15 @@ def _test_only_modules() -> set[str]:
                     target = node.module[len("hfl.") :]
                     if target != me:
                         sink.add(target)
+                    # ``from hfl.engine import mlx_engine`` imports the
+                    # module named by the alias. Without this, the selector's
+                    # import of the MLX engine did not count, and the module
+                    # was reported test-only as soon as a test imported it by
+                    # its full path.
+                    for alias in node.names:
+                        candidate = f"{target}.{alias.name}"
+                        if candidate != me:
+                            sink.add(candidate)
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
                         if alias.name.startswith("hfl."):
