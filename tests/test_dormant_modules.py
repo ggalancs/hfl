@@ -68,11 +68,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "live ProvenanceLog; nothing imports it back. Release artefacts are signed by "
     "Sigstore/cosign in CI, which is unrelated. Deleting loses a designed "
     "capability: wire it or drop the capability deliberately.",
-    "observability.audit": "VERIFIED UNFINISHED (2026-09-23), not dead. Zero "
-    "emitters: no router calls audit_event and nothing audits by another route, so "
-    "audit events are recorded nowhere. No documentation promises it — the "
-    "'Markdown audit trail' in docs/hub-native-features.md is the live "
-    "provenance log, a different thing. Wire it or drop it deliberately.",
     # --- speculative, never found a home --------------------------------
     "engine.failover": "Assumes a multi-backend world HFL is not. Candidate for removal.",
     "utils.circuit_breaker": "Same assumption. Candidate for removal.",
@@ -177,7 +172,10 @@ def test_the_documented_subsystems_carry_their_verdict():
     distinction decides whether deleting them is free or destructive, so
     the verdict travels with the entry.
     """
-    for name in ("api.timeout", "observability.signing", "observability.audit"):
+    # ``observability.audit`` left this list when it was wired into
+    # ``require_owner`` — resolved entries are struck off rather than kept
+    # as history, which is the same rule the inventory itself follows.
+    for name in ("api.timeout", "observability.signing"):
         assert name in KNOWN_ORPHANS, f"{name} dropped out of the inventory"
         assert "VERIFIED" in KNOWN_ORPHANS[name], (
             f"{name} was one of the three the docs presented as active. Its entry "

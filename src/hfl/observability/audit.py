@@ -65,6 +65,18 @@ AUDIT_EVENTS = frozenset(
         "mcp.disconnect",
         "api_key.mint",
         "api_key.revoke",
+        # Emitted from ``require_owner``, which is the single gate every
+        # privileged route passes through. Adding a guarded route without
+        # adding its name here is caught by test_audit_wired.py rather
+        # than by a warning nobody reads.
+        "model.push",
+        "model.smart_pull",
+        "model.batch",
+        "lora.apply",
+        "lora.remove",
+        "snapshot.save",
+        "snapshot.load",
+        "snapshot.delete",
     }
 )
 

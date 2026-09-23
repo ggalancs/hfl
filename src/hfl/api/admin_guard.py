@@ -23,7 +23,11 @@ responsibility attached.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 # Loopback peers are the machine's owner. Everything else is a remote
 # *user*. ``localhost`` is included for transports that pass the name
@@ -90,6 +94,64 @@ def _reject_browser_origin(request: Request, operation: str) -> None:
     )
 
 
+# ``require_owner``'s operation strings are written for a human reading a
+# 403. The audit log is read by a machine, so the two vocabularies are
+# mapped explicitly rather than derived — a derivation would silently
+# invent an event name the catalogue does not know.
+_AUDIT_EVENT_FOR: dict[str, str] = {
+    "pull": "model.pull",
+    "smart-pull": "model.smart_pull",
+    "push": "model.push",
+    "create": "model.create",
+    "copy": "model.copy",
+    "stop": "model.stop",
+    "batch": "model.batch",
+    "lora apply": "lora.apply",
+    "lora remove": "lora.remove",
+    "snapshot save": "snapshot.save",
+    "snapshot load": "snapshot.load",
+    "snapshot delete": "snapshot.delete",
+}
+
+
+def _actor_for(request: Request) -> str:
+    """Identify the caller without ever recording a credential.
+
+    A loopback peer is the machine's owner and is recorded as such. A
+    remote peer is identified by a short SHA-256 prefix of its API key,
+    which is enough to correlate a series of actions to one client and
+    useless to anybody who obtains the log.
+    """
+    if is_local_request(request):
+        return "local"
+    key = request.headers.get("authorization", "") or request.headers.get("x-api-key", "")
+    if key.lower().startswith("bearer "):
+        key = key[7:]
+    if not key:
+        return "anonymous"
+    import hashlib
+
+    return "api-key:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def _audit(request: Request, operation: str, outcome: str) -> None:
+    """Record a privileged attempt. Never raises, never blocks the route.
+
+    Denied attempts are recorded too, and are the more interesting half:
+    an audit log that only holds successes cannot answer the question it
+    exists for.
+    """
+    event = _AUDIT_EVENT_FOR.get(operation)
+    if event is None:
+        return
+    try:
+        from hfl.observability.audit import audit_event
+
+        audit_event(event, actor=_actor_for(request), outcome=outcome)
+    except Exception:  # pragma: no cover — auditing must never break a route
+        logger.debug("audit emit failed for %s", event, exc_info=True)
+
+
 def require_owner(request: Request, operation: str = "this operation") -> None:
     """Refuse ``operation`` for remote callers unless remote admin is on.
 
@@ -108,6 +170,7 @@ def require_owner(request: Request, operation: str = "this operation") -> None:
     _reject_browser_origin(request, operation)
 
     if is_local_request(request):
+        _audit(request, operation, "ok")
         return
 
     # Late import so this module stays cheap and honours test monkeypatching
@@ -115,8 +178,10 @@ def require_owner(request: Request, operation: str = "this operation") -> None:
     from hfl.config import config
 
     if getattr(config, "allow_remote_pull", False):
+        _audit(request, operation, "ok")
         return
 
+    _audit(request, operation, "denied")
     raise HTTPException(
         status_code=403,
         detail={
