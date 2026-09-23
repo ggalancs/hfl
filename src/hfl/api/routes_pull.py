@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from hfl.hub.license_checker import LicenseInfo
     from hfl.hub.resolver import ResolvedModel
 
+from hfl.hub.connectivity import HUB_HOST, is_network_error
 from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,12 @@ class PullRequest(BaseModel):
             "until completion and receive a single JSON envelope."
         ),
     )
+
+
+HUB_UNREACHABLE_MESSAGE = (
+    f"cannot reach {HUB_HOST} — this server appears to be offline. "
+    "Models already pulled keep serving."
+)
 
 
 def _event(status: str, **extra: Any) -> str:
@@ -252,6 +259,13 @@ async def _run_pull_streaming(
     except Exception as exc:  # pragma: no cover — error envelope tested via mock
         # ``resolve`` talks to the Hub and the local cache; its failures quote
         # URLs and on-disk paths. Reference the log line instead.
+        if is_network_error(exc):
+            # Offline is a normal state for a local runner, not a server
+            # fault: name the cause, and tag it so the non-stream path can
+            # answer 503 (the upstream is unavailable) instead of 500.
+            logger.info("pull of %r: Hub unreachable (%s)", req.model, type(exc).__name__)
+            yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
+            return
         detail = log_internal_failure(logger, f"resolving {req.model!r}", exc)
         yield _event("error", error=detail)
         return
@@ -308,6 +322,12 @@ async def _run_pull_streaming(
     try:
         local_path = await download_task
     except Exception as exc:
+        if is_network_error(exc):
+            logger.info(
+                "pull of %r: Hub unreachable mid-download (%s)", req.model, type(exc).__name__
+            )
+            yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
+            return
         detail = log_internal_failure(logger, "download", exc)
         yield _event("error", error=detail)
         return
@@ -385,7 +405,13 @@ async def pull_model_route(req: PullRequest, request: Request) -> StreamingRespo
             if event.get("status") == "error":
                 # A refused license is a client/authorization problem (403),
                 # not a server failure (500).
-                status_code = 403 if event.get("code") == "license_not_accepted" else 500
+                # An unreachable Hub is an unavailable upstream (503), and
+                # retryable — a client can back off and try again when the
+                # network returns. 500 claimed the server itself had broken.
+                status_code = {
+                    "license_not_accepted": 403,
+                    "hub_unreachable": 503,
+                }.get(event.get("code", ""), 500)
                 return JSONResponse(status_code=status_code, content=event)
             final = event
         final["_duration_seconds"] = round(time.monotonic() - start, 2)

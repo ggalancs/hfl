@@ -19,8 +19,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from hfl.logging_config import log_internal_failure
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["HFL Beyond"])
@@ -60,8 +58,15 @@ async def _stream_smart_pull(req: SmartPullRequest) -> AsyncIterator[str]:
     try:
         plan, reason = try_smart_plan(req.model, max_vram_gb=req.max_vram_gb)
     except Exception as exc:
-        detail = log_internal_failure(logger, "smart-pull planning", exc)
-        yield json.dumps({"status": "failed", "error": detail}) + "\n"
+        from hfl.hub.connectivity import describe_hub_failure, is_network_error
+
+        event: dict[str, Any] = {
+            "status": "failed",
+            "error": describe_hub_failure(logger, "smart-pull planning", exc),
+        }
+        if is_network_error(exc):
+            event["code"] = "hub_unreachable"
+        yield json.dumps(event) + "\n"
         return
 
     if plan is None:
@@ -134,7 +139,10 @@ async def api_pull_smart(
             except (json.JSONDecodeError, ValueError):
                 continue
         if last.get("status") == "failed":
-            raise HTTPException(status_code=400, detail=last.get("error", "unknown"))
+            # Offline is an unavailable upstream (503, retryable), not a bad
+            # request.
+            status = 503 if last.get("code") == "hub_unreachable" else 400
+            raise HTTPException(status_code=status, detail=last.get("error", "unknown"))
         return JSONResponse(content=last)
 
     return StreamingResponse(

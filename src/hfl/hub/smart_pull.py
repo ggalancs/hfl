@@ -125,10 +125,20 @@ def _candidate_repos(base_repo_id: str, profile: HardwareProfile) -> list[str]:
 
 
 def _repo_exists(api: "HfApi", repo_id: str) -> bool:
+    """Whether ``repo_id`` is on the Hub. Raises if the Hub cannot be reached.
+
+    Returning False on every exception made an offline machine report each
+    candidate as "not on Hub" and then conclude that no variant fits the
+    budget — two false statements about repos nobody looked at.
+    """
     try:
         api.model_info(repo_id)
         return True
-    except Exception:
+    except Exception as exc:
+        from hfl.hub.connectivity import HubUnreachableError, is_network_error
+
+        if is_network_error(exc):
+            raise HubUnreachableError(f"could not reach the Hub to look up {repo_id}") from exc
         return False
 
 
@@ -142,7 +152,11 @@ def _list_quants_in_repo(api: "HfApi", repo_id: str) -> set[str]:
     """
     try:
         info = api.model_info(repo_id)
-    except Exception:
+    except Exception as exc:
+        from hfl.hub.connectivity import HubUnreachableError, is_network_error
+
+        if is_network_error(exc):
+            raise HubUnreachableError(f"could not reach the Hub to list {repo_id}") from exc
         return set()
     siblings = getattr(info, "siblings", []) or []
     seen: set[str] = set()
@@ -211,6 +225,10 @@ def try_smart_plan(
     max_vram_gb: float | None = None,
 ) -> tuple[SmartPullPlan | None, str | None]:
     """Resolve the best available variant for the current host.
+
+    Raises :class:`~hfl.hub.connectivity.HubUnreachableError` when the Hub
+    cannot be reached: that is not "nothing fits", it is "cannot know",
+    and the two need different words for the user.
 
     Returns ``(plan, None)`` on success and ``(None, reason)`` when nothing
     fits the budget — ``reason`` is the same sentence

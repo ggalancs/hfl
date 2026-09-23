@@ -186,7 +186,17 @@ def total_b_from_hub_files(api: "HfApi", repo_id: str) -> float | None:
     """
     try:
         info = api.model_info(repo_id, files_metadata=True)
-    except Exception:
+    except Exception as exc:
+        # Three outcomes, not two. "The Hub answered with no sizes" and "the
+        # call failed for some other reason" both return None — the caller
+        # falls back and says it could not determine the size. "The Hub was
+        # never reached" raises, because the true message is "you are
+        # offline", and reporting "no file sizes" there is a false statement
+        # about a repo nobody looked at.
+        from hfl.hub.connectivity import HubUnreachableError, is_network_error
+
+        if is_network_error(exc):
+            raise HubUnreachableError(f"could not reach the Hub for {repo_id}") from exc
         logger.debug("could not read file metadata for %s", repo_id, exc_info=True)
         return None
 

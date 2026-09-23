@@ -125,6 +125,8 @@ def pull(
         elif "not found" in error_msg.lower() or "No se encontró" in error_msg:
             console.print(f"[red]Error:[/] {e}")
             console.print(f"[dim]{t('errors.check_name_or_search')}[/]")
+        elif _hub_unreachable(e):
+            _print_hub_unreachable()
         else:
             console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
         raise typer.Exit(1) from e
@@ -476,6 +478,25 @@ def run(
             f"[dim]{t('messages.session_saved', path=sessions_dir() / f'{session}.json')}[/]"
         )
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
+
+
+def _hub_unreachable(exc: BaseException) -> bool:
+    """Whether a Hub command failed because there is no network at all."""
+    from hfl.hub.connectivity import is_network_error
+
+    return is_network_error(exc)
+
+
+def _print_hub_unreachable() -> None:
+    """Say "offline" once, plainly, and what still works.
+
+    Being offline is a normal state for a local runner, not a fault, so
+    the message leads with the cause and follows with the remedy instead
+    of printing whatever the socket layer raised ("[Errno 8] nodename nor
+    servname provided") and leaving the user to translate it.
+    """
+    console.print(f"[yellow]{t('errors.hub_unreachable')}[/]")
+    console.print(f"[dim]{t('errors.hub_unreachable_hint')}[/]")
 
 
 def _is_public_bind(host: str) -> bool:
@@ -1048,7 +1069,10 @@ def search(
             # the legacy ``direction=-1`` kwarg was removed in hub 1.0.
             models = list(api.list_models(**kwargs))
     except Exception as e:
-        console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
+        if _hub_unreachable(e):
+            _print_hub_unreachable()
+        else:
+            console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1) from e
 
     if not models:
@@ -2036,7 +2060,10 @@ def recommend(
             top_n=top_n,
         )
     except Exception as exc:
-        console.print(f"[red]Hub unavailable:[/] {exc}")
+        if _hub_unreachable(exc):
+            _print_hub_unreachable()
+        else:
+            console.print(f"[red]{t('errors.error_resolving')}:[/] {exc}")
         raise typer.Exit(1) from exc
 
     profile_dict = asdict(profile)

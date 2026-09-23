@@ -14,8 +14,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from hfl.hub.connectivity import describe_hub_failure
 from hfl.hub.draft_picker import pick_draft_for
-from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ async def api_draft_recommend(
     except Exception as exc:  # pragma: no cover — Hub failure is upstream
         # huggingface_hub quotes request URLs in its exceptions, and on an
         # auth failure whatever it was sent. Those stay in the log.
-        detail = log_internal_failure(logger, "draft recommender", exc)
+        detail = describe_hub_failure(logger, "draft recommender", exc)
         raise HTTPException(status_code=503, detail=detail) from exc
 
     return {
