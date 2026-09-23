@@ -97,17 +97,31 @@ class TestCheckEngineAvailability:
         assert result["llama-cpp"] is True
 
     @patch.dict("sys.modules", {"llama_cpp": None})
+    @patch.dict("sys.modules", {"llama_cpp": None})
     def test_llama_cpp_not_available(self):
-        """check_engine_availability returns error string when llama_cpp is missing."""
-        # Force reimport
-        import sys
+        """A missing backend is reported as a message, not as a bare key.
 
-        if "llama_cpp" in sys.modules:
-            del sys.modules["llama_cpp"]
+        Two defects lived here. It asserted ``"llama-cpp" in result``,
+        which is true whether the import succeeds or fails — the key is
+        always present — so it could not fail. And it reached that
+        tautology by deleting ``llama_cpp`` from ``sys.modules`` and never
+        putting it back, which poisoned every later test on a machine
+        that has the backend: a subsequent ``import
+        llama_cpp.llama_chat_format`` rebuilt the parent package from the
+        cached submodule alone, leaving a husk carrying no ctypes
+        bindings.
 
-        # This test may not work perfectly due to caching, but the function handles ImportError
+        ``patch.dict`` with ``None`` is the idiom the sibling test above
+        already uses: it makes ``import llama_cpp`` raise ImportError and
+        restores the real entry afterwards. Deleting and re-importing
+        instead is not merely untidy — a native extension re-initialised
+        mid-process crashes the interpreter, which is what happened when
+        that was tried.
+        """
         result = check_engine_availability()
-        assert "llama-cpp" in result
+        assert result["llama-cpp"] is not True
+        assert isinstance(result["llama-cpp"], str)
+        assert "Not installed" in result["llama-cpp"]
 
     def test_torch_cuda_check(self):
         """check_engine_availability checks CUDA availability if torch is available."""

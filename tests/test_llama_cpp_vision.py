@@ -20,6 +20,7 @@ The Llama class itself is patched so no real model loads.
 from __future__ import annotations
 
 import base64
+import contextlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -151,24 +152,53 @@ def _install_fake_handlers(monkeypatch=None):
     return fake
 
 
-class TestVisionHandlerDispatch:
-    @pytest.fixture(autouse=True)
-    def _patch_handlers(self):
-        before = {
-            "llama_cpp": __import__("sys").modules.get("llama_cpp"),
-            "llama_cpp.llama_chat_format": __import__("sys").modules.get(
-                "llama_cpp.llama_chat_format"
-            ),
-        }
-        _install_fake_handlers()
-        yield
-        import sys
+@contextlib.contextmanager
+def _fake_handlers():
+    """Install the fake chat handlers and put ``sys.modules`` back after.
 
+    The ``setdefault`` above is load-bearing in a way that bites: when the
+    real ``llama_cpp`` is not currently imported it creates an EMPTY
+    ``ModuleType`` and hangs only ``llama_chat_format`` on it. Left in
+    place, that husk shadows the real package for the rest of the session
+    — every later ``import llama_cpp`` finds a module with no ctypes
+    bindings, so anything asking about its real surface raises
+    AttributeError and anything merely checking the module exists is
+    quietly testing the stub.
+
+    One class restored by hand and two did not, which is why this is a
+    fixture now instead of three copies of the same six lines.
+    """
+    import sys
+
+    watched = ("llama_cpp", "llama_cpp.llama_chat_format")
+    before = {name: sys.modules.get(name) for name in watched}
+    real_parent = before["llama_cpp"]
+    had_attr = hasattr(real_parent, "llama_chat_format") if real_parent else False
+    original_attr = getattr(real_parent, "llama_chat_format", None) if real_parent else None
+    try:
+        yield _install_fake_handlers()
+    finally:
         for name, module in before.items():
             if module is None:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
+        # ``_install_fake_handlers`` also mutates the real parent in place.
+        if real_parent is not None:
+            if had_attr:
+                real_parent.llama_chat_format = original_attr
+            else:
+                try:
+                    del real_parent.llama_chat_format
+                except AttributeError:
+                    pass
+
+
+class TestVisionHandlerDispatch:
+    @pytest.fixture(autouse=True)
+    def _patch_handlers(self):
+        with _fake_handlers():
+            yield
 
     def test_gemma3_gets_gemma3_handler(self):
         h = _build_vision_chat_handler(architecture="gemma3", clip_model_path="/tmp/mmproj.gguf")
@@ -206,33 +236,38 @@ class TestVisionHandlerDispatch:
 
 
 class TestVisionHandlerImportFallback:
-    def test_missing_multimodal_module_returns_none(self):
+    def test_missing_multimodal_module_returns_none(self, monkeypatch):
         """If llama-cpp-python is too old to ship multimodal
         handlers, we return None and skip multimodal support
-        rather than crashing."""
+        rather than crashing.
+
+        Both entries are restored. The ``finally`` here used to put back
+        only ``llama_cpp.llama_chat_format`` and leave the bare
+        ``ModuleType`` standing in for ``llama_cpp`` itself for the rest
+        of the session. Two files later, a test that introspects the real
+        package raised AttributeError — and, worse, any test in between
+        that merely checked the backend was importable was quietly
+        checking this stub.
+
+        ``monkeypatch.setitem`` swaps the dict entry and swaps it back,
+        which is the safe shape: deleting a native extension and letting
+        it re-import mid-process crashes the interpreter.
+        """
         import sys
         import types
 
-        before = sys.modules.get("llama_cpp.llama_chat_format")
-
-        # Install a fake top-level llama_cpp so the import itself
-        # succeeds, but omit the llama_chat_format submodule —
-        # and map it to None so ``from ... import X`` raises
-        # ImportError on the names.
+        # A top-level llama_cpp that imports fine, with a submodule that
+        # raises ImportError on every name — the shape of an old release
+        # without multimodal support.
         class BrokenModule:
             def __getattr__(self, name):
                 raise ImportError(f"no {name}")
 
-        sys.modules["llama_cpp"] = types.ModuleType("llama_cpp")
-        sys.modules["llama_cpp.llama_chat_format"] = BrokenModule()  # type: ignore[assignment]
-        try:
-            h = _build_vision_chat_handler(architecture="gemma3", clip_model_path="/tmp/m.gguf")
-            assert h is None
-        finally:
-            if before is None:
-                sys.modules.pop("llama_cpp.llama_chat_format", None)
-            else:
-                sys.modules["llama_cpp.llama_chat_format"] = before
+        monkeypatch.setitem(sys.modules, "llama_cpp", types.ModuleType("llama_cpp"))
+        monkeypatch.setitem(sys.modules, "llama_cpp.llama_chat_format", BrokenModule())
+
+        h = _build_vision_chat_handler(architecture="gemma3", clip_model_path="/tmp/m.gguf")
+        assert h is None
 
 
 # ----------------------------------------------------------------------
@@ -241,6 +276,18 @@ class TestVisionHandlerImportFallback:
 
 
 class TestLoadAutodetectsCLIPProjector:
+    @pytest.fixture(autouse=True)
+    def _patch_handlers(self):
+        """Same restoring fixture as TestVisionHandlerDispatch.
+
+        Without it, the bare ``_install_fake_handlers()`` calls below left
+        a stub ``llama_cpp`` in ``sys.modules`` for the rest of the
+        session. It surfaced two files later as an AttributeError on
+        ``llama_model_params``, in a test that passes on its own.
+        """
+        with _fake_handlers():
+            yield
+
     @pytest.fixture
     def vision_model_tree(self, tmp_path):
         """Create a fake GGUF + a paired mmproj so ``load`` discovers it."""
@@ -254,8 +301,6 @@ class TestLoadAutodetectsCLIPProjector:
 
     def test_mmproj_sibling_triggers_multimodal_load(self, vision_model_tree):
         model, mmproj = vision_model_tree
-
-        _install_fake_handlers()
 
         captured: dict = {}
 
@@ -319,7 +364,6 @@ class TestLoadAutodetectsCLIPProjector:
     def test_explicit_clip_path_wins_over_sibling_scan(self, vision_model_tree, tmp_path):
         """When ``clip_model_path`` is explicitly passed it must NOT
         be shadowed by an auto-detected sibling."""
-        _install_fake_handlers()
         model, _sibling = vision_model_tree
         explicit = tmp_path / "other-mmproj.gguf"
         explicit.write_bytes(b"GGUF" + b"\x00" * 64)

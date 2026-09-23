@@ -208,3 +208,54 @@ def mock_llama_cpp():
 
     with patch.dict(sys.modules, {"llama_cpp": mock_llama}):
         yield mock_llama_class
+
+
+# ----------------------------------------------------------------------
+# Global-state pollution guard
+# ----------------------------------------------------------------------
+#
+# Several tests swap ``sys.modules["llama_cpp"]`` for a stub to exercise
+# the "backend missing / too old" paths. Two of them used to put the stub
+# in and never take it out, and the damage was invisible for a long time:
+# a test that merely checks the backend is importable passes happily
+# against a stub, so it reports green while testing nothing. It only
+# surfaced when a test introspected the real package and got an
+# AttributeError — two files and several hundred tests later.
+#
+# This hook names the test that left the stub behind, at the moment it
+# happens, instead of leaving the next person to bisect for it.
+
+
+def _llama_cpp_is_stubbed() -> bool:
+    module = sys.modules.get("llama_cpp")
+    if module is None:
+        return False
+    # The real package carries the ctypes bindings; every stub in this
+    # suite is a bare ModuleType or a MagicMock standing in for it.
+    return not hasattr(module, "llama_model_params")
+
+
+@pytest.fixture(autouse=True)
+def _no_llama_cpp_pollution(request):
+    """Fail the test that leaves a stub behind, by name.
+
+    An autouse fixture declared in the root conftest is the OUTERMOST
+    one, so its teardown runs last — after ``monkeypatch`` has already
+    undone a well-behaved test's swap. That ordering is the whole reason
+    it is a fixture rather than a ``pytest_runtest_protocol`` wrapper:
+    failing from inside that hook produces an INTERNALERROR and still
+    reports the test as passed, which is precisely the kind of
+    unattributable result this guard exists to prevent.
+    """
+    polluted_before = _llama_cpp_is_stubbed()
+    yield
+    if _llama_cpp_is_stubbed() and not polluted_before:
+        raise AssertionError(
+            f"{request.node.nodeid} left a stub llama_cpp in sys.modules. "
+            "Restore it — monkeypatch.setitem swaps the entry back for you. Do "
+            "NOT delete and re-import: a native extension re-initialised "
+            "mid-process crashes the interpreter. Left in place, the stub "
+            "silently shadows the real package for every test that follows, so "
+            "anything merely checking the backend is importable reports green "
+            "while testing the stub."
+        )
