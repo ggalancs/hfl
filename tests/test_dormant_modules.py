@@ -55,12 +55,24 @@ REACHED_OTHERWISE: dict[str, str] = {
 # Orphans as of 2026-09-22, each with the decision it is waiting on.
 # Striking one off is the point of the exercise.
 KNOWN_ORPHANS: dict[str, str] = {
-    # --- documented as active; absence of an importer is the finding ----
-    "api.timeout": "CLAUDE.md lists this among cross-cutting concerns. VERIFY whether "
-    "request timeouts run at all before treating it as dead code.",
-    "observability.signing": "Artifact signing. Verify whether the release path is "
-    "meant to call it.",
-    "observability.audit": "Audit log. Verify whether any route is meant to emit one.",
+    # --- the three that were questions, now answered by measurement -----
+    "api.timeout": "VERIFIED DEAD (2026-09-23). Superseded duplicate: "
+    "hfl.api.helpers.run_dispatched enforces the same config.generation_timeout "
+    "and is what 6 routers import. Measured: limit 0.25/0.75/2.0s cuts at "
+    "exactly that, HTTP 504 code=TIMEOUT. This module even exports a "
+    "run_with_timeout under the same name as the live one, which is how "
+    "CLAUDE.md came to point at the inert copy. Safe to delete. "
+    "See tests/test_timeouts_run.py.",
+    "observability.signing": "VERIFIED UNFINISHED (2026-09-23), not dead. It signs "
+    "provenance manifest envelopes — a feature, not a duplicate. It imports the "
+    "live ProvenanceLog; nothing imports it back. Release artefacts are signed by "
+    "Sigstore/cosign in CI, which is unrelated. Deleting loses a designed "
+    "capability: wire it or drop the capability deliberately.",
+    "observability.audit": "VERIFIED UNFINISHED (2026-09-23), not dead. Zero "
+    "emitters: no router calls audit_event and nothing audits by another route, so "
+    "audit events are recorded nowhere. No documentation promises it — the "
+    "'Markdown audit trail' in docs/hub-native-features.md is the live "
+    "provenance log, a different thing. Wire it or drop it deliberately.",
     # --- speculative, never found a home --------------------------------
     "engine.failover": "Assumes a multi-backend world HFL is not. Candidate for removal.",
     "utils.circuit_breaker": "Same assumption. Candidate for removal.",
@@ -158,16 +170,20 @@ def test_every_known_orphan_still_exists():
     assert not missing, f"KNOWN_ORPHANS names modules that are gone: {missing}"
 
 
-def test_the_documented_subsystems_are_flagged_for_verification():
-    """The entries that are questions, not decisions.
+def test_the_documented_subsystems_carry_their_verdict():
+    """The three that looked like they might be absent features.
 
-    `CLAUDE.md` presents `api/timeout.py` as an active cross-cutting
-    concern. Nothing imports it. Until somebody checks which of the two
-    is wrong, it must not be filed as dead code and quietly deleted.
+    All three were measured on 2026-09-23 rather than reasoned about, and
+    they did not come out the same: `api/timeout.py` is a superseded
+    duplicate (timeouts demonstrably run, from `helpers.py`), while
+    `signing` and `audit` are unfinished features with no callers. The
+    distinction decides whether deleting them is free or destructive, so
+    the verdict travels with the entry.
     """
     for name in ("api.timeout", "observability.signing", "observability.audit"):
         assert name in KNOWN_ORPHANS, f"{name} dropped out of the inventory"
-        assert "VERIFY" in KNOWN_ORPHANS[name] or "Verify" in KNOWN_ORPHANS[name], (
-            f"{name} is documented as active but nothing imports it; its entry "
-            "must keep saying that needs checking, not read as a removal plan."
+        assert "VERIFIED" in KNOWN_ORPHANS[name], (
+            f"{name} was one of the three the docs presented as active. Its entry "
+            "must carry the verdict the measurement produced, so nobody has to "
+            "redo the investigation to know whether deleting it is safe."
         )
