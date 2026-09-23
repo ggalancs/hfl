@@ -1564,41 +1564,41 @@ def config():
     from hfl.config import config as cfg
 
     info = Text()
-    info.append("[bold]Directories[/]\n")
+    info.append_text(Text.from_markup("[bold]Directories[/]\n"))
     info.append(f"  Home:     {cfg.home_dir}\n")
     info.append(f"  Models:   {cfg.models_dir}\n")
     info.append(f"  Cache:    {cfg.cache_dir}\n")
     info.append(f"  Registry: {cfg.registry_path}\n")
 
-    info.append("\n[bold]Server[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Server[/]\n"))
     info.append(f"  Host: {cfg.host}\n")
     info.append(f"  Port: {cfg.port}\n")
 
-    info.append("\n[bold]Rate Limiting[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Rate Limiting[/]\n"))
     info.append(f"  Enabled:  {cfg.rate_limit_enabled}\n")
     info.append(f"  Requests: {cfg.rate_limit_requests}/min\n")
 
-    info.append("\n[bold]Inference Defaults[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Inference Defaults[/]\n"))
     info.append(f"  Context Size: {cfg.default_ctx_size}\n")
     info.append(f"  GPU Layers:   {cfg.default_n_gpu_layers} (-1 = all)\n")
     info.append(f"  Threads:      {cfg.default_threads} (0 = auto)\n")
 
-    info.append("\n[bold]Timeouts (seconds)[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Timeouts (seconds)[/]\n"))
     info.append(f"  Model Load:   {cfg.model_load_timeout}\n")
     info.append(f"  Generation:   {cfg.generation_timeout}\n")
 
-    info.append("\n[bold]SLO Targets[/]\n")
+    info.append_text(Text.from_markup("\n[bold]SLO Targets[/]\n"))
     info.append(f"  Availability: {cfg.slo.availability_target * 100:.1f}%\n")
     info.append(f"  Latency P50:  {cfg.slo.latency_p50_ms}ms\n")
     info.append(f"  Latency P95:  {cfg.slo.latency_p95_ms}ms\n")
     info.append(f"  Latency P99:  {cfg.slo.latency_p99_ms}ms\n")
     info.append(f"  Error Rate:   {cfg.slo.error_rate_target * 100:.1f}%\n")
 
-    info.append("\n[bold]HuggingFace[/]\n")
+    info.append_text(Text.from_markup("\n[bold]HuggingFace[/]\n"))
     if cfg.hf_token:
-        info.append("  Token: [green]Configured[/]\n")
+        info.append_text(Text.from_markup("  Token: [green]Configured[/]\n"))
     else:
-        info.append("  Token: [dim]Not set[/] (use HF_TOKEN env var)\n")
+        info.append_text(Text.from_markup("  Token: [dim]Not set[/] (use HF_TOKEN env var)\n"))
 
     console.print(Panel(info, title="[bold]HFL Configuration[/]", border_style="cyan"))
 
@@ -1688,18 +1688,18 @@ def debug():
     info = Text()
 
     # System info
-    info.append("[bold]System[/]\n")
+    info.append_text(Text.from_markup("[bold]System[/]\n"))
     info.append(f"  Python:   {sys.version.split()[0]}\n")
     info.append(f"  Platform: {platform.system()} {platform.release()}\n")
     info.append(f"  Machine:  {platform.machine()}\n")
 
     # HFL info
-    info.append("\n[bold]HFL[/]\n")
+    info.append_text(Text.from_markup("\n[bold]HFL[/]\n"))
     info.append(f"  Version:  {__version__}\n")
     info.append(f"  Home:     {cfg.home_dir}\n")
 
     # Dependency versions
-    info.append("\n[bold]Dependencies[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Dependencies[/]\n"))
 
     def get_version(module_name: str) -> str:
         try:
@@ -1717,7 +1717,7 @@ def debug():
     info.append(f"  pydantic:         {get_version('pydantic')}\n")
 
     # Optional deps
-    info.append("\n[bold]Optional Dependencies[/]\n")
+    info.append_text(Text.from_markup("\n[bold]Optional Dependencies[/]\n"))
     availability = check_engine_availability()
 
     for dep in ["llama-cpp-python", "transformers", "torch", "vllm", "soundfile", "torchaudio"]:
@@ -1725,10 +1725,10 @@ def debug():
         if version != "not installed":
             info.append(f"  {dep}: {version}\n")
         else:
-            info.append(f"  {dep}: [dim]not installed[/]\n")
+            info.append_text(Text.from_markup(f"  {dep}: [dim]not installed[/]\n"))
 
     # GPU info
-    info.append("\n[bold]GPU[/]\n")
+    info.append_text(Text.from_markup("\n[bold]GPU[/]\n"))
     if availability.get("torch") is True:
         if availability.get("torch_cuda"):
             device = availability.get("cuda_device", "unknown")
@@ -1743,16 +1743,16 @@ def debug():
         elif availability.get("torch_mps"):
             info.append("  MPS: Apple Silicon\n")
         else:
-            info.append("  GPU: [dim]none available[/]\n")
+            info.append_text(Text.from_markup("  GPU: [dim]none available[/]\n"))
     else:
-        info.append("  GPU: [dim]torch not installed[/]\n")
+        info.append_text(Text.from_markup("  GPU: [dim]torch not installed[/]\n"))
 
     # Memory info
     try:
         import psutil
 
         mem = psutil.virtual_memory()
-        info.append("\n[bold]Memory[/]\n")
+        info.append_text(Text.from_markup("\n[bold]Memory[/]\n"))
         info.append(f"  Total:     {mem.total / 1024**3:.1f} GB\n")
         info.append(f"  Available: {mem.available / 1024**3:.1f} GB\n")
         info.append(f"  Used:      {mem.percent}%\n")

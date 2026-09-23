@@ -1097,6 +1097,19 @@ class TestDebugCommand:
         assert result.exit_code == 0
         assert "Debug" in result.stdout
 
+    @pytest.mark.parametrize("command", ["config", "debug"])
+    def test_no_markup_is_printed_literally(self, runner, temp_config, command):
+        """Both panels are built from ``rich.text.Text``, whose ``append``
+        does not parse markup: every heading used to print as
+        ``[bold]Directories[/]``."""
+        from hfl.cli.main import app
+
+        result = runner.invoke(app, [command])
+
+        assert result.exit_code == 0
+        assert "[/" not in result.stdout
+        assert "[bold]" not in result.stdout
+
     def test_debug_shows_system(self, runner, temp_config):
         """Debug command shows system info."""
         from hfl.cli.main import app
