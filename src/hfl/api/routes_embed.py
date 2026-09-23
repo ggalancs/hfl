@@ -36,9 +36,9 @@ import base64
 import logging
 import struct
 import time
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from hfl.api.helpers import apply_keep_alive
@@ -103,12 +103,16 @@ class OllamaEmbedRequest(BaseModel):
             "greater than the model's native dimension → 400."
         ),
     )
-    pooling: str | None = Field(
-        None,
+    pooling: Literal["mean", "cls", "last"] = Field(
+        "mean",
         description=(
-            "Pooling strategy: ``mean`` (default), ``cls`` (first "
-            "token), ``last`` (last non-pad token). Phase 12 P1 — "
-            "V2 row 18."
+            "How token embeddings collapse into one vector: ``mean`` (default), "
+            "``cls`` (first token), ``last`` (last non-pad token). A model trained "
+            "with CLS pooling and served with mean pooling returns vectors that are "
+            "not obviously wrong, just quietly weaker at retrieval — which is why "
+            "this is stated rather than guessed. Only the transformers backend can "
+            "honour a non-mean value; llama.cpp pools inside the C library and "
+            "answers 400."
         ),
     )
 
@@ -308,9 +312,19 @@ async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
 
     inputs = req.input if isinstance(req.input, list) else [req.input]
 
-    result = await _run_embed(
-        lambda: engine.embed(inputs, truncate=req.truncate, dimensions=req.dimensions)
-    )
+    try:
+        result = await _run_embed(
+            lambda: engine.embed(
+                inputs,
+                truncate=req.truncate,
+                dimensions=req.dimensions,
+                pooling=req.pooling,
+            )
+        )
+    except ValueError as exc:
+        # The backend cannot pool the way the caller asked. Its own sentence
+        # names the alternative, and it is ours, not a leaked exception.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     total_duration = time.monotonic_ns() - start
 

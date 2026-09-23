@@ -48,7 +48,11 @@ def fake_embed_engine(sample_manifest):
     engine = MagicMock()
     engine.is_loaded = True
 
-    def fake_embed(inputs, truncate=True, dimensions=None):
+    def fake_embed(inputs, truncate=True, dimensions=None, pooling="mean"):
+        # ``pooling`` joined the EmbeddingEngine contract when the field on
+        # /api/embed was finally connected to the engine; a fake that omits
+        # it would fail with TypeError rather than exercise the route.
+        assert pooling in ("mean", "cls", "last")
         vectors = [[float(i) + 0.1 * j for j in range(4)] for i, _ in enumerate(inputs)]
         if dimensions:
             vectors = [v[:dimensions] for v in vectors]

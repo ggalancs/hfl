@@ -84,7 +84,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "api.deprecation": "Decide whether any endpoint is meant to be marked deprecated.",
     "core.sandbox": "Decide whether tool execution is meant to go through it.",
     "core.sessions": "Decide whether the session store has a caller.",
-    "engine.embedding_pooling": "Decide whether embedding_engine should use it.",
 }
 
 

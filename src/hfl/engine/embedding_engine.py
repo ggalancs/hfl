@@ -33,7 +33,9 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from hfl.engine.embedding_pooling import POOLING_STRATEGIES, Pooling, pool
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +105,20 @@ class EmbeddingEngine(ABC):
         *,
         truncate: bool = True,
         dimensions: int | None = None,
+        pooling: str = "mean",
     ) -> EmbeddingResult:
         """Produce embeddings for a batch of input strings.
 
         Args:
             inputs: Strings to embed. Empty list is rejected by the
                 router; engines may assume non-empty.
+            pooling: How token embeddings collapse into one vector —
+                ``mean``, ``cls`` or ``last``. A model trained with CLS
+                pooling and served with mean pooling returns vectors that
+                are not obviously wrong, just quietly worse at retrieval,
+                which is why this is explicit rather than inferred. An
+                engine that cannot honour the request must raise rather
+                than silently pool some other way.
             truncate: When True (Ollama's default), inputs longer
                 than the model's context are truncated to fit
                 instead of raising. When False, an oversized input
@@ -193,9 +203,21 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
         *,
         truncate: bool = True,
         dimensions: int | None = None,
+        pooling: str = "mean",
     ) -> EmbeddingResult:
         if not self._loaded or self._llm is None:
             raise RuntimeError("Model not loaded")
+        if pooling != "mean":
+            # llama.cpp pools inside the C library and hands back one
+            # vector per input; the token matrix never reaches Python, so
+            # CLS or last-token pooling cannot be applied after the fact.
+            # Accepting the argument and ignoring it would return
+            # mean-pooled vectors labelled as something else.
+            raise ValueError(
+                f"pooling={pooling!r} is not available on the llama.cpp embedding "
+                "backend, which pools internally. Serve this model through the "
+                "transformers backend, or request pooling='mean'."
+            )
         if not inputs:
             raise ValueError("inputs must be a non-empty list")
         if dimensions is not None:
@@ -335,9 +357,14 @@ class TransformersEmbeddingEngine(EmbeddingEngine):
         *,
         truncate: bool = True,
         dimensions: int | None = None,
+        pooling: str = "mean",
     ) -> EmbeddingResult:
         if not self._loaded or self._model is None or self._tokenizer is None:
             raise RuntimeError("Model not loaded")
+        if pooling not in POOLING_STRATEGIES:
+            raise ValueError(
+                f"unknown pooling {pooling!r}; expected one of {', '.join(POOLING_STRATEGIES)}"
+            )
         if not inputs:
             raise ValueError("inputs must be a non-empty list")
         if dimensions is not None:
@@ -362,12 +389,26 @@ class TransformersEmbeddingEngine(EmbeddingEngine):
         with torch.no_grad():
             outputs = self._model(**encoded)
 
-        # Mean-pool over the non-padding tokens.
         last_hidden = outputs.last_hidden_state  # (batch, seq, hidden)
-        mask = encoded["attention_mask"].unsqueeze(-1).float()
-        summed = (last_hidden * mask).sum(dim=1)
-        counts = mask.sum(dim=1).clamp(min=1e-9)
-        pooled = summed / counts
+
+        if pooling == "mean":
+            # Kept as the original tensor path rather than routed through
+            # ``pool``: it is the default, it is what every existing vector
+            # was produced with, and a rewrite would risk moving the last
+            # bit of a number for no gain.
+            mask = encoded["attention_mask"].unsqueeze(-1).float()
+            summed = (last_hidden * mask).sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1e-9)
+            pooled = summed / counts
+        else:
+            # CLS / last-token go through the shared implementation so the
+            # strategies have exactly one definition in the codebase.
+            masks = encoded["attention_mask"].tolist()
+            rows = [
+                pool(seq.tolist(), row_mask, cast("Pooling", pooling))
+                for seq, row_mask in zip(last_hidden, masks)
+            ]
+            pooled = torch.tensor(rows, dtype=last_hidden.dtype, device=last_hidden.device)
         # Matryoshka (ENG-5): truncate BEFORE the final L2-normalisation so
         # the returned vector is unit-norm at the requested dimensionality.
         # Normalising first and slicing afterwards leaves norm < 1, which
