@@ -290,6 +290,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Server lifecycle."""
+    # OpenTelemetry, if the operator asked for it. ``configure_tracing``
+    # is a no-op without the SDK installed and without HFL_OTEL_ENABLED,
+    # so the default path costs one function call at boot and nothing per
+    # request — the spans below resolve to a null context manager.
+    from hfl.observability.tracing import configure_tracing
+
+    configure_tracing()
+
     yield
     # Cleanup on shutdown
     await get_state().cleanup()

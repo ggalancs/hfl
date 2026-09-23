@@ -72,7 +72,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "engine.failover": "Assumes a multi-backend world HFL is not. Candidate for removal.",
     "utils.circuit_breaker": "Same assumption. Candidate for removal.",
     "engine.async_wrapper": "Superseded by asyncio.to_thread at the call sites.",
-    "observability.tracing": "OTEL trace_span, zero call sites since June. Wire or remove.",
     "engine.observability": "EngineObserver; token accounting moved to run_dispatched "
     "in 0.18.0, which is why nothing calls it.",
     # --- smaller, unclassified ------------------------------------------

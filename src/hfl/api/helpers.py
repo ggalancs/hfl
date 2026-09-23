@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 
 from hfl.config import config
 from hfl.engine.base import GenerationConfig
+from hfl.observability.tracing import trace_span
 
 if TYPE_CHECKING:
     from fastapi.responses import StreamingResponse
@@ -188,6 +189,21 @@ async def run_dispatched(
     slot_cm = dispatcher.slot()
     await slot_cm.__aenter__()
 
+    # One span covers every inference in the process: chat, generate and
+    # embeddings from all three API dialects funnel through here, and the
+    # caller already names the operation. Instrumenting the routers
+    # instead would be a dozen call sites that drift apart.
+    #
+    # Entered manually with a single ``finally`` below rather than a
+    # ``with`` block: the body has three exit paths (timeout, raise,
+    # success) and each releases the dispatcher slot differently, so a
+    # ``with`` would have to be threaded through all of them.
+    span_cm = trace_span(
+        f"inference.{operation}",
+        attributes={"hfl.operation": operation, "hfl.timeout_s": effective_timeout},
+    )
+    span_cm.__enter__()
+
     worker = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
 
     async def _release_when_worker_exits() -> None:
@@ -204,31 +220,37 @@ async def run_dispatched(
                 await slot_cm.__aexit__(None, None, None)
 
     try:
-        result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
-    except asyncio.TimeoutError:
-        asyncio.ensure_future(_release_when_worker_exits())
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": f"{operation} timed out",
-                "code": "TIMEOUT",
-                "timeout_seconds": effective_timeout,
-                "operation": operation,
-            },
-        ) from None
-    except BaseException as exc:
-        if worker.done() and not isinstance(exc, asyncio.CancelledError):
-            # The worker finished (it raised); release inline, then propagate.
-            await slot_cm.__aexit__(None, None, None)
-        else:
-            # Cancelled, or the worker is still running on the shared model:
-            # keep the slot until the worker thread is truly done.
+        try:
+            result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
+        except asyncio.TimeoutError:
             asyncio.ensure_future(_release_when_worker_exits())
-        raise
-    else:
-        await slot_cm.__aexit__(None, None, None)
-        _account_generation(result, operation)
-        return result
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "error": f"{operation} timed out",
+                    "code": "TIMEOUT",
+                    "timeout_seconds": effective_timeout,
+                    "operation": operation,
+                },
+            ) from None
+        except BaseException as exc:
+            if worker.done() and not isinstance(exc, asyncio.CancelledError):
+                # The worker finished (it raised); release inline, then propagate.
+                await slot_cm.__aexit__(None, None, None)
+            else:
+                # Cancelled, or the worker is still running on the shared model:
+                # keep the slot until the worker thread is truly done.
+                asyncio.ensure_future(_release_when_worker_exits())
+            raise
+        else:
+            await slot_cm.__aexit__(None, None, None)
+            _account_generation(result, operation)
+            return result
+    finally:
+        # Closes on all three paths. The span must not outlive the call
+        # even when the worker thread does — the request is what is being
+        # traced, not the orphaned thread.
+        span_cm.__exit__(None, None, None)
 
 
 async def acquire_stream_slot(
