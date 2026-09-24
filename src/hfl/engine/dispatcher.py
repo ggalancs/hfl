@@ -114,6 +114,13 @@ class InferenceDispatcher:
 
         self._sem = asyncio.Semaphore(max_inflight)
         self._counter_lock = asyncio.Lock()
+        # Two exclusive() callers must take turns. Each acquires permits one
+        # at a time, and the semaphore hands freed permits out in arrival
+        # order, so with every slot busy they end up alternating: each holds
+        # half the permits and waits for the other half for ever. Only
+        # possible with max_inflight > 1 (vLLM), and only since several
+        # models can be unloaded concurrently (eviction, keep_alive, stop).
+        self._exclusive_lock = asyncio.Lock()
 
         self._in_flight = 0
         self._depth = 0
@@ -299,15 +306,16 @@ class InferenceDispatcher:
         request); new inference callers block on the semaphore until the block
         exits, which is exactly the serialisation we want during a model swap.
         """
-        acquired = 0
-        try:
-            for _ in range(self._max_inflight):
-                await self._sem.acquire()
-                acquired += 1
-            yield
-        finally:
-            for _ in range(acquired):
-                self._sem.release()
+        async with self._exclusive_lock:
+            acquired = 0
+            try:
+                for _ in range(self._max_inflight):
+                    await self._sem.acquire()
+                    acquired += 1
+                yield
+            finally:
+                for _ in range(acquired):
+                    self._sem.release()
 
     # -- Administrative -------------------------------------------------
 

@@ -594,3 +594,31 @@ class TestRunDispatchedTimeoutHoldsSlot:
             release.set()
             await asyncio.sleep(0.05)
             dispatcher.reset()
+
+
+@pytest.mark.asyncio
+async def test_two_exclusive_callers_do_not_deadlock_with_every_slot_busy():
+    """With several slots all busy, two exclusive() callers used to receive
+    freed permits alternately — each ending up with half and waiting for
+    the other half for ever. Reachable once models could be unloaded
+    concurrently (eviction, keep_alive reaper, /api/stop) on vLLM."""
+    import asyncio
+
+    from hfl.engine.dispatcher import InferenceDispatcher
+
+    d = InferenceDispatcher(max_inflight=4)
+
+    async def admin(tag):
+        async with d.exclusive():
+            await asyncio.sleep(0.01)
+        return tag
+
+    slots = [d.slot() for _ in range(4)]
+    for s in slots:
+        await s.__aenter__()
+    tasks = [asyncio.create_task(admin(i)) for i in range(2)]
+    await asyncio.sleep(0.05)
+    for s in slots:
+        await s.__aexit__(None, None, None)
+        await asyncio.sleep(0.01)
+    assert sorted(await asyncio.wait_for(asyncio.gather(*tasks), 2)) == [0, 1]
