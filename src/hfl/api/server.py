@@ -28,6 +28,7 @@ Security:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import secrets
@@ -287,6 +288,26 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+KEEP_ALIVE_REAP_INTERVAL = 15.0
+
+
+async def _keep_alive_reaper() -> None:
+    """Unload models whose keep_alive has run out and that nothing uses.
+
+    ``keep_alive`` (per request, or HFL_KEEP_ALIVE / OLLAMA_KEEP_ALIVE,
+    default 5m) was recorded and shown by ``/api/ps`` as ``expires_at`` but
+    never applied: with one model resident, the next request's swap was the
+    only unload. With several resident, an idle model would otherwise hold
+    its memory until a load needed the room.
+    """
+    while True:
+        await asyncio.sleep(KEEP_ALIVE_REAP_INTERVAL)
+        try:
+            await get_state().reap_expired()
+        except Exception:  # pragma: no cover - keep reaping on the next tick
+            logging.getLogger(__name__).exception("keep_alive reaper failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Server lifecycle."""
@@ -298,7 +319,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     configure_tracing()
 
+    reaper = asyncio.create_task(_keep_alive_reaper())
+
     yield
+    reaper.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reaper
     # Cleanup on shutdown
     await get_state().cleanup()
     # Close HTTP clients

@@ -335,8 +335,6 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
     Raises:
         APIValidationError: The value can't be parsed (maps to 400).
     """
-    from datetime import datetime, timezone
-
     from hfl.api.state import get_state
     from hfl.exceptions import ValidationError as APIValidationError
     from hfl.utils.duration import (
@@ -351,54 +349,26 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
     except InvalidKeepAliveError as exc:
         raise APIValidationError(str(exc)) from exc
 
-    if delta is None:
-        # Caller didn't pass the field. Two cases:
-        #   a) A previous request already recorded a deadline — leave it
-        #      alone so explicit per-request decisions are not silently
-        #      reset by a server default.
-        #   b) No deadline yet — apply the server-level default
-        #      (``HFL_KEEP_ALIVE`` / ``OLLAMA_KEEP_ALIVE``) so the model
-        #      gets a documented expiry instead of relying on the
-        #      pool's idle timeout, which Ollama clients don't observe.
-        from hfl.config import config as _hfl_config
-
-        existing = get_state().keep_alive_deadline_for(model_name)
-        if existing is not None:
-            return False
-
-        global_default = _hfl_config.keep_alive_default
-        if global_default is None:
-            return False
-        try:
-            delta = parse_keep_alive(global_default)
-        except InvalidKeepAliveError:
-            # A bad operator-supplied default should not break the
-            # request. Log once and behave like "no global default".
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "HFL_KEEP_ALIVE/OLLAMA_KEEP_ALIVE value %r is invalid; ignoring",
-                global_default,
-            )
-            return False
-        if delta is None:
-            return False
-
     state = get_state()
 
+    if delta is None:
+        # Field omitted: the model keeps the keep_alive it already had — an
+        # explicit value from an earlier request, else HFL_KEEP_ALIVE — and
+        # its clock restarts, because it is being used right now.
+        state.refresh_keep_alive(model_name)
+        return False
+
     if is_unload_immediately(delta):
-        # Clear any standing deadline first; the caller will unload
-        # after responding.
+        # Ollama semantics: this request only. Later requests that omit the
+        # field go back to the model's keep_alive.
         state.set_keep_alive_deadline(model_name, None)
         return True
 
     if is_never_expire(delta):
-        # No deadline — model stays forever until an explicit stop.
-        state.set_keep_alive_deadline(model_name, None)
+        state.set_keep_alive(model_name, None)
         return False
 
-    deadline = datetime.now(timezone.utc) + delta
-    state.set_keep_alive_deadline(model_name, deadline)
+    state.set_keep_alive(model_name, delta)
     return False
 
 

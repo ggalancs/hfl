@@ -102,19 +102,32 @@ class TestKeepAliveDeadlineOnGenerate:
         # "-1" → never expire → deadline cleared (null in /api/ps)
         assert get_state().keep_alive_deadline_for(sample_manifest.name) is None
 
-    def test_missing_keep_alive_leaves_deadline_untouched(self, client, sample_manifest):
+    def test_an_explicit_keep_alive_sticks_and_restarts_on_use(self, client, sample_manifest):
+        """A later request that omits the field keeps the model's explicit
+        keep_alive, and — since keep_alive is measured from the last use —
+        restarts its clock. The old rule kept the first absolute deadline,
+        which once enforced would unload a model in continuous use."""
         _mock_llm_loaded(sample_manifest)
-        existing = datetime.now(timezone.utc) + timedelta(hours=1)
-        get_state().set_keep_alive_deadline(sample_manifest.name, existing)
+        first = client.post(
+            "/api/generate",
+            json={
+                "model": sample_manifest.name,
+                "prompt": "hi",
+                "stream": False,
+                "keep_alive": "1h",
+            },
+        )
+        assert first.status_code == 200
 
+        before = datetime.now(timezone.utc)
         response = client.post(
             "/api/generate",
             json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
         )
         assert response.status_code == 200
-
-        # No keep_alive in body → previous deadline survives unchanged
-        assert get_state().keep_alive_deadline_for(sample_manifest.name) == existing
+        deadline = get_state().keep_alive_deadline_for(sample_manifest.name)
+        assert deadline is not None
+        assert abs((deadline - (before + timedelta(hours=1))).total_seconds()) < 30
 
 
 class TestKeepAliveGlobalDefault:
@@ -145,42 +158,52 @@ class TestKeepAliveGlobalDefault:
         finally:
             hfl_config.keep_alive_default = previous
 
-    def test_global_default_does_not_overwrite_existing_deadline(self, client, sample_manifest):
-        """Once a previous request set a deadline, omitting ``keep_alive``
-        on a follow-up request must NOT reset it to the global default —
-        explicit decisions win."""
+    def test_global_default_does_not_overwrite_an_explicit_value(self, client, sample_manifest):
+        """Explicit decisions win: a model given keep_alive=2h keeps 2h on a
+        follow-up request that omits the field, not the 5m default."""
         from hfl.config import config as hfl_config
 
         _mock_llm_loaded(sample_manifest)
-        sticky = datetime.now(timezone.utc) + timedelta(hours=2)
-        get_state().set_keep_alive_deadline(sample_manifest.name, sticky)
-
         previous = hfl_config.keep_alive_default
         hfl_config.keep_alive_default = "5m"
         try:
+            client.post(
+                "/api/generate",
+                json={
+                    "model": sample_manifest.name,
+                    "prompt": "hi",
+                    "stream": False,
+                    "keep_alive": "2h",
+                },
+            )
+            before = datetime.now(timezone.utc)
             response = client.post(
                 "/api/generate",
                 json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
             )
             assert response.status_code == 200
-            assert get_state().keep_alive_deadline_for(sample_manifest.name) == sticky
+            deadline = get_state().keep_alive_deadline_for(sample_manifest.name)
+            assert abs((deadline - (before + timedelta(hours=2))).total_seconds()) < 30
         finally:
             hfl_config.keep_alive_default = previous
 
-    def test_invalid_global_default_is_ignored_silently(self, client, sample_manifest):
-        """A misconfigured server must not break user requests."""
+    def test_invalid_global_default_falls_back_to_five_minutes(self, client, sample_manifest):
+        """A misconfigured server must not break user requests — nor pin a
+        model's memory forever on a typo, now that keep_alive is enforced."""
         from hfl.config import config as hfl_config
 
         _mock_llm_loaded(sample_manifest)
         previous = hfl_config.keep_alive_default
         hfl_config.keep_alive_default = "not-a-duration"
         try:
+            before = datetime.now(timezone.utc)
             response = client.post(
                 "/api/generate",
                 json={"model": sample_manifest.name, "prompt": "hi", "stream": False},
             )
             assert response.status_code == 200
-            assert get_state().keep_alive_deadline_for(sample_manifest.name) is None
+            deadline = get_state().keep_alive_deadline_for(sample_manifest.name)
+            assert abs((deadline - (before + timedelta(minutes=5))).total_seconds()) < 30
         finally:
             hfl_config.keep_alive_default = previous
 

@@ -398,3 +398,100 @@ def test_a_websocket_turn_that_fails_before_streaming_releases_its_model(world):
         time.sleep(0.02)
     assert get_state().resident("a") is not None, "the model never loaded — test proves nothing"
     assert get_state()._engine_inuse == {}, "the failed turn kept its model leased"
+
+
+# ----------------------------------------------------------------------
+# keep_alive is enforced
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_expired_idle_models_are_unloaded_and_the_others_kept(world):
+    from datetime import datetime, timedelta, timezone
+
+    from hfl.api.state import get_state
+
+    w = world({"old": 10, "fresh": 10, "busy": 10})
+    state = get_state()
+    await _load("old")
+    await _load("fresh")
+    hold = asyncio.Event()
+    leased = asyncio.Event()
+
+    async def user():
+        with _lease_scope():
+            await _load("busy")
+            leased.set()
+            await hold.wait()
+
+    task = asyncio.create_task(user())
+    await leased.wait()
+    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    state.set_keep_alive_deadline("old", past)
+    state.set_keep_alive_deadline("busy", past)
+
+    assert await state.reap_expired() == ["old"]
+    assert w.engines["old"][0].unloaded
+    assert not w.engines["fresh"][0].unloaded
+    assert not w.engines["busy"][0].unloaded, "reaped a model in use"
+
+    hold.set()
+    await task
+    # Released: its clock restarted from now, so it is not expired any more.
+    assert state.keep_alive_deadline_for("busy") > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_every_use_renews_the_deadline_whatever_the_api(world, monkeypatch):
+    """/v1 routes never call apply_keep_alive; the renewal happens when the
+    model is bound to the request, so it covers every dialect."""
+    from datetime import datetime, timedelta, timezone
+
+    from hfl.api.state import get_state
+    from hfl.config import config
+
+    world({"a": 10})
+    monkeypatch.setattr(config, "keep_alive_default", "10m")
+    await _load("a")
+    get_state().set_keep_alive_deadline("a", datetime.now(timezone.utc))
+    await _load("a")
+    deadline = get_state().keep_alive_deadline_for("a")
+    assert deadline > datetime.now(timezone.utc) + timedelta(minutes=9)
+
+
+@pytest.mark.asyncio
+async def test_never_expire_is_respected(world):
+    from hfl.api.state import get_state
+
+    world({"a": 10})
+    await _load("a")
+    get_state().set_keep_alive("a", None)
+    assert get_state().keep_alive_deadline_for("a") is None
+    assert await get_state().reap_expired() == []
+
+
+def test_the_server_reaper_unloads_an_expired_model(world, monkeypatch):
+    """End to end with the real lifespan: a model idle past its keep_alive
+    disappears from /api/ps without any request asking for it."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from hfl.api import server
+    from hfl.config import config
+
+    w = world({"a": 10})
+    monkeypatch.setattr(server, "KEEP_ALIVE_REAP_INTERVAL", 0.1)
+    monkeypatch.setattr(config, "keep_alive_default", "1s")
+    with TestClient(server.app, client=("127.0.0.1", 5555)) as client:
+        response = client.post(
+            "/api/chat",
+            json={"model": "a", "messages": [{"role": "user", "content": "hi"}], "stream": False},
+        )
+        assert response.status_code == 200
+        assert [m["name"] for m in client.get("/api/ps").json()["models"]] == ["a"]
+        deadline = time.monotonic() + 5
+        while client.get("/api/ps").json()["models"] and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert client.get("/api/ps").json()["models"] == []
+    assert w.engines["a"][0].unloaded

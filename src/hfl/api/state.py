@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from datetime import datetime  # noqa: F401 — used in type comments / methods
+    from datetime import datetime, timedelta  # noqa: F401 — used in annotations
 
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.engine.dispatcher import InferenceDispatcher
@@ -137,6 +137,13 @@ class ServerState:
     _engine_retired: dict[int, "InferenceEngine"] = field(default_factory=dict)
     _engine_ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _lease_released: asyncio.Event = field(default_factory=asyncio.Event)
+
+    # keep_alive: the duration a model stays loaded after its last use. A
+    # value a request set explicitly is remembered per model (None = never
+    # expire); otherwise HFL_KEEP_ALIVE / OLLAMA_KEEP_ALIVE applies. The
+    # deadline is renewed every time the model is used and when its last
+    # request ends — a model in continuous use never expires between turns.
+    _keep_alive_durations: dict[str, "timedelta | None"] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Request-facing view
@@ -262,6 +269,7 @@ class ServerState:
             if resident is None:
                 return None
         resident.last_used = time.monotonic()
+        self.refresh_keep_alive(name)
         self._engine, self._current_model = resident.engine, resident.manifest
         _BOUND.set((id(self), resident))
         leases = _LEASES.get()
@@ -283,6 +291,11 @@ class ServerState:
             retired = self._engine_retired.pop(key, None)
             if retired is not None and retired.is_loaded:
                 _spawn_unload(retired)
+            for resident in self._residents.values():
+                if resident.engine is engine:
+                    # The keep_alive clock starts when the model goes idle.
+                    resident.last_used = time.monotonic()
+                    self.refresh_keep_alive(resident.name)
         self._lease_released.set()
 
     def _views(self, exclude: str | None = None) -> "list[ResidentView]":
@@ -714,6 +727,7 @@ class ServerState:
                                 model_name, engine, manifest, footprint
                             )
                             self._engine, self._current_model = engine, manifest
+                            self.refresh_keep_alive(model_name)
                         await self._reconcile(model_name)
                     return engine, manifest
                 except Exception:
@@ -831,6 +845,49 @@ class ServerState:
         """Check if TTS engine is loaded."""
         return self._tts_engine is not None and self._tts_engine.is_loaded
 
+    # -- keep_alive ------------------------------------------------------
+
+    def set_keep_alive(self, model_name: str, duration: "timedelta | None") -> None:
+        """Remember an explicit keep_alive for ``model_name`` (None = never
+        expire) and restart its clock."""
+        self._keep_alive_durations[model_name] = duration
+        self.refresh_keep_alive(model_name)
+
+    def keep_alive_duration_for(self, model_name: str) -> "timedelta | None":
+        """The explicit value if one was set, else the server default.
+        None means the model never expires."""
+        if model_name in self._keep_alive_durations:
+            return self._keep_alive_durations[model_name]
+        return _default_keep_alive()
+
+    def refresh_keep_alive(self, model_name: str) -> None:
+        """Deadline = now + the model's keep_alive (cleared for "never")."""
+        from datetime import datetime, timezone
+
+        duration = self.keep_alive_duration_for(model_name)
+        if duration is None:
+            self.set_keep_alive_deadline(model_name, None)
+        else:
+            self.set_keep_alive_deadline(model_name, datetime.now(timezone.utc) + duration)
+
+    async def reap_expired(self, now: "datetime | None" = None) -> list[str]:
+        """Unload resident models whose keep_alive deadline has passed and
+        that no request holds. Returns the names unloaded."""
+        from datetime import datetime, timezone
+
+        now = now or datetime.now(timezone.utc)
+        expired = []
+        for resident in list(self._residents.values()):
+            deadline = self.keep_alive_deadline_for(resident.name)
+            if deadline is None or deadline > now:
+                continue
+            if self._engine_inuse.get(id(resident.engine), 0) > 0:
+                continue  # in use: its release renews the deadline
+            if await self.evict(resident.name, reason="keep_alive expired"):
+                self.set_keep_alive_deadline(resident.name, None)
+                expired.append(resident.name)
+        return expired
+
     # -- keep_alive tracking -------------------------------------------
     # Per-model keep-alive deadline, populated by request handlers
     # (R15). ``None`` means "managed by the default idle timeout /
@@ -888,6 +945,29 @@ def _measure_safely(manifest: "ModelManifest | None", engine: "InferenceEngine")
         return footprint_of_loaded(path, engine).total_bytes
     except Exception:
         return 0
+
+
+def _default_keep_alive() -> "timedelta | None":
+    """HFL_KEEP_ALIVE / OLLAMA_KEEP_ALIVE as a duration; None = never.
+
+    An unreadable value falls back to Ollama's 5 minutes rather than to
+    "never", which would pin memory forever on a typo."""
+    from datetime import timedelta
+
+    from hfl.config import config
+    from hfl.utils.duration import InvalidKeepAliveError, is_never_expire, parse_keep_alive
+
+    raw = getattr(config, "keep_alive_default", "5m")
+    try:
+        delta = parse_keep_alive(raw)
+    except InvalidKeepAliveError:
+        logger.warning("HFL_KEEP_ALIVE/OLLAMA_KEEP_ALIVE value %r is invalid; using 5m", raw)
+        return timedelta(minutes=5)
+    if delta is None:
+        return timedelta(minutes=5)
+    if is_never_expire(delta):
+        return None
+    return delta
 
 
 def _memory_checks_disabled() -> bool:

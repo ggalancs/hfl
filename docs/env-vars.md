@@ -42,7 +42,7 @@ the host string does not.
 
 | HFL                | Ollama alias        | Default | What it does |
 |--------------------|---------------------|---------|--------------|
-| `HFL_KEEP_ALIVE`   | `OLLAMA_KEEP_ALIVE` | `5m`    | Default keep-alive applied when a request omits the field. Per-request value always wins; a previously-recorded deadline is preserved. Accepts the Ollama duration grammar (`5m`, `30s`, `0`, `-1`). |
+| `HFL_KEEP_ALIVE`   | `OLLAMA_KEEP_ALIVE` | `5m`    | How long a model stays loaded after its last use; enforced — a model idle past it, and not in use, is unloaded (checked every 15 s). The clock restarts on every request and when the request ends, so a model in continuous use never expires between turns. A `keep_alive` sent on a request is remembered for that model and wins over this default; `0` unloads after that one response; `-1` keeps it until `hfl stop` or a load needs the memory. Ollama duration grammar (`5m`, `30s`, `0`, `-1`); an unreadable value falls back to `5m`. |
 
 ## Backend selection / runtime
 
