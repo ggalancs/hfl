@@ -225,6 +225,30 @@
       "args": {
         "name": "Nombre de la sesión"
       }
+    },
+    "launch": {
+      "description": "Abre un agente de programación (Claude Code, Codex) sobre un modelo local.",
+      "args": {
+        "tool": "El agente que se abre: claude o codex. Lo que va tras -- se le pasa a él."
+      },
+      "options": {
+        "model": "Nombre local, alias o referencia del Hub (org/modelo[:CUANT])",
+        "host": "Host del servidor HFL",
+        "port": "Puerto del servidor HFL",
+        "api_key": "Clave de API, si el servidor la pide",
+        "print": "Muestra la configuración para tu shell en vez de lanzar nada"
+      },
+      "messages": {
+        "unknown_tool": "Herramienta desconocida {tool}: elige una de {tools}.",
+        "not_installed": "{tool} no está instalado (no está en el PATH).",
+        "no_server": "Ningún servidor HFL responde en {url}.",
+        "starting": "Arrancando un servidor HFL en {url} (log: {log})",
+        "not_started": "El servidor no arrancó; mira {log}.",
+        "loading": "Cargando {model}...",
+        "unreachable": "No se pudo contactar con {url}.",
+        "model_required": "Indica el modelo con -m: un nombre local, un alias o una referencia del Hub.",
+        "model_missing": "{model} no es un modelo local. Una referencia del Hub (org/modelo[:CUANT]) lo descarga."
+      }
     }
   },
   "messages": {
@@ -393,6 +417,7 @@
     "common_pull": "Descarga un modelo de HuggingFace Hub",
     "common_run": "Inicia un chat interactivo con un modelo",
     "common_serve": "Inicia el servidor API",
+    "common_launch": "Abre Claude Code o Codex sobre un modelo local",
     "common_search": "Busca modelos en HuggingFace Hub",
     "common_list": "Lista los modelos descargados",
     "more_info": "Ejecuta 'hfl <comando> --help' para detalles de cualquier comando.",

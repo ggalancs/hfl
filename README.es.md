@@ -249,9 +249,23 @@ curl http://localhost:11434/api/tts -H "Content-Type: application/json" \
 
 ## Conecta tus herramientas
 
+**Agentes de programación.** Un comando abre Claude Code o Codex sobre un modelo local:
+
+```bash
+hfl launch claude -m hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M
+hfl launch codex  -m qwen-coder                 # también vale un nombre local o un alias
+hfl launch claude -m qwen-coder --print         # solo muestra la configuración para tu shell
+```
+
+HFL descarga el modelo si hace falta, arranca un servidor si no hay ninguno
+(y lo para cuando el agente termina), carga el modelo y le pasa al agente su
+ventana de contexto real. No se toca la configuración propia del agente.
+Lo que va tras `--` se le pasa al agente: `hfl launch claude -m qwen-coder -- -p "arregla los tests"`.
+
 El servidor escucha en `http://localhost:11434` y habla tres APIs.
 
-**OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`
+**OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
+`/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations`
 
 ```python
 from openai import OpenAI
@@ -264,7 +278,8 @@ reply = client.chat.completions.create(
 print(reply.choices[0].message.content)
 ```
 
-**Ollama** — `/api/chat`, `/api/generate`, `/api/embed`, `/api/tags`, `/api/ps`, `/api/pull` y más
+**Ollama** — `/api/chat`, `/api/generate`, `/api/embed`, `/api/tags`, `/api/ps`, `/api/pull`,
+`/api/delete` (solo desde la propia máquina del servidor) y más
 
 ```bash
 curl http://localhost:11434/api/chat -d '{"model": "llama70b",

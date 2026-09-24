@@ -485,6 +485,59 @@ def run(
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
 
 
+@app.command(
+    name="launch",
+    help=t("commands.launch.description"),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def launch(
+    ctx: typer.Context,
+    tool: str = typer.Argument(..., help=t("commands.launch.args.tool")),
+    model: str = typer.Option(None, "--model", "-m", help=t("commands.launch.options.model")),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("commands.launch.options.host")),
+    port: int = typer.Option(11434, "--port", "-p", help=t("commands.launch.options.port")),
+    api_key: str = typer.Option(None, "--api-key", help=t("commands.launch.options.api_key")),
+    print_only: bool = typer.Option(False, "--print", help=t("commands.launch.options.print")),
+) -> None:
+    """Open Claude Code or Codex on a local model (``hfl launch claude -m NAME``)."""
+    from hfl.cli.commands import launch as launcher
+    from hfl.config import config
+    from hfl.models.registry import ModelRegistry
+
+    if not model:
+        console.print(f"[red]{escape_markup(t('commands.launch.messages.model_required'))}[/]")
+        raise typer.Exit(2)
+    try:
+        if print_only:
+            plan = launcher.build_launch(
+                tool, f"http://{host}:{port}", model, api_key=api_key, extra=list(ctx.args)
+            )
+            for line in launcher.shell_lines(plan):
+                typer.echo(line)
+            return
+        launcher.check_tool(tool)
+        manifest = _local_or_pulled(model, ModelRegistry)
+        if manifest is None:
+            console.print(
+                f"[red]{escape_markup(t('commands.launch.messages.model_missing', model=model))}[/]"
+            )
+            raise typer.Exit(1)
+        code = launcher.run(
+            tool,
+            manifest.name,
+            host=host,
+            port=port,
+            api_key=api_key,
+            extra=list(ctx.args),
+            log_path=config.home_dir / "logs" / "launch-server.log",
+            say=lambda message: console.print(f"[dim]{escape_markup(message)}[/]"),
+        )
+    except launcher.LaunchError as exc:
+        console.print(f"[red]{escape_markup(str(exc))}[/]")
+        raise typer.Exit(1) from None
+    raise typer.Exit(code)
+
+
 def _load_tts_or_exit(model: str) -> tuple[Any, Any]:
     """Resolve ``model`` to a text-to-speech manifest and a loaded engine.
 
@@ -2194,6 +2247,7 @@ def help_command(
             ("pull <model>", t("help.common_pull")),
             ("run <model>", t("help.common_run")),
             ("serve [--tray]", t("help.common_serve")),
+            ("launch claude -m <m>", t("help.common_launch")),
             ("search <query>", t("help.common_search")),
             ("list", t("help.common_list")),
         ]

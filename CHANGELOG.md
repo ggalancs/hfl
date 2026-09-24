@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`hfl launch claude|codex -m MODEL` opens a coding agent on a local
+  model.** Claude Code talks to HFL's Anthropic API, Codex to its Responses
+  API. HFL pulls the model if needed (a Hub reference works), starts a
+  server on 127.0.0.1 if none is running and stops it when the agent exits,
+  loads the model first (a model that does not fit is reported before the
+  agent opens) and hands the agent its real context window. The agent's
+  own configuration is never touched; `--print` shows the settings instead.
+  Verified for real: both agents fixed a bug through a local Qwen3-Coder.
 - **Ollama's preload and unload.** `/api/generate` without a prompt and
   `/api/chat` with no messages load the model and answer
   `done_reason: "load"`; with `keep_alive: 0` they unload it without

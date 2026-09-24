@@ -225,6 +225,30 @@
       "args": {
         "name": "Session name"
       }
+    },
+    "launch": {
+      "description": "Open a coding agent (Claude Code, Codex) on a local model.",
+      "args": {
+        "tool": "The agent to open: claude or codex. Arguments after -- go to it."
+      },
+      "options": {
+        "model": "Local model name, alias or Hub reference (org/model[:QUANT])",
+        "host": "HFL server host",
+        "port": "HFL server port",
+        "api_key": "API key, if the server requires one",
+        "print": "Print the settings for your shell instead of launching"
+      },
+      "messages": {
+        "unknown_tool": "Unknown tool {tool}: choose one of {tools}.",
+        "not_installed": "{tool} is not installed (not found on PATH).",
+        "no_server": "No HFL server answers at {url}.",
+        "starting": "Starting an HFL server on {url} (log: {log})",
+        "not_started": "The server did not start; see {log}.",
+        "loading": "Loading {model}...",
+        "unreachable": "Could not reach {url}.",
+        "model_required": "Say which model with -m: a local name, an alias or a Hub reference.",
+        "model_missing": "{model} is not a local model. A Hub reference (org/model[:QUANT]) downloads it."
+      }
     }
   },
   "messages": {
@@ -393,6 +417,7 @@
     "common_pull": "Download a model from HuggingFace Hub",
     "common_run": "Start an interactive chat with a model",
     "common_serve": "Start the API server",
+    "common_launch": "Open Claude Code or Codex on a local model",
     "common_search": "Search models on HuggingFace Hub",
     "common_list": "List downloaded models",
     "more_info": "Run 'hfl <command> --help' for details on any command.",
