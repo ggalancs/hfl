@@ -62,7 +62,7 @@ class TestValidationDialects:
         assert "message" in body["error"]
 
     def test_ollama_native_validation_stays_422(self, client):
-        r = client.post("/api/chat", json={"model": "m", "messages": []})
+        r = client.post("/api/chat", json={"model": "m", "messages": "not a list"})
         # Native FastAPI shape preserved for the Ollama surface.
         assert r.status_code == 422
         assert "detail" in r.json()

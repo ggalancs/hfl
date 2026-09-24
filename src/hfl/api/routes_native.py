@@ -48,6 +48,36 @@ def _get_state() -> "ServerState":
     return get_state()
 
 
+async def _preload_reply(
+    model: str, options: dict | None, unload: bool, *, chat: bool
+) -> dict[str, Any] | Response:
+    """Ollama's answer to a request with nothing to generate.
+
+    It loads the model — the way clients warm one up — or, with
+    ``keep_alive: 0``, unloads it without loading it first. One JSON
+    object either way, even when ``stream`` is true, as Ollama does.
+    """
+    if unload:
+        await unload_after_response(model)
+        reason = "unload"
+    else:
+        await _ensure_model_loaded(model, options)
+        if _get_state().engine is None:
+            return service_unavailable(f"Model '{model}' failed to load")
+        reason = "load"
+    reply: dict[str, Any] = {
+        "model": model,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "done": True,
+        "done_reason": reason,
+    }
+    if chat:
+        reply["message"] = {"role": "assistant", "content": ""}
+    else:
+        reply["response"] = ""
+    return reply
+
+
 async def _ensure_model_loaded(model_name: str, options: dict | None = None) -> None:
     """Load the model if it is not already in memory (thread-safe).
 
@@ -272,6 +302,8 @@ async def api_generate(
     immediate unload when set to 0.
     """
     unload_after = apply_keep_alive(req.model, req.keep_alive)
+    if not req.prompt:
+        return await _preload_reply(req.model, req.options, unload_after, chat=False)
     await _ensure_model_loaded(req.model, req.options)
     state = _get_state()
     if state.engine is None:
@@ -511,6 +543,8 @@ async def api_chat(
             )
 
     unload_after = apply_keep_alive(req.model, req.keep_alive)
+    if not req.messages:
+        return await _preload_reply(req.model, req.options, unload_after, chat=True)
     await _ensure_model_loaded(req.model, req.options)
     state = _get_state()
     if state.engine is None:

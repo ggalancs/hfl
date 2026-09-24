@@ -131,7 +131,7 @@ class GenerateRequest(BaseModel):
         examples=["llama3.3-70b-q4", "mistral-7b"],
     )
     prompt: str = Field(
-        ...,
+        "",
         max_length=2_000_000,
         description="Prompt text for generation",
     )
@@ -221,9 +221,9 @@ class ChatRequest(BaseModel):
         description="Model name or alias",
         examples=["llama3.3-70b-q4", "mistral-7b"],
     )
+    # Empty (or omitted) is Ollama's preload: load the model, say nothing.
     messages: list[OllamaChatMessage] = Field(
-        ...,
-        min_length=1,
+        default_factory=list,
         max_length=1000,
         description="Chat messages",
     )

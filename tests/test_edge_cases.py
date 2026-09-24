@@ -316,7 +316,8 @@ class TestNativeAPIEdgeCases:
         assert response.status_code in (200, 404, 503)
 
     def test_native_chat_empty_messages(self, client):
-        """Empty messages in native chat should fail validation."""
+        """Empty messages are Ollama's preload, not a validation error: the
+        model is looked up (and, here, not found)."""
         response = client.post(
             "/api/chat",
             json={
@@ -324,8 +325,7 @@ class TestNativeAPIEdgeCases:
                 "messages": [],
             },
         )
-        # Ollama-native (/api/*) keeps FastAPI's native 422; only /v1/* maps to 400.
-        assert response.status_code == 422
+        assert response.status_code == 404
 
     def test_native_chat_invalid_message_format(self, client):
         """Invalid message format should fail."""

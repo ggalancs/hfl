@@ -250,10 +250,10 @@ class TestChatRequest:
         assert len(req.messages) == 1
         assert req.stream is True  # Default
 
-    def test_empty_messages_rejected(self):
-        """Should reject empty messages list."""
-        with pytest.raises(ValidationError):
-            ChatRequest(model="llama3", messages=[])
+    def test_empty_messages_are_a_preload(self):
+        """Ollama loads the model when there are no messages; so does HFL."""
+        assert ChatRequest(model="llama3", messages=[]).messages == []
+        assert ChatRequest(model="llama3").messages == []
 
 
 class TestOpenAITTSRequest:
