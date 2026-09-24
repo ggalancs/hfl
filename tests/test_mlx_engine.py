@@ -416,3 +416,45 @@ class TestPromptCache:
         from hfl.config import HFLConfig
 
         assert HFLConfig().mlx_prompt_cache_bytes > 0
+
+
+class TestUnloadReleasesMemory:
+    """MLX keeps freed Metal buffers in its own cache, so dropping the model
+    references left a 17 GB model's memory with the process (measured: 16.7
+    GB resident after unload, 0.6 GB once the cache is cleared). With several
+    models resident, evicting one would have freed nothing."""
+
+    def test_unload_clears_the_mlx_cache_after_dropping_the_model(self, fake_mlx, monkeypatch):
+        seen = {}
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+
+        core = ModuleType("mlx.core")
+
+        def clear_cache():
+            seen["model_at_clear"] = engine._model
+
+        core.clear_cache = clear_cache  # type: ignore[attr-defined]
+        mlx_pkg = ModuleType("mlx")
+        mlx_pkg.core = core  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "mlx", mlx_pkg)
+        monkeypatch.setitem(sys.modules, "mlx.core", core)
+
+        engine.unload()
+        assert "model_at_clear" in seen, "unload never cleared the MLX buffer cache"
+        assert seen["model_at_clear"] is None, "cleared before the model was dropped"
+
+    def test_old_mlx_keeps_it_under_metal(self, fake_mlx, monkeypatch):
+        calls = []
+        core = ModuleType("mlx.core")
+        core.metal = ModuleType("mlx.core.metal")  # type: ignore[attr-defined]
+        core.metal.clear_cache = lambda: calls.append(1)  # type: ignore[attr-defined]
+        mlx_pkg = ModuleType("mlx")
+        mlx_pkg.core = core  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "mlx", mlx_pkg)
+        monkeypatch.setitem(sys.modules, "mlx.core", core)
+
+        engine = mlx_engine.MLXEngine()
+        engine.load("/fake/model")
+        engine.unload()
+        assert calls == [1]

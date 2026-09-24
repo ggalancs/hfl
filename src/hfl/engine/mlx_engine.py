@@ -99,6 +99,35 @@ class MLXEngine(InferenceEngine):
         # The cached KV belongs to the model being dropped; keeping it would
         # pin memory and could never be matched against another model.
         self._prompt_store = None
+        self._release_memory()
+
+    @staticmethod
+    def _release_memory() -> None:
+        """Hand the dropped model's memory back to the system.
+
+        Dropping the references is not enough on MLX: freed Metal buffers go
+        to MLX's own cache for reuse, so the process keeps them. Measured on
+        a 17 GB model: resident memory stayed at 16.7 GB after ``unload``.
+        With several models resident that made eviction a no-op — unloading
+        one to make room for another freed nothing. ``clear_cache`` only
+        returns buffers nothing uses, so a model still loaded elsewhere in
+        the process keeps its weights.
+        """
+        import gc
+
+        gc.collect()
+        try:
+            import mlx.core as mx
+        except ImportError:
+            return
+        clear = getattr(mx, "clear_cache", None)
+        if clear is None:  # mlx < 0.22 kept it under mx.metal
+            clear = getattr(getattr(mx, "metal", None), "clear_cache", None)
+        if clear is not None:
+            try:
+                clear()
+            except Exception:  # pragma: no cover - backend-specific failure
+                logger.debug("mlx clear_cache failed", exc_info=True)
 
     @staticmethod
     def _new_prompt_store() -> Any:
