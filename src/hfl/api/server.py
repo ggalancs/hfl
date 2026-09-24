@@ -45,7 +45,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from hfl import __version__
 from hfl.api.exception_handlers import register_exception_handlers
-from hfl.api.middleware import RequestBodyLimitMiddleware, RequestLogger
+from hfl.api.middleware import JSONBodyMiddleware, RequestBodyLimitMiddleware, RequestLogger
 from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_batch import router as batch_router
 from hfl.api.routes_benchmark import router as benchmark_router
@@ -427,6 +427,9 @@ if config.max_request_bytes > 0:
 
 # Request logging and metrics recording
 app.add_middleware(RequestLogger)
+
+# ``curl -d '{...}'`` without a Content-Type, as in Ollama's docs.
+app.add_middleware(JSONBodyMiddleware)
 
 # CORS — added LAST so it is the OUTERMOST middleware and can answer browser
 # preflight (OPTIONS) requests before auth/rate-limit run. Configurable via

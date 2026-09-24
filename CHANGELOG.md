@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ollama's preload and unload.** `/api/generate` without a prompt and
+  `/api/chat` with no messages load the model and answer
+  `done_reason: "load"`; with `keep_alive: 0` they unload it without
+  loading it first (`"unload"`). An empty prompt used to reach llama.cpp,
+  which asserted: a 500.
+- **`curl URL -d '{...}'` works as in Ollama's docs.** Without
+  `-H 'Content-Type: application/json'` curl labels the body a form and
+  every request was refused with 422. A request without an `Origin`
+  header now has its body read as JSON; a browser always sends `Origin`,
+  so a web page posting a form to your server is still refused.
+
 ### Fixed
 
 - **Models pulled before 2026-03-18 were stuck at 4096 tokens of context.**

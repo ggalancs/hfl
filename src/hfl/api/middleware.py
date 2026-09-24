@@ -382,3 +382,38 @@ def reset_rate_limiter() -> None:
     global _rate_limiter_instance
     if _rate_limiter_instance is not None:
         _rate_limiter_instance.reset()
+
+
+# Labels curl and friends put on a JSON body sent without ``-H``.
+_UNLABELLED_JSON = (b"", b"application/x-www-form-urlencoded", b"text/plain")
+
+
+class JSONBodyMiddleware:
+    """Read a JSON body as JSON whatever its label, as Ollama does.
+
+    ``curl URL -d '{...}'`` — the form of every example in Ollama's docs —
+    labels the body ``application/x-www-form-urlencoded``, which FastAPI
+    refuses. Only a request without ``Origin`` is relabelled: a browser
+    always sends one on a cross-origin POST, and for a web page the JSON
+    requirement is what forces a CORS preflight, so its form posts to
+    localhost keep being refused. Blob uploads keep their label.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("method") in ("POST", "PUT")
+            and not str(scope.get("path", "")).startswith("/api/blobs/")
+        ):
+            headers = list(scope.get("headers") or [])
+            names = {name.lower() for name, _ in headers}
+            if b"origin" not in names:
+                label = next((v for n, v in headers if n.lower() == b"content-type"), b"")
+                if label.split(b";")[0].strip().lower() in _UNLABELLED_JSON:
+                    headers = [(n, v) for n, v in headers if n.lower() != b"content-type"]
+                    headers.append((b"content-type", b"application/json"))
+                    scope = {**scope, "headers": headers}
+        await self.app(scope, receive, send)
