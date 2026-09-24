@@ -753,6 +753,87 @@ def _fit_ctx_to_memory(model_path: str, info: dict | None, n_ctx: int) -> int:
     return fitted
 
 
+def resolve_n_ctx(
+    model_path: str,
+    gguf_info: dict | None,
+    n_ctx: int,
+    explicit_n_ctx: bool,
+) -> int:
+    """The context window to open ``model_path`` with.
+
+    ``n_ctx`` is the caller's value (explicit) or the configured default
+    (``0`` = auto). An explicit value is returned untouched; otherwise the
+    architecture cap, the VRAM tier, the model's advertised maximum and the
+    memory left after the weights decide. Shared by every GGUF backend so
+    they open the same model with the same window.
+    """
+    architecture = gguf_info.get("architecture") if gguf_info else None
+    # Architecture-based safe cap on n_ctx. Gemma 3/4 GGUFs advertise
+    # 131072-token contexts; the fp16 KV cache for that window can
+    # trivially exceed available unified memory on macOS and crash the
+    # host. Only apply when the caller did NOT pass an explicit n_ctx.
+    if not explicit_n_ctx and architecture in _ARCHITECTURE_CTX_CAP:
+        cap = _ARCHITECTURE_CTX_CAP[architecture]
+        if n_ctx == 0 or n_ctx > cap:
+            logger.warning(
+                "Capping n_ctx to %d for architecture %r (was %s). "
+                "Advertised context length would exceed the safe "
+                "memory budget. Override with n_ctx=<N> or set "
+                "HFL_DEFAULT_CTX_SIZE.",
+                cap,
+                architecture,
+                n_ctx if n_ctx else "auto",
+            )
+            n_ctx = cap
+
+    # Phase 11 P1 — V2 row 13. When neither the caller nor the
+    # architecture pinned a value, fall back to a VRAM-tier
+    # recommendation (4 k / 32 k / 256 k). No-op on Gemma 3/4
+    # because the arch cap above already set n_ctx.
+    if not explicit_n_ctx and n_ctx == 0:
+        try:
+            from hfl.engine.vram import pick_ctx_size
+
+            tier = pick_ctx_size()
+            n_ctx = tier.ctx
+            if tier.vram_gib is not None:
+                logger.info(
+                    "VRAM probe saw %.1f GiB → num_ctx=%d",
+                    tier.vram_gib,
+                    n_ctx,
+                )
+            else:
+                logger.info("VRAM probe inconclusive → defaulting num_ctx=%d", n_ctx)
+        except Exception:
+            logger.debug("VRAM auto-sizing failed", exc_info=True)
+
+    # Two clamps that only apply to an auto-selected context — an
+    # explicit ``n_ctx=`` is the caller's call and is left alone
+    # (the preflight check below still guards the host).
+    #
+    #   1. Never exceed the context the model was actually trained
+    #      for. The VRAM tier is derived from the machine, not the
+    #      model, so on a large host it happily returns 262144 for
+    #      a model whose GGUF advertises 32768.
+    #   2. Never size the KV cache past what is left after the
+    #      weights. Without this a 72B Q4_K_M on a 128 GB Mac
+    #      auto-selects 262144 tokens = 80 GiB of KV on top of
+    #      44 GiB of weights, and every load 500s with
+    #      "Insufficient memory ... requires ~124.2GB".
+    if not explicit_n_ctx and n_ctx > 0:
+        advertised = (gguf_info or {}).get("max_context") or 0
+        if advertised and n_ctx > advertised:
+            logger.info(
+                "Clamping auto n_ctx %d → %d (model's advertised context length)",
+                n_ctx,
+                advertised,
+            )
+            n_ctx = advertised
+        n_ctx = _fit_ctx_to_memory(model_path, gguf_info, n_ctx)
+
+    return n_ctx
+
+
 def _estimate_memory_required_gb(model_path: str, info: dict | None, n_ctx: int) -> float:
     """Conservative upper bound for the RAM / unified memory a load will take.
 
@@ -1206,68 +1287,7 @@ class LlamaCppEngine(InferenceEngine):
                 architecture,
             )
 
-        # Architecture-based safe cap on n_ctx. Gemma 3/4 GGUFs advertise
-        # 131072-token contexts; the fp16 KV cache for that window can
-        # trivially exceed available unified memory on macOS and crash the
-        # host. Only apply when the caller did NOT pass an explicit n_ctx.
-        if not explicit_n_ctx and architecture in _ARCHITECTURE_CTX_CAP:
-            cap = _ARCHITECTURE_CTX_CAP[architecture]
-            if n_ctx == 0 or n_ctx > cap:
-                logger.warning(
-                    "Capping n_ctx to %d for architecture %r (was %s). "
-                    "Advertised context length would exceed the safe "
-                    "memory budget. Override with n_ctx=<N> or set "
-                    "HFL_DEFAULT_CTX_SIZE.",
-                    cap,
-                    architecture,
-                    n_ctx if n_ctx else "auto",
-                )
-                n_ctx = cap
-
-        # Phase 11 P1 — V2 row 13. When neither the caller nor the
-        # architecture pinned a value, fall back to a VRAM-tier
-        # recommendation (4 k / 32 k / 256 k). No-op on Gemma 3/4
-        # because the arch cap above already set n_ctx.
-        if not explicit_n_ctx and n_ctx == 0:
-            try:
-                from hfl.engine.vram import pick_ctx_size
-
-                tier = pick_ctx_size()
-                n_ctx = tier.ctx
-                if tier.vram_gib is not None:
-                    logger.info(
-                        "VRAM probe saw %.1f GiB → num_ctx=%d",
-                        tier.vram_gib,
-                        n_ctx,
-                    )
-                else:
-                    logger.info("VRAM probe inconclusive → defaulting num_ctx=%d", n_ctx)
-            except Exception:
-                logger.debug("VRAM auto-sizing failed", exc_info=True)
-
-        # Two clamps that only apply to an auto-selected context — an
-        # explicit ``n_ctx=`` is the caller's call and is left alone
-        # (the preflight check below still guards the host).
-        #
-        #   1. Never exceed the context the model was actually trained
-        #      for. The VRAM tier is derived from the machine, not the
-        #      model, so on a large host it happily returns 262144 for
-        #      a model whose GGUF advertises 32768.
-        #   2. Never size the KV cache past what is left after the
-        #      weights. Without this a 72B Q4_K_M on a 128 GB Mac
-        #      auto-selects 262144 tokens = 80 GiB of KV on top of
-        #      44 GiB of weights, and every load 500s with
-        #      "Insufficient memory ... requires ~124.2GB".
-        if not explicit_n_ctx and n_ctx > 0:
-            advertised = (gguf_info or {}).get("max_context") or 0
-            if advertised and n_ctx > advertised:
-                logger.info(
-                    "Clamping auto n_ctx %d → %d (model's advertised context length)",
-                    n_ctx,
-                    advertised,
-                )
-                n_ctx = advertised
-            n_ctx = _fit_ctx_to_memory(model_path, gguf_info, n_ctx)
+        n_ctx = resolve_n_ctx(model_path, gguf_info, n_ctx, explicit_n_ctx)
 
         # Flash-attention is not safe for every architecture: llama-cpp-
         # python's flash-attn path has been historically crash-prone for
