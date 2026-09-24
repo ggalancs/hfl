@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One command from the Hub**: `hfl run hf.co/org/model:Q4_K_M` (the
+  `hf.co/` prefix is optional) pulls the model if it is not on the machine
+  — license check included — and opens it; a copy already on disk is used
+  without touching the network. `hfl serve --model <reference>` does the
+  same before starting, and the API accepts the reference as a model name
+  (mapped to the local copy; the server never pulls by itself, and a
+  `@revision` is rejected there). `hfl pull` accepts the `hf.co/` prefix.
 - Memory reporting: every load logs memory in use now and after;
   `/api/ps` adds a `memory` summary (and `memory.gpu`); `hfl ps` prints it;
   `hfl run`, `hfl serve --model` and the tray say what a load will take
@@ -83,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config` showed a timeout that nothing applied.
 - A possible deadlock when several models were unloaded concurrently on a
   multi-slot backend (vLLM).
+- MLX and other safetensors models kept as is were registered with the
+  requested GGUF quantization in their name and label
+  (`...-4bit-q4_k_m`, `Q4_K_M`); only GGUF results carry a label now.
+  Models already registered keep their names.
+- `hfl serve --model` with a name that resolves to nothing now exits with
+  "model not found" instead of starting without it.
 
 ### Security
 
