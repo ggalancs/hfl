@@ -46,10 +46,11 @@ class TestLoad:
         monkeypatch.setattr(whisper_engine, "is_available", lambda: True)
 
         class _FakeModel:
-            def __init__(self, model, device="auto", compute_type="auto"):
+            def __init__(self, model, device="auto", compute_type="auto", local_files_only=False):
                 self.model = model
                 self.device = device
                 self.compute_type = compute_type
+                self.local_files_only = local_files_only
 
             def transcribe(self, audio, language=None, beam_size=1):
                 return iter([]), SimpleNamespace(language="en")
@@ -62,6 +63,9 @@ class TestLoad:
         engine.load("small")
         assert engine.backend == "faster_whisper"
         assert engine.is_loaded
+        assert engine._model.local_files_only is False
+        engine.load("small", local_files_only=True)
+        assert engine._model.local_files_only is True  # reaches the backend
 
 
 class TestTranscribe:
@@ -112,7 +116,7 @@ class TestTranscribeRoute:
         monkeypatch.setattr(routes_transcribe, "is_available", lambda: False)
         from hfl.api.server import app
 
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/transcribe",
             data={"model": "small"},
@@ -129,7 +133,7 @@ class TestTranscribeRoute:
             def __init__(self):
                 self._loaded = False
 
-            def load(self, model, device=None, compute_type=None):
+            def load(self, model, device=None, compute_type=None, local_files_only=False):
                 self._loaded = True
 
             def unload(self):
@@ -149,7 +153,7 @@ class TestTranscribeRoute:
         monkeypatch.setattr(routes_transcribe, "WhisperEngine", lambda: _FakeEngine())
         from hfl.api.server import app
 
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/transcribe",
             data={"model": "small", "language": "es"},
@@ -167,7 +171,7 @@ class TestTranscribeRoute:
         monkeypatch.setattr(routes_transcribe, "_MAX_AUDIO_BYTES", 16)
         from hfl.api.server import app
 
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/transcribe",
             data={"model": "small"},

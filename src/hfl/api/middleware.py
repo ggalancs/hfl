@@ -138,7 +138,7 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
     # keeps a prefix because the digest is a path parameter, but it is
     # anchored with the separator and the route validates the digest against
     # a 64-hex regex before touching disk.
-    EXCLUDED_PATHS: frozenset[str] = frozenset({"/api/transcribe"})
+    EXCLUDED_PATHS: frozenset[str] = frozenset({"/api/transcribe", "/v1/audio/transcriptions"})
     BLOB_PREFIX = "/api/blobs/"
 
     def __init__(self, app: Any, max_bytes: int) -> None:

@@ -24,6 +24,7 @@ import io
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -79,11 +80,13 @@ class WhisperEngine:
         *,
         device: str | None = None,
         compute_type: str | None = None,
+        local_files_only: bool = False,
     ) -> None:
         """Load a Whisper model by size or HF repo id.
 
         ``model`` is one of ``tiny``/``base``/``small``/``medium``/
-        ``large-v3``, or a HuggingFace repo id.
+        ``large-v3``, or a HuggingFace repo id. ``local_files_only``
+        refuses to download: only a model already on disk loads.
         """
         if not is_available():
             raise RuntimeError("No Whisper backend installed. `pip install 'hfl[stt]'` adds one.")
@@ -94,6 +97,7 @@ class WhisperEngine:
                 model,
                 device=device or "auto",
                 compute_type=compute_type or "auto",
+                local_files_only=local_files_only,
             )
             self._backend = "faster_whisper"
             self._model_name = model
@@ -104,6 +108,10 @@ class WhisperEngine:
         try:
             import whisper
 
+            from hfl.hub.local_cache import openai_whisper_cached
+
+            if local_files_only and not Path(model).exists() and not openai_whisper_cached(model):
+                raise FileNotFoundError(f"Whisper model {model!r} is not on disk")
             self._model = whisper.load_model(model)
             self._backend = "openai_whisper"
             self._model_name = model

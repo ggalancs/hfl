@@ -72,7 +72,9 @@ class DiffusersEngine:
         self._model: str | None = None
         self._device: str | None = None
 
-    def load(self, model: str, *, device: str | None = None) -> None:
+    def load(
+        self, model: str, *, device: str | None = None, local_files_only: bool = False
+    ) -> None:
         if not is_available():
             raise RuntimeError("Diffusers backend not installed. `pip install 'hfl[imagegen]'`.")
         import torch
@@ -88,7 +90,9 @@ class DiffusersEngine:
             )
         )
         dtype = torch.float16 if selected != "cpu" else torch.float32
-        pipeline = DiffusionPipeline.from_pretrained(model, torch_dtype=dtype)
+        pipeline = DiffusionPipeline.from_pretrained(
+            model, torch_dtype=dtype, local_files_only=local_files_only
+        )
         pipeline.to(selected)
         self._pipeline = pipeline
         self._model = model

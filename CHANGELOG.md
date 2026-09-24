@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard is the strictest HFL has: a loopback caller, never a web page, and
   no remote exception — `HFL_ALLOW_REMOTE_PULL` opens downloads, not
   deletion. A loaded model is unloaded first.
+- **OpenAI's `/v1/audio/transcriptions` and `/v1/images/generations`.**
+  Transcriptions take `json`, `text`, `verbose_json`, `srt` and `vtt`;
+  `whisper-1` means the default local Whisper. Images come back as
+  `b64_json` (`url` is refused: HFL does not host files).
 
 ### Changed
 
@@ -31,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing anywhere else — a GGUF of yours registered in place — loses its
   registry entry and keeps its file (you are told where). Same rule for
   `/api/delete`.
+
+### Security
+
+- **Speech-to-text and image generation could download any repo for any
+  client.** `model` accepted a Hub repo id and the engines fetched
+  whatever they were given, so a remote client could make the server
+  download arbitrary repos — around the owner guard and the license check
+  that protect `/api/pull`. Only the owner may fetch now; everyone else is
+  served models already on disk (`local_files_only`) or told the model is
+  not on this server (404).
 
 ### Fixed
 
@@ -40,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine. A 256K-context coder could not take Claude Code's first prompt
   (20K tokens). A 4096 saved before that date now means "auto"; one saved
   later came from an explicit `num_ctx` and is kept.
+- **An image or a transcription froze the whole server.** The load and
+  the inference ran on the event loop, so nothing — `/healthz` included —
+  answered until they finished. They run in a worker thread now.
 - **Qwen3-Coder's tool calls came back as text.** Its template emits
   `<function=NAME><parameter=KEY>…` instead of JSON; clients (Claude Code
   among them) got the markup and never ran the tool. It is parsed now,

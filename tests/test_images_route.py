@@ -31,7 +31,7 @@ class TestRoute:
         from hfl.api import routes_images
 
         monkeypatch.setattr(routes_images, "is_available", lambda: False)
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/images/generate",
             json={"model": "stable", "prompt": "a cat"},
@@ -47,7 +47,7 @@ class TestRoute:
             def __init__(self):
                 self._loaded = False
 
-            def load(self, model, device=None):
+            def load(self, model, device=None, local_files_only=False):
                 self._loaded = True
                 self.model = model
 
@@ -79,7 +79,7 @@ class TestRoute:
 
         monkeypatch.setattr(routes_images, "DiffusersEngine", lambda: _FakeEngine())
 
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/images/generate",
             json={
@@ -101,7 +101,7 @@ class TestRoute:
         from hfl.api import routes_images
 
         monkeypatch.setattr(routes_images, "is_available", lambda: True)
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/images/generate",
             json={"model": "x", "prompt": "x", "size": "bad"},
@@ -112,7 +112,7 @@ class TestRoute:
         from hfl.api import routes_images
 
         monkeypatch.setattr(routes_images, "is_available", lambda: True)
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 50000))  # the owner
         resp = client.post(
             "/api/images/generate",
             json={"model": "x", "prompt": ""},

@@ -238,3 +238,22 @@ def require_local_owner(request: Request, operation: str) -> None:
             "retryable": False,
         },
     )
+
+
+def may_fetch_models(request: Request) -> bool:
+    """Whether this caller may make the server download a model.
+
+    The same people :func:`require_owner` lets through — a loopback peer,
+    or anyone when ``HFL_ALLOW_REMOTE_PULL`` is on, never a web page with a
+    foreign ``Origin`` — but as a question, not a refusal: routes that
+    also serve models already on disk (speech-to-text, images) use it to
+    decide whether a missing model may be fetched.
+    """
+    from hfl.config import config
+
+    origin = request.headers.get("origin")
+    if origin and not (config.cors_allow_all or origin in (config.cors_origins or [])):
+        return False
+    if is_local_request(request):
+        return True
+    return bool(getattr(config, "allow_remote_pull", False))
