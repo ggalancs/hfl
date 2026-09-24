@@ -505,5 +505,18 @@
   "confirm": {
     "delete_model": "Delete {name} ({size})?",
     "pull_model": "Download this model?"
+  },
+  "ui": {
+    "model": "Model",
+    "new_chat": "New chat",
+    "empty": "Ask anything. Everything runs on this machine.",
+    "placeholder": "Message",
+    "send": "Send",
+    "stop": "Stop",
+    "thinking": "Thinking",
+    "no_models": "No models yet — download one with `hfl pull`",
+    "unreachable": "Cannot reach the HFL server.",
+    "failed": "Something went wrong:",
+    "api_key": "This server needs an API key:"
   }
 }

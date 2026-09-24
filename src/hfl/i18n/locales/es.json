@@ -505,5 +505,18 @@
   "confirm": {
     "delete_model": "¿Eliminar {name} ({size})?",
     "pull_model": "¿Descargar este modelo?"
+  },
+  "ui": {
+    "model": "Modelo",
+    "new_chat": "Nueva conversación",
+    "empty": "Pregunta lo que quieras. Todo se ejecuta en esta máquina.",
+    "placeholder": "Mensaje",
+    "send": "Enviar",
+    "stop": "Parar",
+    "thinking": "Razonamiento",
+    "no_models": "Aún no hay modelos: descarga uno con `hfl pull`",
+    "unreachable": "No se puede contactar con el servidor HFL.",
+    "failed": "Algo ha fallado:",
+    "api_key": "Este servidor pide una clave de API:"
   }
 }

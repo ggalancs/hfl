@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chat page in the browser.** Open `http://localhost:11434` (or `/ui`)
+  in a browser: pick a local model and chat, with streamed replies, a stop
+  button and the conversation kept in the browser. One self-contained file,
+  nothing loaded from the internet, English or Spanish as the server is.
+  Clients still get `{"status": "hfl is running"}` at `/`; only a
+  browser's `Accept: text/html` gets the page. It carries a strict
+  Content-Security-Policy (a nonce per response, connections only to this
+  server) and escapes every model reply before rendering it.
 - **Parallel requests: the `llama-server` backend.** With
   `HFL_LLM_LIBRARY=llama-server`, a GGUF model is served by a llama.cpp
   `llama-server` process of its own, decoding several requests together in

@@ -74,6 +74,7 @@ from hfl.api.routes_snapshot import router as snapshot_router
 from hfl.api.routes_stop import router as stop_router
 from hfl.api.routes_transcribe import router as transcribe_router
 from hfl.api.routes_tts import router as tts_router
+from hfl.api.routes_ui import router as ui_router
 from hfl.api.routes_verify import router as verify_router
 from hfl.api.routes_web import router as web_router
 from hfl.api.routes_ws import router as ws_router
@@ -142,9 +143,12 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     #
     # An exact-match frozenset has neither property. Adding a public path
     # is now a deliberate act, and a typo fails closed.
+    # ``/ui`` is the chat page: static HTML with nothing in it; the API
+    # calls it makes carry the key the user types into it.
     PUBLIC_ENDPOINTS = frozenset(
         {
             "/",
+            "/ui",
             "/api/version",
             "/healthz",
             "/health",
@@ -455,6 +459,7 @@ app.include_router(batch_router)
 app.include_router(blobs_router)
 app.include_router(copy_router)
 app.include_router(delete_router)
+app.include_router(ui_router)
 app.include_router(create_router)
 app.include_router(embed_router)
 app.include_router(ps_router)
@@ -481,8 +486,17 @@ app.include_router(metrics_router)
 
 
 @app.get("/")
-async def root() -> dict[str, str]:
-    return {"status": "hfl is running"}
+async def root(request: Request) -> Response:
+    """Liveness for clients; the chat page for a browser.
+
+    Clients probe ``/`` to see whether the server is up and read the JSON;
+    a browser asks for HTML (``Accept: text/html``) and gets the chat.
+    """
+    if "text/html" in request.headers.get("accept", ""):
+        from hfl.api.routes_ui import render_chat_page
+
+        return render_chat_page()
+    return JSONResponse({"status": "hfl is running"})
 
 
 def start_server(
