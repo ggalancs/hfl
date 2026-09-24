@@ -27,6 +27,14 @@ def client(temp_config):
 
 
 @pytest.fixture
+def owner(temp_config):
+    """A loopback peer: the server's owner, who sees the memory summary."""
+    reset_state()
+    yield TestClient(app, client=("127.0.0.1", 50000))
+    reset_state()
+
+
+@pytest.fixture
 def llm_manifest():
     """A typical LLM manifest — qwen-style."""
     from hfl.models.manifest import ModelManifest
@@ -274,8 +282,8 @@ class TestRoutesPsListsEveryResident:
         names = [m["name"] for m in client.get("/api/ps").json()["models"]]
         assert names.count(llm_manifest.name) == 1
 
-    def test_memory_summary(self, client):
-        body = client.get("/api/ps").json()
+    def test_memory_summary(self, owner):
+        body = owner.get("/api/ps").json()
         memory = body.get("memory")
         pytest.importorskip("psutil")
         assert memory is not None
@@ -284,7 +292,7 @@ class TestRoutesPsListsEveryResident:
         assert memory["budget_bytes"] == int(memory["total_bytes"] * memory["budget_percent"] / 100)
 
 
-def test_memory_summary_includes_a_measured_gpu(client, monkeypatch):
+def test_memory_summary_includes_a_measured_gpu(owner, monkeypatch):
     from hfl.engine.residency import MemoryView
 
     pytest.importorskip("psutil")
@@ -293,12 +301,19 @@ def test_memory_summary_includes_a_measured_gpu(client, monkeypatch):
         "hfl.engine.residency.current_gpu_memory",
         lambda: MemoryView(total=24 * gib, in_use=6 * gib, hfl_rss=5 * gib),
     )
-    gpu = client.get("/api/ps").json()["memory"]["gpu"]
+    gpu = owner.get("/api/ps").json()["memory"]["gpu"]
     assert gpu["total_bytes"] == 24 * gib and gpu["hfl_bytes"] == 5 * gib
     assert gpu["in_use_percent"] == 25.0
 
 
-def test_no_gpu_key_without_a_discrete_gpu(client, monkeypatch):
+def test_no_gpu_key_without_a_discrete_gpu(owner, monkeypatch):
     pytest.importorskip("psutil")
     monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", lambda: None)
-    assert "gpu" not in client.get("/api/ps").json()["memory"]
+    assert "gpu" not in owner.get("/api/ps").json()["memory"]
+
+
+def test_a_remote_client_sees_no_host_memory(client):
+    """Host RAM and VRAM are the owner's to see, like any admin view."""
+    body = client.get("/api/ps").json()
+    assert "memory" not in body
+    assert body["models"] == []

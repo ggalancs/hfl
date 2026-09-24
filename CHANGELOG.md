@@ -111,6 +111,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- With several models resident, a refused or waiting load told any client
+  the host's RAM figures and — for a wait — which models other clients were
+  using. Remote peers now get the outcome only (`/api/ps` omits its `memory`
+  block for them too); the owner and the server log keep the detail.
+- Prompt caches (the new MLX one, and llama.cpp's existing prefix reuse) make
+  a request faster when someone recently sent the same prefix, which the
+  response timings expose. Documented under `HFL_MLX_PROMPT_CACHE_BYTES`
+  for servers shared by several people; `0` disables the MLX cache.
 - The audit log labelled remote callers with a plain SHA-256 prefix of
   their API key, which let a log reader test guesses of a weak key
   offline (CodeQL `py/weak-sensitive-data-hashing`). It is now a PBKDF2

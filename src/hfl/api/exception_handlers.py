@@ -24,6 +24,24 @@ from hfl.logging_config import get_request_id
 logger = logging.getLogger(__name__)
 
 
+def _redacted_admission_body(exc: HFLError) -> dict:
+    """What a remote peer is told when a load cannot go ahead."""
+    from hfl.exceptions import ModelsBusyError
+
+    model = getattr(exc, "model_name", "the model")
+    if isinstance(exc, ModelsBusyError):
+        return {
+            "error": f"Cannot load {model} yet: the memory it needs is in use.",
+            "code": type(exc).__name__,
+            "details": "Retry shortly.",
+        }
+    return {
+        "error": f"Not enough memory to load {model} on this server.",
+        "code": type(exc).__name__,
+        "details": "Ask the server's owner, or choose a smaller model or quantization.",
+    }
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers on the FastAPI app."""
 
@@ -39,7 +57,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         if exc.details:
             body["details"] = exc.details
 
-        if status_code >= 500:
+        # Memory admission refusals are expected outcomes, not failures, and
+        # their full text is for the owner: host RAM figures, and — for a
+        # busy wait — which models OTHER clients are using right now. A
+        # remote peer gets the outcome without either; the log keeps it all.
+        from hfl.exceptions import MemoryBudgetExceededError, ModelsBusyError
+
+        if isinstance(exc, (MemoryBudgetExceededError, ModelsBusyError)):
+            logger.info("%s: %s", type(exc).__name__, exc)
+            from hfl.api.admin_guard import is_local_request
+
+            if not is_local_request(request):
+                body = _redacted_admission_body(exc)
+        elif status_code >= 500:
             logger.error("Unhandled HFLError: %s", exc)
 
         # API-3: shape the body for the OpenAI/Anthropic dialect on /v1/*

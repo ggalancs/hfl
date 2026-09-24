@@ -45,7 +45,7 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from hfl.api.state import get_state
 
@@ -169,7 +169,7 @@ def _render_model(
     summary="List running models",
     responses={200: {"description": "Currently-loaded models with memory and expiry info"}},
 )
-async def list_running() -> dict[str, Any]:
+async def list_running(request: Request) -> dict[str, Any]:
     """Ollama-compatible ``GET /api/ps``.
 
     Returns every model HFL holds in memory — each resident LLM, most
@@ -193,7 +193,11 @@ async def list_running() -> dict[str, Any]:
         entries.append(_render_model(state.current_tts_model, state.tts_engine))
         seen.add(state.current_tts_model.name)
 
-    memory = _memory_summary(state)
+    # Host RAM/VRAM figures are for the owner (a loopback peer), like every
+    # other administrative view; a remote client gets the Ollama shape only.
+    from hfl.api.admin_guard import is_local_request
+
+    memory = _memory_summary(state) if is_local_request(request) else None
     if memory is not None:
         return {"models": entries, "memory": memory}
     return {"models": entries}
