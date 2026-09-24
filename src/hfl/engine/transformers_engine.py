@@ -125,6 +125,18 @@ class TransformersEngine(InferenceEngine):
             except Exception:
                 pass  # Ignore if torch not available or CUDA errors
 
+            # Apple Silicon: device_map="auto" lands on MPS, whose allocator
+            # also keeps freed blocks cached. Without this, unloading a model
+            # to make room for another returns nothing to the system — the
+            # same defect measured on the MLX engine (16.7 GB kept).
+            try:
+                import torch
+
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+            except Exception:
+                pass  # torch absent, or an MPS build without empty_cache
+
     def _build_prompt(
         self,
         messages: list[ChatMessage],

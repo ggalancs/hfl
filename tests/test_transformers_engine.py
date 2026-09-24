@@ -208,6 +208,31 @@ class TestTransformersEngine:
 
             mock_torch.cuda.empty_cache.assert_called_once()
 
+    def test_unload_releases_the_mps_cache(self, mock_torch, mock_transformers):
+        """On Apple Silicon the model lives on MPS, not CUDA."""
+        mock_torch.cuda.is_available.return_value = False
+        mock_torch.backends.mps.is_available.return_value = True
+        with patch.dict(sys.modules, {"torch": mock_torch, "transformers": mock_transformers}):
+            from hfl.engine.transformers_engine import TransformersEngine
+
+            engine = TransformersEngine()
+            engine.load("/path/to/model")
+            engine.unload()
+
+            mock_torch.mps.empty_cache.assert_called_once()
+
+    def test_a_cuda_failure_does_not_skip_the_mps_release(self, mock_torch, mock_transformers):
+        mock_torch.cuda.is_available.side_effect = RuntimeError("driver")
+        mock_torch.backends.mps.is_available.return_value = True
+        with patch.dict(sys.modules, {"torch": mock_torch, "transformers": mock_transformers}):
+            from hfl.engine.transformers_engine import TransformersEngine
+
+            engine = TransformersEngine()
+            engine.load("/path/to/model")
+            engine.unload()
+
+            mock_torch.mps.empty_cache.assert_called_once()
+
     def test_unload_without_model_loaded(self, mock_torch, mock_transformers):
         """Test unload when no model is loaded does nothing."""
         with patch.dict(
