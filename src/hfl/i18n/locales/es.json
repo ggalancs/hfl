@@ -284,7 +284,8 @@
     "session_deleted": "Sesión '{name}' eliminada",
     "no_sessions": "Aún no hay sesiones guardadas. Empieza una con: hfl run <modelo> --session <nombre>",
     "memory_report": "Memoria: {in_use} de {total} GB en uso ({pct}%). {model} necesita ~{need} GB → tras cargarlo, {after} GB en uso ({after_pct}%); presupuesto {budget}%.",
-    "memory_unknown": "Memoria: no se pudo estimar cuánto ocupará {model}; se carga sin comprobar la memoria."
+    "memory_unknown": "Memoria: no se pudo estimar cuánto ocupará {model}; se carga sin comprobar la memoria.",
+    "memory_summary": "Memoria: {in_use} de {total} GB en uso ({pct}%) · presupuesto {budget}% ({limit} GB) · margen: {free} GB · modelos: {models} GB"
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",

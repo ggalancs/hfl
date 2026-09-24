@@ -284,7 +284,8 @@
     "session_deleted": "Deleted session '{name}'",
     "no_sessions": "No saved sessions yet. Start one with: hfl run <model> --session <name>",
     "memory_report": "Memory: {in_use} of {total} GB in use ({pct}%). {model} needs ~{need} GB → after loading, {after} GB in use ({after_pct}%); budget {budget}%.",
-    "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check."
+    "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check.",
+    "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB"
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

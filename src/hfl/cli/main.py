@@ -1020,6 +1020,7 @@ def ps(
 
     if not models:
         console.print("[dim]No models loaded. Send a request to /api/chat to load one.[/]")
+        _print_memory_summary(data.get("memory"))
         return
 
     table = Table(title="Running models")
@@ -1051,6 +1052,28 @@ def ps(
         )
 
     console.print(table)
+    _print_memory_summary(data.get("memory"))
+
+
+def _print_memory_summary(memory: Any) -> None:
+    """The server's memory against HFL_MEMORY_BUDGET (``/api/ps`` HFL
+    extension); silent when an older server does not send it."""
+    if not isinstance(memory, dict) or not memory.get("total_bytes"):
+        return
+    gib = 1024**3
+    console.print(
+        t(
+            "messages.memory_summary",
+            in_use=f"{memory.get('in_use_bytes', 0) / gib:.1f}",
+            total=f"{memory['total_bytes'] / gib:.1f}",
+            pct=f"{memory.get('in_use_percent', 0):.0f}",
+            budget=f"{memory.get('budget_percent', 0):.0f}",
+            limit=f"{memory.get('budget_bytes', 0) / gib:.1f}",
+            free=f"{memory.get('free_within_budget_bytes', 0) / gib:.1f}",
+            models=f"{memory.get('models_bytes', 0) / gib:.1f}",
+        ),
+        markup=False,
+    )
 
 
 @app.command()

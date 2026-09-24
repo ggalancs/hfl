@@ -495,3 +495,49 @@ def test_the_server_reaper_unloads_an_expired_model(world, monkeypatch):
             time.sleep(0.1)
         assert client.get("/api/ps").json()["models"] == []
     assert w.engines["a"][0].unloaded
+
+
+@pytest.mark.asyncio
+async def test_a_count_ceiling_of_two_keeps_two(world, monkeypatch):
+    """With room for two, the third load unloads exactly one. (The
+    post-load reconcile once applied the ceiling minus one and evicted a
+    second model right after every load.)"""
+    from hfl.api.state import get_state
+    from hfl.config import config
+
+    w = world({"a": 1, "b": 1, "c": 1})
+    monkeypatch.setattr(config, "max_loaded_models", 2)
+    await _load("a")
+    await _load("b")
+    assert {r.name for r in get_state().resident_models()} == {"a", "b"}
+    await _load("c")
+    assert {r.name for r in get_state().resident_models()} == {"b", "c"}
+    assert w.engines["a"][0].unloaded and not w.engines["b"][0].unloaded
+
+
+@pytest.mark.asyncio
+async def test_a_model_of_unknown_size_does_not_evict_everything(world, monkeypatch):
+    """Without a size estimate only the (optional) count ceiling can apply;
+    the others must stay loaded."""
+    from hfl.api.state import get_state
+
+    w = world({"a": 10, "b": 10, "mystery": 0})
+    await _load("a")
+    await _load("b")
+    await _load("mystery")
+    assert {r.name for r in get_state().resident_models()} == {"a", "b", "mystery"}
+    assert not w.engines["a"][0].unloaded and not w.engines["b"][0].unloaded
+
+
+def test_a_preloaded_model_gets_a_keep_alive_deadline(world):
+    """`hfl serve --model` assigns the pointer directly; a model nobody then
+    uses must still expire."""
+    from hfl.api.state import get_state
+
+    w = world({"a": 10})
+    state = get_state()
+    engine = w.engine_for(w.manifests["a"].local_path)
+    engine.load("x")
+    state.engine = engine
+    state.current_model = w.manifests["a"]
+    assert state.keep_alive_deadline_for("a") is not None

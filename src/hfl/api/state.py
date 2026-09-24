@@ -21,7 +21,7 @@ import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,9 @@ class ServerState:
         self._residents[name] = ResidentModel(
             name, engine, manifest, _measure_safely(manifest, engine)
         )
+        # A preloaded model follows keep_alive from load time; otherwise one
+        # nobody uses would never expire.
+        self.refresh_keep_alive(name)
 
     @property
     def tts_engine(self) -> AudioEngine | None:
@@ -405,7 +408,9 @@ class ServerState:
             if memory is None:
                 # No measurement (psutil absent, size unknown, or checks
                 # disabled): only the optional count ceiling applies.
-                plan = plan_admission(0, MemoryView(1, 0, 0), views, 1.0, max_models)
+                # Sizes are zeroed so memory cannot trigger an eviction.
+                counted = [replace(v, footprint=0) for v in views]
+                plan = plan_admission(0, MemoryView(1, 0, 0), counted, 1.0, max_models)
             else:
                 plan = plan_admission(estimate, memory, views, budget_fraction(), max_models)
                 logger.info(
@@ -464,9 +469,9 @@ class ServerState:
         if loaded is None:
             return
         max_models = int(getattr(config, "max_loaded_models", 0) or 0)
-        plan = plan_admission(
-            0, memory, views, budget_fraction(), max_models - 1 if max_models else 0
-        )
+        # The loaded model is not in ``views`` and counts as the "+1" the
+        # planner adds for the incoming model; its memory is in hfl_rss.
+        plan = plan_admission(0, memory, views, budget_fraction(), max_models)
         if plan.fits:
             for victim in plan.evict:
                 resident = self._residents.get(victim)

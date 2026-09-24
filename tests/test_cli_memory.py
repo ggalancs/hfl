@@ -130,3 +130,48 @@ def test_serve_preload_refuses_before_loading(memory, model_of, monkeypatch, tem
     assert result.exit_code == 1, result.stdout
     assert "HFL_MEMORY_BUDGET" in result.stdout
     assert created == [] and started == []
+
+
+class TestPsShowsMemory:
+    PAYLOAD = {
+        "models": [{"name": "a", "size": 9 * GB, "size_vram": 9 * GB, "digest": "sha256:x"}],
+        "memory": {
+            "total_bytes": 128 * GB,
+            "in_use_bytes": 70 * GB,
+            "in_use_percent": 54.7,
+            "budget_percent": 85.0,
+            "budget_bytes": int(108.8 * GB),
+            "free_within_budget_bytes": int(38.8 * GB),
+            "models_bytes": 9 * GB,
+        },
+    }
+
+    def _run(self, monkeypatch, payload):
+        import httpx
+        from typer.testing import CliRunner
+
+        from hfl.cli import main
+
+        class Resp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **k: Resp())
+        return CliRunner().invoke(main.app, ["ps"], env={"COLUMNS": "200"})
+
+    def test_the_summary_is_printed(self, monkeypatch):
+        result = self._run(monkeypatch, self.PAYLOAD)
+        assert result.exit_code == 0
+        assert "70.0" in result.stdout and "128.0" in result.stdout
+        assert "38.8" in result.stdout and "85" in result.stdout
+
+    def test_also_with_no_model_loaded(self, monkeypatch):
+        result = self._run(monkeypatch, {**self.PAYLOAD, "models": []})
+        assert "128.0" in result.stdout
+
+    def test_an_older_server_without_the_summary(self, monkeypatch):
+        result = self._run(monkeypatch, {"models": self.PAYLOAD["models"]})
+        assert result.exit_code == 0

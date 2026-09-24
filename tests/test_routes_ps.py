@@ -107,8 +107,20 @@ class TestRoutesPsSingleLLM:
         assert entry["details"]["parameter_size"] == "7B"
         assert entry["details"]["quantization_level"] == "Q4_K_M"
 
-        # Expiry: no keep_alive deadline set ⇒ null
-        assert entry["expires_at"] is None
+        # Expiry: a loaded model follows the default keep_alive (5m) from
+        # load time, as in Ollama.
+        expires = datetime.strptime(entry["expires_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+            tzinfo=timezone.utc
+        )
+        remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+        assert 240 < remaining <= 300
+
+    def test_never_expiring_model_reports_null(self, client, llm_manifest):
+        state = get_state()
+        state.engine = MagicMock(is_loaded=True)
+        state.current_model = llm_manifest
+        state.set_keep_alive(llm_manifest.name, None)  # keep_alive=-1
+        assert client.get("/api/ps").json()["models"][0]["expires_at"] is None
 
     def test_digest_falls_back_to_identity_hash_when_no_file_hash(self, client, llm_manifest):
         """A manifest without ``file_hash`` still gets a deterministic digest."""

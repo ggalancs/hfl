@@ -138,8 +138,8 @@ class TestKeepAliveGlobalDefault:
         from hfl.config import config as hfl_config
 
         _mock_llm_loaded(sample_manifest)
-        # No deadline yet → global default kicks in.
-        assert get_state().keep_alive_deadline_for(sample_manifest.name) is None
+        # A preloaded model already follows the default from load time; the
+        # request must restart it with the default in force NOW (10m).
 
         previous = hfl_config.keep_alive_default
         hfl_config.keep_alive_default = "10m"
