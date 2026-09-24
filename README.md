@@ -42,6 +42,9 @@ Any OpenAI, Ollama or Anthropic client can now talk to `http://localhost:11434`.
 - **The whole Hub, not one file format.** GGUF repos run through llama.cpp, MLX
   builds run natively on Apple Silicon, and safetensors checkpoints are converted
   and quantized for you on pull. Copy a repo name from the Hub and run it.
+- **Browse the Hub from your terminal.** `hfl search` pages through the live
+  Hub with sizes, downloads and formats at a glance; filter by GGUF or by size,
+  press a number and the model is pulled, license check included.
 - **Yours alone.** No account, no sign-in, no cloud service behind it. On its own
   HFL talks to one server, the Hugging Face Hub, to fetch weights; its web-search
   endpoints reach the web only when a client calls them, and a test pins every
@@ -94,6 +97,24 @@ GGUF and MLX models need none of this.
 
 ## Use it
 
+### Search and pick from the terminal
+
+<p align="center">
+  <img src="docs/assets/hfl-search-demo.svg" alt="Terminal: hfl search lists Hugging Face Hub models page by page with size, downloads and format; pressing a number pulls the model (real output)" width="880">
+</p>
+
+```bash
+hfl search qwen3                          # everything matching, most downloaded first
+hfl search qwen3 --gguf --max-params 8    # GGUF only, 8B or smaller — searched across the whole Hub
+hfl search llama --sort likes             # or: downloads (default), created
+```
+
+Each page lists up to ten models with their size, downloads, likes, format and
+task. Press **0–9** to pull one (you confirm, and its license is checked
+first), **SPACE** for the next page, **p** for the previous one, **q** to leave.
+Sizes are total parameters, so Mixture-of-Experts models are not shown smaller
+than they are.
+
 ### Chat
 
 ```bash
@@ -113,7 +134,6 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct                 # Q4_K_M by default
 hfl pull meta-llama/Llama-3.3-70B-Instruct --quantize Q5_K_M --alias llama70b
 hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: pinned revision
 
-hfl search qwen --gguf                  # interactive, paginated Hub search
 hfl list                                # what is on this machine
 hfl inspect llama70b                    # details and license
 hfl rm llama70b

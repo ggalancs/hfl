@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
@@ -104,19 +103,21 @@ def get_key() -> str:
 
 
 def extract_params_from_name(model_id: str) -> str | None:
-    """Extract the number of parameters from the model name (e.g.: '70B', '7B')."""
-    name = model_id.lower()
-    # Patterns: 70b, 7b, 1.5b, 0.5b, 405b, etc.
-    patterns = [
-        r"(\d+\.?\d*)b(?:[-_]|$)",  # 70b, 7b, 1.5b
-        r"(\d+)b-",  # 70b-instruct
-        r"-(\d+\.?\d*)b",  # model-7b
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, name)
-        if match:
-            return match.group(1) + "B"
-    return None
+    """Total parameters read from the model name (e.g. '70B', '1.5B'), or None.
+
+    Uses the Mixture-of-Experts-aware reader in :mod:`hfl.hub.params`: the
+    old "first <N>B" pattern read ``Llama-4-Scout-17B-16E`` as 17B (it is
+    108.6B), ``Hunyuan-A13B`` as 13B (80.4B) and ``2.4T-A95B`` as 95B, so the
+    search showed sizes several times too small and let such models through
+    a ``--max-params`` filter. A name that only states the active count
+    yields None: no size is better than a wrong one.
+    """
+    from hfl.hub.params import parse_params_from_name
+
+    total = parse_params_from_name(model_id).total_b
+    if total is None:
+        return None
+    return f"{total:g}B"
 
 
 def estimate_model_size(params_str: str | None, quantization: str = "Q4") -> str:

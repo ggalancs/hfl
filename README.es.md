@@ -43,6 +43,10 @@ Cualquier cliente de OpenAI, Ollama o Anthropic puede hablar ya con `http://loca
   llama.cpp, los builds MLX se ejecutan de forma nativa en Apple Silicon y los
   checkpoints safetensors se convierten y cuantizan solos al descargarlos. Copia
   el nombre de un repositorio del Hub y ejecútalo.
+- **Explora el Hub desde tu terminal.** `hfl search` recorre el Hub en vivo
+  página a página, con tamaño, descargas y formato de un vistazo; filtra por GGUF
+  o por tamaño, pulsa un número y el modelo se descarga, con la licencia
+  comprobada antes.
 - **Solo tuyo.** Sin cuenta, sin inicio de sesión, sin un servicio en la nube
   detrás. Por su cuenta HFL habla con un solo servidor, el Hub de Hugging Face,
   para descargar pesos; sus endpoints de búsqueda web solo salen a internet
@@ -97,6 +101,24 @@ Debian/Ubuntu). Los modelos GGUF ya cuantizados y los MLX no necesitan nada de e
 
 ## Uso
 
+### Buscar y elegir desde la terminal
+
+<p align="center">
+  <img src="docs/assets/hfl-search-demo.svg" alt="Terminal: hfl search muestra modelos del Hub de Hugging Face página a página con tamaño, descargas y formato; al pulsar un número se descarga el modelo (salida real)" width="880">
+</p>
+
+```bash
+hfl search qwen3                          # todo lo que coincide, los más descargados primero
+hfl search qwen3 --gguf --max-params 8    # solo GGUF de 8B o menos, buscando en todo el Hub
+hfl search llama --sort likes             # o: downloads (por defecto), created
+```
+
+Cada página muestra hasta diez modelos con su tamaño, descargas, likes, formato y
+tarea. Pulsa **0–9** para descargar uno (confirmas y se comprueba su licencia
+antes), **ESPACIO** para la página siguiente, **p** para la anterior y **q** para
+salir. Los tamaños son parámetros totales, así que los modelos Mixture-of-Experts
+no aparecen más pequeños de lo que son.
+
 ### Chat
 
 ```bash
@@ -116,7 +138,6 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct                 # Q4_K_M por defecto
 hfl pull meta-llama/Llama-3.3-70B-Instruct --quantize Q5_K_M --alias llama70b
 hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: revisión fijada
 
-hfl search qwen --gguf                  # búsqueda interactiva y paginada en el Hub
 hfl list                                # lo que hay en esta máquina
 hfl inspect llama70b                    # detalles y licencia
 hfl rm llama70b

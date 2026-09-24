@@ -1340,13 +1340,20 @@ def search(
     try:
         # Search models with progress spinner
         with progress_spinner(t("messages.searching", query=query)):
+            size_filter = max_params is not None or min_params is not None
             kwargs: dict = {
                 "search": query,
                 "sort": sort,
-                "limit": limit,
+                # The size filter can only run on names, after the Hub answers;
+                # fetch a wider window so it filters more than the first page.
+                "limit": min(limit * 10, 1000) if size_filter else limit,
                 "fetch_config": False,
                 "full": True,  # To get siblings and detect GGUF
             }
+            if gguf_only:
+                # Filtered by the Hub itself, over every GGUF repo — not over
+                # whatever GGUF happened to be among the top `limit` results.
+                kwargs["filter"] = "gguf"
             # ``sort="downloads"`` is already descending on hub API v1;
             # the legacy ``direction=-1`` kwarg was removed in hub 1.0.
             models = list(api.list_models(**kwargs))
@@ -1399,6 +1406,8 @@ def search(
             console.print(f"[yellow]{msg}[/]")
             return
 
+    models = models[:limit]
+
     total = len(models)
     total_pages = (total + page_size - 1) // page_size
     current_page = 0
@@ -1437,47 +1446,50 @@ def search(
         )
         page_info = f"[dim]-- {page_msg} --[/]"
 
-        if current_page < total_pages - 1:
-            console.print(f"{page_info}  [dim]SPACE[/] more  [dim]q[/] quit", end="")
-
-            # Wait for user input
-            try:
-                key = get_key()
-            except Exception:
-                # Fallback if no interactive terminal
-                try:
-                    user_input = input("\n[Press ENTER to continue, 'q' to quit]: ")
-                    key = "q" if user_input.lower() == "q" else " "
-                except (EOFError, KeyboardInterrupt):
-                    key = "q"
-
-            # Clear status line
-            console.print("\r" + " " * 80 + "\r", end="")
-
-            if key in ("q", "Q", "\x1b", "\x03"):  # q, Q, ESC, Ctrl+C
-                console.print(
-                    f"\n[dim]{t('messages.search_finished', shown=end_idx, total=total)}[/]"
-                )
-                break
-            if key == "p" and current_page > 0:
-                current_page -= 1
-                console.print()  # New line before previous page
-            elif key.isdigit():
-                # User selected a model by number (0-9)
-                selection = int(key)
-                if selection < len(page_models):
-                    selected_model = page_models[selection]
-                    console.print()
-                    _pull_selected_model(selected_model)
-                    return
-                console.print()  # Invalid selection, continue
-            else:
-                current_page += 1
-                console.print()  # New line before next page
+        # Every page — the last one included — waits for a key, so a model
+        # can be picked wherever it is listed. (The last page used to print
+        # "end of results" and return: a search that fit on one page could
+        # not be picked from at all.)
+        is_last = current_page >= total_pages - 1
+        hints = f"[dim]0-9[/] {t('messages.select_to_pull')}  [dim]q[/] {t('messages.quit')}"
+        if is_last:
+            status = f"{page_info}  [bold green]{t('messages.end_of_results')}[/]  {hints}"
         else:
-            # Last page
-            console.print(f"{page_info}  [bold green]{t('messages.end_of_results')}[/]")
+            status = f"{page_info}  [dim]SPACE[/] {t('messages.next_page')}  {hints}"
+        console.print(status, end="")
+
+        try:
+            key = get_key()
+        except Exception:
+            # No raw keyboard (a pipe, some Windows consoles): read a line
+            # instead, where a typed number still selects.
+            try:
+                typed = input("\n[ENTER / 0-9 / q]: ").strip().lower()
+                key = typed if typed else " "
+            except (EOFError, KeyboardInterrupt):
+                key = "q"
+
+        # Clear status line
+        console.print("\r" + " " * 80 + "\r", end="")
+
+        if key in ("q", "\x1b", "\x03") or key.startswith("q"):  # q, ESC, Ctrl+C
+            console.print(f"\n[dim]{t('messages.search_finished', shown=end_idx, total=total)}[/]")
+            break
+        if key == "p" and current_page > 0:
+            current_page -= 1
+            console.print()  # New line before previous page
+        elif key.isdigit():
+            selection = int(key)
+            if selection < len(page_models):
+                console.print()
+                _pull_selected_model(page_models[selection])
+                return
+            console.print()  # Not on this page: show it again
+        elif is_last:
+            break
+        else:
             current_page += 1
+            console.print()  # New line before next page
 
     # Show help at the end
     console.print()

@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requested GGUF quantization in their name and label
   (`...-4bit-q4_k_m`, `Q4_K_M`); only GGUF results carry a label now.
   Models already registered keep their names.
+- **`hfl search`**: `--gguf` and `--min-params` / `--max-params` filtered only
+  the first `--limit` results, so `hfl search qwen3 --gguf --max-params 8` found
+  nothing while dozens of such repos exist; GGUF is now filtered by the Hub and
+  size filters look through a wider window. A model on the last page — or in a
+  search that fit on one page — could not be picked; every page now accepts
+  0–9. Sizes are total parameters (Llama 4 Scout was shown as 17B, not 108.6B).
+  Without a raw keyboard, a typed number now selects too.
 - `hfl serve --model` with a name that resolves to nothing now exits with
   "model not found" instead of starting without it.
 
