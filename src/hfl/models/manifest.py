@@ -11,6 +11,23 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Until this date (commit c0c1256) ``context_length`` defaulted to 4096 and
+# every pull saved it. The server and ``hfl run`` honour a recorded context
+# before auto-sizing, so those records pinned models to 4096 tokens forever.
+# A 4096 saved earlier is that default; one saved later was asked for.
+_CTX_DEFAULT_BECAME_AUTO = datetime(2026, 3, 18)
+_LEGACY_DEFAULT_CTX = 4096
+
+
+def _is_legacy_default_ctx(manifest: "ModelManifest") -> bool:
+    if manifest.context_length != _LEGACY_DEFAULT_CTX:
+        return False
+    try:
+        created = datetime.fromisoformat(str(manifest.created_at))
+    except ValueError:
+        return False
+    return created.replace(tzinfo=None) < _CTX_DEFAULT_BECAME_AUTO
+
 
 @dataclass
 class ModelManifest:
@@ -90,7 +107,10 @@ class ModelManifest:
 
     @classmethod
     def from_dict(cls, data: dict) -> "ModelManifest":
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        manifest = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if _is_legacy_default_ctx(manifest):
+            manifest.context_length = 0
+        return manifest
 
     @property
     def display_size(self) -> str:
