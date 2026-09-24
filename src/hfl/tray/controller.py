@@ -185,6 +185,19 @@ class TrayServerController:
         try:
             state = get_state()
             n_ctx = state.context_size_override if state.context_size_override > 0 else 0
+            from hfl.engine.residency import check_standalone_load
+
+            check = check_standalone_load(manifest.local_path, n_ctx)
+            if check.plan is not None and not check.plan.fits:
+                logger.warning(
+                    "Not pre-loading %s: it needs ~%.1f GB and memory in use would "
+                    "reach %.1f GB, over HFL_MEMORY_BUDGET (%.0f%%)",
+                    manifest.name,
+                    check.footprint / 1024**3,
+                    check.plan.used_after / 1024**3,
+                    check.budget * 100,
+                )
+                return
             engine = select_engine(Path(manifest.local_path))
             engine.load(manifest.local_path, n_ctx=n_ctx)
             state.engine = engine

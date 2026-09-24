@@ -282,7 +282,9 @@
     "session_saved": "Session saved to {path}",
     "session_new": "Recording a new session as '{name}'",
     "session_deleted": "Deleted session '{name}'",
-    "no_sessions": "No saved sessions yet. Start one with: hfl run <model> --session <name>"
+    "no_sessions": "No saved sessions yet. Start one with: hfl run <model> --session <name>",
+    "memory_report": "Memory: {in_use} of {total} GB in use ({pct}%). {model} needs ~{need} GB → after loading, {after} GB in use ({after_pct}%); budget {budget}%.",
+    "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",
@@ -323,7 +325,9 @@
     "tts_disabled": "TTS functionality is temporarily disabled. Only LLM models are supported.",
     "session_not_found": "No session named '{name}'. List them with: hfl sessions list",
     "hub_unreachable": "Cannot reach huggingface.co — you appear to be offline.",
-    "hub_unreachable_hint": "Models you have already pulled keep working: hfl list, hfl run <model>, hfl serve."
+    "hub_unreachable_hint": "Models you have already pulled keep working: hfl list, hfl run <model>, hfl serve.",
+    "memory_refused": "Not enough memory for {model}: it needs ~{need} GB, and the machine would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%.",
+    "memory_refused_hint": "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context (--ctx 8192), closing other programs, or raising HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 skips this check."
   },
   "warnings": {
     "download_cancelled": "Download cancelled.",

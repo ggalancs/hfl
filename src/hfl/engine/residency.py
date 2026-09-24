@@ -204,3 +204,31 @@ def describe_memory(memory: MemoryView, budget: float) -> str:
         f"{_gb(memory.in_use)} of {_gb(memory.total)} in use ({pct:.0f}%), "
         f"budget {budget * 100:.0f}% = {_gb(int(memory.total * budget))}"
     )
+
+
+@dataclass(frozen=True)
+class StandaloneCheck:
+    """Admission of one model into a process that holds no other model
+    (``hfl run``, a preload before the server starts)."""
+
+    footprint: int
+    kv_known: bool
+    memory: MemoryView | None
+    plan: AdmissionPlan | None
+    """None when the check could not run: no measurement, unknown size, or
+    ``HFL_DISABLE_MEMORY_PREFLIGHT``."""
+    budget: float
+
+
+def check_standalone_load(model_path: str, n_ctx: int = 0) -> StandaloneCheck:
+    """Would this model fit, alone, under the memory budget right now?"""
+    from hfl.engine.footprint import estimate_footprint
+
+    fp = estimate_footprint(model_path, n_ctx)
+    budget = budget_fraction()
+    disabled = os.environ.get("HFL_DISABLE_MEMORY_PREFLIGHT", "").lower() in ("1", "true", "yes")
+    memory = current_memory()
+    if disabled or memory is None or not fp.known:
+        return StandaloneCheck(fp.total_bytes, fp.kv_known, memory, None, budget)
+    plan = plan_admission(fp.total_bytes, memory, [], budget)
+    return StandaloneCheck(fp.total_bytes, fp.kv_known, memory, plan, budget)

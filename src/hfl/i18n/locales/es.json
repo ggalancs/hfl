@@ -282,7 +282,9 @@
     "session_saved": "Sesión guardada en {path}",
     "session_new": "Grabando una sesión nueva como '{name}'",
     "session_deleted": "Sesión '{name}' eliminada",
-    "no_sessions": "Aún no hay sesiones guardadas. Empieza una con: hfl run <modelo> --session <nombre>"
+    "no_sessions": "Aún no hay sesiones guardadas. Empieza una con: hfl run <modelo> --session <nombre>",
+    "memory_report": "Memoria: {in_use} de {total} GB en uso ({pct}%). {model} necesita ~{need} GB → tras cargarlo, {after} GB en uso ({after_pct}%); presupuesto {budget}%.",
+    "memory_unknown": "Memoria: no se pudo estimar cuánto ocupará {model}; se carga sin comprobar la memoria."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",
@@ -323,7 +325,9 @@
     "tts_disabled": "La funcionalidad TTS está temporalmente deshabilitada. Solo se soportan modelos LLM.",
     "session_not_found": "No hay ninguna sesión llamada '{name}'. Lístalas con: hfl sessions list",
     "hub_unreachable": "No se puede contactar con huggingface.co — parece que no hay conexión.",
-    "hub_unreachable_hint": "Los modelos que ya descargaste siguen funcionando: hfl list, hfl run <modelo>, hfl serve."
+    "hub_unreachable_hint": "Los modelos que ya descargaste siguen funcionando: hfl list, hfl run <modelo>, hfl serve.",
+    "memory_refused": "No hay memoria suficiente para {model}: necesita ~{need} GB y la máquina llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%.",
+    "memory_refused_hint": "Opciones: una cuantización menor (Q4_K_M, Q3_K_M), un contexto menor (--ctx 8192), cerrar otros programas o subir HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 omite esta comprobación."
   },
   "warnings": {
     "download_cancelled": "Descarga cancelada.",

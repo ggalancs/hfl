@@ -391,6 +391,7 @@ def run(
             console.print(f"\n[dim]{t('errors.use_tts_command')}[/]")
         raise typer.Exit(1)
 
+    _memory_check_or_exit(manifest, ctx)
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
     try:
         engine = select_engine(Path(manifest.local_path), backend=backend)
@@ -478,6 +479,38 @@ def run(
             f"[dim]{t('messages.session_saved', path=sessions_dir() / f'{session}.json')}[/]"
         )
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
+
+
+def _memory_check_or_exit(manifest: Any, n_ctx: int) -> None:
+    """Say what loading ``manifest`` will do to memory, and refuse if it
+    cannot fit under HFL_MEMORY_BUDGET — before any weights are read."""
+    from rich.markup import escape
+
+    from hfl.engine.residency import check_standalone_load
+
+    check = check_standalone_load(manifest.local_path, n_ctx)
+    if check.plan is None or check.memory is None:
+        if check.memory is not None and not check.footprint:
+            console.print(f"[dim]{escape(t('messages.memory_unknown', model=manifest.name))}[/]")
+        return
+    gib = 1024**3
+    total = check.memory.total or 1
+    fields = {
+        "model": manifest.name,
+        "in_use": f"{check.memory.in_use / gib:.1f}",
+        "total": f"{check.memory.total / gib:.1f}",
+        "pct": f"{100 * check.memory.in_use / total:.0f}",
+        "need": f"{check.footprint / gib:.1f}",
+        "after": f"{check.plan.used_after / gib:.1f}",
+        "after_pct": f"{100 * check.plan.used_after / total:.0f}",
+        "budget": f"{check.budget * 100:.0f}",
+    }
+    if check.plan.fits:
+        console.print(f"[dim]{escape(t('messages.memory_report', **fields))}[/]")
+        return
+    console.print(f"[red]{escape(t('errors.memory_refused', **fields))}[/]")
+    console.print(escape(t("errors.memory_refused_hint")))
+    raise typer.Exit(1)
 
 
 def _hub_unreachable(exc: BaseException) -> bool:
@@ -659,6 +692,7 @@ def serve(
         registry = ModelRegistry()
         manifest = registry.get(model)
         if manifest:
+            _memory_check_or_exit(manifest, ctx if ctx > 0 else 0)
             console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
             try:
                 n_ctx = ctx if ctx > 0 else 0  # 0 = auto-detect from model
