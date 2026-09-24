@@ -212,3 +212,29 @@ def require_owner(request: Request, operation: str = "this operation") -> None:
             "retryable": False,
         },
     )
+
+
+def require_local_owner(request: Request, operation: str) -> None:
+    """Like :func:`require_owner`, with no remote exception at all.
+
+    For operations that destroy data on the host (deleting a model):
+    ``HFL_ALLOW_REMOTE_PULL`` opens provisioning to remote clients, not
+    destruction. Only a loopback peer, and never from a web page.
+    """
+    _reject_browser_origin(request, operation)
+    if is_local_request(request):
+        _audit(request, operation, "ok")
+        return
+    _audit(request, operation, "denied")
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": (
+                f"{operation} can only be done on the server host itself "
+                "(loopback), never by a remote API client."
+            ),
+            "code": "local_owner_only",
+            "category": "auth",
+            "retryable": False,
+        },
+    )

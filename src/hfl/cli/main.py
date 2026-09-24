@@ -1502,9 +1502,6 @@ def rm(
     yes: bool = typer.Option(False, "--yes", "-y", help=t("commands.rm.options.yes")),
 ):
     """Delete a local model."""
-    import shutil
-    from pathlib import Path
-
     from hfl.models.registry import ModelRegistry
 
     registry = ModelRegistry()
@@ -1520,34 +1517,19 @@ def rm(
     ):
         return
 
-    # Delete files — but only when no OTHER registry entry shares this blob.
-    # ``hfl cp`` deliberately creates a second entry pointing at the same
-    # on-disk path (zero-copy); its contract promises that removing one entry
-    # must not destroy the shared bytes. Honour that so ``cp a b; rm a`` leaves
-    # ``b`` loadable. (DATA: shared-blob guard.)
-    path = Path(manifest.local_path)
-    try:
-        resolved = path.resolve()
-    except OSError:
-        resolved = path
+    # Same rule as DELETE /api/delete (hfl.models.removal): only files inside
+    # HFL's models folder are deleted, and a blob another entry shares
+    # (``hfl cp`` is zero-copy) is kept so ``cp a b; rm a`` leaves ``b``.
+    from hfl.models.removal import remove_model
 
-    def _shares_blob(other) -> bool:
-        try:
-            return Path(other.local_path).resolve() == resolved
-        except OSError:
-            return bool(other.local_path == manifest.local_path)
-
-    others = [m for m in registry.list_all() if m.name != manifest.name and _shares_blob(m)]
-
-    if others:
-        names = ", ".join(sorted(m.name for m in others))
+    result = remove_model(registry, manifest)
+    if result.shared_with:
+        names = ", ".join(result.shared_with)
         console.print(f"[yellow]{t('messages.blob_shared', names=names)}[/]")
-    elif path.is_dir():
-        shutil.rmtree(path)
-    elif path.is_file():
-        path.unlink()
-
-    registry.remove(model)
+    elif result.kept_outside is not None:
+        console.print(
+            f"[yellow]{escape_markup(t('messages.file_kept_outside', path=result.kept_outside))}[/]"
+        )
     console.print(f"[green]{t('messages.deleted')}:[/] {manifest.name}")
 
 

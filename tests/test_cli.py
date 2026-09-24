@@ -348,11 +348,13 @@ class TestRmCommand:
 
     def test_rm_deletes_blob_when_unshared(self, runner, cli_app, temp_config, temp_dir):
         """Counterpart: with no other entry sharing the path, ``rm`` still
-        deletes the on-disk file — no behaviour regression for the common case."""
+        deletes the on-disk file — no behaviour regression for the common case.
+        (Pulls land in the models folder; files elsewhere are never deleted —
+        see test_model_removal.)"""
         from hfl.models.manifest import ModelManifest
         from hfl.models.registry import ModelRegistry
 
-        model_path = temp_dir / "lonely-model.gguf"
+        model_path = temp_config.models_dir / "lonely-model.gguf"
         model_path.write_bytes(b"GGUF")
 
         registry = ModelRegistry()

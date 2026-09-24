@@ -405,7 +405,7 @@ class JSONBodyMiddleware:
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if (
             scope["type"] == "http"
-            and scope.get("method") in ("POST", "PUT")
+            and scope.get("method") in ("POST", "PUT", "DELETE")
             and not str(scope.get("path", "")).startswith("/api/blobs/")
         ):
             headers = list(scope.get("headers") or [])

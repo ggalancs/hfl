@@ -17,8 +17,8 @@ Implemented endpoints:
     POST /api/chat
     GET  /api/tags
     POST /api/pull
-    (model deletion is CLI-only — `hfl rm`; there is deliberately no
-     DELETE /api/delete route, so the API cannot destroy local models.)
+    DELETE /api/delete (owner on the host only: loopback, never a web
+     page, no remote exception — see routes_delete)
 
 Legal Compliance (R9 - Audit):
 - Disclaimer header in all AI responses
@@ -53,6 +53,7 @@ from hfl.api.routes_blobs import router as blobs_router
 from hfl.api.routes_compliance import router as compliance_router
 from hfl.api.routes_copy import router as copy_router
 from hfl.api.routes_create import router as create_router
+from hfl.api.routes_delete import router as delete_router
 from hfl.api.routes_discover import router as discover_router
 from hfl.api.routes_draft import router as draft_router
 from hfl.api.routes_embed import router as embed_router
@@ -453,6 +454,7 @@ app.include_router(native_router)
 app.include_router(batch_router)
 app.include_router(blobs_router)
 app.include_router(copy_router)
+app.include_router(delete_router)
 app.include_router(create_router)
 app.include_router(embed_router)
 app.include_router(ps_router)

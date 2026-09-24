@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every request was refused with 422. A request without an `Origin`
   header now has its body read as JSON; a browser always sends `Origin`,
   so a web page posting a form to your server is still refused.
+- **`DELETE /api/delete`, for the owner on the host only.** Ollama clients
+  (Open WebUI's model manager, `ollama.delete`) can remove a model. The
+  guard is the strictest HFL has: a loopback caller, never a web page, and
+  no remote exception — `HFL_ALLOW_REMOTE_PULL` opens downloads, not
+  deletion. A loaded model is unloaded first.
+
+### Changed
+
+- **`hfl rm` deletes only files inside HFL's models folder.** An entry
+  pointing anywhere else — a GGUF of yours registered in place — loses its
+  registry entry and keeps its file (you are told where). Same rule for
+  `/api/delete`.
 
 ### Fixed
 

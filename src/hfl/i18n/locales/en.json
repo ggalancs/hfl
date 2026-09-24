@@ -247,6 +247,7 @@
     "server_at": "hfl server at http://{host}:{port}",
     "deleted": "Deleted",
     "blob_shared": "Blob still referenced by {names}; removing registry entry only (on-disk files kept).",
+    "file_kept_outside": "Its file is outside HFL's models folder, so it was kept: {path}",
     "alias_assigned": "Alias assigned",
     "you_can_now_use": "You can now use",
     "configure_hf_token": "Configure HuggingFace token",
