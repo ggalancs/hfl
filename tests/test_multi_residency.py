@@ -608,3 +608,65 @@ async def test_an_explicit_ceiling_wins_over_the_unmeasured_gpu_fallback(world, 
     await _load("a")
     await _load("b")
     assert not w.engines["a"][0].unloaded
+
+
+# ----------------------------------------------------------------------
+# After a load: the model came out larger than estimated
+# ----------------------------------------------------------------------
+
+
+def _measured_as(monkeypatch, w, sizes_gb):
+    """The loaded model measures larger than its estimate (llama.cpp opened
+    a bigger context than assumed, for instance)."""
+    from hfl.api import model_loader
+
+    monkeypatch.setattr(
+        model_loader, "_measure_loaded", lambda e, m: sizes_gb.get(m.name, w.sizes[m.name]) * GB
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_larger_than_estimated_load_evicts_idle_models_afterwards(world, monkeypatch):
+    # Budget 85, others 10. a 30 + b 30 = 70; c estimated 10 fits (80), but
+    # measures 30 once loaded (100): the least recently used idle model goes.
+    from hfl.api.state import get_state
+
+    w = world({"a": 30, "b": 30, "c": 10})
+    await _load("a")
+    await _load("b")
+    _measured_as(monkeypatch, w, {"c": 30})
+    await _load("c")
+
+    assert {r.name for r in get_state().resident_models()} == {"b", "c"}
+    assert w.engines["a"][0].unloaded
+    assert get_state().resident("c").footprint == 30 * GB  # the measurement is kept
+
+
+@pytest.mark.asyncio
+async def test_a_larger_load_never_evicts_itself_or_a_busy_model(world, monkeypatch, caplog):
+    import logging
+
+    from hfl.api.state import get_state
+
+    w = world({"a": 40, "c": 10})
+    hold = asyncio.Event()
+    leased = asyncio.Event()
+
+    async def user():
+        with _lease_scope():
+            await _load("a")
+            leased.set()
+            await hold.wait()
+
+    task = asyncio.create_task(user())
+    await leased.wait()
+    _measured_as(monkeypatch, w, {"c": 40})
+    with caplog.at_level(logging.WARNING, logger="hfl.api.state"):
+        await _load("c")
+    try:
+        assert {r.name for r in get_state().resident_models()} == {"a", "c"}
+        assert not w.engines["a"][0].unloaded and not w.engines["c"][0].unloaded
+        assert "over the budget" in caplog.text
+    finally:
+        hold.set()
+        await task
