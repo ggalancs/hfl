@@ -400,12 +400,32 @@ true`) accumulates the full reply and emits `tool_calls` on the final
 `done: true` chunk. The acceptance suite (the executable spec, T1–T7)
 lives at `tests/test_tool_calling_acceptance.py`.
 
+## Several models loaded at once
+
+HFL keeps as many models loaded as the machine can hold, decided by
+memory rather than by a count. Before each load it estimates what the
+model will take (weights plus the KV cache for its context) and checks
+that the machine stays under `HFL_MEMORY_BUDGET` — the share of total RAM
+in use after the load, other programs included (default `85%`):
+
+- it fits → it loads next to the models already resident;
+- it does not → idle models are unloaded, least recently used first;
+- the room is held by models serving a request → the load waits for them
+  (a model in use is never unloaded under its request);
+- it cannot fit even alone → the load is refused with the numbers (HTTP
+  507), before anything is unloaded.
+
+Each load is logged with memory in use now and after, and `GET /api/ps`
+lists every resident model with its footprint plus a `memory` summary.
+`HFL_MAX_LOADED_MODELS` / `OLLAMA_MAX_LOADED_MODELS` remains available as
+an optional ceiling on the number of models (off by default).
+
 ## Concurrency & Backpressure
 
 Local inference backends (llama.cpp, transformers-GPU) share a single
 non-reentrant model instance. HFL protects them with an **in-server
-inference dispatcher** that serialises requests on the currently-loaded
-engine with a bounded wait queue:
+inference dispatcher** that serialises inference across all loaded
+models (one at a time) with a bounded wait queue:
 
 | Setting | Env var | Default | Meaning |
 |---|---|---|---|

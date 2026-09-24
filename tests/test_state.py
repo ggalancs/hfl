@@ -145,19 +145,32 @@ class TestServerStateLLMOperations:
         assert state.current_model is manifest
 
     @pytest.mark.asyncio
-    async def test_set_llm_engine_unloads_previous(self):
-        """set_llm_engine unloads previous engine."""
+    async def test_set_llm_engine_keeps_other_models_resident(self):
+        """Several models stay loaded: registering a second one is not an
+        eviction (that is the residency planner's call, by memory)."""
         state = ServerState()
         old_engine = MockEngine("old")
         new_engine = MockEngine("new")
-        old_manifest = MockManifest("old-model")
-        new_manifest = MockManifest("new-model")
 
-        await state.set_llm_engine(old_engine, old_manifest)
-        await state.set_llm_engine(new_engine, new_manifest)
+        await state.set_llm_engine(old_engine, MockManifest("old-model"))
+        await state.set_llm_engine(new_engine, MockManifest("new-model"))
+
+        assert not old_engine.unload_called
+        assert state.engine is new_engine
+        assert {r.name for r in state.resident_models()} == {"old-model", "new-model"}
+
+    @pytest.mark.asyncio
+    async def test_set_llm_engine_replacing_the_same_model_unloads_the_old_copy(self):
+        state = ServerState()
+        old_engine = MockEngine("old")
+        new_engine = MockEngine("new")
+
+        await state.set_llm_engine(old_engine, MockManifest("m"))
+        await state.set_llm_engine(new_engine, MockManifest("m"))
 
         assert old_engine.unload_called
         assert state.engine is new_engine
+        assert [r.engine for r in state.resident_models()] == [new_engine]
 
     @pytest.mark.asyncio
     async def test_set_llm_engine_none_clears_state(self):
@@ -186,13 +199,13 @@ class TestServerStateLLMOperations:
             state = ServerState()
             old_engine = MockEngine("old")
             new_engine = MockEngine("new")
-            await state.set_llm_engine(old_engine, MockManifest("old"))
+            await state.set_llm_engine(old_engine, MockManifest("m"))
 
             # Simulate an in-flight inference holding the only slot.
             slot = dispatcher.slot()
             await slot.__aenter__()
             try:
-                swap = asyncio.create_task(state.set_llm_engine(new_engine, MockManifest("new")))
+                swap = asyncio.create_task(state.set_llm_engine(new_engine, MockManifest("m")))
                 await asyncio.sleep(0.05)  # let the swap reach its drain wait
                 assert not old_engine.unload_called, (
                     "swap freed the engine while a request still held a slot"
@@ -214,11 +227,11 @@ class TestServerStateLLMOperations:
         state = ServerState()
         old_engine = MockEngine("old")
         new_engine = MockEngine("new")
-        await state.set_llm_engine(old_engine, MockManifest("old"))
+        await state.set_llm_engine(old_engine, MockManifest("m"))
 
         await state.pin_engine(old_engine)  # WS turn starts reading it
 
-        await state.set_llm_engine(new_engine, MockManifest("new"))
+        await state.set_llm_engine(new_engine, MockManifest("m"))
         # Displaced but still pinned -> unload deferred.
         assert not old_engine.unload_called
         assert state.engine is new_engine
@@ -259,15 +272,15 @@ class TestServerStateLLMOperations:
 
     @pytest.mark.asyncio
     async def test_ensure_llm_loaded_unloads_orphan_on_swap_failure(self, monkeypatch):
-        """CON: if the swap (set_llm_engine) fails after the loader produced a
-        loaded engine, ensure_llm_loaded must unload that orphan so a failed
-        swap doesn't leak its weights/VRAM."""
+        """CON: if registering fails after the loader produced a loaded
+        engine, ensure_llm_loaded must unload that orphan so a failed
+        registration doesn't leak its weights/VRAM."""
         state = ServerState()
 
-        async def _boom(engine, model):
+        def _boom(engine):
             raise RuntimeError("swap failed")
 
-        monkeypatch.setattr(state, "set_llm_engine", _boom)
+        monkeypatch.setattr(state, "_enforce_engine_concurrency", _boom)
 
         engine = MockEngine("orphan")
 

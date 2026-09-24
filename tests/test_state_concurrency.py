@@ -69,8 +69,14 @@ class TestConcurrentModelLoading:
         assert load_count == 1
 
     @pytest.mark.asyncio
-    async def test_concurrent_different_model_loads(self, fresh_state):
-        """Different models can load concurrently."""
+    async def test_different_models_are_admitted_one_at_a_time(self, fresh_state):
+        """Loads of different models are serialised by the admission lock.
+
+        They used to run in parallel. With several models resident, each
+        load decides what to evict from the free memory it measures; two
+        deciding at once would both see the same free memory and together
+        overcommit it. Loads compete for disk and memory bandwidth anyway.
+        """
         load_times = {}
 
         async def create_loader(model_name: str, delay: float):
@@ -94,9 +100,10 @@ class TestConcurrentModelLoading:
 
         await asyncio.gather(task_a, task_b)
 
-        # Both loads should have started almost simultaneously
+        # The second load starts only after the first has finished.
         time_diff = abs(load_times.get("model-a", 0) - load_times.get("model-b", 0))
-        assert time_diff < 0.05, "Different models should load concurrently"
+        assert time_diff >= 0.09, "two admissions overlapped"
+        assert {r.name for r in fresh_state.resident_models()} == {"model-a", "model-b"}
 
     @pytest.mark.asyncio
     async def test_model_switch_during_load(self, fresh_state, mock_engine):

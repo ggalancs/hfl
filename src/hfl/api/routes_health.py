@@ -49,8 +49,8 @@ async def healthz() -> JSONResponse:
     state = get_state()
     uptime = (datetime.now() - _startup_time).total_seconds()
 
-    models_loaded: list[str] = []
-    if state.current_model is not None:
+    models_loaded: list[str] = [r.name for r in state.resident_models()]
+    if state.current_model is not None and state.current_model.name not in models_loaded:
         models_loaded.append(state.current_model.name)
     if state.current_tts_model is not None:
         models_loaded.append(state.current_tts_model.name)
@@ -164,18 +164,24 @@ async def health_deep(probe: bool = False) -> dict[str, Any]:
     }
 
     # Optional inference probe
-    if probe and state.is_llm_loaded() and state.engine is not None:
+    probe_engine = state.engine
+    if probe and state.is_llm_loaded() and probe_engine is not None:
+        # Leased for the call: with several models resident, a concurrent
+        # load may evict this one, and the probe runs outside the dispatcher.
+        await state.pin_engine(probe_engine)
         try:
             import asyncio
 
             from hfl.engine.base import GenerationConfig
 
             probe_config = GenerationConfig(max_tokens=1)
-            probe_result = await asyncio.to_thread(state.engine.generate, "test", probe_config)
+            probe_result = await asyncio.to_thread(probe_engine.generate, "test", probe_config)
             result["llm"]["probe"] = "ok" if probe_result.text else "empty"
         except Exception as e:
             result["llm"]["probe"] = f"failed: {type(e).__name__}"
             result["status"] = "degraded"
+        finally:
+            await state.unpin_engine(probe_engine)
 
     # System metrics if psutil is available
     try:

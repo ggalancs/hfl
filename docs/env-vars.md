@@ -25,10 +25,12 @@ the host string does not.
 
 | HFL                            | Ollama alias               | Default | What it does |
 |--------------------------------|----------------------------|---------|--------------|
-| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Inference slots executing simultaneously per model. |
+| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Inference slots executing simultaneously, across all loaded models. |
 | `HFL_QUEUE_MAX_SIZE` / `HFL_MAX_QUEUE`        | `OLLAMA_MAX_QUEUE`         | `16`    | Max wait queue; further requests get 429. |
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
-| `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `1`     | **Accepted for Ollama parity, not yet honoured.** One model stays resident whatever you set; a request for another evicts it. `ModelPool` implements LRU multi-residency but the server does not instantiate it — that change touches the model-lifecycle locking and has not been made. Values above 1 log a warning at startup. |
+| `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `0`     | Optional ceiling on the **number** of resident models. `0` (default) = no ceiling: memory alone decides, see `HFL_MEMORY_BUDGET`. When set, loading one more model than this unloads the least recently used idle one. |
+| `HFL_MEMORY_BUDGET`            | —                          | `85`    | Share of **total RAM** the machine may have in use after a model loads (other programs included), as a percentage (`85` or `85%`). HFL keeps as many models loaded as fit under it: a load that does not fit unloads idle models, least recently used first; a model a request is using is never unloaded — the load waits for it (up to `HFL_QUEUE_ACQUIRE_TIMEOUT`, then 503); a model that cannot fit even alone is refused (507) with the numbers, before anything is unloaded. `/api/ps` reports the budget and what is in use. `HFL_DISABLE_MEMORY_PREFLIGHT=1` turns the memory checks off (only the count ceiling remains). |
+| `HFL_DISABLE_MEMORY_PREFLIGHT` | —                          | unset   | `1` skips every memory check: the per-load llama.cpp preflight and the residency budget. For hosts whose real limit is a discrete GPU's VRAM, which these checks do not measure. |
 
 > **`HFL_NUM_PARALLEL` / `OLLAMA_NUM_PARALLEL` only take effect on a backend that
 > batches internally (vLLM).** llama.cpp and Transformers drive a single

@@ -28,10 +28,14 @@ Response ::
         ...
     ]}
 
-HFL today keeps at most ONE LLM + ONE TTS engine resident; the array
-therefore has 0-2 entries. When the multi-engine ``ModelPool`` is
-wired end-to-end the same endpoint will naturally list all residents
-without a client-visible schema change.
+HFL keeps as many LLMs resident as the memory budget allows
+(``HFL_MEMORY_BUDGET``), plus one TTS engine; every one is listed, most
+recently used first. ``size`` is the estimated memory footprint
+(weights + KV cache) when it can be computed, else the files on disk.
+
+HFL extension: a top-level ``memory`` object reports the machine's
+memory and the budget, so "how much room is left for the next model?"
+is answerable over the API. Ollama clients ignore unknown keys.
 """
 
 from __future__ import annotations
@@ -144,12 +148,14 @@ def _expires_at_iso(manifest: "ModelManifest") -> str | None:
     return None
 
 
-def _render_model(manifest: "ModelManifest", engine: Any | None) -> dict[str, Any]:
+def _render_model(
+    manifest: "ModelManifest", engine: Any | None, footprint: int = 0
+) -> dict[str, Any]:
     """Build one Ollama-shaped model entry."""
     return {
         "name": manifest.name,
         "model": manifest.name,
-        "size": int(manifest.size_bytes or 0),
+        "size": int(footprint or manifest.size_bytes or 0),
         "digest": _manifest_digest(manifest),
         "details": _manifest_details(manifest, engine),
         "expires_at": _expires_at_iso(manifest),
@@ -163,51 +169,51 @@ def _render_model(manifest: "ModelManifest", engine: Any | None) -> dict[str, An
     summary="List running models",
     responses={200: {"description": "Currently-loaded models with memory and expiry info"}},
 )
-async def list_running() -> dict[str, list[dict[str, Any]]]:
+async def list_running() -> dict[str, Any]:
     """Ollama-compatible ``GET /api/ps``.
 
-    Returns the set of models HFL currently holds in memory, shaped
-    for drop-in replacement of Ollama in UIs like Open WebUI and SDKs
-    like ``ollama-python``.
-
-    The list now spans three sources, deduplicated by model name:
-
-    1. ``state.current_model`` — the legacy single-LLM slot.
-    2. ``state.current_tts_model`` — the TTS engine slot.
-    3. The shared ``ModelPool`` — all multi-model entries when the
-       operator opts into ``HFL_MAX_LOADED_MODELS > 1``.
-
-    Order follows the underlying registries (state slots first, then
-    pool by recency) so a single-model setup keeps emitting the same
-    shape it did before V3.
+    Returns every model HFL holds in memory — each resident LLM, most
+    recently used first, then the TTS engine — shaped for drop-in
+    replacement of Ollama in UIs like Open WebUI and SDKs like
+    ``ollama-python``, plus a ``memory`` summary (HFL extension).
     """
     state = get_state()
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    if state.current_model is not None:
+    for resident in state.resident_models():
+        entries.append(_render_model(resident.manifest, resident.engine, resident.footprint))
+        seen.add(resident.name)
+    # A pointer assigned without going through the resident set (older
+    # callers, tests) is still a loaded model.
+    if state.current_model is not None and state.current_model.name not in seen:
         entries.append(_render_model(state.current_model, state.engine))
         seen.add(state.current_model.name)
     if state.current_tts_model is not None and state.current_tts_model.name not in seen:
         entries.append(_render_model(state.current_tts_model, state.tts_engine))
         seen.add(state.current_tts_model.name)
 
-    # Multi-model: drain the shared pool. We avoid awaiting locks here
-    # because /api/ps is hit by liveness probes — read the snapshot
-    # via the public attribute and accept best-effort consistency.
-    try:
-        from hfl.engine.model_pool import get_model_pool
-
-        pool = get_model_pool()
-        for name in pool.cached_models:
-            if name in seen:
-                continue
-            cached = pool._models.get(name)
-            if cached is None:
-                continue
-            entries.append(_render_model(cached.manifest, cached.engine))
-            seen.add(name)
-    except Exception:  # pragma: no cover — pool unavailable in some tests
-        pass
-
+    memory = _memory_summary(state)
+    if memory is not None:
+        return {"models": entries, "memory": memory}
     return {"models": entries}
+
+
+def _memory_summary(state: Any) -> dict[str, Any] | None:
+    """The machine's memory and the residency budget, in bytes."""
+    from hfl.engine.residency import budget_fraction, current_memory
+
+    memory = current_memory()
+    if memory is None:
+        return None
+    budget = budget_fraction()
+    models = sum(r.footprint for r in state.resident_models())
+    return {
+        "total_bytes": memory.total,
+        "in_use_bytes": memory.in_use,
+        "in_use_percent": round(100.0 * memory.in_use / memory.total, 1) if memory.total else 0.0,
+        "budget_percent": round(budget * 100, 1),
+        "budget_bytes": int(memory.total * budget),
+        "free_within_budget_bytes": max(0, int(memory.total * budget) - memory.in_use),
+        "models_bytes": models,
+    }

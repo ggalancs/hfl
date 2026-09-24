@@ -284,7 +284,8 @@
 │   │   ├── <span class="file">bark_engine.py</span>   <span class="desc">— BarkEngine (TTS via transformers)</span>
 │   │   ├── <span class="file">coqui_engine.py</span>  <span class="desc">— CoquiEngine (TTS XTTS-v2)</span>
 │   │   ├── <span class="file">async_wrapper.py</span> <span class="desc">— Wrapper sync→async para engines</span>
-│   │   ├── <span class="file">model_pool.py</span>    <span class="desc">— Pool de modelos con LRU eviction</span>
+│   │   ├── <span class="file">footprint.py</span>     <span class="desc">— Huella en memoria de un modelo (pesos + KV)</span>
+│   │   ├── <span class="file">residency.py</span>     <span class="desc">— Admisión por presupuesto de memoria (qué modelos siguen cargados)</span>
 │   │   ├── <span class="file">dependency_check.py</span> <span class="desc">— Verificación de dependencias opcionales</span>
 │   │   ├── <span class="file">failover.py</span>      <span class="desc">— FailoverEngine (multi-engine retry con sticky routing)</span>
 │   │   ├── <span class="file">memory.py</span>        <span class="desc">— Tracking de memoria RAM/GPU en tiempo real</span>
@@ -925,7 +926,7 @@
 </table>
 <p>El valor resuelto se pasa al constructor de <code class="cls">Llama</code> junto al tope de contexto por arquitectura (<code>_ARCHITECTURE_CTX_CAP</code>, p.ej. Gemma 3/4 limitado a 8192 para no fijar memoria unificada en Apple Silicon) y la cuantización opcional del KV-cache (<code>kv_cache_type</code> → <code>type_k</code>/<code>type_v</code> q4_0/q8_0/f16).</p>
 <h3>Ciclo de vida del modelo en el engine — keep-alive y evicción</h3>
-<p>HFL no tiene un <code>pin()</code>/<code>unpin()</code> literal en el engine; la residencia de un modelo la gobiernan el <code class="cls">ModelPool</code> (<code>model_pool.py</code>) y los deadlines de keep-alive, así que el "pinning" es una propiedad emergente, no una llamada de API. El pool mantiene varios engines cargados y los desaloja por tres señales: LRU (capacidad), timeout de inactividad (default <code>idle_timeout_seconds=3600</code>) y presión de memoria (estimaciones). Un bucle en background (<code>background_eviction_interval=60s</code>) barre modelos ociosos vía <code class="func">start_background_eviction()</code>.</p>
+<p>Puede haber varios LLM residentes a la vez. <code class="cls">ServerState</code> mantiene el conjunto de residentes; <code>hfl.engine.residency</code> admite una carga si la máquina se queda por debajo de <code>HFL_MEMORY_BUDGET</code> (porcentaje de la RAM total en uso), descargando los modelos ociosos empezando por el menos usado recientemente, esperando a los que están en uso o rechazando con las cifras. Cada petición toma en préstamo el modelo que cargó (<code>load_llm</code> + <code>ModelLeaseMiddleware</code>; el turno WebSocket lo fija explícitamente), un modelo prestado nunca se descarga y <code>state.engine</code> dentro de una petición es el modelo de esa petición. La inferencia sigue serializada entre todos los modelos por el dispatcher.</p>
 <div class="grid-2">
   <div class="card">
     <div class="card-header"><span class="icon">📌</span><h4>Pin = deadline de keep-alive</h4></div>
@@ -1823,7 +1824,7 @@
         <tr><td><code>test_vllm_engine.py</code></td><td>vLLM con mocks</td></tr>
         <tr><td><code>test_tts_*.py</code> (2)</td><td>Bark, Coqui TTS</td></tr>
         <tr><td><code>test_async_wrapper.py</code></td><td>Sync→Async wrapper</td></tr>
-        <tr><td><code>test_model_pool.py</code></td><td>Pool de modelos</td></tr>
+        <tr><td><code>test_multi_residency.py</code></td><td>Varios modelos residentes, préstamos, admisión por memoria</td></tr>
       </table>
     </div>
   </div>

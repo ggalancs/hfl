@@ -285,7 +285,8 @@
 │   │   ├── <span class="file">bark_engine.py</span>   <span class="desc">— BarkEngine (TTS via transformers)</span>
 │   │   ├── <span class="file">coqui_engine.py</span>  <span class="desc">— CoquiEngine (TTS XTTS-v2)</span>
 │   │   ├── <span class="file">async_wrapper.py</span> <span class="desc">— Sync→async wrapper for engines</span>
-│   │   ├── <span class="file">model_pool.py</span>    <span class="desc">— Model pool with LRU eviction</span>
+│   │   ├── <span class="file">footprint.py</span>     <span class="desc">— Memory footprint of a model (weights + KV)</span>
+│   │   ├── <span class="file">residency.py</span>     <span class="desc">— Memory-budget admission (which models stay loaded)</span>
 │   │   ├── <span class="file">dependency_check.py</span> <span class="desc">— Optional dependency verification</span>
 │   │   ├── <span class="file">failover.py</span>      <span class="desc">— FailoverEngine (multi-engine retry with sticky routing)</span>
 │   │   ├── <span class="file">memory.py</span>        <span class="desc">— Real-time RAM/GPU memory tracking</span>
@@ -928,7 +929,7 @@
 </table>
 <p>The resolved value is passed into the <code class="cls">Llama</code> constructor alongside the architecture-aware context cap (<code>_ARCHITECTURE_CTX_CAP</code>, e.g. Gemma 3/4 capped at 8192 to avoid pinning unified memory on Apple Silicon) and optional KV-cache quantisation (<code>kv_cache_type</code> → <code>type_k</code>/<code>type_v</code> q4_0/q8_0/f16).</p>
 <h3>Engine-Side Model Lifetime — keep-alive &amp; eviction</h3>
-<p>HFL has no literal <code>pin()</code>/<code>unpin()</code> on the engine; a model's residency is governed by the <code class="cls">ModelPool</code> (<code>model_pool.py</code>) and keep-alive deadlines, so "pinning" is an emergent property rather than an API call. The pool keeps multiple loaded engines and evicts on three signals: LRU (capacity), idle timeout (default <code>idle_timeout_seconds=3600</code>), and memory pressure (estimates). A background loop (<code>background_eviction_interval=60s</code>) sweeps idle models via <code class="func">start_background_eviction()</code>.</p>
+<p>Several LLMs can be resident at once. <code class="cls">ServerState</code> keeps the resident set; <code>hfl.engine.residency</code> admits a load when the machine stays under <code>HFL_MEMORY_BUDGET</code> (share of total RAM in use), unloading idle models least-recently-used first, waiting for models in use, or refusing with the numbers. Every request leases the model it loaded (<code>load_llm</code> + <code>ModelLeaseMiddleware</code>; the WebSocket turn pins explicitly), a leased model is never unloaded, and <code>state.engine</code> inside a request is that request's model. Inference is still serialised across all models by the dispatcher.</p>
 <div class="grid-2">
   <div class="card">
     <div class="card-header"><span class="icon">📌</span><h4>Pin = keep-alive deadline</h4></div>
@@ -1829,7 +1830,7 @@
         <tr><td><code>test_vllm_engine.py</code></td><td>vLLM with mocks</td></tr>
         <tr><td><code>test_tts_*.py</code> (2)</td><td>Bark, Coqui TTS</td></tr>
         <tr><td><code>test_async_wrapper.py</code></td><td>Sync→Async wrapper</td></tr>
-        <tr><td><code>test_model_pool.py</code></td><td>Model pool</td></tr>
+        <tr><td><code>test_multi_residency.py</code></td><td>Several resident models, leases, memory admission</td></tr>
       </table>
     </div>
   </div>
@@ -1869,7 +1870,6 @@
     <tr><td><code>test_exception_handlers.py</code></td><td>HFLError → HTTP status code mapping</td></tr>
     <tr><td><code>test_health_probes.py</code></td><td>Health probe endpoints (/health/deep, /health/sli)</td></tr>
     <tr><td><code>test_config_env.py</code></td><td>Config env var override tests</td></tr>
-    <tr><td><code>test_model_pool_wait.py</code></td><td>Model pool non-recursive waiting</td></tr>
     <tr><td><code>test_stress.py</code></td><td>Stress tests (concurrent streaming, model pool stress)</td></tr>
     <tr><td><code>test_timeout.py</code></td><td>Timeout decorator tests</td></tr>
     <tr><td><code>test_failover.py</code></td><td>Failover engine multi-backend retry</td></tr>

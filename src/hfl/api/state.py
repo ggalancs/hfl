@@ -7,17 +7,20 @@ Provides atomic access to shared server state using asyncio.Lock
 for safe concurrent access in async context.
 
 Features:
-- Model loading serialization (prevents concurrent loads of same model)
-- Per-model locks for fine-grained concurrency control
-- Timeout support for long-running operations
+- As many LLMs resident as memory allows (``hfl.engine.residency``)
+- Per-request engine binding, so a request always talks to its own model
+- Leases: a model a request is using is never unloaded under it
+- Per-model locks for load coalescing; one admission at a time
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
 
@@ -28,7 +31,57 @@ if TYPE_CHECKING:
 
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.engine.dispatcher import InferenceDispatcher
+    from hfl.engine.residency import AdmissionPlan, ResidentView
     from hfl.models.manifest import ModelManifest
+
+
+@dataclass
+class ResidentModel:
+    """One loaded LLM."""
+
+    name: str
+    engine: "InferenceEngine"
+    manifest: "ModelManifest"
+    footprint: int
+    """Estimated resident bytes (``hfl.engine.footprint``); 0 = unknown."""
+    loaded_at: float = field(default_factory=time.monotonic)
+    last_used: float = field(default_factory=time.monotonic)
+
+
+# The model a request loaded. ``ServerState.engine`` / ``current_model`` read
+# it first, so every route that does ``await load_llm(name)`` and then uses
+# ``state.engine`` gets the model it asked for — with several models
+# resident, "the current engine" would otherwise be whichever request loaded
+# last, and two concurrent requests could answer from each other's model
+# without any error. Keyed by the state instance so a stale binding from a
+# reset state is ignored.
+_BOUND: ContextVar["tuple[int, ResidentModel] | None"] = ContextVar("hfl_bound", default=None)
+
+# Engines leased by the current HTTP request (opened by the lease middleware
+# in ``hfl.api.server``). ``None`` outside a request — the CLI, the tray, a
+# unit test — where there is no concurrent unloader to protect against.
+_LEASES: ContextVar["list[InferenceEngine] | None"] = ContextVar("hfl_leases", default=None)
+
+
+def open_lease_scope() -> "Token[list[InferenceEngine] | None]":
+    """Start collecting the leases of one request. Paired with
+    :func:`close_lease_scope`."""
+    return _LEASES.set([])
+
+
+def close_lease_scope(token: "Token[list[InferenceEngine] | None]") -> None:
+    """Release every lease the request took. Synchronous on purpose: it runs
+    in a ``finally`` that a client disconnect may be cancelling, and a lease
+    that survived its request would pin a model forever."""
+    leases = _LEASES.get()
+    _LEASES.reset(token)
+    if not leases:
+        return
+    from hfl.core.container import get_container
+
+    state = get_container().state.get()
+    for engine in leases:
+        state._release_lease(engine)
 
 
 @dataclass
@@ -39,13 +92,17 @@ class ServerState:
     All state modifications should be done through the provided methods.
 
     Features:
+    - Several LLMs resident at once, admitted by memory budget
     - Per-model locks prevent concurrent loads of the same model
     - Tracks loading state for API health checks
     """
 
-    # LLM state
+    # LLM state. ``_engine`` / ``_current_model`` point at the most recently
+    # used resident — what a caller outside any request (health probe, tray,
+    # CLI) means by "the model". Requests read their own binding instead.
     _engine: InferenceEngine | None = None
     _current_model: ModelManifest | None = None
+    _residents: dict[str, ResidentModel] = field(default_factory=dict)
 
     # TTS state
     _tts_engine: AudioEngine | None = None
@@ -64,40 +121,91 @@ class ServerState:
     # Per-model locks to serialize loading of the same model
     _model_locks: dict[str, asyncio.Lock] = field(default_factory=lambda: defaultdict(asyncio.Lock))
 
+    # One admission at a time: two loads deciding in parallel would both see
+    # the same free memory and together overcommit it.
+    _admission_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
     # Track which models are currently loading
     _loading_models: set[str] = field(default_factory=set)
 
-    # Engine hot-swap safety (CON). Inference paths that do NOT hold a
-    # dispatcher slot (the WebSocket chat turn) ``pin`` the engine they read
-    # for the duration of their use. ``set_llm_engine`` drains the dispatcher
-    # (so no slot-holding HTTP request is mid-flight) and then, if the displaced
-    # engine is still pinned by such a path, defers its ``unload`` until the
-    # last reader ``unpin``s it — so a swap can never free the model out from
-    # under an in-flight request (use-after-free of the non-reentrant model).
+    # Leases. Every request that loads a model leases its engine until the
+    # request ends (the WebSocket turn, which outlives HTTP semantics, pins
+    # explicitly). A leased engine is never unloaded: eviction skips it, and
+    # an explicit unload (``hfl stop``, shutdown) defers until the last lease
+    # is released — no use-after-free of a non-reentrant model.
     _engine_inuse: dict[int, int] = field(default_factory=dict)
     _engine_retired: dict[int, "InferenceEngine"] = field(default_factory=dict)
     _engine_ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _lease_released: asyncio.Event = field(default_factory=asyncio.Event)
 
-    # Properties with setters for testing compatibility
+    # ------------------------------------------------------------------
+    # Request-facing view
+    # ------------------------------------------------------------------
+
+    def _bound(self) -> ResidentModel | None:
+        bound = _BOUND.get()
+        if bound is None or bound[0] != id(self):
+            return None
+        return bound[1]
+
     @property
     def engine(self) -> InferenceEngine | None:
-        """Get current LLM engine."""
+        """The LLM engine for this request, else the most recently used one."""
+        bound = self._bound()
+        if bound is not None:
+            return bound.engine
         return self._engine
 
     @engine.setter
     def engine(self, value: InferenceEngine | None) -> None:
-        """Set LLM engine (for testing, use set_llm_engine in async context)."""
+        """Set the LLM pointer directly (tests, CLI and tray preloads).
+
+        Kept in step with the resident set, so what is assigned here is
+        what ``/api/ps`` lists and what eviction accounts for.
+        """
+        old = self._engine
         self._engine = value
+        if value is None and old is not None:
+            for name, resident in list(self._residents.items()):
+                if resident.engine is old:
+                    del self._residents[name]
+        self._sync_pointer()
 
     @property
     def current_model(self) -> ModelManifest | None:
-        """Get current LLM model manifest."""
+        """The manifest for this request, else the most recently used one."""
+        bound = self._bound()
+        if bound is not None:
+            return bound.manifest
         return self._current_model
 
     @current_model.setter
     def current_model(self, value: ModelManifest | None) -> None:
-        """Set current model (for testing)."""
+        """Set current model (for testing and preloads)."""
+        old = self._current_model
         self._current_model = value
+        if value is None and old is not None:
+            resident = self._residents.get(old.name)
+            if resident is not None and resident.engine is self._engine:
+                del self._residents[old.name]
+        self._sync_pointer()
+
+    def _sync_pointer(self) -> None:
+        """Register the pointer pair as a resident when both halves are set."""
+        engine, manifest = self._engine, self._current_model
+        if engine is None or manifest is None:
+            return
+        name = manifest.name
+        for other, resident in list(self._residents.items()):
+            if resident.engine is engine and other != name:
+                del self._residents[other]
+        existing = self._residents.get(name)
+        if existing is not None and existing.engine is engine:
+            existing.manifest = manifest
+            return
+        self._residents[name] = ResidentModel(
+            name, engine, manifest, _measure_safely(manifest, engine)
+        )
 
     @property
     def tts_engine(self) -> AudioEngine | None:
@@ -129,65 +237,287 @@ class ServerState:
         """Set API key (thread-safe for simple assignment)."""
         self._api_key = value
 
-    # Thread-safe LLM operations
+    # ------------------------------------------------------------------
+    # Resident set
+    # ------------------------------------------------------------------
+
+    def resident_models(self) -> list[ResidentModel]:
+        """Loaded LLMs, most recently used first."""
+        return sorted(self._residents.values(), key=lambda r: r.last_used, reverse=True)
+
+    def resident(self, name: str) -> ResidentModel | None:
+        return self._residents.get(name)
+
+    def bind_request(self, name: str) -> ResidentModel | None:
+        """Make ``name`` this request's model and lease it.
+
+        Called by ``load_llm`` once the model is resident. Returns the
+        resident, or None when ``name`` is not loaded (the caller then
+        keeps the pointer semantics).
+        """
+        resident = self._residents.get(name)
+        if resident is None:
+            self._sync_pointer()
+            resident = self._residents.get(name)
+            if resident is None:
+                return None
+        resident.last_used = time.monotonic()
+        self._engine, self._current_model = resident.engine, resident.manifest
+        _BOUND.set((id(self), resident))
+        leases = _LEASES.get()
+        if leases is not None:
+            leases.append(resident.engine)
+            key = id(resident.engine)
+            self._engine_inuse[key] = self._engine_inuse.get(key, 0) + 1
+        return resident
+
+    def _release_lease(self, engine: "InferenceEngine") -> None:
+        """Drop one lease. Synchronous: no await between read and write, so
+        it is atomic on the event loop and safe inside a cancelled finally."""
+        key = id(engine)
+        remaining = self._engine_inuse.get(key, 0) - 1
+        if remaining > 0:
+            self._engine_inuse[key] = remaining
+        else:
+            self._engine_inuse.pop(key, None)
+            retired = self._engine_retired.pop(key, None)
+            if retired is not None and retired.is_loaded:
+                _spawn_unload(retired)
+        self._lease_released.set()
+
+    def _views(self, exclude: str | None = None) -> "list[ResidentView]":
+        from hfl.engine.residency import ResidentView
+
+        mine: dict[int, int] = {}
+        for engine in _LEASES.get() or []:
+            mine[id(engine)] = mine.get(id(engine), 0) + 1
+        views = []
+        for resident in self._residents.values():
+            if resident.name == exclude:
+                continue
+            key = id(resident.engine)
+            held = self._engine_inuse.get(key, 0)
+            own = mine.get(key, 0)
+            views.append(
+                ResidentView(
+                    resident.name,
+                    resident.footprint,
+                    resident.last_used,
+                    busy=held - own > 0,
+                    mine=own > 0,
+                )
+            )
+        return views
+
+    async def _retire(self, resident: ResidentModel, reason: str) -> None:
+        """Remove ``resident`` from the set and unload it once nothing uses it.
+
+        Removed from the set FIRST, so no new request can bind to a model
+        that is being unloaded. Then in-flight dispatcher work is drained (a
+        path that read the pointer without a lease — the health probe — must
+        not be mid-call) and the engine is unloaded now if unleased, or on
+        its last lease release. If the unload raises, the set and pointer are
+        restored: callers observe "unload failed", not a half-updated state.
+        """
+        was_member = self._residents.get(resident.name) is resident
+        if was_member:
+            del self._residents[resident.name]
+        pointer = (self._engine, self._current_model)
+        if self._engine is resident.engine:
+            nxt = self.resident_models()
+            self._engine = nxt[0].engine if nxt else None
+            self._current_model = nxt[0].manifest if nxt else None
+        logger.info(
+            "Unloading %s (~%.1f GB): %s",
+            resident.name,
+            resident.footprint / 1024**3,
+            reason,
+        )
+
+        async def _unload() -> None:
+            async with self._engine_ref_lock:
+                pinned = self._engine_inuse.get(id(resident.engine), 0) > 0
+                if pinned:
+                    self._engine_retired[id(resident.engine)] = resident.engine
+            if not pinned and resident.engine.is_loaded:
+                await asyncio.to_thread(resident.engine.unload)
+
+        try:
+            dispatcher = self._try_get_dispatcher()
+            if dispatcher is not None:
+                async with dispatcher.exclusive():
+                    await _unload()
+            else:  # pragma: no cover — dispatcher always present in running app
+                await _unload()
+        except BaseException:
+            if was_member and resident.name not in self._residents:
+                self._residents[resident.name] = resident
+            if pointer[0] is resident.engine:
+                self._engine, self._current_model = pointer
+            raise
+
+    async def evict(self, name: str, reason: str = "requested") -> bool:
+        """Unload one resident LLM by name. False when it is not loaded."""
+        resident = self._residents.get(name)
+        if resident is None:
+            return False
+        async with self._llm_lock:
+            if self._residents.get(name) is not resident:
+                return False
+            await self._retire(resident, reason)
+        return True
+
+    # ------------------------------------------------------------------
+    # Admission
+    # ------------------------------------------------------------------
+
+    async def _make_room(self, name: str, estimate: int, deadline: float) -> "AdmissionPlan | None":
+        """Evict until ``estimate`` bytes fit, waiting for busy models if
+        that is what it takes. Raises when it cannot fit."""
+        from hfl.config import config
+        from hfl.engine.residency import (
+            MemoryView,
+            budget_fraction,
+            current_memory,
+            describe_memory,
+            plan_admission,
+        )
+        from hfl.exceptions import MemoryBudgetExceededError, ModelsBusyError
+
+        max_models = int(getattr(config, "max_loaded_models", 0) or 0)
+        while True:
+            self._lease_released.clear()
+            memory = None if _memory_checks_disabled() or estimate <= 0 else current_memory()
+            views = self._views(exclude=name)
+            if memory is None:
+                # No measurement (psutil absent, size unknown, or checks
+                # disabled): only the optional count ceiling applies.
+                plan = plan_admission(0, MemoryView(1, 0, 0), views, 1.0, max_models)
+            else:
+                plan = plan_admission(estimate, memory, views, budget_fraction(), max_models)
+                logger.info(
+                    "Loading %s (~%.1f GB): %s; after load ~%.1f GB (%.0f%%). Resident: %s",
+                    name,
+                    estimate / 1024**3,
+                    describe_memory(memory, budget_fraction()),
+                    plan.used_after / 1024**3,
+                    100.0 * plan.used_after / memory.total if memory.total else 0.0,
+                    ", ".join(f"{v.name} ({v.footprint / 1024**3:.1f} GB)" for v in views)
+                    or "none",
+                )
+            if plan.fits:
+                for victim in plan.evict:
+                    resident = self._residents.get(victim)
+                    if resident is not None:
+                        idle = time.monotonic() - resident.last_used
+                        await self._retire(resident, f"to make room for {name} (idle {idle:.0f}s)")
+                return plan
+            if plan.reason == "wait":
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ModelsBusyError(name, list(plan.wait_for))
+                logger.info(
+                    "%s waits for %s to finish before it can load",
+                    name,
+                    ", ".join(plan.wait_for),
+                )
+                try:
+                    await asyncio.wait_for(self._lease_released.wait(), min(5.0, remaining))
+                except asyncio.TimeoutError:
+                    pass
+                continue
+            raise MemoryBudgetExceededError(
+                name,
+                needed=estimate,
+                plan=plan,
+                total=memory.total if memory is not None else 0,
+                budget=budget_fraction(),
+            )
+
+    async def _reconcile(self, name: str) -> None:
+        """After a load, the measured footprint may exceed the estimate
+        (llama.cpp can open a larger context than assumed). Unload idle
+        models until the budget holds again; never the one just loaded."""
+        from hfl.config import config
+        from hfl.engine.residency import budget_fraction, current_memory, plan_admission
+
+        if _memory_checks_disabled():
+            return
+        memory = current_memory()
+        if memory is None:
+            return
+        views = [v for v in self._views() if v.name != name]
+        loaded = self._residents.get(name)
+        if loaded is None:
+            return
+        max_models = int(getattr(config, "max_loaded_models", 0) or 0)
+        plan = plan_admission(
+            0, memory, views, budget_fraction(), max_models - 1 if max_models else 0
+        )
+        if plan.fits:
+            for victim in plan.evict:
+                resident = self._residents.get(victim)
+                if resident is not None:
+                    await self._retire(resident, f"{name} loaded larger than estimated")
+        else:
+            logger.warning(
+                "%s is loaded but memory in use (~%.1f GB) is over the budget; "
+                "the models that could be unloaded are in use",
+                name,
+                plan.used_after / 1024**3,
+            )
+
+    # ------------------------------------------------------------------
+    # Compatibility setters
+    # ------------------------------------------------------------------
+
     async def set_llm_engine(
         self,
         engine: InferenceEngine | None,
         model: ModelManifest | None,
     ) -> None:
-        """Set LLM engine and model atomically.
+        """Register ``engine`` as a resident LLM, or unload them all.
 
-        Unloading the previous engine is delegated to a worker thread
-        so that GPU / Metal teardown — which can take several seconds
-        for a large model — does not block the asyncio event loop and
-        starve other endpoints (``/healthz``, ``/metrics``, etc.).
-
-        Args:
-            engine: New inference engine (or None to unload)
-            model: Model manifest for the loaded model
+        ``(None, None)`` unloads every resident LLM (shutdown, ``hfl stop``
+        with no model) — each deferred while leased. Otherwise the pair is
+        added to the resident set; only a previous engine under the SAME
+        name is replaced and unloaded. Other models stay loaded: with
+        several resident, a new load is not an eviction.
         """
         async with self._llm_lock:
-            prev = self._engine
-
-            # Fast path: nothing loaded to retire (first load / no-op re-set).
-            if prev is None or prev is engine or not prev.is_loaded:
-                self._engine = engine
-                self._current_model = model
-                self._enforce_engine_concurrency(engine)
+            if engine is None:
+                # A pointer assigned directly (CLI/tray preload) is a resident
+                # too; register it so it is unloaded like the others.
+                self._sync_pointer()
+                for resident in list(self._residents.values()):
+                    await self._retire(resident, "unload requested")
+                orphan = self._engine
+                if orphan is not None:  # pointer without a manifest
+                    await self._retire(
+                        ResidentModel("<unnamed>", orphan, None, 0),  # type: ignore[arg-type]
+                        "unload requested",
+                    )
+                self._engine = None
+                self._current_model = None
                 return
-
-            # There is a loaded previous engine to retire. Retire it BEFORE
-            # assigning the new one so an unload *failure* leaves the old engine
-            # in place (atomic swap — callers observe "replacement failed", not
-            # a half-updated state). The teardown runs off-loop so a slow unload
-            # (GPU/Metal context cleanup) doesn't freeze unrelated endpoints.
-            async def _retire_and_assign() -> None:
-                # A non-dispatcher path (the WS chat turn) may still be reading
-                # ``prev``; if so, defer its unload until the last reader unpins.
-                async with self._engine_ref_lock:
-                    pinned = self._engine_inuse.get(id(prev), 0) > 0
-                    if pinned:
-                        self._engine_retired[id(prev)] = prev
-                if not pinned and prev.is_loaded:
-                    # May raise (e.g. GPU fault) — propagate without assigning,
-                    # so ``self._engine`` stays the old engine.
-                    await asyncio.to_thread(prev.unload)
-                self._engine = engine
-                self._current_model = model
-                # Runs inside ``exclusive()`` below — every slot is drained,
-                # which is the precondition ``clamp_max_inflight`` requires.
-                self._enforce_engine_concurrency(engine)
-
-            # Drain in-flight dispatcher inference first, so no slot-holding
-            # HTTP request (stream or non-stream) is mid-read of ``prev`` when
-            # it is freed. ``exclusive()`` waits for every inference slot to
-            # clear — guarding against a use-after-free of the shared model.
-            dispatcher = self._try_get_dispatcher()
-            if dispatcher is not None:
-                async with dispatcher.exclusive():
-                    await _retire_and_assign()
-            else:  # pragma: no cover — dispatcher always present in running app
-                await _retire_and_assign()
+            name = model.name if model is not None else getattr(engine, "model_name", "")
+            previous = self._residents.get(name)
+            prior_pointer = (self._engine, self._current_model)
+            if model is not None and (previous is None or previous.engine is not engine):
+                # Register the new copy first, so the set never shows a gap.
+                self._residents[name] = ResidentModel(
+                    name, engine, model, _measure_safely(model, engine)
+                )
+            self._engine = engine
+            self._current_model = model
+            if previous is not None and previous.engine is not engine:
+                try:
+                    await self._retire(previous, "replaced by a reload")
+                except BaseException:
+                    self._residents[name] = previous
+                    self._engine, self._current_model = prior_pointer
+                    raise
+            self._enforce_engine_concurrency(engine)
 
     def _enforce_engine_concurrency(self, engine: "InferenceEngine | None") -> None:
         """Clamp dispatcher concurrency to 1 for a non-reentrant backend.
@@ -233,17 +563,17 @@ class ServerState:
             return None
 
     async def pin_engine(self, engine: "InferenceEngine | None") -> None:
-        """Mark ``engine`` as in-use by an in-flight request that does not hold
-        a dispatcher slot (the WebSocket chat turn). Paired with
-        :meth:`unpin_engine`; while pinned, a hot-swap defers its unload."""
+        """Lease ``engine`` outside the HTTP lease scope (the WebSocket chat
+        turn). Paired with :meth:`unpin_engine`; while pinned, the engine is
+        never evicted and an explicit unload defers."""
         if engine is None:
             return
         async with self._engine_ref_lock:
             self._engine_inuse[id(engine)] = self._engine_inuse.get(id(engine), 0) + 1
 
     async def unpin_engine(self, engine: "InferenceEngine | None") -> None:
-        """Release a pinned engine. If it was displaced by a hot-swap and this
-        was its last in-flight reader, unload it now (off-loop)."""
+        """Release a pinned engine. If it was retired while pinned and this
+        was its last lease, unload it now (off-loop)."""
         if engine is None:
             return
         to_unload: "InferenceEngine | None" = None
@@ -255,6 +585,7 @@ class ServerState:
             else:
                 self._engine_inuse.pop(key, None)
                 to_unload = self._engine_retired.pop(key, None)
+            self._lease_released.set()
         if to_unload is not None and to_unload.is_loaded:
             await asyncio.to_thread(to_unload.unload)
 
@@ -275,13 +606,16 @@ class ServerState:
         from hfl.exceptions import ModelNotLoadedError
 
         async with self._llm_lock:
-            if self._engine is None:
+            engine = self.engine
+            if engine is None:
                 raise ModelNotLoadedError()
-            yield self._engine
+            yield engine
 
     def is_llm_loaded(self) -> bool:
-        """Check if LLM engine is loaded."""
-        return self._engine is not None and self._engine.is_loaded
+        """Check if any LLM engine is loaded."""
+        if self._engine is not None and self._engine.is_loaded:
+            return True
+        return any(r.engine.is_loaded for r in self._residents.values())
 
     @property
     def is_loading(self) -> bool:
@@ -299,64 +633,97 @@ class ServerState:
         loader: Callable[[], Awaitable[tuple["InferenceEngine", "ModelManifest"]]],
         timeout: float = 300.0,
         required_ctx: int = 0,
+        estimate: int = 0,
+        measure: Callable[["InferenceEngine", "ModelManifest"], int] | None = None,
     ) -> tuple["InferenceEngine", "ModelManifest"]:
-        """Ensure LLM model is loaded, with serialization per model.
+        """Ensure ``model_name`` is resident, making room for it by memory.
 
-        If the requested model is already loaded, returns immediately.
-        If another request is loading the same model, waits for it.
-        Uses per-model locks to allow loading different models concurrently.
+        If the model is already resident (with a large enough context), it
+        is returned at once. Otherwise, one admission at a time: a stale
+        copy of the same model is unloaded, idle models are evicted
+        least-recently-used first until ``estimate`` bytes fit the memory
+        budget, busy ones are waited for, and the load is refused with the
+        numbers when it cannot fit. Concurrent requests for the same model
+        wait for one load rather than duplicating it.
 
         Args:
             model_name: Name of the model to load
             loader: Async function that loads the model and returns (engine, manifest)
             timeout: Maximum time to wait for model loading (seconds)
             required_ctx: When > 0, a resident engine only satisfies the
-                request if it was opened with this context size. Lets a
-                caller force a reload for an ``options.num_ctx`` change
-                without racing the per-model lock itself.
+                request if it was opened with at least this context size.
+            estimate: Predicted footprint in bytes (0 = unknown).
+            measure: Re-measures the footprint once loaded.
 
         Returns:
             Tuple of (engine, manifest)
 
         Raises:
             asyncio.TimeoutError: If loading takes longer than timeout
+            MemoryBudgetExceededError: The model cannot fit.
+            ModelsBusyError: Room exists only by unloading models in use,
+                and they did not finish in time.
         """
 
-        def _resident_is_usable() -> bool:
-            if (
-                self._current_model is None
-                or self._current_model.name != model_name
-                or self._engine is None
-            ):
-                return False
+        def _resident_is_usable() -> ResidentModel | None:
+            resident = self._residents.get(model_name)
+            if resident is None:
+                self._sync_pointer()
+                resident = self._residents.get(model_name)
+            if resident is None:
+                return None
             if required_ctx <= 0:
-                return True
-            resident_ctx = self._engine.context_size
+                return resident
+            resident_ctx = getattr(resident.engine, "context_size", 0)
             # ``0`` means the backend doesn't report a context size —
             # never force a reload we can't justify. A window at least as
             # large as the request already satisfies it; only growing it
             # needs a reload (see ``load_llm`` for why shrinking must not).
-            return resident_ctx == 0 or resident_ctx >= required_ctx
+            if resident_ctx == 0 or resident_ctx >= required_ctx:
+                return resident
+            return None
 
         async def _load_with_lock() -> tuple["InferenceEngine", "ModelManifest"]:
             async with self._model_locks[model_name]:
-                # Check state inside lock to prevent race condition
-                # Another thread could clear the engine between check and use
-                if _resident_is_usable():
-                    assert self._engine is not None and self._current_model is not None
-                    return self._engine, self._current_model
+                usable = _resident_is_usable()
+                if usable is not None:
+                    return usable.engine, usable.manifest
 
                 self._loading_models.add(model_name)
                 engine = None
                 try:
-                    engine, manifest = await loader()
-                    await self.set_llm_engine(engine, manifest)
+                    async with self._admission_lock:
+                        deadline = time.monotonic() + _busy_wait_seconds()
+                        stale = self._residents.get(model_name)
+                        if stale is not None:
+                            await self._wait_for_release(stale, deadline)
+                            await self._retire(stale, "reloading with a larger context")
+                        await self._make_room(model_name, estimate, deadline)
+                        engine, manifest = await loader()
+                        footprint = estimate
+                        if measure is not None:
+                            try:
+                                footprint = measure(engine, manifest) or estimate
+                            except Exception:  # pragma: no cover - defensive
+                                logger.debug("footprint re-measure failed", exc_info=True)
+                        async with self._llm_lock:
+                            # May raise; runs before registration so a failure
+                            # leaves an unregistered engine the handler frees.
+                            self._enforce_engine_concurrency(engine)
+                            self._residents[model_name] = ResidentModel(
+                                model_name, engine, manifest, footprint
+                            )
+                            self._engine, self._current_model = engine, manifest
+                        await self._reconcile(model_name)
                     return engine, manifest
                 except Exception:
-                    # If the engine loaded but the swap failed (e.g. the previous
-                    # engine's unload raised), unload the orphan so a failed swap
-                    # doesn't leak its weights/VRAM.
-                    if engine is not None and getattr(engine, "is_loaded", False):
+                    # A load that succeeded but could not be registered must
+                    # not leak its weights.
+                    if (
+                        engine is not None
+                        and getattr(engine, "is_loaded", False)
+                        and not any(r.engine is engine for r in self._residents.values())
+                    ):
                         try:
                             await asyncio.to_thread(engine.unload)
                         except Exception:  # pragma: no cover - best-effort cleanup
@@ -367,6 +734,23 @@ class ServerState:
 
         # Use asyncio.wait_for for cross-platform timeout (works on Python 3.10+)
         return await asyncio.wait_for(_load_with_lock(), timeout=timeout)
+
+    async def _wait_for_release(self, resident: ResidentModel, deadline: float) -> None:
+        """Wait until no other request holds ``resident``."""
+        from hfl.exceptions import ModelsBusyError
+
+        while True:
+            self._lease_released.clear()
+            view = next((v for v in self._views() if v.name == resident.name), None)
+            if view is None or not view.busy:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ModelsBusyError(resident.name, [resident.name])
+            try:
+                await asyncio.wait_for(self._lease_released.wait(), min(5.0, remaining))
+            except asyncio.TimeoutError:
+                pass
 
     async def ensure_tts_loaded(
         self,
@@ -480,17 +864,64 @@ class ServerState:
     async def cleanup(self) -> None:
         """Cleanup all engines on shutdown.
 
-        Routes through ``set_llm_engine``/``set_tts_engine`` so the LLM unload
-        DRAINS in-flight inference via ``dispatcher.exclusive()`` (and defers a
-        still-pinned engine) rather than freeing the shared non-reentrant model
-        out from under a request still running during uvicorn's graceful-
-        shutdown window — the same use-after-free the hot-swap path prevents,
-        at the moment (SIGTERM under load) it matters most. ``unload()`` still
-        runs off-loop so the event loop stays alive to finish in-flight
-        responses. (CON)
+        Routes through ``set_llm_engine``/``set_tts_engine`` so every LLM
+        unload DRAINS in-flight inference via ``dispatcher.exclusive()`` (and
+        defers a still-leased engine) rather than freeing a non-reentrant
+        model out from under a request still running during uvicorn's
+        graceful-shutdown window. ``unload()`` still runs off-loop so the
+        event loop stays alive to finish in-flight responses. (CON)
         """
         await self.set_llm_engine(None, None)
         await self.set_tts_engine(None, None)
+
+
+def _measure_safely(manifest: "ModelManifest | None", engine: "InferenceEngine") -> int:
+    """Footprint of a loaded model, or 0 when it cannot be read."""
+    if manifest is None:
+        return 0
+    try:
+        from hfl.engine.footprint import footprint_of_loaded
+
+        path = getattr(manifest, "local_path", None)
+        if not isinstance(path, str) or not path:
+            return 0
+        return footprint_of_loaded(path, engine).total_bytes
+    except Exception:
+        return 0
+
+
+def _memory_checks_disabled() -> bool:
+    import os
+
+    return os.environ.get("HFL_DISABLE_MEMORY_PREFLIGHT", "").lower() in ("1", "true", "yes")
+
+
+def _busy_wait_seconds() -> float:
+    """How long a load waits for busy models to free room: the same bound a
+    request waits for an inference slot."""
+    from hfl.config import config
+
+    try:
+        return float(getattr(config, "queue_acquire_timeout_seconds", 60.0))
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def _spawn_unload(engine: "InferenceEngine") -> None:
+    """Unload a retired engine off-loop from synchronous code."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        engine.unload()
+        return
+    task = loop.create_task(asyncio.to_thread(engine.unload))
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+# Strong references to fire-and-forget unload tasks (asyncio keeps only weak
+# ones, so an unreferenced task can be collected mid-flight).
+_BACKGROUND: set["asyncio.Task[None]"] = set()
 
 
 # Singleton access delegated to container for unified management

@@ -416,6 +416,11 @@ async def unload_after_response(model_name: str) -> None:
     from hfl.api.state import get_state
 
     state = get_state()
+    if state.resident(model_name) is not None:
+        # Only this model: the others stay loaded. Deferred until the
+        # request's own lease on it is released.
+        await state.evict(model_name, reason="keep_alive=0")
+        return
     current = state.current_model
     if current is not None and current.name == model_name:
         # cleanup() evicts the LLM engine (and the TTS one, which is

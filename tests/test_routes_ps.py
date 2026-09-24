@@ -65,7 +65,9 @@ class TestRoutesPsEmpty:
         response = client.get("/api/ps")
         assert response.status_code == 200
         body = response.json()
-        assert body == {"models": []}
+        assert body["models"] == []
+        # The only other key is HFL's memory summary (ignored by Ollama clients).
+        assert set(body) <= {"models", "memory"}
 
 
 class TestRoutesPsSingleLLM:
@@ -222,77 +224,49 @@ class TestRoutesPsHelpers:
         assert got == llm_manifest.size_bytes
 
 
-class TestRoutesPsMultiModelFromPool:
-    """When ``HFL_MAX_LOADED_MODELS > 1`` the pool may hold multiple
-    residents. ``/api/ps`` must enumerate all of them, deduplicated
-    against the legacy ``state.current_model`` slot."""
+class TestRoutesPsListsEveryResident:
+    """Several models can be resident at once; ``/api/ps`` lists each one,
+    most recently used first, with its memory footprint, plus the
+    machine's memory against the budget."""
 
-    def _make_pool_entry(self, manifest):
-        from hfl.engine.model_pool import CachedModel
+    @staticmethod
+    def _register(manifest, footprint=0):
+        import asyncio
 
+        state = get_state()
         engine = MagicMock(is_loaded=True)
-        return CachedModel(
-            engine=engine,
-            manifest=manifest,
-            last_used=0.0,
-            load_time_ms=12.0,
-            memory_estimate_mb=1234.0,
+        asyncio.run(state.set_llm_engine(engine, manifest))
+        if footprint:
+            state.resident(manifest.name).footprint = footprint
+        return engine
+
+    def test_two_residents_are_both_listed(self, client, llm_manifest, tts_manifest):
+        from hfl.models.manifest import ModelManifest
+
+        other = ModelManifest(
+            name="llama:8b", repo_id="x/y", local_path="/tmp/l.gguf", format="gguf", size_bytes=5
         )
+        self._register(llm_manifest)
+        self._register(other)
 
-    def test_pool_residents_are_listed(self, client, llm_manifest):
-        from hfl.engine.model_pool import get_model_pool, reset_model_pool
+        names = [m["name"] for m in client.get("/api/ps").json()["models"]]
+        assert names == ["llama:8b", "qwen-coder:7b"]
 
-        reset_model_pool()
-        pool = get_model_pool(max_models=4)
-        pool._models[llm_manifest.name] = self._make_pool_entry(llm_manifest)
+    def test_size_is_the_footprint_when_known(self, client, llm_manifest):
+        self._register(llm_manifest, footprint=9_000_000_000)
+        entry = client.get("/api/ps").json()["models"][0]
+        assert entry["size"] == 9_000_000_000
 
-        try:
-            body = client.get("/api/ps").json()
-            names = [m["name"] for m in body["models"]]
-            assert llm_manifest.name in names
-        finally:
-            reset_model_pool()
+    def test_no_double_count_with_the_pointer(self, client, llm_manifest):
+        self._register(llm_manifest)
+        names = [m["name"] for m in client.get("/api/ps").json()["models"]]
+        assert names.count(llm_manifest.name) == 1
 
-    def test_state_and_pool_dont_double_count(self, client, llm_manifest):
-        """If the same model is in both ``state.current_model`` and the
-        pool (which is normal — load() registers it everywhere), it
-        appears once."""
-        from hfl.engine.model_pool import get_model_pool, reset_model_pool
-
-        state = get_state()
-        state.engine = MagicMock(is_loaded=True)
-        state.current_model = llm_manifest
-
-        reset_model_pool()
-        pool = get_model_pool(max_models=4)
-        pool._models[llm_manifest.name] = self._make_pool_entry(llm_manifest)
-
-        try:
-            body = client.get("/api/ps").json()
-            names = [m["name"] for m in body["models"]]
-            assert names.count(llm_manifest.name) == 1
-        finally:
-            reset_model_pool()
-
-    def test_pool_walk_failure_does_not_500(self, client, llm_manifest, monkeypatch):
-        """``/api/ps`` is hit by liveness probes — if the pool import or
-        attribute access raises (half-initialised pool, hot-reload mid
-        cycle), the endpoint must still return the legacy state slots
-        with status 200."""
-        state = get_state()
-        state.engine = MagicMock(is_loaded=True)
-        state.current_model = llm_manifest
-
-        # Make ``get_model_pool`` blow up when /api/ps tries to drain
-        # the pool. The route's ``except Exception`` should swallow it.
-        from hfl.engine import model_pool as pool_module
-
-        def _exploding(*args, **kwargs):
-            raise RuntimeError("pool corrupted mid-request")
-
-        monkeypatch.setattr(pool_module, "get_model_pool", _exploding)
-
+    def test_memory_summary(self, client):
         body = client.get("/api/ps").json()
-        # Legacy single-LLM slot still surfaces, ignoring the broken pool.
-        names = [m["name"] for m in body["models"]]
-        assert llm_manifest.name in names
+        memory = body.get("memory")
+        pytest.importorskip("psutil")
+        assert memory is not None
+        assert memory["total_bytes"] > 0
+        assert 0 < memory["budget_percent"] <= 100
+        assert memory["budget_bytes"] == int(memory["total_bytes"] * memory["budget_percent"] / 100)

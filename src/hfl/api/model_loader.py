@@ -83,15 +83,21 @@ async def load_llm(
 
     requested_ctx = num_ctx if num_ctx and num_ctx > 0 else 0
 
-    # Fast path - already loaded with a compatible context window.
-    if state.current_model and state.current_model.name == model_name:
+    # Fast path - already resident with a compatible context window.
+    resident = state.resident(model_name)
+    candidate: "tuple[InferenceEngine, ModelManifest] | None" = None
+    if resident is not None:
+        candidate = (resident.engine, resident.manifest)
+    elif state.current_model and state.current_model.name == model_name:
+        # A preload (CLI/tray) or a test assigned the pointer directly.
         if state.engine is None:
             raise ModelNotReadyError(model_name)
-        if not requested_ctx:
-            return state.engine, state.current_model
+        candidate = (state.engine, state.current_model)
+    if candidate is not None:
+        resident_engine, resident_manifest = candidate
         # ``0`` from a backend that doesn't track its context window is
         # "unknown", not "mismatched" — don't reload on a guess.
-        resident_ctx = state.engine.context_size
+        resident_ctx = getattr(resident_engine, "context_size", 0) if requested_ctx else 0
         # A resident window that is at least as large as the request already
         # satisfies it: a model opened at 32768 serves an 8192-token request
         # perfectly. Only *growing* the window needs a reload.
@@ -102,8 +108,9 @@ async def load_llm(
         # shrinks and therefore pure waste — each one evicting the weights
         # and throwing away the KV cache, so the next request had to
         # re-prefill its whole prompt from scratch.
-        if not resident_ctx or resident_ctx >= requested_ctx:
-            return state.engine, state.current_model
+        if not requested_ctx or not resident_ctx or resident_ctx >= requested_ctx:
+            state.bind_request(model_name)
+            return resident_engine, resident_manifest
         logger.info(
             "Reloading %s: request asked for num_ctx=%d, resident engine has %d",
             model_name,
@@ -138,33 +145,10 @@ async def load_llm(
         n_ctx = _manifest_ctx(manifest)
 
     async def _loader() -> tuple["InferenceEngine", "ModelManifest"]:
-        # Evict the resident model BEFORE allocating the new one. HFL's
-        # single-model slot loads-then-swaps, which means the outgoing
-        # model's weights are still resident while the incoming ones are
-        # allocated. For multi-GB models that either doubles peak memory
-        # or — because the llama.cpp preflight measures free memory at
-        # load time — rejects a load that would fit perfectly once the
-        # old model is gone ("requires ~49.2GB but only 49.5GB are
-        # available" while a 47GB model is still loaded). Ollama also
-        # unloads before loading. The cost is that a failed load leaves
-        # nothing resident instead of the previous model; that is the
-        # right trade for a slot that can only hold one model anyway.
-        #
-        # Runs under ensure_llm_loaded's per-model lock, after its
-        # residency re-check, so we only get here once we are committed
-        # to loading. set_llm_engine(None, None) is used rather than a
-        # bare unload so the dispatcher drain / pinned-engine deferral
-        # in ServerState is preserved.
-        if state.engine is not None:
-            logger.info(
-                "Evicting resident model %s before loading %s",
-                state.current_model.name if state.current_model else "<unknown>",
-                model_name,
-            )
-            await state.set_llm_engine(None, None)
-
-        # Load off the event loop; unload on load failure so a half-loaded
-        # engine never leaks. The state swap is performed by ensure_llm_loaded.
+        # Other resident models stay loaded: ``ensure_llm_loaded`` has
+        # already made room by memory budget (evicting idle models, least
+        # recently used first) before calling this. Load off the event loop;
+        # unload on failure so a half-loaded engine never leaks.
         engine = select_engine(model_path)
         try:
             await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=n_ctx)
@@ -177,20 +161,38 @@ async def load_llm(
             raise
         return engine, manifest
 
-    # CON: coalesce concurrent COLD loads of the same model. The unlocked
-    # fast-path above lets two simultaneous first-requests both fall through and
-    # both run a multi-GB engine.load() (2x VRAM/OOM + A/B load thrash, the
-    # second then unloading the first). ensure_llm_loaded holds a per-model lock
-    # and re-checks residency inside it, so the second request simply awaits the
-    # first's load instead of duplicating it.
     from hfl.config import config as _hfl_config
+    from hfl.engine.footprint import estimate_footprint
 
-    return await state.ensure_llm_loaded(
+    estimate = estimate_footprint(model_path, n_ctx).total_bytes
+
+    # CON: coalesce concurrent COLD loads of the same model. The unlocked
+    # fast-path above lets two simultaneous first-requests both fall through;
+    # ensure_llm_loaded holds a per-model lock and re-checks residency inside
+    # it, so the second request simply awaits the first's load.
+    engine, loaded = await state.ensure_llm_loaded(
         model_name,
         _loader,
         timeout=_hfl_config.model_load_timeout,
         required_ctx=requested_ctx,
+        estimate=estimate,
+        measure=_measure_loaded,
     )
+    state.bind_request(model_name)
+    return engine, loaded
+
+
+def _measure_loaded(engine: "InferenceEngine", manifest: "ModelManifest") -> int:
+    """Footprint with the context the engine really opened, plus the MLX
+    prompt cache's ceiling when that engine keeps one."""
+    from hfl.engine.footprint import footprint_of_loaded
+
+    total = footprint_of_loaded(manifest.local_path, engine).total_bytes
+    if getattr(engine, "_prompt_store", None) is not None:
+        from hfl.config import config as _cfg
+
+        total += int(getattr(_cfg, "mlx_prompt_cache_bytes", 0) or 0)
+    return total
 
 
 async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:

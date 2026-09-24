@@ -3,7 +3,7 @@
 """Memory tracking utilities for model management.
 
 Provides real memory measurement for system RAM and GPU VRAM.
-Used by ModelPool for accurate memory-based eviction.
+Used by the residency planner (hfl.engine.residency) and diagnostics.
 """
 
 from __future__ import annotations

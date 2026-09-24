@@ -55,6 +55,14 @@ async def _unload_llm() -> None:
     await get_state().set_llm_engine(None, None)
 
 
+async def _unload_named_llm(name: str) -> None:
+    """Background helper: unload one resident LLM, leaving the others.
+
+    Same safety as :func:`_unload_llm`: the unload drains in-flight
+    inference and defers while a request still holds the model."""
+    await get_state().evict(name, reason="stop requested")
+
+
 async def _unload_tts() -> None:
     """Background helper: unload the resident TTS engine (serialised via the
     TTS lock, mirroring ``set_tts_engine``)."""
@@ -99,13 +107,16 @@ async def stop_model(
 
     current = state.current_model
     current_tts = state.current_tts_model
+    resident_names = [r.name for r in state.resident_models()]
+    if current is not None and current.name not in resident_names:
+        resident_names.append(current.name)
 
-    # No model target → evict both if loaded, report what happened.
+    # No model target → evict everything loaded, report what happened.
     if not req.model:
         evicted: list[str] = []
-        if current is not None:
+        if resident_names:
             background_tasks.add_task(_unload_llm)
-            evicted.append(current.name)
+            evicted.extend(resident_names)
         if current_tts is not None:
             background_tasks.add_task(_unload_tts)
             evicted.append(current_tts.name)
@@ -113,7 +124,10 @@ async def stop_model(
             return {"status": "nothing_loaded", "model": None}
         return {"status": "stopped", "model": ",".join(evicted)}
 
-    # Named model — match against LLM first, then TTS.
+    # Named model — match against the resident LLMs first, then TTS.
+    if state.resident(req.model) is not None:
+        background_tasks.add_task(_unload_named_llm, req.model)
+        return {"status": "stopped", "model": req.model}
     if current is not None and current.name == req.model:
         background_tasks.add_task(_unload_llm)
         return {"status": "stopped", "model": req.model}

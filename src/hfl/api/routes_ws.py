@@ -145,33 +145,39 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
         await _send(ws, {"type": "error", "message": "engine not available"})
         return
 
-    chat_msgs = [
-        ChatMessage(role=str(m.get("role")), content=str(m.get("content") or "")) for m in messages
-    ]
-    options = frame.get("options") or {}
-    cfg = GenerationConfig(
-        max_tokens=int(options.get("max_tokens", 0) or 0),
-        temperature=float(options.get("temperature", 0.7) or 0.7),
-        top_p=float(options.get("top_p", 0.9) or 0.9),
-    )
+    # CON: the WS turn reads ``engine`` directly and does NOT hold a dispatcher
+    # slot. With several models resident a concurrent load may choose this one
+    # to evict, and an explicit unload could free it mid-stream (use-after-free
+    # of the non-reentrant model). Lease it before the first await, so no
+    # eviction can land between the load and the lease. From the producer's
+    # start the release belongs to the producer (it can outlive a client
+    # cancel — the engine call cannot be preempted); anything failing before
+    # that releases here.
+    from hfl.api.state import get_state
 
-    await _send(ws, {"type": "ready", "model": model_name})
+    state = get_state()
+    await state.pin_engine(engine)
+    try:
+        chat_msgs = [
+            ChatMessage(role=str(m.get("role")), content=str(m.get("content") or ""))
+            for m in messages
+        ]
+        options = frame.get("options") or {}
+        cfg = GenerationConfig(
+            max_tokens=int(options.get("max_tokens", 0) or 0),
+            temperature=float(options.get("temperature", 0.7) or 0.7),
+            top_p=float(options.get("top_p", 0.9) or 0.9),
+        )
+
+        await _send(ws, {"type": "ready", "model": model_name})
+    except BaseException:
+        await state.unpin_engine(engine)
+        raise
 
     # Run the sync chat_stream in a thread so the event loop can
     # service inbound ``cancel`` frames concurrently.
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
-
-    # CON: the WS turn reads ``engine`` directly and does NOT hold a dispatcher
-    # slot, so a concurrent model hot-swap could ``unload`` it mid-stream
-    # (use-after-free of the non-reentrant model). Pin it for the lifetime of
-    # the producer; the swap defers the unload until we unpin below. The unpin
-    # must fire when the PRODUCER finishes (it can outlive a client cancel — the
-    # engine call cannot be preempted), not when the consumer loop exits.
-    from hfl.api.state import get_state
-
-    state = get_state()
-    await state.pin_engine(engine)
 
     def _producer() -> None:
         # ``asyncio.Queue`` is NOT thread-safe, and this closure runs in a

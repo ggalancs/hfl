@@ -225,6 +225,70 @@ class OutOfMemoryError(EngineError):
         self.fitting_ctx = fitting_ctx
 
 
+class MemoryBudgetExceededError(EngineError):
+    """A model cannot be loaded within the memory budget.
+
+    Raised by the residency planner before anything is unloaded, so a
+    refusal never costs the user the models they already had. The message
+    carries the numbers and the levers, because "not enough memory" alone
+    does not say whether to close a browser, lower the context or pick a
+    smaller quantization.
+    """
+
+    status_code = 507
+
+    def __init__(self, model_name: str, *, needed: int, plan: object, total: int, budget: float):
+        gib = 1024**3
+        floor = int(getattr(plan, "floor", 0) or 0)
+        limit = int(getattr(plan, "limit", 0) or 0)
+        reason = getattr(plan, "reason", "too_big")
+        if reason == "blocked":
+            headline = (
+                f"Not enough memory to load {model_name} (~{needed / gib:.1f} GB) without "
+                "unloading a model this same request is using."
+            )
+        else:
+            headline = f"Not enough memory to load {model_name}: it needs ~{needed / gib:.1f} GB."
+        lines = []
+        if total and limit:
+            lines.append(
+                f"Even with every other HFL model unloaded, memory in use would reach "
+                f"{floor / gib:.1f} of {total / gib:.1f} GB "
+                f"({100.0 * floor / total:.0f}%), over the HFL_MEMORY_BUDGET of "
+                f"{budget * 100:.0f}% ({limit / gib:.1f} GB)."
+            )
+        lines.append(
+            "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context "
+            '("options": {"num_ctx": 8192}), closing other programs, or raising '
+            "HFL_MEMORY_BUDGET."
+        )
+        super().__init__(headline, " ".join(lines))
+        self.model_name = model_name
+        self.needed = needed
+        self.floor = floor
+        self.limit = limit
+        self.total = total
+
+
+class ModelsBusyError(EngineError):
+    """Room for a model exists only by unloading models that are in use.
+
+    Retryable: the models finish their requests and the next attempt can
+    unload them.
+    """
+
+    status_code = 503
+
+    def __init__(self, model_name: str, busy: list[str]):
+        super().__init__(
+            f"Cannot load {model_name} yet: making room needs {', '.join(busy)}, "
+            "which are serving other requests.",
+            "Retry when they finish, or raise HFL_MEMORY_BUDGET.",
+        )
+        self.model_name = model_name
+        self.busy = busy
+
+
 # --- Authentication Errors ---
 
 

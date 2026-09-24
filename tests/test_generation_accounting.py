@@ -177,6 +177,7 @@ class TestContextReloadDecision:
         manifest = MagicMock()
         manifest.name = "m"
         state = MagicMock()
+        state.resident.return_value = None  # no multi-resident entry
         state.current_model = manifest
         state.engine = engine
         state.set_llm_engine = AsyncMock()

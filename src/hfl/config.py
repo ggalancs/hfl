@@ -2,6 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Central configuration for hfl."""
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +42,27 @@ def _parse_ollama_host_env() -> tuple[str | None, int | None]:
 
     # No colon — treat as host (the most common Ollama usage).
     return raw, None
+
+
+def _parse_percent(raw: str | None, default: float) -> float:
+    """``"85"`` or ``"85%"`` -> 85.0; anything unreadable -> ``default``."""
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip().rstrip("%").strip())
+    except ValueError:
+        logging.getLogger(__name__).warning("Invalid percentage %r; using %s", raw, default)
+        return default
+
+
+def _parse_nonnegative_int(raw: str | None, default: int) -> int:
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(0, int(raw.strip()))
+    except ValueError:
+        logging.getLogger(__name__).warning("Invalid integer %r; using %d", raw, default)
+        return default
 
 
 def _parse_cors_origins_env() -> list[str] | None:
@@ -372,6 +394,20 @@ class HFLConfig:
     )
     stream_queue_get_timeout: float = field(
         default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_GET_TIMEOUT", "30"))
+    )
+    # Memory residency. HFL keeps as many models loaded as fit; this is the
+    # share of TOTAL RAM the machine may have in use after a load (other
+    # programs included). Accepts "85" or "85%". See hfl.engine.residency.
+    memory_budget_percent: float = field(
+        default_factory=lambda: _parse_percent(os.environ.get("HFL_MEMORY_BUDGET"), 85.0)
+    )
+    # Optional ceiling on the NUMBER of resident models, for operators who
+    # come from Ollama. 0 (the default) means memory alone decides.
+    max_loaded_models: int = field(
+        default_factory=lambda: _parse_nonnegative_int(
+            os.environ.get("HFL_MAX_LOADED_MODELS") or os.environ.get("OLLAMA_MAX_LOADED_MODELS"),
+            0,
+        )
     )
     # MLX prompt cache: the KV of recent prompts, kept so a follow-up turn
     # only evaluates its new suffix. Bounded in bytes because on Apple

@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for health check probe feature."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,12 +43,18 @@ class TestHealthDeepProbe:
         mock_state.current_tts_model = None
         mock_state.engine = MagicMock()
         mock_state.engine.generate.return_value = GenerationResult(text="ok", tokens_generated=1)
+        mock_state.pin_engine = AsyncMock()
+        mock_state.unpin_engine = AsyncMock()
         mock_get_state.return_value = mock_state
 
         resp = client.get("/health/deep?probe=true")
         assert resp.status_code == 200
         data = resp.json()
         assert data["llm"]["probe"] == "ok"
+        # The probe runs outside the dispatcher; it must hold a lease so a
+        # concurrent load cannot evict the model mid-call.
+        mock_state.pin_engine.assert_awaited_once_with(mock_state.engine)
+        mock_state.unpin_engine.assert_awaited_once_with(mock_state.engine)
 
     @patch("hfl.api.routes_health.get_state")
     def test_deep_probe_failure_reports_degraded(self, mock_get_state, client):
@@ -60,6 +66,8 @@ class TestHealthDeepProbe:
         mock_state.current_tts_model = None
         mock_state.engine = MagicMock()
         mock_state.engine.generate.side_effect = RuntimeError("GPU error")
+        mock_state.pin_engine = AsyncMock()
+        mock_state.unpin_engine = AsyncMock()
         mock_get_state.return_value = mock_state
 
         resp = client.get("/health/deep?probe=true")

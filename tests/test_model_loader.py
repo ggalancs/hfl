@@ -99,6 +99,8 @@ class TestLoadLLM:
         mock_manifest = MockManifest("test-model")
 
         mock_state = MagicMock()
+
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = mock_manifest
         mock_state.engine = mock_engine
         mock_get_state.return_value = mock_state
@@ -115,6 +117,8 @@ class TestLoadLLM:
         mock_manifest = MockManifest("test-model")
 
         mock_state = MagicMock()
+
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = mock_manifest
         mock_state.engine = None
         mock_get_state.return_value = mock_state
@@ -130,6 +134,7 @@ class TestLoadLLM:
     async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
         """Model not in registry raises ModelNotFoundError (404)."""
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = None
         mock_get_state.return_value = mock_state
 
@@ -156,6 +161,7 @@ class TestLoadLLM:
     ):
         """Wrong model type raises ModelTypeMismatchError (400)."""
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = None
         mock_get_state.return_value = mock_state
 
@@ -194,6 +200,8 @@ class TestLoadLLM:
         mock_manifest = MockManifest("new-model")
 
         mock_state = MagicMock()
+
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = None
         mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
@@ -262,6 +270,7 @@ class TestLoadLLMCleanupOnFailure:
         then re-raise the original error.
         """
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = None
         mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
@@ -307,6 +316,7 @@ class TestLoadLLMCleanupOnFailure:
         root cause gets masked by a cleanup failure.
         """
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_model = None
         mock_state.engine = None  # nothing resident -> no pre-load eviction
         mock_state.context_size_override = 0
@@ -356,6 +366,7 @@ class TestContextResolution:
     @staticmethod
     def _state(**overrides):
         state = MagicMock()
+        state.resident.return_value = None  # no multi-resident entry
         state.current_model = None
         state.engine = None
         state.context_size_override = 0
@@ -446,11 +457,11 @@ class TestContextResolution:
         mock_select,
         mock_to_thread,
     ):
-        """A different ``num_ctx`` must reload — and the resident copy has
-        to be evicted BEFORE the new one is allocated, or the llama.cpp
-        preflight measures free memory with the outgoing model still in
-        it and rejects a load that fits ("requires ~49.2GB but only
-        49.5GB are available")."""
+        """A different ``num_ctx`` must reload. Evicting the stale copy
+        BEFORE the new one is allocated (or the llama.cpp preflight
+        measures free memory with the outgoing model still in it and
+        rejects a load that fits) now happens inside ``ensure_llm_loaded``
+        — see tests/test_multi_residency.py::test_a_reload_unloads_the_stale_copy_first."""
         resident = MockEngine()
         resident.context_size = 8192
         manifest = MockManifest("m")
@@ -469,7 +480,6 @@ class TestContextResolution:
 
         await load_llm("m", num_ctx=16384)
 
-        state.set_llm_engine.assert_awaited_once_with(None, None)
         _, kwargs = mock_to_thread.call_args
         assert kwargs["n_ctx"] == 16384
         # The reload requirement is handed to the coalescing primitive so
@@ -519,6 +529,8 @@ class TestLoadTTS:
         mock_manifest = MockManifest("test-tts")
 
         mock_state = MagicMock()
+
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_tts_model = mock_manifest
         mock_state.tts_engine = mock_engine
         mock_get_state.return_value = mock_state
@@ -535,6 +547,8 @@ class TestLoadTTS:
         mock_manifest = MockManifest("test-tts")
 
         mock_state = MagicMock()
+
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_tts_model = mock_manifest
         mock_state.tts_engine = None
         mock_get_state.return_value = mock_state
@@ -550,6 +564,7 @@ class TestLoadTTS:
     async def test_model_not_found_raises_404(self, mock_get_registry, mock_get_state):
         """Model not in registry raises ModelNotFoundError (404)."""
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_tts_model = None
         mock_get_state.return_value = mock_state
 
@@ -574,6 +589,7 @@ class TestLoadTTS:
     ):
         """Wrong model type raises ModelTypeMismatchError (400)."""
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_tts_model = None
         mock_get_state.return_value = mock_state
 
@@ -607,6 +623,7 @@ class TestLoadTTS:
     ):
         """Successfully loads TTS model through full path."""
         mock_state = MagicMock()
+        mock_state.resident.return_value = None  # no multi-resident entry
         mock_state.current_tts_model = None
         mock_state.set_tts_engine = AsyncMock()
         mock_get_state.return_value = mock_state

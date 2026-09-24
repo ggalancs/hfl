@@ -205,21 +205,21 @@ class TestKeepAliveDeadlineOnChat:
 
 class TestKeepAliveZeroTriggersUnload:
     def test_keep_alive_zero_schedules_background_unload(self, client, sample_manifest):
-        """``keep_alive=0`` should schedule ``state.cleanup`` as a
-        FastAPI BackgroundTask so the model is evicted after the
-        response is flushed. We verify by intercepting ``cleanup``.
+        """``keep_alive=0`` should schedule the eviction of THAT model as a
+        FastAPI BackgroundTask, after the response is flushed — and only
+        that model: others stay resident. We verify by intercepting
+        ``evict``.
         """
         _mock_llm_loaded(sample_manifest)
-        cleanup_called = False
+        evicted: list[str] = []
 
-        async def fake_cleanup():
-            nonlocal cleanup_called
-            cleanup_called = True
+        async def fake_evict(name, reason="requested"):
+            evicted.append(name)
+            return True
 
         state = get_state()
-        # Patch the async method ``cleanup`` on the specific instance.
-        original = state.cleanup
-        state.cleanup = AsyncMock(side_effect=fake_cleanup)  # type: ignore[assignment]
+        original = state.evict
+        state.evict = AsyncMock(side_effect=fake_evict)  # type: ignore[assignment]
         try:
             response = client.post(
                 "/api/generate",
@@ -231,13 +231,13 @@ class TestKeepAliveZeroTriggersUnload:
                 },
             )
         finally:
-            state.cleanup = original  # restore
+            state.evict = original  # type: ignore[method-assign]
 
         assert response.status_code == 200
         # TestClient runs background tasks synchronously after the
         # response is built, so by the time .json() returns the unload
         # has completed.
-        assert cleanup_called
+        assert evicted == [sample_manifest.name]
 
 
 class TestKeepAliveRejectsInvalid:
