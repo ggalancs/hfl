@@ -49,6 +49,44 @@ def _manifest_ctx(manifest: "ModelManifest") -> int:
     return value if value > 0 else 0
 
 
+def _canonical_model_name(model_name: str) -> str:
+    """The local name to load for ``model_name``, validated.
+
+    Clients that learned model names from the Hub's "Use this model" menu,
+    or from Ollama, send a Hub reference: ``hf.co/org/model:Q4_K_M``. That
+    is not a valid local name (``:`` is not allowed), so it is taken apart
+    and each part validated on its own — the repo id with the same rules
+    as any model name, the tag only if it is a quantization — and then
+    mapped to the copy already on disk. The server never pulls on its own:
+    a reference with no local copy is a 404 that names ``hfl pull``. A
+    ``@revision`` is not accepted here; pin revisions when pulling.
+    """
+    from hfl.hub.resolver import parse_model_spec
+
+    try:
+        validate_model_name(model_name)
+        valid = True
+    except ValidationError as exc:
+        valid, error = False, exc
+    if valid and get_registry().get(model_name) is not None:
+        return model_name
+
+    spec = parse_model_spec(model_name)
+    if spec.repo_id is not None and spec.revision is None:
+        try:
+            validate_model_name(spec.repo_id)
+        except ValidationError as exc:
+            raise APIValidationError(str(exc)) from exc
+        local = get_registry().find_pulled(spec.repo_id, spec.quantization)
+        if local is not None:
+            return str(local.name)
+        if not valid:
+            raise ModelNotFoundError(model_name)
+    if not valid:
+        raise APIValidationError(str(error)) from error
+    return model_name
+
+
 async def load_llm(
     model_name: str, num_ctx: int | None = None
 ) -> tuple["InferenceEngine", "ModelManifest"]:
@@ -73,11 +111,7 @@ async def load_llm(
         ModelTypeMismatchError: If a non-LLM model was requested (400).
         ModelNotReadyError: If the engine slot exists but is None (503).
     """
-    # Validate input
-    try:
-        validate_model_name(model_name)
-    except ValidationError as e:
-        raise APIValidationError(str(e)) from e
+    model_name = _canonical_model_name(model_name)
 
     state = get_state()
 

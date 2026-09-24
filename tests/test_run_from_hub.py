@@ -163,3 +163,77 @@ class TestRunResolution:
     def test_an_unknown_bare_name_is_not_guessed_at(self, cli):
         assert cli.main._local_or_pulled("not-here", cli.registry) is None
         assert cli.pulls == []
+
+
+class TestApiNames:
+    """The API accepts the Hub reference clients learned from the Hub or
+    Ollama, maps it to the local copy, and never pulls on its own."""
+
+    @pytest.fixture
+    def names(self, monkeypatch):
+        from hfl.api import model_loader
+
+        manifests = [_manifest("local-q4", "org/model", "Q4_K_M", "2026")]
+
+        class Registry:
+            def get(self, name):
+                return next((m for m in manifests if m.name == name), None)
+
+            def find_pulled(self, repo, quant=None):
+                return next(
+                    (
+                        m
+                        for m in manifests
+                        if m.repo_id.lower() == repo.lower()
+                        and (quant is None or m.quantization.lower() == quant.lower())
+                    ),
+                    None,
+                )
+
+        monkeypatch.setattr(model_loader, "get_registry", lambda: Registry())
+        return model_loader._canonical_model_name
+
+    def test_a_local_name_is_itself(self, names):
+        assert names("local-q4") == "local-q4"
+
+    @pytest.mark.parametrize(
+        "ref", ["hf.co/org/model:Q4_K_M", "org/model:q4_k_m", "huggingface.co/org/model"]
+    )
+    def test_a_reference_maps_to_the_local_copy(self, names, ref):
+        assert names(ref) == "local-q4"
+
+    def test_a_reference_not_on_disk_is_a_404_not_a_pull(self, names):
+        from hfl.exceptions import ModelNotFoundError
+
+        with pytest.raises(ModelNotFoundError):
+            names("hf.co/org/other:Q4_K_M")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "hf.co/org/../../etc:Q4_K_M",  # traversal inside the repo part
+            "org/model:latest",  # a tag that is not a quantization
+            "hf.co/org/model:Q4_K_M@abc",  # revisions are pinned at pull time
+        ],
+    )
+    def test_each_part_is_validated(self, names, bad):
+        from hfl.exceptions import ValidationError as APIValidationError
+
+        with pytest.raises(APIValidationError):
+            names(bad)
+
+
+def test_serve_preload_goes_through_the_same_resolution(monkeypatch, temp_config):
+    """`hfl serve --model hf.co/org/model:Q4_K_M` pulls if needed, like run."""
+    from typer.testing import CliRunner
+
+    from hfl.cli import main
+
+    seen = []
+    monkeypatch.setattr(main, "_local_or_pulled", lambda model, cls: seen.append(model))
+    monkeypatch.setattr("hfl.api.server.start_server", lambda **k: None)
+    result = CliRunner().invoke(
+        main.app, ["serve", "--model", "hf.co/org/model:Q4_K_M", "--host", "127.0.0.1"]
+    )
+    assert seen == ["hf.co/org/model:Q4_K_M"]
+    assert result.exit_code == 1  # resolution returned nothing: said, not ignored

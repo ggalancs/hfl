@@ -737,8 +737,10 @@ def serve(
         from hfl.engine.selector import MissingDependencyError, select_engine
         from hfl.models.registry import ModelRegistry
 
-        registry = ModelRegistry()
-        manifest = registry.get(model)
+        manifest = _local_or_pulled(model, ModelRegistry)
+        if manifest is None:
+            console.print(f"[red]{t('errors.model_not_found')}:[/] {escape_markup(model)}")
+            raise typer.Exit(1)
         if manifest:
             _memory_check_or_exit(manifest, ctx if ctx > 0 else 0)
             console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")

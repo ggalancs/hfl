@@ -118,7 +118,19 @@ def world(tmp_path, temp_config, monkeypatch):
 
     def build(sizes: dict[str, int], others: int = 10, total: int = 100) -> World:
         w = World(tmp_path, sizes, others, total)
-        registry = type("R", (), {"get": staticmethod(lambda n: w.manifests.get(n))})()
+        registry = type(
+            "R",
+            (),
+            {
+                "get": staticmethod(lambda n: w.manifests.get(n)),
+                "find_pulled": staticmethod(
+                    lambda repo, quant=None: next(
+                        (m for m in w.manifests.values() if m.repo_id.lower() == repo.lower()),
+                        None,
+                    )
+                ),
+            },
+        )()
         monkeypatch.setattr(model_loader, "get_registry", lambda: registry)
         monkeypatch.setattr(model_loader, "detect_model_type", lambda p: ModelType.LLM)
         monkeypatch.setattr(model_loader, "select_engine", w.engine_for)
@@ -861,3 +873,26 @@ async def test_stress_many_requests_three_models_room_for_two(world, monkeypatch
     # Churn really happened: every wave forced a load.
     assert sum(len(v) for v in w.engines.values()) >= 7
     assert len(results) == 90
+
+
+def test_a_hub_reference_reaches_the_local_model_over_http(world):
+    """What a client copying the Hub's snippet sends: `hf.co/<repo>`."""
+    from fastapi.testclient import TestClient
+
+    from hfl.api.server import app
+    from hfl.api.state import get_state
+
+    world({"a": 10})
+    client = TestClient(app, client=("127.0.0.1", 5555))
+    response = client.post(
+        "/api/chat",
+        json={
+            "model": "hf.co/t/a",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["message"]["content"] == "from a"
+    # Resident under its local name: the reference and the name share it.
+    assert [r.name for r in get_state().resident_models()] == ["a"]
