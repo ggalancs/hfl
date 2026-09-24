@@ -9,11 +9,11 @@ Ollama- and Anthropic-compatible API. No account. No cloud of its own — by des
 
 [![PyPI](https://img.shields.io/pypi/v/hfl.svg)](https://pypi.org/project/hfl/)
 [![Python](https://img.shields.io/pypi/pyversions/hfl.svg)](https://pypi.org/project/hfl/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/ggalancs/hfl/blob/main/LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fggalancs%2Fhfl-2496ED.svg)](https://github.com/ggalancs/hfl/pkgs/container/hfl)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 
-[Quick start](#quick-start) · [Why HFL](#why-hfl) · [Install](#install) · [Use it](#use-it) · [API](#connect-your-tools) · [Docs](#documentation) · **[Español](README.es.md)**
+[Quick start](#quick-start) · [Why HFL](#why-hfl) · [Install](#install) · [Use it](#use-it) · [API](#connect-your-tools) · [Docs](#documentation) · **[Español](https://github.com/ggalancs/hfl/blob/main/README.es.md)**
 
 </div>
 
@@ -149,7 +149,7 @@ hfl verify <model>                      # tokenizer, chat template, smoke genera
 hfl bench <model>                       # time to first token, tokens/s, p50/p95
 ```
 
-See [docs/hub-native-features.md](docs/hub-native-features.md) for every option.
+See [docs/hub-native-features.md](https://github.com/ggalancs/hfl/blob/main/docs/hub-native-features.md) for every option.
 
 ### Several models at once
 
@@ -308,7 +308,7 @@ own: `hfl pull` or `hfl serve --model <reference>` does.
 
 Settings Ollama also has (`OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
 `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, …) are read under either
-name. The full list is in [docs/env-vars.md](docs/env-vars.md).
+name. The full list is in [docs/env-vars.md](https://github.com/ggalancs/hfl/blob/main/docs/env-vars.md).
 
 Protect the API with a key: `hfl serve --api-key <secret>`, then send
 `Authorization: Bearer <secret>` or `X-API-Key: <secret>`.
@@ -364,18 +364,19 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 
 ## Documentation
 
-- [Hub-native features](docs/hub-native-features.md) — discover, recommend, pull-smart, verify, bench and more
-- [Environment variables](docs/env-vars.md) — every setting and its default
-- [Apple Silicon and Docker clients](docs/apple-silicon-and-docker-clients.md)
+- [Hub-native features](https://github.com/ggalancs/hfl/blob/main/docs/hub-native-features.md) — discover, recommend, pull-smart, verify, bench and more
+- [Environment variables](https://github.com/ggalancs/hfl/blob/main/docs/env-vars.md) — every setting and its default
+- [Apple Silicon and Docker clients](https://github.com/ggalancs/hfl/blob/main/docs/apple-silicon-and-docker-clients.md)
+- [Benchmarks](https://github.com/ggalancs/hfl/blob/main/docs/benchmarks.md) — HFL, Ollama and llama-server on the same GGUF, with the script to rerun it
 - [Architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)
-- [Changelog](CHANGELOG.md)
+- [Changelog](https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md)
 
 **Status:** beta — 4,000+ tests at ~90% coverage. Windows builds and installers
 are published, but Windows is less tested than macOS and Linux.
 
 ## Contributing
 
-Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome — see [CONTRIBUTING.md](https://github.com/ggalancs/hfl/blob/main/CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/ggalancs/hfl && cd hfl
@@ -401,7 +402,7 @@ regulations of their jurisdiction.
 
 **Disclaimer.** AI models may generate inaccurate, biased or inappropriate
 content. Users are solely responsible for evaluating and using model outputs.
-See [DISCLAIMER.md](DISCLAIMER.md).
+See [DISCLAIMER.md](https://github.com/ggalancs/hfl/blob/main/DISCLAIMER.md).
 
 **Trademarks.** "OpenAI" is a trademark of OpenAI, Inc. "Ollama" is a trademark
 of Ollama, Inc. "Anthropic" is a trademark of Anthropic, PBC. "Hugging Face" and
@@ -414,12 +415,12 @@ their services describe technical interoperability only.
 
 HFL is licensed under the **Apache License 2.0** — you may use, modify,
 distribute and sell it, including commercially, as long as you keep the
-copyright and license notices. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+copyright and license notices. See [LICENSE](https://github.com/ggalancs/hfl/blob/main/LICENSE) and [NOTICE](https://github.com/ggalancs/hfl/blob/main/NOTICE).
 
 HFL ships responsible-use safeguards: license checking, AI disclaimers,
 provenance tracking, privacy protections and respect for gated models.
 Apache-2.0 does not require you to keep them; as a project norm we ask that
-redistributions leave them active. See [DISCLAIMER.md](DISCLAIMER.md),
-[PRIVACY.md](PRIVACY.md) and [NOTICE-EU-AI-ACT.md](NOTICE-EU-AI-ACT.md).
+redistributions leave them active. See [DISCLAIMER.md](https://github.com/ggalancs/hfl/blob/main/DISCLAIMER.md),
+[PRIVACY.md](https://github.com/ggalancs/hfl/blob/main/PRIVACY.md) and [NOTICE-EU-AI-ACT.md](https://github.com/ggalancs/hfl/blob/main/NOTICE-EU-AI-ACT.md).
 
 HFL's license covers HFL itself, not the models you download.

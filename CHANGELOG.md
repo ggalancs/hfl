@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `whisper-1` means the default local Whisper. Images come back as
   `b64_json` (`url` is refused: HFL does not host files).
 
+- **A reproducible benchmark against Ollama and llama-server**
+  (`scripts/bench_compare.py`, results in `docs/benchmarks.md`). One GGUF,
+  three servers started together, interleaved rounds, a unique prefix per
+  request (no cache hits) and tokens counted by the script with the model's
+  own tokenizer. On an M3 Max with Phi-3.5-mini: HFL level with
+  llama-server on one request and ahead of Ollama; llama-server well ahead
+  with four requests at once, since HFL runs one inference at a time.
+
 ### Changed
 
 - **`hfl rm` deletes only files inside HFL's models folder.** An entry
@@ -62,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine. A 256K-context coder could not take Claude Code's first prompt
   (20K tokens). A 4096 saved before that date now means "auto"; one saved
   later came from an explicit `num_ctx` and is kept.
+- **Links and images in the README were broken on PyPI**, which cannot
+  resolve paths relative to the repository — the license and legal notices
+  among them. They point to GitHub now.
 - **The official `ollama` Python library listed every model as `None`.**
   `/api/tags` sent `name` but not `model`, the field the library reads.
   Found by running the `ollama`, `openai` and `anthropic` SDKs against a
