@@ -183,7 +183,9 @@ async def list_running(request: Request) -> dict[str, Any]:
 
     for resident in state.resident_models():
         entries.append(_render_model(resident.manifest, resident.engine, resident.footprint))
-        seen.add(resident.name)
+        # The key is the name the request used (possibly an alias); the
+        # pointer below carries the manifest's. Remember both.
+        seen.update((resident.name, resident.manifest.name))
     # A pointer assigned without going through the resident set (older
     # callers, tests) is still a loaded model.
     if state.current_model is not None and state.current_model.name not in seen:

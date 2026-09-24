@@ -317,3 +317,24 @@ def test_a_remote_client_sees_no_host_memory(client):
     body = client.get("/api/ps").json()
     assert "memory" not in body
     assert body["models"] == []
+
+
+class TestListedOnce:
+    def test_a_model_loaded_by_its_alias_is_listed_once(self, client, llm_manifest):
+        """The resident set keys a model by the name the request used — an
+        alias like ``qwen-coder`` — while the current-model pointer carries
+        the manifest's own name, so ``/api/ps`` used to list the same model
+        twice (once with its footprint, once with its file size)."""
+        from hfl.api.state import ResidentModel
+
+        state = get_state()
+        engine = MagicMock()
+        # What load_llm does for a request that named the alias: key the
+        # resident by the requested name, point the pair at it directly.
+        state._residents["qwen-coder"] = ResidentModel(
+            name="qwen-coder", engine=engine, manifest=llm_manifest, footprint=1
+        )
+        state._engine, state._current_model = engine, llm_manifest
+
+        names = [m["name"] for m in client.get("/api/ps").json()["models"]]
+        assert names == [llm_manifest.name]
