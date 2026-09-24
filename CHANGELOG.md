@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- **The test suite no longer writes to the real `~/.hfl`.** Isolation was
+  opt-in, and five modelfile tests registered fake models in the
+  developer's own registry (they showed up in `hfl list`). The whole
+  session now runs with `HFL_HOME` in a throwaway directory.
+
 ## [0.21.0] - 2026-09-24
 
 ### Changed — read these before upgrading

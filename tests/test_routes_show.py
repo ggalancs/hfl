@@ -23,7 +23,7 @@ def client(temp_config):
 
 
 @pytest.fixture
-def registered_llm(sample_manifest):
+def registered_llm(temp_config, sample_manifest):
     """Put ``sample_manifest`` into the registry under a known name."""
     from hfl.models.registry import ModelRegistry
 

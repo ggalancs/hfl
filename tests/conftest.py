@@ -4,12 +4,23 @@
 Global pytest configuration and shared fixtures.
 """
 
+import os
 import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Every test runs against a throwaway HFL home. Set before any test module
+# imports hfl, so the global config is built from it; a test that forgets
+# ``temp_config`` then writes here instead of the developer's ~/.hfl.
+_SESSION_HOME = tempfile.TemporaryDirectory(prefix="hfl-test-home-")
+os.environ["HFL_HOME"] = _SESSION_HOME.name
+
+
+def pytest_unconfigure(config):
+    _SESSION_HOME.cleanup()
 
 
 @pytest.fixture(autouse=True)
