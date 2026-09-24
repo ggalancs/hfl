@@ -105,6 +105,14 @@ class TestNoCredentialEverReachesTheLog:
     def test_a_local_caller_is_named_local(self):
         assert _actor_for(_Req(LOCAL)) == "local"
 
+    def test_the_label_is_keyed_so_a_log_reader_cannot_test_guesses(self):
+        """Anyone can compute sha256("letmein")[:8]; nobody outside the
+        process can compute its HMAC under the process secret."""
+        import hashlib
+
+        actor = _actor_for(_Req(REMOTE, {"authorization": "Bearer letmein"}))
+        assert actor != "api-key:" + hashlib.sha256(b"letmein").hexdigest()[:8]
+
     def test_the_key_never_appears_in_the_written_record(self, audit_file, monkeypatch):
         import hfl.config
 

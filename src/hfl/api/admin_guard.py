@@ -23,7 +23,10 @@ responsibility attached.
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import logging
+import os
 
 from fastapi import HTTPException, Request
 
@@ -118,9 +121,13 @@ def _actor_for(request: Request) -> str:
     """Identify the caller without ever recording a credential.
 
     A loopback peer is the machine's owner and is recorded as such. A
-    remote peer is identified by a short SHA-256 prefix of its API key,
-    which is enough to correlate a series of actions to one client and
-    useless to anybody who obtains the log.
+    remote peer is identified by a short PBKDF2 digest of its API key
+    salted with a random per-process secret: enough to correlate a series of actions to
+    one client within a server run, and useless to anybody who obtains the
+    log. A plain hash was not: its prefix let a reader of the log test
+    guesses of a weak, human-chosen key offline (CodeQL
+    py/weak-sensitive-data-hashing). The price is that the same client
+    gets a different label after a restart.
     """
     if is_local_request(request):
         return "local"
@@ -129,9 +136,18 @@ def _actor_for(request: Request) -> str:
         key = key[7:]
     if not key:
         return "anonymous"
-    import hashlib
+    return "api-key:" + _actor_digest(key)[:8]
 
-    return "api-key:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+# Never persisted or logged: it exists so actor labels cannot be reversed.
+_ACTOR_SECRET = os.urandom(32)
+
+
+@functools.lru_cache(maxsize=64)
+def _actor_digest(key: str) -> str:
+    """PBKDF2 keyed by the process secret: slow to guess against and
+    impossible without the secret. Cached, so a client pays it once."""
+    return hashlib.pbkdf2_hmac("sha256", key.encode("utf-8"), _ACTOR_SECRET, 20_000).hex()
 
 
 def _audit(request: Request, operation: str, outcome: str) -> None:
