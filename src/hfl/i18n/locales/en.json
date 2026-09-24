@@ -325,7 +325,6 @@
     "use_run_command": "For LLM models, use: hfl run <model>",
     "unsupported_model_type": "Unsupported model type",
     "unsupported_model_type_hint": "HFL does not support {type} models yet. Only LLM (text generation) models are currently supported.",
-    "tts_disabled": "TTS functionality is temporarily disabled. Only LLM models are supported.",
     "session_not_found": "No session named '{name}'. List them with: hfl sessions list",
     "hub_unreachable": "Cannot reach huggingface.co — you appear to be offline.",
     "hub_unreachable_hint": "Models you have already pulled keep working: hfl list, hfl run <model>, hfl serve.",

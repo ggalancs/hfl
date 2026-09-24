@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same before starting, and the API accepts the reference as a model name
   (mapped to the local copy; the server never pulls by itself, and a
   `@revision` is rejected there). `hfl pull` accepts the `hf.co/` prefix.
+- **`hfl tts` and `hfl speak` are back.** They had been disabled and then
+  removed from the CLI while the README still listed them; they now run on
+  the current engines (Bark, SpeechT5, Coqui), accept Hub references like
+  `hfl run`, check memory first, and `speak` falls back to the system player
+  (afplay, aplay, paplay) when `hfl[audio]` is not installed.
 - Memory reporting: every load logs memory in use now and after;
   `/api/ps` adds a `memory` summary (and `memory.gpu`); `hfl ps` prints it;
   `hfl run`, `hfl serve --model` and the tray say what a load will take

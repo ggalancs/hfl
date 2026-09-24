@@ -325,7 +325,6 @@
     "use_run_command": "Para modelos LLM, usa: hfl run <modelo>",
     "unsupported_model_type": "Tipo de modelo no soportado",
     "unsupported_model_type_hint": "HFL aún no soporta modelos {type}. Solo los modelos LLM (generación de texto) están soportados actualmente.",
-    "tts_disabled": "La funcionalidad TTS está temporalmente deshabilitada. Solo se soportan modelos LLM.",
     "session_not_found": "No hay ninguna sesión llamada '{name}'. Lístalas con: hfl sessions list",
     "hub_unreachable": "No se puede contactar con huggingface.co — parece que no hay conexión.",
     "hub_unreachable_hint": "Los modelos que ya descargaste siguen funcionando: hfl list, hfl run <modelo>, hfl serve.",

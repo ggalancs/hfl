@@ -485,6 +485,164 @@ def run(
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
 
 
+def _load_tts_or_exit(model: str) -> tuple[Any, Any]:
+    """Resolve ``model`` to a text-to-speech manifest and a loaded engine.
+
+    Same resolution as ``hfl run`` (a local name, or a Hub reference pulled
+    on first use), then the same memory check, then the type check: a chat
+    model is pointed at ``hfl run`` instead of failing inside the engine.
+    """
+    from rich.markup import escape
+
+    from hfl.converter.formats import ModelType, get_model_type_display_name
+    from hfl.engine.selector import MissingDependencyError, select_tts_engine
+    from hfl.models.registry import ModelRegistry
+
+    manifest = _local_or_pulled(model, ModelRegistry)
+    if manifest is None:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {escape(model)}")
+        console.print(t("errors.use_list_to_see"))
+        raise typer.Exit(1)
+    model_type = get_model_type(manifest)
+    if model_type != ModelType.TTS:
+        console.print(f"[red]{t('errors.wrong_model_type')}:[/] {escape(model)}")
+        console.print(
+            f"  {t('errors.detected_type')}: "
+            f"[yellow]{escape(get_model_type_display_name(model_type))}[/]"
+        )
+        console.print(f"  {t('errors.expected_type')}: [green]TTS (Text-to-Speech)[/]")
+        if model_type == ModelType.LLM:
+            console.print(f"\n[dim]{t('errors.use_run_command')}[/]")
+        raise typer.Exit(1)
+
+    _memory_check_or_exit(manifest, 0)
+    console.print(f"[cyan]{t('messages.loading')}[/] {escape(manifest.name)}...")
+    try:
+        engine = select_tts_engine(Path(manifest.local_path))
+        engine.load(manifest.local_path)
+    except MissingDependencyError as e:
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+        raise typer.Exit(1) from e
+    console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
+    return manifest, engine
+
+
+def _synthesize(engine: Any, text: str, config: Any) -> Any:
+    from rich.markup import escape
+
+    preview = text[:50] + "..." if len(text) > 50 else text
+    console.print(f'[cyan]{t("messages.synthesizing")}[/] "{escape(preview)}"')
+    try:
+        return engine.synthesize(text, config)
+    finally:
+        engine.unload()
+
+
+def _check_speed(speed: float) -> None:
+    if not 0.25 <= speed <= 4.0:
+        console.print(f"[red]--speed must be between 0.25 and 4.0 (got {speed})[/]")
+        raise typer.Exit(2)
+
+
+@app.command()
+def tts(
+    model: str = typer.Argument(help=t("commands.tts.args.model")),
+    text: str = typer.Argument(help=t("commands.tts.args.text")),
+    output: str = typer.Option(
+        "output.wav", "--output", "-o", help=t("commands.tts.options.output")
+    ),
+    language: str = typer.Option("en", "--lang", "-l", help=t("commands.tts.options.lang")),
+    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.tts.options.voice")),
+    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.tts.options.speed")),
+    sample_rate: int = typer.Option(22050, "--rate", "-r", help=t("commands.tts.options.rate")),
+    audio_format: str = typer.Option(
+        "wav", "--format", "-f", help=t("commands.tts.options.format")
+    ),
+) -> None:
+    """Synthesize text to an audio file."""
+    from rich.markup import escape
+
+    from hfl.engine.base import TTSConfig
+
+    _check_speed(speed)
+    if audio_format not in ("wav", "mp3", "ogg"):
+        console.print(f"[red]--format must be wav, mp3 or ogg (got {escape(audio_format)})[/]")
+        raise typer.Exit(2)
+    _, engine = _load_tts_or_exit(model)
+    config = TTSConfig(
+        voice=voice, speed=speed, language=language, sample_rate=sample_rate, format=audio_format
+    )
+    result = _synthesize(engine, text, config)
+
+    output_path = Path(output)
+    output_path.write_bytes(result.audio)
+    console.print(f"\n[bold green]{t('messages.audio_saved')}:[/] {escape(str(output_path))}")
+    console.print(f"  {t('messages.duration')}: {result.duration:.2f}s")
+    console.print(f"  {t('messages.sample_rate')}: {result.sample_rate} Hz")
+    console.print(f"  {t('messages.format')}: {result.format}")
+
+
+@app.command()
+def speak(
+    model: str = typer.Argument(help=t("commands.speak.args.model")),
+    text: str = typer.Argument(help=t("commands.speak.args.text")),
+    language: str = typer.Option("en", "--lang", "-l", help=t("commands.speak.options.lang")),
+    voice: str = typer.Option("default", "--voice", "-v", help=t("commands.speak.options.voice")),
+    speed: float = typer.Option(1.0, "--speed", "-s", help=t("commands.speak.options.speed")),
+) -> None:
+    """Synthesize text and play it directly."""
+    from rich.markup import escape
+
+    from hfl.engine.base import TTSConfig
+
+    _check_speed(speed)
+    _, engine = _load_tts_or_exit(model)
+    result = _synthesize(
+        engine, text, TTSConfig(voice=voice, speed=speed, language=language, format="wav")
+    )
+    console.print(f"[cyan]{t('messages.playing')}[/]...")
+    try:
+        _play_audio(result.audio, result.sample_rate)
+        console.print(f"[green]{t('messages.playback_finished')}[/]")
+    except Exception as e:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(result.audio)
+        console.print(f"[yellow]{t('warnings.playback_failed')}:[/] {escape(str(e))}")
+        console.print(f"[dim]{t('messages.audio_saved_to')}:[/] {escape(f.name)}")
+
+
+def _play_audio(audio: bytes, sample_rate: int) -> None:
+    """Play WAV bytes: sounddevice when installed (``hfl[audio]``), else the
+    system player (afplay on macOS, aplay or paplay on Linux). Raises when
+    neither is available, so the caller can save the file instead."""
+    try:
+        import io
+
+        import sounddevice
+        import soundfile
+
+        data, rate = soundfile.read(io.BytesIO(audio))
+        sounddevice.play(data, rate or sample_rate)
+        sounddevice.wait()
+        return
+    except ImportError:
+        pass
+
+    import shutil
+    import subprocess
+    import tempfile
+
+    player = next((p for p in ("afplay", "aplay", "paplay") if shutil.which(p)), None)
+    if player is None:
+        raise RuntimeError('no audio player found; install one with: pip install "hfl[audio]"')
+    with tempfile.NamedTemporaryFile(suffix=".wav") as f:
+        f.write(audio)
+        f.flush()
+        subprocess.run([player, f.name], check=True, timeout=600)
+
+
 def _local_or_pulled(model: str, registry_cls: Any) -> Any:
     """The manifest ``hfl run`` should open, pulling it first if needed.
 
