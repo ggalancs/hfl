@@ -867,6 +867,8 @@ async def api_tags() -> dict[str, Any]:
         "models": [
             {
                 "name": m.name,
+                # Ollama sends both; its Python library reads ``model``.
+                "model": m.name,
                 "modified_at": m.created_at,
                 "size": m.size_bytes,
                 "digest": m.file_hash or "",  # Use actual hash if available

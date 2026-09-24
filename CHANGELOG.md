@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine. A 256K-context coder could not take Claude Code's first prompt
   (20K tokens). A 4096 saved before that date now means "auto"; one saved
   later came from an explicit `num_ctx` and is kept.
+- **The official `ollama` Python library listed every model as `None`.**
+  `/api/tags` sent `name` but not `model`, the field the library reads.
+  Found by running the `ollama`, `openai` and `anthropic` SDKs against a
+  live server: 18 of 18 checks pass now (chat, streaming, tools,
+  Responses, copy and delete).
 - **An image or a transcription froze the whole server.** The load and
   the inference ran on the event loop, so nothing — `/healthz` included —
   answered until they finished. They run in a worker thread now.

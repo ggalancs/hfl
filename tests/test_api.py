@@ -281,6 +281,9 @@ class TestNativeEndpoints:
         assert len(data["models"]) == 1
         model = data["models"][0]
         assert model["name"] == "test-model-q4_k_m"
+        # The official ``ollama`` Python library reads ``model``, not
+        # ``name``: without it every listed model came back as None.
+        assert model["model"] == "test-model-q4_k_m"
         assert "details" in model
         assert model["details"]["format"] == "gguf"
 
