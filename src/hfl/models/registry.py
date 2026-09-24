@@ -467,6 +467,23 @@ class ModelRegistry:
             self._ensure_indexes()
             return sorted(self._models, key=lambda m: m.created_at, reverse=True)
 
+    def find_pulled(self, repo_id: str, quantization: str | None = None) -> ModelManifest | None:
+        """The most recent local copy of ``repo_id``, at ``quantization`` if given.
+
+        Repo ids compare case-insensitively (the Hub treats them so), and so
+        do quantizations (``q4_k_m`` = ``Q4_K_M``). Lets ``hfl run
+        org/model:Q4_K_M`` use a copy already on disk instead of pulling.
+        """
+        wanted_repo = repo_id.lower()
+        wanted_quant = quantization.lower() if quantization else None
+        for manifest in self.list_all():  # newest first
+            if (manifest.repo_id or "").lower() != wanted_repo:
+                continue
+            if wanted_quant and (manifest.quantization or "").lower() != wanted_quant:
+                continue
+            return manifest
+        return None
+
     def remove(self, name: str) -> bool:
         """Removes a model from the registry (thread-safe).
 

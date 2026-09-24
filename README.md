@@ -198,6 +198,10 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct@main   # ...or with the @ syntax
 # Start chat with a model
 hfl run llama-3.3-70b-instruct-q4_k_m
 
+# Or straight from a Hub repo: pulled first if it is not on this machine,
+# reused from disk otherwise (the hf.co/ prefix is optional)
+hfl run hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
+
 # With system prompt
 hfl run llama-3.3-70b-instruct-q4_k_m --system "You are a Python expert"
 ```

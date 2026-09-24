@@ -367,8 +367,7 @@ def run(
     from hfl.engine.selector import MissingDependencyError, select_engine
     from hfl.models.registry import ModelRegistry
 
-    registry = ModelRegistry()
-    manifest = registry.get(model)
+    manifest = _local_or_pulled(model, ModelRegistry)
     if not manifest:
         console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         console.print(t("errors.use_list_to_see"))
@@ -479,6 +478,46 @@ def run(
             f"[dim]{t('messages.session_saved', path=sessions_dir() / f'{session}.json')}[/]"
         )
     console.print(f"\n[dim]{t('messages.session_ended')}[/]")
+
+
+def _local_or_pulled(model: str, registry_cls: Any) -> Any:
+    """The manifest ``hfl run`` should open, pulling it first if needed.
+
+    ``model`` may be a local name or alias, or a Hub reference in the form
+    the Hub's "Use this model" snippets use: ``[hf.co/]org/model[:QUANT]``.
+    A reference already on disk (same repo, same quantization) is used as
+    is, without touching the network; otherwise it is pulled with the same
+    flow as ``hfl pull`` — license check included — and then opened. A bare
+    name that is not local is not guessed at: it returns None.
+    """
+    from hfl.hub.resolver import parse_model_spec
+
+    registry = registry_cls()
+    manifest = registry.get(model)
+    if manifest is not None:
+        return manifest
+    spec = parse_model_spec(model)
+    if spec.repo_id is None:
+        return None
+    local = registry.find_pulled(spec.repo_id, spec.quantization)
+    if local is not None:
+        return local
+    console.print(f"[cyan]{escape_markup(t('messages.run_pulling', model=model))}[/]")
+    pull(
+        model=model,
+        quantize=spec.quantization or "Q4_K_M",
+        format="auto",
+        revision=spec.revision,
+        alias=None,
+        skip_license=False,
+    )
+    return registry_cls().find_pulled(spec.repo_id, spec.quantization)
+
+
+def escape_markup(text: str) -> str:
+    from rich.markup import escape
+
+    return escape(text)
 
 
 def _memory_check_or_exit(manifest: Any, n_ctx: int) -> None:

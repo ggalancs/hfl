@@ -20,7 +20,7 @@
     "run": {
       "description": "Inicia un chat interactivo con un modelo.",
       "args": {
-        "model": "Nombre del modelo local"
+        "model": "Nombre de un modelo local, o un repositorio del Hub (org/modelo[:CUANT], admite el prefijo hf.co/): se descarga primero si no está en esta máquina"
       },
       "options": {
         "backend": "Backend de inferencia (auto, llama.cpp, transformers, vllm)",
@@ -286,7 +286,8 @@
     "memory_report": "Memoria: {in_use} de {total} GB en uso ({pct}%). {model} necesita ~{need} GB → tras cargarlo, {after} GB en uso ({after_pct}%); presupuesto {budget}%.",
     "memory_unknown": "Memoria: no se pudo estimar cuánto ocupará {model}; se carga sin comprobar la memoria.",
     "memory_summary": "Memoria: {in_use} de {total} GB en uso ({pct}%) · presupuesto {budget}% ({limit} GB) · margen: {free} GB · modelos: {models} GB",
-    "memory_summary_gpu": "GPU: {in_use} de {total} GB en uso ({pct}%) · margen: {free} GB"
+    "memory_summary_gpu": "GPU: {in_use} de {total} GB en uso ({pct}%) · margen: {free} GB",
+    "run_pulling": "{model} aún no está en esta máquina: se descarga primero."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",

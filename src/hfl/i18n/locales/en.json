@@ -20,7 +20,7 @@
     "run": {
       "description": "Start an interactive chat with a model.",
       "args": {
-        "model": "Local model name"
+        "model": "Local model name, or a Hub repo (org/model[:QUANT], hf.co/ prefix accepted) — pulled first if not on this machine"
       },
       "options": {
         "backend": "Inference backend (auto, llama.cpp, transformers, vllm)",
@@ -286,7 +286,8 @@
     "memory_report": "Memory: {in_use} of {total} GB in use ({pct}%). {model} needs ~{need} GB → after loading, {after} GB in use ({after_pct}%); budget {budget}%.",
     "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check.",
     "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB",
-    "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB"
+    "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB",
+    "run_pulling": "{model} is not on this machine yet — pulling it first."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

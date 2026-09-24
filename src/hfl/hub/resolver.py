@@ -25,6 +25,51 @@ class ResolvedModel:
     commit_sha: str | None = None  # immutable commit the revision resolved to
 
 
+_HUB_PREFIXES = ("https://huggingface.co/", "http://huggingface.co/", "huggingface.co/", "hf.co/")
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """A model reference taken apart, without touching the network."""
+
+    repo_id: str | None
+    """``org/model`` when the spec names a Hub repo; None for a bare name."""
+    quantization: str | None
+    revision: str | None
+
+
+def strip_hub_prefix(model_spec: str) -> str:
+    """``hf.co/org/model:Q4_K_M`` -> ``org/model:Q4_K_M``.
+
+    The Hub's "Use this model" snippets and Ollama's ``hf.co/...`` names
+    carry the host; a repo id does not.
+    """
+    for prefix in _HUB_PREFIXES:
+        if model_spec.lower().startswith(prefix):
+            return model_spec[len(prefix) :]
+    return model_spec
+
+
+def parse_model_spec(model_spec: str) -> ModelSpec:
+    """Split ``[hf.co/]org/model[:QUANT][@ref]`` into its parts.
+
+    The same grammar :func:`resolve` accepts, so a caller can look for a
+    local copy before deciding to go to the Hub.
+    """
+    spec = strip_hub_prefix(model_spec.strip())
+    revision = None
+    if "@" in spec:
+        spec, _, rev = spec.rpartition("@")
+        revision = rev or None
+    quantization = None
+    if ":" in spec:
+        base, _, tail = spec.rpartition(":")
+        if _is_quantization(tail):
+            spec, quantization = base, tail
+    repo_id = spec if "/" in spec else None
+    return ModelSpec(repo_id=repo_id, quantization=quantization, revision=revision)
+
+
 def resolve(
     model_spec: str,
     quantization: str | None = None,
@@ -60,6 +105,8 @@ def resolve(
     # ``quote_from_bytes() expected bytes``. Coerce anything non-str to None.
     if not isinstance(revision, str):
         revision = None
+
+    model_spec = strip_hub_prefix(model_spec)
 
     # Extract an explicit "@<ref>" revision pin: "org/model@abc123".
     # A flag-supplied ``revision`` wins over one embedded in the spec.
