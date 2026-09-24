@@ -359,8 +359,9 @@ class ServerState:
                 await asyncio.to_thread(resident.engine.unload)
 
         try:
-            dispatcher = self._try_get_dispatcher()
+            dispatcher = self._try_get_dispatcher(resident.engine)
             if dispatcher is not None:
+                # Drain the queue this engine's requests actually use.
                 async with dispatcher.exclusive():
                     await _unload()
             else:  # pragma: no cover — dispatcher always present in running app
@@ -587,13 +588,14 @@ class ServerState:
             )
 
     @staticmethod
-    def _try_get_dispatcher() -> "InferenceDispatcher | None":
-        """Best-effort handle to the inference dispatcher (None if unavailable,
-        e.g. in a unit test that never built the container)."""
+    def _try_get_dispatcher(engine: object | None = None) -> "InferenceDispatcher | None":
+        """Best-effort handle to the dispatcher scheduling ``engine`` (the
+        global one by default; None if unavailable, e.g. in a unit test that
+        never built the container)."""
         try:
-            from hfl.core import get_dispatcher
+            from hfl.core import dispatcher_for
 
-            return get_dispatcher()
+            return dispatcher_for(engine)
         except Exception:  # pragma: no cover — defensive
             return None
 

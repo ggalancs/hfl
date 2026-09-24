@@ -5,6 +5,7 @@
 from hfl.core.container import (
     Container,
     Singleton,
+    dispatcher_for,
     get_config,
     get_container,
     get_dispatcher,
@@ -32,6 +33,7 @@ __all__ = [
     "Singleton",
     "get_config",
     "get_container",
+    "dispatcher_for",
     "get_dispatcher",
     "get_event_bus",
     "get_metrics",

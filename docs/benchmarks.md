@@ -43,6 +43,26 @@ the script interleaves the servers in rotating rounds — a drift then hits all
 three alike — and why a comparison is only meaningful between servers measured
 together, never across sessions.
 
+## HFL with the llama-server backend — 2026-09-25
+
+The same comparison with a fourth column: HFL serving through
+`HFL_LLM_LIBRARY=llama-server` (4 parallel slots). **Run on battery**, so every
+absolute number is low; the four servers were measured together and
+interleaved, so the comparison between them holds.
+[Raw data](benchmarks/2026-09-25-m3-max-phi-3.5-mini-llama-server-backend.json).
+
+| | HFL | HFL + llama-server | Ollama | llama-server |
+|---|---:|---:|---:|---:|
+| Decode, one request | 47.3 tok/s | 55.6 tok/s | 43.3 tok/s | 47.1 tok/s |
+| Throughput, 4 requests at once | 50.9 tok/s | **79.9 tok/s** | 42.0 tok/s | 77.4 tok/s |
+
+With four requests at once the backend lifts HFL by 57%, level with
+llama-server run on its own. One difference to know: with HFL's default
+`repeat_penalty` (1.1, as Ollama's) the llama-server backend wrote a longer
+answer to the long prompt (256 tokens against 134) — at temperature 0 it
+applies the penalty differently from the in-process backend. With
+`repeat_penalty` 1.0 both wrote the same 134 tokens.
+
 ## Method
 
 - **Same file.** `hfl pull` fetches the GGUF once; HFL serves it by name,

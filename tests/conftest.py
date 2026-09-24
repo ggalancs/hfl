@@ -17,6 +17,11 @@ import pytest
 # ``temp_config`` then writes here instead of the developer's ~/.hfl.
 _SESSION_HOME = tempfile.TemporaryDirectory(prefix="hfl-test-home-")
 os.environ["HFL_HOME"] = _SESSION_HOME.name
+# Nor does it see a llama-server the developer happens to have installed:
+# without llama-cpp-python, GGUF models fall back to it, and the suite would
+# start real processes against its fake GGUF files. Tests that need one point
+# HFL_LLAMA_SERVER_BIN at their own.
+os.environ["HFL_LLAMA_SERVER_BIN"] = os.path.join(_SESSION_HOME.name, "no-llama-server")
 
 
 def pytest_unconfigure(config):

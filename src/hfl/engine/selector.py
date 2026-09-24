@@ -56,6 +56,33 @@ def _get_llama_cpp_engine() -> InferenceEngine:
         ) from e
 
 
+def _llama_server_if_no_llama_cpp(model_path: Path) -> InferenceEngine | None:
+    """llama-server for a GGUF when llama-cpp-python is not installed.
+
+    An install without the ``[llama]`` extra (Homebrew's, for one, which
+    depends on llama.cpp instead of compiling the Python binding) still
+    serves GGUF models when ``llama-server`` is on the PATH.
+    """
+    import importlib.util
+    import sys
+
+    if "llama_cpp" in sys.modules:  # already imported (or stubbed): present
+        return None
+    try:
+        if importlib.util.find_spec("llama_cpp") is not None:
+            return None
+    except (ImportError, ValueError):
+        pass
+    from hfl.engine.llama_server import LlamaServerEngine, binary
+
+    if binary() is None:
+        return None
+    logging.getLogger(__name__).info(
+        "llama-cpp-python is not installed; serving %s with llama-server", model_path.name
+    )
+    return LlamaServerEngine()
+
+
 def _get_mlx_engine() -> InferenceEngine:
     """Lazy import + availability gate for MLXEngine.
 
@@ -156,7 +183,7 @@ def _resolve_forced_backend() -> str | None:
     if not raw:
         return None
     name = raw.strip().lower()
-    if name in {"llama-cpp", "transformers", "vllm", "mlx"}:
+    if name in {"llama-cpp", "llama-server", "transformers", "vllm", "mlx"}:
         return name
     _logging.getLogger(__name__).warning(
         "HFL_LLM_LIBRARY=%r is not a recognised backend, ignoring", raw
@@ -174,7 +201,7 @@ def select_engine(
 
     Args:
         model_path: Path to the model
-        backend: "auto", "llama-cpp", "transformers", "vllm", "mlx".
+        backend: "auto", "llama-cpp", "llama-server", "transformers", "vllm", "mlx".
             Overridden by ``HFL_LLM_LIBRARY`` /
             ``OLLAMA_LLM_LIBRARY`` when the caller passed ``"auto"``.
             An explicit non-auto request from the caller (e.g.
@@ -187,6 +214,8 @@ def select_engine(
 
     if backend == "auto":
         forced = _resolve_forced_backend()
+        if forced == "llama-server" and fmt != ModelFormat.GGUF:
+            forced = None  # it only serves GGUF; everything else keeps its backend
         if forced is not None:
             return _create_engine(forced)
     elif backend != "auto":
@@ -200,6 +229,9 @@ def select_engine(
         # markedly faster. Say so once instead of silently serving the
         # slower path.
         _advise_mlx_alternative(model_path)
+        fallback = _llama_server_if_no_llama_cpp(model_path)
+        if fallback is not None:
+            return fallback
         return _get_llama_cpp_engine()
 
     # Safetensors / pytorch weights. On Apple Silicon with mlx-lm
@@ -258,6 +290,10 @@ def _get_vllm_engine() -> InferenceEngine:
 def _create_engine(name: str) -> InferenceEngine:
     if name == "llama-cpp":
         return _get_llama_cpp_engine()
+    if name == "llama-server":
+        from hfl.engine.llama_server import LlamaServerEngine
+
+        return LlamaServerEngine()
     if name == "transformers":
         return _get_transformers_engine()
     if name == "vllm":

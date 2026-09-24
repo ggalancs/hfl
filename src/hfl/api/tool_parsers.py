@@ -524,11 +524,13 @@ def dispatch(
     if not tools:
         return _strip_thinking(text).strip(), []
 
-    if parser is None:
-        # The name did not say which family (an alias such as "coder"), but
-        # the client sent tools: every native marker is unambiguous, so try
-        # them all before the loose JSON fallback.
-        for native in parsers_by_family.values():
+    # The client sent tools and the family's own parser found nothing: the
+    # name may hide the family (an alias such as "coder"), or the text may
+    # carry another family's markers (llama-server hands structured calls
+    # back and HFL writes them as ``<tool_call>``). Every native marker is
+    # unambiguous, so try them all before the loose JSON fallback.
+    for native in parsers_by_family.values():
+        if native is not parser:
             cleaned, calls = native(text)
             if calls:
                 return cleaned, calls

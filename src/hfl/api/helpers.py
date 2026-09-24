@@ -178,9 +178,11 @@ async def run_dispatched(
     ``QueueTimeoutError``) propagate unchanged so the route layer can
     map them to 429 / 503 with the correct headers.
     """
-    from hfl.core import get_dispatcher
+    from hfl.core import dispatcher_for
 
-    dispatcher = get_dispatcher()
+    # The engine is the bound method's owner: a concurrent engine has its own
+    # dispatcher; every other engine shares the global, serialized one.
+    dispatcher = dispatcher_for(getattr(func, "__self__", None))
     effective_timeout = timeout if timeout is not None else config.generation_timeout
 
     # Acquire the slot manually (not via ``dispatcher.run``) so we control WHEN
@@ -265,10 +267,13 @@ async def acquire_stream_slot(
     forwarded for per-dialect rendering of the rejection on ``/v1/*`` (API-3).
     """
     from hfl.api.errors import queue_full, queue_timeout
-    from hfl.core import get_dispatcher
+    from hfl.api.state import get_state
+    from hfl.core import dispatcher_for
     from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
-    dispatcher = get_dispatcher()
+    # The request's own model (``load_llm`` bound it), which decides whether
+    # it queues behind every other request or in its own parallel slots.
+    dispatcher = dispatcher_for(get_state().engine)
     cm = dispatcher.slot()
     try:
         await cm.__aenter__()

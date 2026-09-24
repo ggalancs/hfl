@@ -308,6 +308,13 @@ def main() -> int:
                 manifest.name,
                 [*hfl, "serve", "--port", "11601", "--ctx", str(args.ctx)],
             ),
+            "hfl-llama-server": Server(
+                "hfl-llama-server",
+                11604,
+                manifest.name,
+                [*hfl, "serve", "--port", "11604", "--ctx", str(args.ctx)],
+                {"HFL_LLM_LIBRARY": "llama-server"},
+            ),
             "ollama": Server(
                 "ollama",
                 11602,

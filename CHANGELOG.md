@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parallel requests: the `llama-server` backend.** With
+  `HFL_LLM_LIBRARY=llama-server`, a GGUF model is served by a llama.cpp
+  `llama-server` process of its own, decoding several requests together in
+  parallel slots (`HFL_NUM_PARALLEL`, 4 by default) that share one KV
+  buffer sized to the model's context — the memory of a single-slot load.
+  Each such model gets its own queue, so its requests neither wait behind
+  each other nor behind another model's; every other backend keeps the
+  single, serialized queue. Measured with four requests at once on
+  Phi-3.5-mini: 79.9 tokens/s against 50.9 with the default backend (+57%),
+  level with llama-server run directly. The process listens on loopback
+  with a random key passed through its environment (never on the command
+  line), no web UI and no `/slots`; a small guard stops it if HFL dies
+  without unloading (SIGKILL, a crash). Without llama-cpp-python installed,
+  GGUF models fall back to `llama-server` when it is on the PATH. Not
+  supported on this backend: images, LoRA hot-swap, KV snapshots. With the
+  default `repeat_penalty` (1.1) its replies can differ from the in-process
+  backend's; with 1.0 they matched.
 - **`hfl launch claude|codex -m MODEL` opens a coding agent on a local
   model.** Claude Code talks to HFL's Anthropic API, Codex to its Responses
   API. HFL pulls the model if needed (a Hub reference works), starts a
@@ -73,6 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Links and images in the README were broken on PyPI**, which cannot
   resolve paths relative to the repository — the license and legal notices
   among them. They point to GitHub now.
+- **`/api/ps` listed a model twice when it was loaded by an alias** — once
+  with its estimated footprint, once with its file size.
 - **The official `ollama` Python library listed every model as `None`.**
   `/api/tags` sent `name` but not `model`, the field the library reads.
   Found by running the `ollama`, `openai` and `anthropic` SDKs against a

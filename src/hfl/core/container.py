@@ -289,3 +289,30 @@ def get_dispatcher() -> "InferenceDispatcher":
         The global :class:`InferenceDispatcher` singleton.
     """
     return get_container().dispatcher.get()
+
+
+def dispatcher_for(engine: object | None) -> "InferenceDispatcher":
+    """The dispatcher that schedules inference on ``engine``.
+
+    Engines that keep one non-reentrant model instance (llama-cpp-python,
+    Transformers, MLX) share the global dispatcher, clamped to one request
+    at a time. An engine that serves requests concurrently
+    (``supports_concurrent_inference``: llama-server, vLLM) gets its own,
+    sized to its ``parallel_slots`` (or ``HFL_NUM_PARALLEL``), so its
+    requests neither wait behind another model's nor are held to one.
+    """
+    if engine is None or not getattr(engine, "supports_concurrent_inference", False):
+        return get_dispatcher()
+    own = getattr(engine, "_hfl_dispatcher", None)
+    if own is None:
+        from hfl.engine.dispatcher import InferenceDispatcher
+
+        cfg = get_config()
+        slots = int(getattr(engine, "parallel_slots", 0) or cfg.queue_max_inflight or 1)
+        own = InferenceDispatcher(
+            max_inflight=max(1, slots),
+            max_queued=cfg.queue_max_size,
+            acquire_timeout=cfg.queue_acquire_timeout_seconds,
+        )
+        engine._hfl_dispatcher = own  # type: ignore[attr-defined]
+    return own

@@ -25,18 +25,21 @@ the host string does not.
 
 | HFL                            | Ollama alias               | Default | What it does |
 |--------------------------------|----------------------------|---------|--------------|
-| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Inference slots executing simultaneously, across all loaded models. |
+| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Requests one model serves at once. Only backends that serve several at once use it (llama-server: default 4 when this is 1; vLLM); every other backend runs one request at a time, across all its models. |
 | `HFL_QUEUE_MAX_SIZE` / `HFL_MAX_QUEUE`        | `OLLAMA_MAX_QUEUE`         | `16`    | Max wait queue; further requests get 429. |
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
 | `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `0`     | Optional ceiling on the **number** of resident models. `0` (default) = no ceiling: memory alone decides, see `HFL_MEMORY_BUDGET`. When set, loading one more model than this unloads the least recently used idle one. |
 | `HFL_MEMORY_BUDGET`            | —                          | `85`    | Share of **total RAM** the machine may have in use after a model loads (other programs included), as a percentage (`85` or `85%`). HFL keeps as many models loaded as fit under it: a load that does not fit unloads idle models, least recently used first; a model a request is using is never unloaded — the load waits for it (up to `HFL_QUEUE_ACQUIRE_TIMEOUT`, then 503); a model that cannot fit even alone is refused (507) with the numbers, before anything is unloaded. `/api/ps` reports the budget and what is in use. With an NVIDIA GPU (read through `nvidia-smi`), a model must also fit the card's memory under the same percentage; a GPU whose memory cannot be read (ROCm, CUDA without `nvidia-smi`) keeps one model loaded at a time unless `HFL_MAX_LOADED_MODELS` says otherwise. `HFL_DISABLE_MEMORY_PREFLIGHT=1` turns the memory checks off (only the count ceiling remains). |
 | `HFL_DISABLE_MEMORY_PREFLIGHT` | —                          | unset   | `1` skips every memory check: the per-load llama.cpp preflight and the residency budget. For hosts whose real limit is a discrete GPU's VRAM, which these checks do not measure. |
 
-> **`HFL_NUM_PARALLEL` / `OLLAMA_NUM_PARALLEL` only take effect on a backend that
-> batches internally (vLLM).** llama.cpp and Transformers drive a single
+> **Parallel requests need a backend that batches them: llama-server or vLLM.**
+> The default GGUF backend (llama-cpp-python) and Transformers drive a single
 > non-reentrant model instance with one KV cache: two overlapping requests would
-> interleave their state and produce corrupted text, not an error. When such an
-> engine is loaded the dispatcher is clamped to 1 slot and a warning is logged.
+> interleave their state and produce corrupted text, not an error, so they share
+> one queue, clamped to 1 slot (a warning is logged). llama-server and vLLM get a
+> queue of their own per model, with `HFL_NUM_PARALLEL` slots (llama-server: 4
+> when it is left at 1) — their requests neither wait behind each other nor
+> behind another model's.
 
 ## Lifecycle / keep-alive
 
@@ -48,7 +51,8 @@ the host string does not.
 
 | HFL                  | Ollama alias            | Default | What it does |
 |----------------------|-------------------------|---------|--------------|
-| `HFL_LLM_LIBRARY`    | `OLLAMA_LLM_LIBRARY`    | (auto)  | Pin auto-selection to a specific backend: `llama-cpp`, `transformers`, `vllm`, `mlx`. Per-call `backend=` argument still wins. |
+| `HFL_LLM_LIBRARY`    | `OLLAMA_LLM_LIBRARY`    | (auto)  | Pin auto-selection to a specific backend: `llama-cpp`, `llama-server`, `transformers`, `vllm`, `mlx`. `llama-server` serves GGUF models only (others keep their backend) and needs llama.cpp's `llama-server` installed. Per-call `backend=` argument still wins. |
+| `HFL_LLAMA_SERVER_BIN` | — | (PATH) | The `llama-server` executable to run, when it is not on the PATH. |
 | `HFL_DISABLE_MLX`    | —                       | `0`     | When truthy, disables the MLX path on Apple Silicon (forces llama-cpp Metal). Useful for benchmarking. |
 | `HFL_KV_CACHE_TYPE`  | `OLLAMA_KV_CACHE_TYPE`  | `f16`   | KV cache dtype: `f16`, `q8_0`, `q4_0`. Halves / quarters VRAM at the cost of accuracy. |
 | `HFL_FLASH_ATTENTION`| `OLLAMA_FLASH_ATTENTION`| (auto)  | Toggle flash-attention fleet-wide (`1`/`0`). Per-load kwarg wins; per-arch safety list still rejects known-unsafe arches. |
