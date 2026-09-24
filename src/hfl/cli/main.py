@@ -302,11 +302,16 @@ def pull(
         if f.is_file()
     )
 
+    # A quantization label only for what IS quantized that way: a GGUF as
+    # downloaded, or the GGUF the conversion just produced. A safetensors
+    # repo kept as is (MLX, transformers) carries the requested level only as
+    # a conversion target that never ran — labelling it "Q4_K_M" named an
+    # MLX 4-bit build after a llama.cpp format it is not.
+    final_is_gguf = detect_format(final_path) == ModelFormat.GGUF
+    quant_label = (resolved.quantization or quantize) if final_is_gguf else None
     short_name = resolved.repo_id.split("/")[-1].lower()
-    if resolved.quantization:
-        short_name += f"-{resolved.quantization.lower()}"
-    elif quantize:
-        short_name += f"-{quantize.lower()}"
+    if quant_label:
+        short_name += f"-{quant_label.lower()}"
 
     manifest = ModelManifest(
         name=short_name,
@@ -317,7 +322,7 @@ def pull(
         local_path=str(final_path),
         format=detect_format(final_path).value,
         size_bytes=size,
-        quantization=resolved.quantization or quantize,
+        quantization=quant_label,
         model_type=detected_type.value,
         # R1 - License information
         license=license_info.license_id if license_info else None,

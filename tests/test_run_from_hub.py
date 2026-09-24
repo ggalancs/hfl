@@ -237,3 +237,86 @@ def test_serve_preload_goes_through_the_same_resolution(monkeypatch, temp_config
     )
     assert seen == ["hf.co/org/model:Q4_K_M"]
     assert result.exit_code == 1  # resolution returned nothing: said, not ignored
+
+
+class TestQuantizationLabel:
+    """A model is labelled with a quantization only if it IS quantized so."""
+
+    @staticmethod
+    def _pull(tmp_path, temp_config, monkeypatch, resolved, files):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from hfl.cli.main import app
+        from hfl.models.registry import ModelRegistry
+
+        target = temp_config.models_dir / "repo"
+        target.mkdir(parents=True)
+        for name, content in files.items():
+            (target / name).write_bytes(content)
+        path = target / next(iter(files)) if len(files) == 1 else target
+        monkeypatch.setattr("hfl.converter.formats.is_mlx_quantized_repo", lambda *a: True)
+        monkeypatch.setattr("hfl.engine.selector._mlx_preferred", lambda: True)
+        with patch("hfl.hub.resolver.resolve", return_value=resolved):
+            with patch("hfl.hub.downloader.pull_model", return_value=path):
+                result = CliRunner().invoke(app, ["pull", "x", "--skip-license"])
+        assert result.exit_code == 0, result.stdout
+        return ModelRegistry().list_all()[0]
+
+    def test_an_mlx_build_kept_as_is_has_no_gguf_label(self, tmp_path, temp_config, monkeypatch):
+        from hfl.hub.resolver import ResolvedModel
+
+        # What the resolver returns for a safetensors repo: the REQUESTED level.
+        resolved = ResolvedModel(
+            repo_id="mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+            format="safetensors",
+            quantization="Q4_K_M",
+            pipeline_tag="text-generation",
+        )
+        manifest = self._pull(
+            tmp_path,
+            temp_config,
+            monkeypatch,
+            resolved,
+            {"model.safetensors": b"x", "config.json": b"{}"},
+        )
+        assert manifest.name == "qwen2.5-0.5b-instruct-4bit"
+        assert manifest.quantization is None
+
+    def test_a_gguf_keeps_its_label(self, tmp_path, temp_config, monkeypatch):
+        from hfl.hub.resolver import ResolvedModel
+
+        resolved = ResolvedModel(
+            repo_id="org/Model-GGUF",
+            filename="model-Q5_K_M.gguf",
+            format="gguf",
+            quantization="Q5_K_M",
+            pipeline_tag="text-generation",
+        )
+        manifest = self._pull(
+            tmp_path, temp_config, monkeypatch, resolved, {"model-Q5_K_M.gguf": b"GGUF"}
+        )
+        assert manifest.name == "model-gguf-q5_k_m"
+        assert manifest.quantization == "Q5_K_M"
+
+
+def test_api_pull_labels_only_gguf(tmp_path, monkeypatch, temp_config):
+    from types import SimpleNamespace
+
+    from hfl.api.routes_pull import _record_server_pull
+    from hfl.models.registry import ModelRegistry
+
+    license_info = SimpleNamespace(
+        license_id="apache-2.0", license_name="Apache", url="u", restrictions=[], gated=False
+    )
+    folder = tmp_path / "mlx"
+    folder.mkdir()
+    (folder / "model.safetensors").write_bytes(b"x")
+    (folder / "config.json").write_bytes(b"{}")
+    resolved = SimpleNamespace(
+        repo_id="mlx-community/M-4bit", quantization="Q4_K_M", revision="main", commit_sha="abc"
+    )
+    _record_server_pull(resolved, folder, license_info, "permissive")
+    manifest = ModelRegistry().get("m-4bit")
+    assert manifest is not None and manifest.quantization is None

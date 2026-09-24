@@ -185,7 +185,11 @@ def _record_server_pull(
         size = sum(f.stat().st_size for f in local_path.rglob("*") if f.is_file())
 
     short_name = resolved.repo_id.split("/")[-1].lower()
-    quant = getattr(resolved, "quantization", None)
+    # Only a GGUF is quantized at the level the resolver reports; for a
+    # safetensors repo that value is just the level that was asked for.
+    from hfl.converter.formats import ModelFormat
+
+    quant = getattr(resolved, "quantization", None) if fmt == ModelFormat.GGUF else None
     if quant:
         short_name += f"-{quant.lower()}"
 
