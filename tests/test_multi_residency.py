@@ -670,3 +670,194 @@ async def test_a_larger_load_never_evicts_itself_or_a_busy_model(world, monkeypa
     finally:
         hold.set()
         await task
+
+
+# ----------------------------------------------------------------------
+# Stress: many concurrent requests, three models, room for two
+# ----------------------------------------------------------------------
+
+
+class Monitor:
+    """Shared by the stress engines: records every invariant violation at
+    the moment it happens, from whichever thread it happens on."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.violations: list[str] = []
+
+    def enter(self, engine: "StressEngine") -> None:
+        with self.lock:
+            if not engine.is_loaded:
+                self.violations.append(f"{engine.name} served while unloaded")
+            engine.calls += 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+
+    def leave(self, engine: "StressEngine") -> None:
+        with self.lock:
+            engine.calls -= 1
+            self.active -= 1
+
+
+class StressEngine(FakeEngine):
+    monitor: Monitor
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.calls = 0
+
+    def unload(self) -> None:
+        with self.monitor.lock:
+            if self.calls:
+                self.monitor.violations.append(f"{self.name} unloaded while serving")
+        super().unload()
+
+    def chat(self, messages, config=None, tools=None, **kw) -> GenerationResult:
+        import time
+
+        self.monitor.enter(self)
+        try:
+            time.sleep(0.02)
+            return GenerationResult(text=f"from {self.name}", tokens_generated=1)
+        finally:
+            self.monitor.leave(self)
+
+    def chat_stream(self, messages, config=None, tools=None, **kw):
+        import time
+
+        self.monitor.enter(self)
+        try:
+            for piece in ("from ", self.name):
+                time.sleep(0.01)
+                yield piece
+        finally:
+            self.monitor.leave(self)
+
+
+def _answer_text(api: str, stream: bool, body: str) -> str:
+    """The generated text of one response, whatever its wire format."""
+    import json
+
+    if not stream:
+        data = json.loads(body)
+        if api == "native":
+            return data["message"]["content"]
+        return data["choices"][0]["message"]["content"]
+    parts = []
+    for line in body.splitlines():
+        line = line.strip()
+        if api == "openai":
+            if not line.startswith("data:") or line == "data: [DONE]":
+                continue
+            line = line[len("data:") :].strip()
+        if not line:
+            continue
+        data = json.loads(line)
+        if api == "native":
+            parts.append((data.get("message") or {}).get("content") or "")
+        else:
+            for choice in data.get("choices") or []:
+                parts.append((choice.get("delta") or {}).get("content") or "")
+    return "".join(parts)
+
+
+@pytest.mark.asyncio
+async def test_stress_many_requests_three_models_room_for_two(world, monkeypatch):
+    """90 requests in concurrent waves over the native and OpenAI APIs,
+    streamed and not, to three 30 GB models on a 100 GB machine with 10 GB taken by other
+    programs — any two fit under the 85 GB budget, three never do, so
+    admissions keep evicting, waiting and reloading under load.
+
+    What it proves is the combination. It catches cross-talk between models,
+    two inferences overlapping, a lease that outlives its request, and a
+    model unloaded under a request. That last one needs TWO protections
+    broken at once to happen: each eviction also drains the dispatcher in
+    arrival order, so removing only the leases (or only the drain) is
+    masked here — those are pinned one by one by the dedicated tests above.
+    Sabotaged 2026-09-24: no binding, leaks, leases + drain, and an
+    overlapping dispatcher all reddened it."""
+    import random
+
+    import httpx
+
+    from hfl.api.server import app
+    from hfl.api.state import get_state
+    from hfl.config import config
+    from hfl.core import get_dispatcher
+
+    w = world({"a": 30, "b": 30, "c": 30})
+    monitor = Monitor()
+    StressEngine.monitor = monitor
+
+    def engine_for(path):
+        name = Path(path).stem
+        engine = StressEngine(name)
+        w.engines.setdefault(name, []).append(engine)
+        return engine
+
+    from hfl.api import model_loader
+
+    monkeypatch.setattr(model_loader, "select_engine", engine_for)
+    monkeypatch.setattr(config, "queue_acquire_timeout_seconds", 60.0)
+    from hfl.api.middleware import RateLimitMiddleware
+
+    # One client sending 90 requests is what this test is, not abuse.
+    monkeypatch.setattr(RateLimitMiddleware, "_is_excluded", lambda self, path: True)
+    dispatcher = get_dispatcher()
+    monkeypatch.setattr(dispatcher, "_max_queued", 1000)
+    monkeypatch.setattr(dispatcher, "_acquire_timeout", 60.0)
+
+    rng = random.Random(7)
+
+    def wave(models: str, n: int) -> list:
+        return [
+            (rng.choice(models), rng.choice(["native", "openai"]), rng.random() < 0.4)
+            for _ in range(n)
+        ]
+
+    # Each wave asks for the model the previous one did not, so each forces
+    # at least one load (and, with room for two, an eviction): >= 7 loads
+    # over the six pairs, whatever the scheduling. The last wave mixes all
+    # three concurrently.
+    waves = [wave(pair, 10) for pair in ("ab", "ca", "bc", "ab", "ca", "bc")] + [wave("abc", 30)]
+
+    async def one(client, model, api, stream):
+        body = {"model": model, "messages": [{"role": "user", "content": "hi"}], "stream": stream}
+        path = "/api/chat" if api == "native" else "/v1/chat/completions"
+        response = await client.post(path, json=body)
+        return model, api, stream, response.status_code, response.text
+
+    transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 5555))
+    results = []
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for requests in waves:
+            batch = await asyncio.wait_for(
+                asyncio.gather(*(one(client, *p) for p in requests)), timeout=60
+            )
+            results.extend(batch)
+
+    failures = [r for r in results if r[3] != 200]
+    assert not failures, failures[:3]
+    wrong = [
+        (model, api, stream, text[:160])
+        for model, api, stream, _, text in results
+        if _answer_text(api, stream, text) != f"from {model}"
+    ]
+    assert not wrong, wrong[:3]
+    assert monitor.violations == []
+    assert monitor.max_active == 1, "two inferences overlapped on the dispatcher"
+
+    state = get_state()
+    assert state._engine_inuse == {}, "a lease outlived its request"
+    assert state._engine_retired == {}, "an unload is still pending"
+    resident = state.resident_models()
+    assert sum(r.footprint for r in resident) + 10 * GB <= int(100 * GB * 0.85)
+    for r in resident:
+        assert r.engine.is_loaded
+    # Churn really happened: every wave forced a load.
+    assert sum(len(v) for v in w.engines.values()) >= 7
+    assert len(results) == 90
