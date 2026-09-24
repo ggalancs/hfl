@@ -21,7 +21,7 @@ class TestI18nModule:
 
         # English translation should work
         result = t("app.description")
-        assert "HuggingFace" in result or "models" in result.lower()
+        assert "Hugging Face" in result and "model" in result
 
     def test_set_language_english(self, monkeypatch):
         """Setting HFL_LANG=en should use English."""
@@ -63,7 +63,9 @@ class TestI18nModule:
 
         get_language.cache_clear()
 
-        assert t("app.description") == "Run HuggingFace models locally like Ollama."
+        assert t("app.description") == (
+            "Download, run and try any Hugging Face model on your own machine."
+        )
         assert t("commands.pull.description") == "Download a model from HuggingFace Hub."
         assert t("errors.model_not_found") == "Model not found"
 
@@ -75,7 +77,9 @@ class TestI18nModule:
 
         get_language.cache_clear()
 
-        assert t("app.description") == "Ejecuta modelos de HuggingFace localmente como Ollama."
+        assert t("app.description") == (
+            "Descarga, ejecuta y prueba cualquier modelo de Hugging Face en tu propia máquina."
+        )
         assert t("commands.pull.description") == "Descarga un modelo de HuggingFace Hub."
         assert t("errors.model_not_found") == "Modelo no encontrado"
 
@@ -156,7 +160,9 @@ class TestI18nModule:
 
         get_language.cache_clear()
 
-        assert _("app.description") == "Run HuggingFace models locally like Ollama."
+        assert _("app.description") == (
+            "Download, run and try any Hugging Face model on your own machine."
+        )
 
 
 class TestTranslationCompleteness:
@@ -239,5 +245,5 @@ class TestTranslationCompleteness:
         es_description = t("app.description")
 
         assert en_description != es_description
-        assert "Run" in en_description
-        assert "Ejecuta" in es_description
+        assert "Download" in en_description
+        assert "Descarga" in es_description

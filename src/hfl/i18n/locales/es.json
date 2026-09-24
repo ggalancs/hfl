@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "hfl",
-    "description": "Ejecuta modelos de HuggingFace localmente como Ollama."
+    "description": "Descarga, ejecuta y prueba cualquier modelo de Hugging Face en tu propia máquina."
   },
   "commands": {
     "pull": {
@@ -386,7 +386,7 @@
     "options": {
       "extras": "Muestra los extras de instalación opcionales disponibles"
     },
-    "general_help": "HFL — Ejecuta modelos de HuggingFace localmente como Ollama.",
+    "general_help": "HFL — Descarga, ejecuta y prueba cualquier modelo de Hugging Face en tu propia máquina.",
     "usage": "Uso",
     "common_commands": "Comandos principales",
     "common_pull": "Descarga un modelo de HuggingFace Hub",

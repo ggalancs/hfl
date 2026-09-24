@@ -40,8 +40,12 @@ class FakeTTS:
 
 
 @pytest.fixture
-def cli(monkeypatch, temp_config):
+def cli(monkeypatch, temp_config, tmp_path):
     from hfl.cli import main
+
+    # `hfl tts` writes output.wav in the working directory by default; a
+    # regression that lets a refused command through must not litter the repo.
+    monkeypatch.chdir(tmp_path)
 
     engine = FakeTTS()
     state = SimpleNamespace(engine=engine, created=0, model_type=ModelType.TTS, manifest=None)

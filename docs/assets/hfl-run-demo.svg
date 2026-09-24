@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="400" viewBox="0 0 980 400" role="img" aria-label="Terminal: hfl run downloads a model from the Hugging Face Hub on first use and starts a chat (real output, abridged)">
+<title>hfl run hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M (real output, abridged)</title>
+<rect x="0.5" y="0.5" width="979" height="399" rx="10" fill="#0d1117" stroke="#30363d"/>
+<rect x="0.5" y="0.5" width="979" height="36" rx="10" fill="#161b22"/>
+<rect x="0.5" y="26" width="979" height="11" fill="#161b22"/>
+<circle cx="22" cy="18" r="6" fill="#ff5f57"/><circle cx="42" cy="18" r="6" fill="#febc2e"/><circle cx="62" cy="18" r="6" fill="#28c840"/>
+<text x="490.0" y="23" text-anchor="middle" font-family="ui-sans-serif,-apple-system,Segoe UI,sans-serif" font-size="13" fill="#8b949e">hfl — one command from the Hugging Face Hub to a local chat</text>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" xml:space="preserve">
+<text x="20" y="64"><tspan fill="#3fb950">$ </tspan><tspan fill="#e6edf3" font-weight="600">hfl run hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M</tspan></text>
+<text x="20" y="86" fill="#79c0ff">hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M is not on this machine yet — pulling it first.</text>
+<text x="20" y="108" fill="#e6edf3">Resolving hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M...</text>
+<text x="20" y="130" fill="#8b949e">  Repo: bartowski/SmolLM2-135M-Instruct-GGUF</text>
+<text x="20" y="152" fill="#8b949e">  File: SmolLM2-135M-Instruct-Q4_K_M.gguf</text>
+<text x="20" y="174" fill="#8b949e">  License: apache-2.0 (permissive)</text>
+<text x="20" y="196" fill="#e6edf3">Downloading bartowski/SmolLM2-135M-Instruct-GGUF (SmolLM2-135M-Instruct-Q4_K_M.gguf)</text>
+<text x="20" y="218" fill="#3fb950">Model ready: smollm2-135m-instruct-gguf-q4_k_m (101 MB)</text>
+<text x="20" y="240" fill="#8b949e">Memory: 56.4 of 128.0 GB in use (44%). smollm2-135m-instruct-gguf-q4_k_m needs ~0.1 GB →</text>
+<text x="20" y="262" fill="#8b949e">after loading, 56.5 GB in use (44%); budget 85%.</text>
+<text x="20" y="284" fill="#e6edf3">Model loaded. Type &#x27;/exit&#x27; to quit.</text>
+<text x="20" y="328"><tspan fill="#58a6ff" font-weight="600">&gt;&gt;&gt; </tspan><tspan fill="#e6edf3">What is the capital of France? Answer in one short sentence.</tspan></text>
+<text x="20" y="350" fill="#7ee787">Bonjour, the capital of France is Paris.</text>
+<text x="20" y="372"><tspan fill="#58a6ff" font-weight="600">&gt;&gt;&gt; </tspan><tspan fill="#e6edf3"></tspan></text>
+</g></svg>

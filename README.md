@@ -1,632 +1,390 @@
-# hfl
+<div align="center">
 
+# HFL
+
+**Download, run and try any Hugging Face model on your own machine.**
+
+One command takes a model from the Hub to a local chat or to an OpenAI-,
+Ollama- and Anthropic-compatible API. No account. No cloud of its own — by design.
+
+[![PyPI](https://img.shields.io/pypi/v/hfl.svg)](https://pypi.org/project/hfl/)
+[![Python](https://img.shields.io/pypi/pyversions/hfl.svg)](https://pypi.org/project/hfl/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fggalancs%2Fhfl-2496ED.svg)](https://github.com/ggalancs/hfl/pkgs/container/hfl)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 
-Run HuggingFace models locally like Ollama.
+[Quick start](#quick-start) · [Why HFL](#why-hfl) · [Install](#install) · [Use it](#use-it) · [API](#connect-your-tools) · [Docs](#documentation) · **[Español](README.es.md)**
 
-> **[Versión en Español](README.es.md)**
+</div>
 
-## Why HFL?
+<p align="center">
+  <img src="docs/assets/hfl-run-demo.svg" alt="Terminal: hfl run downloads a model from the Hugging Face Hub on first use and starts a local chat (real output, abridged)" width="880">
+</p>
 
-**Ollama has a curated catalog of ~200 models. HuggingFace Hub has 2M+.**
-
-If you want to run a model that isn't in Ollama's catalog — a specific fine-tune, a recent release from a small lab, a niche model — you have to manually download from HuggingFace, convert to GGUF with llama.cpp, quantize, and configure inference. **HFL automates all of this in a single command.**
-
-| Feature | Ollama | HFL |
-|---------|--------|-----|
-| Model catalog | ~200 curated | 2M+ (all HF Hub) |
-| Auto-conversion | Not needed (pre-converted) | Yes (safetensors→GGUF) |
-| Ease of use | Excellent | Good |
-| OpenAI API compatible | Yes | Yes |
-| Ollama API compatible | Native | Yes (drop-in) |
-| Anthropic Messages API | No | Yes (Claude Code compatible) |
-| Structured tool calling | Yes | Yes (qwen / llama3 / mistral) |
-| Multi-backend | llama.cpp only | llama.cpp + Transformers + vLLM |
-| License verification | No | Yes (5 risk levels) |
-| Legal traceability | No | Yes (provenance log) |
-| Maturity | High (established) | Beta (v0.15.0) |
-
-**HFL doesn't compete with Ollama — it complements it.** Use Ollama for curated models; use HFL when you need something from the full HuggingFace ecosystem.
-
-## What's new
-
-hfl ships Hub-native features that exploit its HuggingFace-Hub nature
-— things Ollama can't structurally have because of its curated
-registry model:
-
-- **`hfl discover`** — filter the live HF Hub (2M+ models) by
-  family, quant, multimodal, license, popularity. Marks what you
-  already have locally.
-- **`hfl recommend`** — picks top-N models that *fit your hardware*
-  (probes RAM/VRAM/MLX, scores by hardware fit + capability +
-  popularity + recency).
-- **`hfl pull-smart`** — given a base repo, finds the best community
-  variant (`mlx-community/...-4bit` on Apple Silicon,
-  `bartowski/...-GGUF/Q5_K_M` on CUDA, smallest fitting quant on CPU).
-- **`hfl verify`** — 5 sanity probes against a freshly-pulled model
-  in seconds: tokenizer round-trip, chat-template render, smoke
-  generation, tool-parser, embedding dim.
-- **`hfl bench`** — TTFT + tok/s + p50/p95 with golden prompts
-  (16/256/2048 chars).
-- **`hfl lora apply|remove|list`** — hot-swap LoRA adapters at
-  fractional scales without reloading base weights.
-- **`hfl snapshot save|load|list|delete`** — persist KV cache to
-  disk for warm-start across restarts. Format-versioned.
-- **`hfl compliance-dashboard`** — license-risk overview of the
-  local registry, gated repos pending HF_TOKEN, EU AI Act
-  warnings.
-- **`hfl draft-recommend`** — auto-pick a small Hub sibling for
-  speculative decoding. Measured 1.33× speedup on Qwen3-14B + 0.6B
-  draft for structured prompts.
-- **REST `POST /v1/responses`** — OpenAI Responses API (2025
-  surface used by `client.responses.create()`).
-- **WebSocket `/ws/chat`** — bidirectional with frame-level
-  cancellation (vs HTTP streaming where cancel = TCP close).
-- **REST `POST /api/push`** — upload a registered model to the HF
-  Hub.
-
-See [docs/hub-native-features.md](docs/hub-native-features.md) for the full guide and
-[docs/env-vars.md](docs/env-vars.md) for the env var matrix
-(every `HFL_*` knob has an `OLLAMA_*` fallback so a drop-in
-replacement of an Ollama install works without re-reading the docs).
-
-## Features
-
-- **CLI & API**: Full CLI interface plus REST API compatible with OpenAI, Ollama, and Anthropic
-- **Model Search**: Interactive paginated search of HuggingFace Hub (like `more`)
-- **Multiple Backends**: llama.cpp (GGUF/CPU), Transformers (GPU native), vLLM (production)
-- **Automatic Conversion**: Downloads HuggingFace models and converts to GGUF automatically
-- **Smart Quantization**: Supports Q2_K through F16 quantization levels
-- **Text-to-Speech**: Native TTS support with Bark, SpeechT5, Coqui XTTS and more
-- **Structured tool calling**: Ollama-compatible `tools` / `tool_calls` wire protocol with per-family parsers for qwen, llama3, and mistral — agents work out of the box
-- **Bounded inference queue**: server-side serialisation of requests with explicit 429 / 503 backpressure, live `X-Queue-Depth` headers, and `GET /healthz` for orchestrators
-- **Drop-in Compatible**: Works as a replacement for Ollama with existing tooling
-- **Internationalized**: Full i18n support (English, Spanish) - set `HFL_LANG` to change language
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              HFL Architecture                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
-│  │  hfl pull   │───────▶ │  HuggingFace Hub │───────▶ │  Local Storage  │   │
-│  │             │         │                  │         │   ~/.hfl/       │   │
-│  └─────────────┘         │  • Search API    │         │   ├── models/   │   │
-│        │                 │  • Download      │         │   ├── cache/    │   │
-│        │                 │  • License info  │         │   └── registry  │   │
-│        ▼                 └──────────────────┘         └─────────────────┘   │
-│  ┌─────────────┐                                              │             │
-│  │  Converter  │◀─────────────────────────────────────────────┘             │
-│  │             │                                                            │
-│  │ safetensors │──────────▶ GGUF (quantized Q2_K...F16)                     │
-│  └─────────────┘                                                            │
-│                                                                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
-│  │  hfl run    │───────▶ │ Inference Engine │───────▶ │  Interactive    │   │
-│  │             │         │                  │         │     Chat        │   │
-│  └─────────────┘         │  • llama.cpp     │         └─────────────────┘   │
-│                          │  • Transformers  │                               │
-│                          │  • vLLM          │                               │
-│                          └──────────────────┘                               │
-│                                                                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐   │
-│  │  hfl serve  │───────▶ │   REST API       │───────▶ │  OpenAI SDK /   │   │
-│  │             │         │                  │         │  Ollama clients │   │
-│  └─────────────┘         │  • /v1/chat/...  │         └─────────────────┘   │
-│                          │  • /api/chat     │                               │
-│                          │  • /api/generate │                               │
-│                          └──────────────────┘                               │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Flow Summary:**
-1. **Pull**: Download from HuggingFace Hub → Convert to GGUF (if needed) → Store locally
-2. **Run**: Load model into inference engine → Start interactive chat session
-3. **Serve**: Start API server → Accept OpenAI/Ollama-compatible requests
-
-## Prerequisites
-
-- **Python 3.10+** (required)
-- **git** (for cloning llama.cpp during first conversion)
-- **cmake** and **C++ compiler** (for building llama.cpp quantization tools)
-  - macOS: `xcode-select --install`
-  - Ubuntu/Debian: `sudo apt install build-essential cmake`
-  - Windows: Install Visual Studio Build Tools
-
-> **Note:** Build tools are only needed if you convert safetensors models to GGUF. If you only use pre-quantized GGUF models, they're not required.
-
-## Installation
+## Quick start
 
 ```bash
-# Clone the repository
-git clone https://github.com/ggalancs/hfl
-cd hfl
+pip install "hfl[llama,mlx]"        # the MLX part installs only on Apple Silicon
 
-# Basic installation (CPU + GGUF)
-pip install .
-
-# With GPU support (Transformers + bitsandbytes)
-pip install ".[transformers]"
-
-# With TTS support (Bark, SpeechT5)
-pip install ".[tts]"
-
-# With Coqui TTS (XTTS-v2, VITS)
-pip install ".[coqui]"
-
-# With vLLM for production
-pip install ".[vllm]"
-
-# Everything
-pip install ".[all]"
+hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
 ```
 
-## Quick Start
-
-### Download a Model
+The model is downloaded the first time and reused from disk after that. To serve it instead:
 
 ```bash
-# Download with default Q4_K_M quantization
-hfl pull meta-llama/Llama-3.3-70B-Instruct
-
-# Specify quantization level
-hfl pull meta-llama/Llama-3.3-70B-Instruct --quantize Q5_K_M
-
-# Keep as safetensors (for GPU inference)
-hfl pull mistralai/Mistral-7B-Instruct-v0.3 --format safetensors
-
-# Download with a custom alias for easier reference
-hfl pull meta-llama/Llama-3.3-70B-Instruct --alias llama70b
-
-# Pin to a specific revision (branch, tag, or commit) for a reproducible pull
-hfl pull meta-llama/Llama-3.3-70B-Instruct --revision a1b2c3d
-hfl pull meta-llama/Llama-3.3-70B-Instruct@main   # ...or with the @ syntax
+hfl serve --model hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
 ```
 
-### Interactive Chat
+Any OpenAI, Ollama or Anthropic client can now talk to `http://localhost:11434`.
+
+## Why HFL
+
+- **The whole Hub, not one file format.** GGUF repos run through llama.cpp, MLX
+  builds run natively on Apple Silicon, and safetensors checkpoints are converted
+  and quantized for you on pull. Copy a repo name from the Hub and run it.
+- **Yours alone.** No account, no sign-in, no cloud service behind it. On its own
+  HFL talks to one server, the Hugging Face Hub, to fetch weights; its web-search
+  endpoints reach the web only when a client calls them, and a test pins every
+  host the code can reach. With no network, everything you have already pulled
+  keeps working.
+- **Plugs into what you already use.** OpenAI (chat, completions, embeddings,
+  Responses), Ollama and Anthropic Messages APIs on one port, with structured
+  tool calling for Qwen, Llama 3 and Mistral families and JSON-schema outputs.
+  Existing `OLLAMA_*` settings such as `OLLAMA_HOST` are honoured.
+- **As many models as your memory holds.** Before every load HFL estimates what
+  the model will take (weights + KV cache) and keeps the machine under a memory
+  budget you set: models load side by side while they fit, idle ones make room,
+  one in use is never pulled out from under a request, and one that cannot fit
+  is refused with the numbers — before anything is unloaded. GPU-aware on NVIDIA.
+- **Knows the Hub.** Find models that fit your hardware (`hfl recommend`), pick
+  the best community quant for your machine (`hfl pull-smart`), size
+  Mixture-of-Experts models by their total parameters, check licenses before
+  downloading and keep a provenance record of every pull.
+
+## Install
+
+| How | Command |
+|---|---|
+| **pip** (recommended) | `pip install "hfl[llama,mlx]"` |
+| **Docker** | `docker run -p 11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` |
+| **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases) |
+| **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
+
+<details>
+<summary><b>Optional extras</b> — GPU, speech, vLLM and more</summary>
+
+| Extra | Adds |
+|---|---|
+| `llama` | llama.cpp for GGUF models (Metal on Apple Silicon out of the box) |
+| `mlx` | Native MLX backend on Apple Silicon |
+| `transformers` | Transformers backend for GPU inference with bitsandbytes |
+| `vllm` | vLLM backend |
+| `convert` | Tools to convert safetensors to GGUF |
+| `tts` / `coqui` | Text-to-speech (Bark, SpeechT5 / Coqui XTTS, VITS) |
+| `stt` | Speech-to-text (Whisper) |
+| `mcp` | Model Context Protocol client and server |
+| `all` | Everything above |
+
+Converting safetensors to GGUF builds llama.cpp's tools the first time, which
+needs **git**, **cmake** and a **C++ compiler** (`xcode-select --install` on
+macOS, `sudo apt install build-essential cmake` on Debian/Ubuntu). Pre-quantized
+GGUF and MLX models need none of this.
+
+</details>
+
+## Use it
+
+### Chat
 
 ```bash
-# Start chat with a model
-hfl run llama-3.3-70b-instruct-q4_k_m
-
-# Or straight from a Hub repo: pulled first if it is not on this machine,
-# reused from disk otherwise (the hf.co/ prefix is optional)
-hfl run hf.co/bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
-
-# With system prompt
-hfl run llama-3.3-70b-instruct-q4_k_m --system "You are a Python expert"
+hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M   # from the Hub, pulled on first use
+hfl run hf.co/mlx-community/Qwen2.5-0.5B-Instruct-4bit       # an MLX build on Apple Silicon
+hfl run llama70b --system "You are a Python expert"          # a local name or alias
+hfl run llama70b --session work                              # resume and save a conversation
 ```
 
-### API Server
+The `hf.co/` prefix is optional. `:Q4_K_M` picks a quantization, `@<ref>` pins a
+branch, tag or commit.
+
+### Pull, search and manage
 
 ```bash
-# Start server (default port 11434, same as Ollama)
-hfl serve
+hfl pull meta-llama/Llama-3.3-70B-Instruct                 # Q4_K_M by default
+hfl pull meta-llama/Llama-3.3-70B-Instruct --quantize Q5_K_M --alias llama70b
+hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: pinned revision
 
-# Pre-load a model
-hfl serve --model llama-3.3-70b-instruct-q4_k_m
-
-# Custom host/port
-hfl serve --host 0.0.0.0 --port 8080
+hfl search qwen --gguf                  # interactive, paginated Hub search
+hfl list                                # what is on this machine
+hfl inspect llama70b                    # details and license
+hfl rm llama70b
 ```
 
-### Text-to-Speech (TTS)
-
-HFL supports TTS models from HuggingFace like Bark, SpeechT5, and Coqui XTTS.
+### Find the right model
 
 ```bash
-# Download a TTS model (no GGUF conversion needed)
+hfl recommend                           # top models that fit THIS machine's RAM/VRAM
+hfl discover --family qwen              # filter the live Hub; marks what you already have
+hfl pull-smart Qwen/Qwen3-30B-A3B       # best community variant for your hardware
+hfl verify <model>                      # tokenizer, chat template, smoke generation, tools
+hfl bench <model>                       # time to first token, tokens/s, p50/p95
+```
+
+See [docs/hub-native-features.md](docs/hub-native-features.md) for every option.
+
+### Several models at once
+
+HFL keeps every model that fits under `HFL_MEMORY_BUDGET` — the share of total
+RAM the machine may have in use after a load, other programs included (default
+`85%`). Each load reports the numbers before it happens:
+
+```text
+Memory: 65.3 of 128.0 GB in use (51%). qwen3-14b needs ~9.0 GB → after loading, 74.3 GB in use (58%); budget 85%.
+```
+
+- fits → it loads next to the models already resident;
+- does not fit → idle models are unloaded, least recently used first;
+- the room is held by models answering requests → the load waits for them;
+- cannot fit even alone → refused with the numbers (HTTP 507), nothing unloaded.
+
+With an NVIDIA GPU the model must also fit the card (read through `nvidia-smi`).
+Idle models unload after `keep_alive` (default `5m`, renewed on every use).
+`hfl ps` and `GET /api/ps` show what is loaded and how much room is left.
+
+<details>
+<summary><b>Tool calling</b> — agents work out of the box</summary>
+
+Send `tools` on `/api/chat` or `/v1/chat/completions`: HFL renders them through
+the model's own chat template (Qwen `<tool_call>`, Llama 3 `<|python_tag|>`,
+Mistral `[TOOL_CALLS]`), parses the reply into `message.tool_calls` with the
+arguments as an object, and accepts `role: "tool"` results on the next turn.
+
+```bash
+curl http://localhost:11434/api/chat -d '{
+  "model": "qwen3-32b-q4_k_m",
+  "stream": false,
+  "messages": [{"role": "user", "content": "Save Hello at topics/hello.md"}],
+  "tools": [{"type": "function", "function": {
+    "name": "write_wiki", "description": "Create or overwrite a wiki article",
+    "parameters": {"type": "object",
+      "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+      "required": ["path", "content"]}}}]
+}'
+```
+
+```json
+{"message": {"role": "assistant", "content": "",
+  "tool_calls": [{"function": {"name": "write_wiki",
+    "arguments": {"path": "topics/hello.md", "content": "Hello"}}}]},
+ "done": true}
+```
+
+When streaming, `tool_calls` arrive on the final `done: true` chunk. The
+executable spec lives in `tests/test_tool_calling_acceptance.py`.
+
+</details>
+
+<details>
+<summary><b>Text to speech</b> — Bark, SpeechT5, Coqui XTTS</summary>
+
+```bash
+pip install "hfl[tts,audio]"
 hfl pull suno/bark-small --alias bark
-
-# Synthesize text to audio file
-hfl tts bark "Hello, this is a test." -o output.wav
-
-# Synthesize and play directly (requires sounddevice)
-hfl speak bark "Hello, this is a test."
-
-# With options
-hfl tts bark "Hola mundo" --lang es --output spanish.wav --speed 0.9
-hfl speak bark "Fast speech" --speed 1.5
+hfl tts bark "Hello, this is a test." -o hello.wav     # write a file (wav, mp3, ogg)
+hfl speak bark "Hola mundo" --lang es --speed 0.9      # play it
 ```
 
-**TTS Options:**
-- `--output, -o`: Output file path (default: output.wav)
-- `--lang, -l`: Language code (en, es, fr, etc.)
-- `--voice, -v`: Voice/speaker to use
-- `--speed, -s`: Speed multiplier (0.25-4.0)
-- `--rate, -r`: Sample rate in Hz
-- `--format, -f`: Audio format (wav, mp3, ogg)
-
-**TTS API:**
-```bash
-# OpenAI-compatible endpoint
-curl -X POST http://localhost:11434/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{"model": "bark", "input": "Hello world", "voice": "alloy"}' \
-  --output speech.wav
-
-# Native HFL endpoint
-curl -X POST http://localhost:11434/api/tts \
-  -H "Content-Type: application/json" \
-  -d '{"model": "bark", "text": "Hello world", "language": "en"}' \
-  --output speech.wav
-```
-
-### Search Models on HuggingFace
+Options: `--lang`, `--voice`, `--speed` (0.25–4.0), and for `tts` also
+`--output`, `--rate` and `--format`. The same voices are served over HTTP:
 
 ```bash
-# Search for models (paginated like 'more')
-hfl search llama
+# OpenAI-compatible
+curl http://localhost:11434/v1/audio/speech -H "Content-Type: application/json" \
+  -d '{"model": "bark", "input": "Hello world", "voice": "alloy"}' --output speech.wav
 
-# Search only models with GGUF files
-hfl search mistral --gguf
-
-# Customize pagination and results
-hfl search phi --limit 50 --page-size 5
-
-# Sort by likes instead of downloads
-hfl search qwen --sort likes
+# Native: language, speed, sample rate and format (wav, mp3, ogg)
+curl http://localhost:11434/api/tts -H "Content-Type: application/json" \
+  -d '{"model": "bark", "text": "Hola mundo", "language": "es"}' --output speech.wav
 ```
 
-**Navigation controls:**
-- `SPACE` / `ENTER` - Next page
-- `p` - Previous page
-- `q` / `ESC` - Exit
+</details>
 
-### Model Management
+<details>
+<summary><b>More tools</b> — LoRA, KV snapshots, speculative decoding, MCP, Hub upload</summary>
 
-```bash
-# List all local models
-hfl list
+- `hfl lora apply|remove|list` — hot-swap LoRA adapters without reloading the base model.
+- `hfl snapshot save|load|list|delete` — persist the KV cache to disk for warm starts.
+- `hfl draft-recommend` — pick a small Hub sibling for speculative decoding.
+- `hfl mcp serve` / `hfl mcp connect` — run as a Model Context Protocol server, or use MCP tools.
+- `hfl compliance-dashboard` — license risk across your local models.
+- `POST /api/push` — upload a registered model to the Hub.
+- `WS /ws/chat` — bidirectional chat with frame-level cancellation.
 
-# Show model details
-hfl inspect llama-3.3-70b-instruct-q4_k_m
+</details>
 
-# Remove a model
-hfl rm llama-3.3-70b-instruct-q4_k_m
+## Connect your tools
 
-# Set an alias for an existing model
-hfl alias llama-3.3-70b-instruct-q4_k_m llama70b
+The server listens on `http://localhost:11434` and speaks three APIs.
 
-# Now use the alias in any command
-hfl run llama70b
-hfl inspect llama70b
-```
-
-## API Endpoints
-
-### OpenAI-Compatible
-
-```bash
-curl http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "llama-3.3-70b-instruct-q4_k_m",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-### Ollama-Compatible
-
-```bash
-curl http://localhost:11434/api/chat \
-  -d '{
-    "model": "llama-3.3-70b-instruct-q4_k_m",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-### Using OpenAI Python SDK
+**OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="not-needed"
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="not-needed")
+reply = client.chat.completions.create(
+    model="hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",
+    messages=[{"role": "user", "content": "Explain quantum computing in one paragraph"}],
 )
-
-response = client.chat.completions.create(
-    model="llama-3.3-70b-instruct-q4_k_m",
-    messages=[{"role": "user", "content": "Explain quantum computing"}],
-)
-print(response.choices[0].message.content)
+print(reply.choices[0].message.content)
 ```
 
-## Tool Calling (Agents)
-
-HFL implements the Ollama wire protocol for **structured tool calling**, so
-agents written against the Ollama Python SDK can drive multi-turn tool loops
-directly. When a client sends `tools` on `/api/chat`, HFL forwards them
-through the model's native chat template (qwen3 `<tool_call>`, llama3
-`<|python_tag|>`, mistral `[TOOL_CALLS]`), parses the reply into canonical
-`message.tool_calls` with `arguments` as a parsed object, and accepts
-`role: "tool"` results on the next turn.
+**Ollama** — `/api/chat`, `/api/generate`, `/api/embed`, `/api/tags`, `/api/ps`, `/api/pull` and more
 
 ```bash
-curl http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen3-32b-q4_k_m",
-    "stream": false,
-    "messages": [
-      {"role":"system","content":"You MUST call write_wiki, never respond with text."},
-      {"role":"user","content":"Save Hello at topics/hello.md"}
-    ],
-    "tools":[{
-      "type":"function",
-      "function":{
-        "name":"write_wiki",
-        "description":"Create or overwrite a wiki article",
-        "parameters":{
-          "type":"object",
-          "properties":{"path":{"type":"string"},"content":{"type":"string"}},
-          "required":["path","content"]
-        }
-      }
-    }]
-  }'
+curl http://localhost:11434/api/chat -d '{"model": "llama70b",
+  "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-Response:
-
-```json
-{
-  "model": "qwen3-32b-q4_k_m",
-  "message": {
-    "role": "assistant",
-    "content": "",
-    "tool_calls": [
-      {
-        "function": {
-          "name": "write_wiki",
-          "arguments": {"path": "topics/hello.md", "content": "Hello"}
-        }
-      }
-    ]
-  },
-  "done": true
-}
-```
-
-The per-family parser also handles a generic `{"tool_call": {...}}`
-fallback for templates that weren't properly applied. Streaming (`stream:
-true`) accumulates the full reply and emits `tool_calls` on the final
-`done: true` chunk. The acceptance suite (the executable spec, T1–T7)
-lives at `tests/test_tool_calling_acceptance.py`.
-
-## Several models loaded at once
-
-HFL keeps as many models loaded as the machine can hold, decided by
-memory rather than by a count. Before each load it estimates what the
-model will take (weights plus the KV cache for its context) and checks
-that the machine stays under `HFL_MEMORY_BUDGET` — the share of total RAM
-in use after the load, other programs included (default `85%`):
-
-- it fits → it loads next to the models already resident;
-- it does not → idle models are unloaded, least recently used first;
-- the room is held by models serving a request → the load waits for them
-  (a model in use is never unloaded under its request);
-- it cannot fit even alone → the load is refused with the numbers (HTTP
-  507), before anything is unloaded.
-
-On a machine with an NVIDIA GPU the model must also fit the card's memory
-(read through `nvidia-smi`), since that is where the weights go; a GPU whose
-memory cannot be read keeps one model loaded at a time.
-
-Each load is logged with memory in use now and after, and `GET /api/ps`
-lists every resident model with its footprint plus a `memory` summary.
-`HFL_MAX_LOADED_MODELS` / `OLLAMA_MAX_LOADED_MODELS` remains available as
-an optional ceiling on the number of models (off by default).
-
-## Concurrency & Backpressure
-
-Local inference backends (llama.cpp, transformers-GPU) share a single
-non-reentrant model instance. HFL protects them with an **in-server
-inference dispatcher** that serialises inference across all loaded
-models (one at a time) with a bounded wait queue:
-
-| Setting | Env var | Default | Meaning |
-|---|---|---|---|
-| Max in-flight | `HFL_QUEUE_MAX_INFLIGHT` | `1` | Parallel requests allowed |
-| Wait queue size | `HFL_QUEUE_MAX_SIZE` | `16` | Requests allowed to wait |
-| Acquire timeout | `HFL_QUEUE_ACQUIRE_TIMEOUT` | `60` | Seconds a request may wait |
-
-When the wait queue is saturated, HFL returns **429** with a structured
-envelope and `Retry-After`:
-
-```json
-{
-  "error": "Inference queue is full",
-  "code": "QUEUE_FULL",
-  "category": "rate_limit",
-  "retryable": true,
-  "details": {"retry_after_seconds": 60, "queue_depth": 1, "max_queued": 1}
-}
-```
-
-When a caller has been queued longer than `HFL_QUEUE_ACQUIRE_TIMEOUT`,
-HFL returns **503** with `code=QUEUE_TIMEOUT`. Every response carries
-`X-Queue-Depth`, `X-Queue-In-Flight`, `X-Queue-Max-Inflight` and
-`X-Queue-Max-Size` so agents can back off proportionally. Live state is
-also available via:
+**Anthropic** — `/v1/messages`
 
 ```bash
-curl http://localhost:11434/healthz
-# { "status":"ok", "models_loaded":[...], "queue_depth":0,
-#   "queue_in_flight":0, "uptime_seconds":12345 }
+curl http://localhost:11434/v1/messages -H "Content-Type: application/json" \
+  -d '{"model": "llama70b", "max_tokens": 256,
+       "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-All three API surfaces (Ollama, OpenAI, Anthropic) share the same
-dispatcher, so a slow call on `/api/chat` correctly blocks
-`/v1/chat/completions` and `/v1/messages`.
+Models can be named by their local name, an alias, or the Hub reference they
+were pulled from (`hf.co/org/repo:QUANT`). The server never downloads on its
+own: `hfl pull` or `hfl serve --model <reference>` does.
 
-## Quantization Levels
+## Reference
 
-| Level | Bits/weight | Quality | Use Case |
-|-------|-------------|---------|----------|
-| Q2_K | ~2.5 | ~80% | Extreme compression |
-| Q3_K_M | ~3.5 | ~87% | Low RAM |
-| **Q4_K_M** | ~4.5 | ~92% | **Default - best balance** |
-| Q5_K_M | ~5.0 | ~96% | High quality |
-| Q6_K | ~6.5 | ~97% | Premium |
-| Q8_0 | ~8.0 | ~98%+ | Maximum quantized quality |
-| F16 | 16.0 | 100% | No quantization |
+<details>
+<summary><b>Configuration</b></summary>
 
-## RAM Requirements
+| Variable | Default | What it does |
+|---|---|---|
+| `HFL_HOME` | `~/.hfl` | Where models, the registry and logs live |
+| `HF_TOKEN` | — | Hugging Face token for gated models (or `hfl login`) |
+| `HFL_MEMORY_BUDGET` | `85` | % of total RAM that may be in use after a load |
+| `HFL_KEEP_ALIVE` | `5m` | How long an idle model stays loaded (`-1` = forever) |
+| `HFL_MAX_LOADED_MODELS` | `0` | Optional ceiling on the number of loaded models |
+| `HFL_LANG` | `en` | CLI language: `en` or `es` |
 
+Settings Ollama also has (`OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
+`OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, …) are read under either
+name. The full list is in [docs/env-vars.md](docs/env-vars.md).
+
+Protect the API with a key: `hfl serve --api-key <secret>`, then send
+`Authorization: Bearer <secret>` or `X-API-Key: <secret>`.
+
+</details>
+
+<details>
+<summary><b>Concurrency and backpressure</b></summary>
+
+llama.cpp and Transformers drive a single model instance that cannot take two
+requests at once, so HFL runs inference one request at a time behind a bounded
+queue, shared by the three APIs:
+
+| Setting | Env var | Default |
+|---|---|---|
+| Requests running at once | `HFL_QUEUE_MAX_INFLIGHT` | `1` |
+| Requests allowed to wait | `HFL_QUEUE_MAX_SIZE` | `16` |
+| Seconds a request may wait | `HFL_QUEUE_ACQUIRE_TIMEOUT` | `60` |
+
+A full queue answers **429** with `Retry-After`; a request that waited too long
+answers **503**. Every response carries `X-Queue-Depth` and related headers, and
+`GET /healthz` reports the live state.
+
+</details>
+
+<details>
+<summary><b>Quantization levels</b></summary>
+
+`Q4_K_M` is the default and the usual balance between size and quality. `Q5_K_M`,
+`Q6_K` and `Q8_0` stay closer to the original model and take more memory; `Q3_K_M`
+and `Q2_K` take less, at a visible cost in quality; `F16` is not quantized.
+HFL tells you before loading whether a model fits — and `hfl recommend` suggests
+the ones that do.
+
+</details>
+
+<details>
+<summary><b>How it works</b></summary>
+
+```text
+hfl pull / run ──▶ Hugging Face Hub ──▶ ~/.hfl/models ──▶ GGUF? ── yes ──▶ llama.cpp
+                   (search, download,                  MLX build (Apple Silicon) ──▶ MLX
+                    license check)                     safetensors ── convert + quantize ──▶ GGUF
+
+hfl serve ──▶ OpenAI · Ollama · Anthropic APIs ──▶ memory-budgeted model set ──▶ one inference at a time
 ```
-RAM needed ≈ (parameters × bits_per_weight) / 8 + 2GB overhead
 
-Example: Llama 3.3 70B with Q4_K_M
-= (70B × 4.5) / 8 + 2GB ≈ 41.4 GB
-```
+The [architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)
+covers the modules, engine selection, the conversion pipeline and every endpoint
+([en español](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html)).
 
-| Model Size | Q4_K_M RAM | Recommended Hardware |
-|------------|------------|---------------------|
-| 7B | ~5 GB | 8 GB RAM |
-| 13B | ~9 GB | 16 GB RAM |
-| 30B | ~20 GB | 32 GB RAM |
-| 70B | ~42 GB | 48 GB+ RAM or GPU |
-
-## Authentication
-
-Configure your HuggingFace token for faster downloads and access to gated models:
-
-```bash
-# Interactive login (recommended - stores token securely)
-hfl login
-
-# Or use environment variable (more private - not persisted)
-export HF_TOKEN=hf_your_token_here
-```
-
-Get your token at: https://huggingface.co/settings/tokens
-
-## Configuration
-
-Environment variables:
-- `HFL_HOME`: Data directory (default: `~/.hfl`)
-- `HF_TOKEN`: HuggingFace token for gated models (alternative to `hfl login`)
-- `HFL_LANG`: Interface language (`en` for English, `es` for Spanish). Defaults to English.
-
-### Language Support
-
-hfl supports multiple languages. Set the `HFL_LANG` environment variable to change the CLI language:
-
-```bash
-# Use Spanish
-export HFL_LANG=es
-hfl --help
-
-# Use English (default)
-export HFL_LANG=en
-hfl --help
-```
-
-Supported languages: English (`en`), Spanish (`es`)
-
-## Known Limitations
-
-This is a v0.15.x beta release (`Development Status :: 4 - Beta`). Known limitations include:
-
-- **vLLM backend is experimental**: Basic implementation without full streaming support
-- **CORS is restrictive by default**: same-origin only; opt in via `cors_allow_all` or explicit `cors_origins`
-- **Windows support**: Not fully tested; Unix-like systems recommended
-
-### API Authentication
-
-The API server supports optional authentication via the `--api-key` flag:
-
-```bash
-# Start server with authentication
-hfl serve --api-key your-secret-key
-
-# Client requests must include the key
-curl -H "Authorization: Bearer your-secret-key" http://localhost:11434/v1/models
-# Or
-curl -H "X-API-Key: your-secret-key" http://localhost:11434/v1/models
-```
+</details>
 
 ## Documentation
 
-Complete architecture documentation with diagrams is available:
+- [Hub-native features](docs/hub-native-features.md) — discover, recommend, pull-smart, verify, bench and more
+- [Environment variables](docs/env-vars.md) — every setting and its default
+- [Apple Silicon and Docker clients](docs/apple-silicon-and-docker-clients.md)
+- [Architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)
+- [Changelog](CHANGELOG.md)
 
-- **[📖 View Architecture Documentation](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)** - Interactive HTML documentation with architecture diagrams, module descriptions, and flow charts
+**Status:** beta — 4,000+ tests at ~90% coverage. Windows builds and installers
+are published, but Windows is less tested than macOS and Linux.
 
-The documentation covers:
-- System architecture and design patterns
-- Module structure and dependencies
-- Inference engine selection logic
-- GGUF conversion pipeline
-- Legal compliance features
-- API endpoints reference
+## Contributing
 
-> **Note:** Documentation is also available in [Spanish](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html).
-
-## Development
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-# Clone and install in development mode
-git clone https://github.com/ggalancs/hfl
-cd hfl
+git clone https://github.com/ggalancs/hfl && cd hfl
 pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=hfl --cov-report=term-missing
-
-# Format code
-ruff format .
-ruff check . --fix
+bash scripts/ci-local.sh        # lint, types and the full test suite, as CI runs them
 ```
 
-## Legal Notices
+If HFL saves you a download–convert–quantize afternoon, a ⭐ helps other people find it.
 
-### Export Compliance
+## Legal notices
 
-hfl only downloads publicly available open-weight models from HuggingFace Hub. Users are responsible for compliance with applicable export control regulations in their jurisdiction.
+**Model licenses.** Models keep their own licenses (Llama, Gemma, OpenRAIL,
+CC-BY-NC, …) and you are responsible for complying with them. HFL shows a
+model's license before downloading it, stores it with the model and records the
+pull's provenance — see `hfl inspect <model>`. Common restrictions include
+non-commercial use only (CC-BY-NC, MRL), attribution (Llama, Gemma) and usage
+restrictions (OpenRAIL).
 
-hfl does not facilitate access to closed-weight or export-controlled model weights.
+**Export compliance.** HFL only downloads publicly available open-weight models
+from the Hugging Face Hub and does not facilitate access to closed-weight or
+export-controlled weights. Users are responsible for complying with the export
+regulations of their jurisdiction.
 
-### Model Licenses
+**Disclaimer.** AI models may generate inaccurate, biased or inappropriate
+content. Users are solely responsible for evaluating and using model outputs.
+See [DISCLAIMER.md](DISCLAIMER.md).
 
-Models downloaded through hfl may have their own license restrictions. hfl displays license information before download and stores it with the model metadata. Users are responsible for complying with model licenses.
-
-Common restrictions include:
-- **Non-commercial use only** (CC-BY-NC, MRL)
-- **Attribution required** (Llama, Gemma)
-- **Usage restrictions** (OpenRAIL)
-
-Use `hfl inspect <model>` to view license details for downloaded models.
-
-### Disclaimer
-
-AI models may generate inaccurate, biased, or inappropriate content. Users are solely responsible for evaluating and using model outputs appropriately. See [DISCLAIMER.md](DISCLAIMER.md) for full details.
-
-## Trademarks
-
-"OpenAI" is a trademark of OpenAI, Inc. "Ollama" is a trademark of Ollama, Inc. "Hugging Face" and the Hugging Face logo are trademarks of Hugging Face, Inc. These marks are used here for identification purposes only.
-
-**hfl is an independent project and is not affiliated with, endorsed by, or officially connected to Hugging Face, Inc., OpenAI, Inc., or Ollama, Inc.** References to these services describe technical interoperability only.
+**Trademarks.** "OpenAI" is a trademark of OpenAI, Inc. "Ollama" is a trademark
+of Ollama, Inc. "Anthropic" is a trademark of Anthropic, PBC. "Hugging Face" and
+the Hugging Face logo are trademarks of Hugging Face, Inc. These marks are used
+for identification only. **HFL is an independent project, not affiliated with,
+endorsed by or officially connected to any of these companies.** References to
+their services describe technical interoperability only.
 
 ## License
 
-hfl is licensed under the **Apache License 2.0** — a permissive, OSI-approved open-source license. You are free to use, modify, distribute, and sell hfl and its derivatives, including commercially, provided you retain the copyright and license notices.
+HFL is licensed under the **Apache License 2.0** — you may use, modify,
+distribute and sell it, including commercially, as long as you keep the
+copyright and license notices. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-hfl ships responsible-use safeguards (license checking, AI disclaimers, provenance tracking, privacy protections, and gating respect). Apache-2.0 does not require you to keep them, but as a project norm we ask that redistributions leave them active. These norms are documented in [DISCLAIMER.md](DISCLAIMER.md), [PRIVACY.md](PRIVACY.md), and [NOTICE-EU-AI-ACT.md](NOTICE-EU-AI-ACT.md).
+HFL ships responsible-use safeguards: license checking, AI disclaimers,
+provenance tracking, privacy protections and respect for gated models.
+Apache-2.0 does not require you to keep them; as a project norm we ask that
+redistributions leave them active. See [DISCLAIMER.md](DISCLAIMER.md),
+[PRIVACY.md](PRIVACY.md) and [NOTICE-EU-AI-ACT.md](NOTICE-EU-AI-ACT.md).
 
-**Model licenses:** hfl's Apache-2.0 license covers hfl itself, not the models you download. Every model keeps its own license (Llama, Gemma, OpenRAIL, CC-BY-NC, etc.) and you are responsible for complying with it. hfl shows license information before download and stores it in the model metadata — see [Model Licenses](#model-licenses) above and `hfl inspect <model>`.
-
-See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for attribution.
+HFL's license covers HFL itself, not the models you download.

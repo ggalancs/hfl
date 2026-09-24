@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """F8 — ``GET /api/compliance/dashboard``.
 
-Aggregates the local registry's metadata into a single envelope that
-Ollama cannot produce: per-license-risk breakdown, gated repos
+Aggregates the local registry's metadata into a single envelope:
+per-license-risk breakdown, gated repos
 without ``HF_TOKEN``, models with no declared license, EU AI Act
 warnings. The HF Hub publishes the underlying metadata; HFL turns
 it into operator-actionable signals.

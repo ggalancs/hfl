@@ -1,8 +1,8 @@
-# HFL — Hub-native features (beyond Ollama)
+# HFL — Hub-native features
 
-hfl is a HuggingFace-Hub-native LLM server. Every feature
-in this guide is something Ollama either doesn't have, or can't have
-without rewriting around its curated registry.
+HFL is built on the Hugging Face Hub itself. The features in this guide
+use the live Hub — its search, file listings, model metadata and licenses —
+to help you find, pull, check and run the right model for your machine.
 
 ---
 
@@ -244,8 +244,8 @@ Supported on the server side: string/list `input`, `instructions`,
 (SSE with `response.created` / `response.output_text.delta` /
 `response.completed` / `[DONE]`) and `stream=false` envelopes.
 
-Not stateful — every request is self-contained, just like Ollama's
-own `/v1/responses` limitation.
+Not stateful — every request is self-contained; the server keeps no
+conversation between calls.
 
 ---
 
@@ -262,6 +262,6 @@ See `docs/env-vars.md` for the full table. relevant additions:
 - `HFL_LLM_LIBRARY` / `OLLAMA_LLM_LIBRARY` — pin auto-selection.
 - `HFL_DEBUG` / `OLLAMA_DEBUG` — DEBUG-level logging.
 
-Drop-in replacement of an Ollama install: most `OLLAMA_*` variables
+Existing Ollama settings carry over: most `OLLAMA_*` variables
 are accepted as fallbacks when the explicit `HFL_*` variant is not
 set.

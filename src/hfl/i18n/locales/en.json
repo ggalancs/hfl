@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "hfl",
-    "description": "Run HuggingFace models locally like Ollama."
+    "description": "Download, run and try any Hugging Face model on your own machine."
   },
   "commands": {
     "pull": {
@@ -386,7 +386,7 @@
     "options": {
       "extras": "Show available optional installation extras"
     },
-    "general_help": "HFL — Run HuggingFace models locally like Ollama.",
+    "general_help": "HFL — Download, run and try any Hugging Face model on your own machine.",
     "usage": "Usage",
     "common_commands": "Common commands",
     "common_pull": "Download a model from HuggingFace Hub",

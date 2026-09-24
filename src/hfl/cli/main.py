@@ -2236,12 +2236,10 @@ def discover(
     page_size: int = typer.Option(20, "--limit", "-l", help=t("commands.discover.options.limit")),
     refresh: bool = typer.Option(False, "--refresh", help=t("commands.discover.options.refresh")),
 ):
-    """filter the HuggingFace Hub catalogue by capability and popularity.
+    """Filter the live Hugging Face Hub by capability and popularity.
 
-    Unlike Ollama's static registry, this hits the live Hub (~1.5M
-    models) and combines filters: family + quantisation + likes +
-    license + multimodal. Cached 5 min on disk (override with
-    ``--refresh``).
+    Combines filters: family + quantisation + likes + license +
+    multimodal. Cached 5 min on disk (override with ``--refresh``).
     """
     from rich.table import Table
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hfl"
 version = "0.20.0"
-description = "Run HuggingFace models locally like Ollama"
+description = "Download, run and try any Hugging Face model on your own machine."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
