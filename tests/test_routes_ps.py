@@ -282,3 +282,23 @@ class TestRoutesPsListsEveryResident:
         assert memory["total_bytes"] > 0
         assert 0 < memory["budget_percent"] <= 100
         assert memory["budget_bytes"] == int(memory["total_bytes"] * memory["budget_percent"] / 100)
+
+
+def test_memory_summary_includes_a_measured_gpu(client, monkeypatch):
+    from hfl.engine.residency import MemoryView
+
+    pytest.importorskip("psutil")
+    gib = 1024**3
+    monkeypatch.setattr(
+        "hfl.engine.residency.current_gpu_memory",
+        lambda: MemoryView(total=24 * gib, in_use=6 * gib, hfl_rss=5 * gib),
+    )
+    gpu = client.get("/api/ps").json()["memory"]["gpu"]
+    assert gpu["total_bytes"] == 24 * gib and gpu["hfl_bytes"] == 5 * gib
+    assert gpu["in_use_percent"] == 25.0
+
+
+def test_no_gpu_key_without_a_discrete_gpu(client, monkeypatch):
+    pytest.importorskip("psutil")
+    monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", lambda: None)
+    assert "gpu" not in client.get("/api/ps").json()["memory"]

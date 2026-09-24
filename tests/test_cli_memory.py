@@ -72,6 +72,19 @@ class TestMemoryCheck:
         assert _check(model_of(60), capsys) == ""
 
 
+def test_a_gpu_refusal_names_the_gpu(memory, model_of, capsys, monkeypatch):
+    from hfl.cli.main import _memory_check_or_exit
+
+    monkeypatch.setattr(
+        "hfl.engine.residency.current_gpu_memory",
+        lambda: MemoryView(total=24 * GB, in_use=1 * GB, hfl_rss=0),
+    )
+    with pytest.raises(typer.Exit):
+        _memory_check_or_exit(model_of(30), 0)
+    out = capsys.readouterr().out
+    assert "GPU" in out and "24.0" in out
+
+
 def test_hfl_run_refuses_before_loading(memory, model_of, monkeypatch, temp_config):
     """The refusal must come before select_engine — nothing is read."""
     from typer.testing import CliRunner
@@ -171,6 +184,20 @@ class TestPsShowsMemory:
     def test_also_with_no_model_loaded(self, monkeypatch):
         result = self._run(monkeypatch, {**self.PAYLOAD, "models": []})
         assert "128.0" in result.stdout
+
+    def test_the_gpu_line_when_the_server_has_one(self, monkeypatch):
+        payload = {**self.PAYLOAD}
+        payload["memory"] = {
+            **self.PAYLOAD["memory"],
+            "gpu": {
+                "total_bytes": 24 * GB,
+                "in_use_bytes": 6 * GB,
+                "in_use_percent": 25.0,
+                "free_within_budget_bytes": int(14.4 * GB),
+            },
+        }
+        result = self._run(monkeypatch, payload)
+        assert "GPU" in result.stdout and "24.0" in result.stdout and "14.4" in result.stdout
 
     def test_an_older_server_without_the_summary(self, monkeypatch):
         result = self._run(monkeypatch, {"models": self.PAYLOAD["models"]})

@@ -237,11 +237,27 @@ class MemoryBudgetExceededError(EngineError):
 
     status_code = 507
 
-    def __init__(self, model_name: str, *, needed: int, plan: object, total: int, budget: float):
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        needed: int,
+        plan: object,
+        total: int,
+        budget: float,
+        gpu_total: int = 0,
+    ):
         gib = 1024**3
-        floor = int(getattr(plan, "floor", 0) or 0)
-        limit = int(getattr(plan, "limit", 0) or 0)
         reason = getattr(plan, "reason", "too_big")
+        on_gpu = getattr(plan, "constraint", "ram") == "gpu" and gpu_total > 0
+        if on_gpu:
+            floor = int(getattr(plan, "gpu_floor", 0) or 0)
+            limit = int(getattr(plan, "gpu_limit", 0) or 0)
+            total = gpu_total
+        else:
+            floor = int(getattr(plan, "floor", 0) or 0)
+            limit = int(getattr(plan, "limit", 0) or 0)
+        where = "GPU memory" if on_gpu else "memory"
         if reason == "blocked":
             headline = (
                 f"Not enough memory to load {model_name} (~{needed / gib:.1f} GB) without "
@@ -252,7 +268,7 @@ class MemoryBudgetExceededError(EngineError):
         lines = []
         if total and limit:
             lines.append(
-                f"Even with every other HFL model unloaded, memory in use would reach "
+                f"Even with every other HFL model unloaded, {where} in use would reach "
                 f"{floor / gib:.1f} of {total / gib:.1f} GB "
                 f"({100.0 * floor / total:.0f}%), over the HFL_MEMORY_BUDGET of "
                 f"{budget * 100:.0f}% ({limit / gib:.1f} GB)."
@@ -265,6 +281,7 @@ class MemoryBudgetExceededError(EngineError):
         super().__init__(headline, " ".join(lines))
         self.model_name = model_name
         self.needed = needed
+        self.on_gpu = on_gpu
         self.floor = floor
         self.limit = limit
         self.total = total

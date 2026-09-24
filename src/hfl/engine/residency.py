@@ -37,6 +37,8 @@ __all__ = [
     "AdmissionPlan",
     "plan_admission",
     "current_memory",
+    "current_gpu_memory",
+    "discrete_gpu_unmeasured",
     "budget_fraction",
     "describe_memory",
 ]
@@ -85,6 +87,13 @@ class AdmissionPlan:
     floor: int = 0
     """Predicted use with every HFL model unloaded and this one loaded —
     the best this machine can do for this model right now."""
+    constraint: str = "ram"
+    """Which memory decides a refusal: ``ram`` or ``gpu``."""
+    gpu_limit: int = 0
+    gpu_used_now: int = 0
+    gpu_used_after: int = 0
+    gpu_floor: int = 0
+    """The same figures for a discrete GPU's memory, when one is measured."""
 
 
 def budget_fraction() -> float:
@@ -120,6 +129,7 @@ def plan_admission(
     residents: list[ResidentView],
     budget: float,
     max_models: int = 0,
+    gpu: MemoryView | None = None,
 ) -> AdmissionPlan:
     """Decide whether a model of ``new_footprint`` bytes may load.
 
@@ -127,48 +137,75 @@ def plan_admission(
     models, least recently used first; wait for busy ones to finish; refuse.
     ``max_models`` > 0 adds a count ceiling (Ollama's
     ``OLLAMA_MAX_LOADED_MODELS``); 0 means memory alone decides.
-    """
-    limit = int(memory.total * budget)
-    accounted = sum(r.footprint for r in residents)
-    others = max(0, memory.in_use - memory.hfl_rss)
-    overhead = max(0, memory.hfl_rss - accounted)  # interpreter, libraries
-    base = others + overhead
-    floor = base + new_footprint
 
-    def used_with(kept: list[ResidentView]) -> int:
-        return base + sum(r.footprint for r in kept) + new_footprint
+    ``gpu`` is a discrete GPU's memory. With one, a model must fit BOTH: its
+    weights and KV cache go to VRAM (full offload is the default), while
+    the process and the OS still take RAM. The same footprint is charged to
+    each — an upper bound on either. Unified memory (Apple Silicon) has no
+    separate pool and passes None.
+    """
+    pools = [("ram", memory)] + ([("gpu", gpu)] if gpu is not None else [])
+    accounted = sum(r.footprint for r in residents)
+
+    def base_of(view: MemoryView) -> int:
+        others = max(0, view.in_use - view.hfl_rss)
+        overhead = max(0, view.hfl_rss - accounted)  # interpreter, libraries, CUDA context
+        return others + overhead
+
+    limits = {name: int(view.total * budget) for name, view in pools}
+    bases = {name: base_of(view) for name, view in pools}
+    floors = {name: bases[name] + new_footprint for name, _ in pools}
+
+    def used_with(kept: list[ResidentView], pool: str = "ram") -> int:
+        return bases[pool] + sum(r.footprint for r in kept) + new_footprint
 
     def count_ok(kept: list[ResidentView]) -> bool:
         return max_models <= 0 or len(kept) + 1 <= max_models
 
+    def over(kept: list[ResidentView]) -> str | None:
+        for name, _ in pools:
+            if used_with(kept, name) > limits[name]:
+                return name
+        return None
+
     def ok(kept: list[ResidentView]) -> bool:
-        return used_with(kept) <= limit and count_ok(kept)
+        return over(kept) is None and count_ok(kept)
 
     def plan(
         fits: bool,
         reason: str,
-        used_after: int,
+        kept: list[ResidentView] | None,
         evict: tuple[str, ...] = (),
         wait_for: tuple[str, ...] = (),
+        constraint: str = "ram",
     ) -> AdmissionPlan:
+        def after(pool: str) -> int:
+            return floors[pool] if kept is None else used_with(kept, pool)
+
         return AdmissionPlan(
             fits,
             evict=evict,
             wait_for=wait_for,
             reason=reason,
-            limit=limit,
+            limit=limits["ram"],
             used_now=memory.in_use,
-            used_after=used_after,
-            floor=floor,
+            used_after=after("ram"),
+            floor=floors["ram"],
+            constraint=constraint,
+            gpu_limit=limits.get("gpu", 0),
+            gpu_used_now=gpu.in_use if gpu is not None else 0,
+            gpu_used_after=after("gpu") if gpu is not None else 0,
+            gpu_floor=floors.get("gpu", 0),
         )
 
-    if floor > limit:
-        # Not even with every HFL model gone. Nothing to evict or wait for.
-        return plan(False, "too_big", floor)
+    for name, _ in pools:
+        if floors[name] > limits[name]:
+            # Not even with every HFL model gone. Nothing to evict or wait for.
+            return plan(False, "too_big", None, constraint=name)
 
     kept = list(residents)
     if ok(kept):
-        return plan(True, "fits", used_with(kept))
+        return plan(True, "fits", kept)
 
     evict: list[str] = []
     for victim in sorted(
@@ -179,7 +216,7 @@ def plan_admission(
         kept.remove(victim)
         evict.append(victim.name)
     if ok(kept):
-        return plan(True, "evict", used_with(kept), evict=tuple(evict))
+        return plan(True, "evict", kept, evict=tuple(evict))
 
     wait: list[str] = []
     for victim in sorted((r for r in kept if r.busy and not r.mine), key=lambda r: r.last_used):
@@ -188,9 +225,94 @@ def plan_admission(
         kept.remove(victim)
         wait.append(victim.name)
     if ok(kept):
-        return plan(False, "wait", used_with(kept), evict=tuple(evict), wait_for=tuple(wait))
+        return plan(False, "wait", kept, evict=tuple(evict), wait_for=tuple(wait))
     # Only models the loading request itself holds stand in the way.
-    return plan(False, "blocked", floor, evict=tuple(evict))
+    return plan(False, "blocked", None, evict=tuple(evict), constraint=over(kept) or "ram")
+
+
+# ----------------------------------------------------------------------
+# Discrete GPU memory
+# ----------------------------------------------------------------------
+
+_MIB = 1024**2
+
+
+def _nvidia_smi(args: list[str]) -> list[list[str]] | None:
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, *args, "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("nvidia-smi failed: %s", exc)
+        return None
+    return [[cell.strip() for cell in line.split(",")] for line in out.splitlines() if line.strip()]
+
+
+def current_gpu_memory() -> MemoryView | None:
+    """NVIDIA memory across all GPUs, with this process's share, or None.
+
+    Read from ``nvidia-smi`` (installed with the driver) rather than torch:
+    llama.cpp's CUDA build puts models in VRAM without torch present. All
+    GPUs are summed, because llama.cpp splits layers across them.
+    """
+    gpus = _nvidia_smi(["--query-gpu=memory.total,memory.used"])
+    if not gpus:
+        return None
+    try:
+        total = sum(int(float(row[0])) for row in gpus) * _MIB
+        used = sum(int(float(row[1])) for row in gpus) * _MIB
+    except (ValueError, IndexError):
+        return None
+    mine = 0
+    for row in _nvidia_smi(["--query-compute-apps=pid,used_memory"]) or []:
+        try:
+            if int(row[0]) == os.getpid():
+                mine += int(float(row[1])) * _MIB
+        except (ValueError, IndexError):
+            continue
+    return MemoryView(total=total, in_use=used, hfl_rss=mine)
+
+
+_UNMEASURED_GPU: bool | None = None
+
+
+def discrete_gpu_unmeasured() -> bool:
+    """A GPU that models may be offloaded to, whose memory we cannot read.
+
+    ROCm, or CUDA without ``nvidia-smi``. Admission by RAM alone would then
+    put several models into a VRAM it cannot see, so the caller falls back
+    to one resident model. Cached: the answer does not change while the
+    process runs, and probing may import torch.
+    """
+    global _UNMEASURED_GPU
+    if _UNMEASURED_GPU is not None:
+        return _UNMEASURED_GPU
+    import importlib.util
+    import shutil
+
+    unmeasured = False
+    if current_gpu_memory() is None:
+        if shutil.which("rocm-smi") is not None:
+            unmeasured = True
+        elif importlib.util.find_spec("torch") is not None:
+            try:
+                import torch
+
+                unmeasured = bool(torch.cuda.is_available() or getattr(torch.version, "hip", None))
+            except Exception:  # pragma: no cover - broken torch install
+                unmeasured = False
+    _UNMEASURED_GPU = unmeasured
+    return unmeasured
 
 
 def _gb(n: int) -> str:
@@ -230,5 +352,5 @@ def check_standalone_load(model_path: str, n_ctx: int = 0) -> StandaloneCheck:
     memory = current_memory()
     if disabled or memory is None or not fp.known:
         return StandaloneCheck(fp.total_bytes, fp.kv_known, memory, None, budget)
-    plan = plan_admission(fp.total_bytes, memory, [], budget)
+    plan = plan_admission(fp.total_bytes, memory, [], budget, gpu=current_gpu_memory())
     return StandaloneCheck(fp.total_bytes, fp.kv_known, memory, plan, budget)

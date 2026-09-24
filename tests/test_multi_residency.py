@@ -128,6 +128,9 @@ def world(tmp_path, temp_config, monkeypatch):
         )
         monkeypatch.setattr(model_loader, "_measure_loaded", lambda e, m: w.sizes[m.name] * GB)
         monkeypatch.setattr("hfl.engine.residency.current_memory", w.memory)
+        # Hermetic: no discrete GPU unless a test installs one.
+        monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", lambda: None)
+        monkeypatch.setattr("hfl.engine.residency.discrete_gpu_unmeasured", lambda: False)
         made["w"] = w
         return w
 
@@ -541,3 +544,67 @@ def test_a_preloaded_model_gets_a_keep_alive_deadline(world):
     state.engine = engine
     state.current_model = w.manifests["a"]
     assert state.keep_alive_deadline_for("a") is not None
+
+
+# ----------------------------------------------------------------------
+# Discrete GPUs: the limit is VRAM, not RAM
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_discrete_gpu_limits_residency_even_with_ram_to_spare(world, monkeypatch):
+    """128 GB of RAM and a 32 GB card (27.2 GB at 85%): two 10 GB models
+    fit the card, a third must evict one — RAM alone would have kept all
+    three and the third load would have failed in CUDA."""
+    from hfl.api.state import get_state
+
+    w = world({"a": 10, "b": 10, "c": 10}, others=10, total=128)
+
+    def gpu():
+        mine = sum(r.footprint for r in get_state().resident_models())
+        return MemoryView(total=32 * GB, in_use=1 * GB + mine, hfl_rss=mine)
+
+    monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", gpu)
+    await _load("a")
+    await _load("b")
+    await _load("c")
+    assert {r.name for r in get_state().resident_models()} == {"b", "c"}
+    assert w.engines["a"][0].unloaded
+    # Before c was allocated: evicting afterwards is too late on a real
+    # card, where c's load itself runs out of VRAM.
+    assert w.events.index("unload a") < w.events.index("new c")
+
+
+@pytest.mark.asyncio
+async def test_a_model_larger_than_the_card_is_refused_and_says_gpu(world, monkeypatch):
+    from hfl.exceptions import MemoryBudgetExceededError
+
+    world({"big": 30}, others=10, total=128)
+    monkeypatch.setattr(
+        "hfl.engine.residency.current_gpu_memory",
+        lambda: MemoryView(total=24 * GB, in_use=1 * GB, hfl_rss=0),
+    )
+    with pytest.raises(MemoryBudgetExceededError, match="GPU memory") as info:
+        await _load("big")
+    assert info.value.on_gpu
+
+
+@pytest.mark.asyncio
+async def test_an_unmeasurable_gpu_falls_back_to_one_model(world, monkeypatch):
+    w = world({"a": 1, "b": 1})
+    monkeypatch.setattr("hfl.engine.residency.discrete_gpu_unmeasured", lambda: True)
+    await _load("a")
+    await _load("b")
+    assert w.engines["a"][0].unloaded
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_ceiling_wins_over_the_unmeasured_gpu_fallback(world, monkeypatch):
+    from hfl.config import config
+
+    w = world({"a": 1, "b": 1})
+    monkeypatch.setattr("hfl.engine.residency.discrete_gpu_unmeasured", lambda: True)
+    monkeypatch.setattr(config, "max_loaded_models", 2)
+    await _load("a")
+    await _load("b")
+    assert not w.engines["a"][0].unloaded

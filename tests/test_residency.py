@@ -238,3 +238,95 @@ def test_planner_invariants_over_random_scenarios():
         if plan.reason == "wait":
             assert set(plan.wait_for) <= {r.name for r in residents if r.busy}
     assert checked > 500, "the scenarios never exercised an admitted load"
+
+
+class TestGPUPool:
+    def test_ram_fits_but_the_card_does_not(self):
+        plan = plan_admission(
+            10 * GB,
+            mem(total=128, in_use=40, rss=20),
+            [res("a", 10, 1), res("b", 10, 2)],
+            0.85,
+            gpu=MemoryView(total=32 * GB, in_use=21 * GB, hfl_rss=20 * GB),
+        )
+        # GPU: 1 other + a 10 + b 10 + new 10 = 31 > 27.2 -> drop a -> 21.
+        assert plan.fits and plan.evict == ("a",)
+        assert plan.gpu_used_after <= plan.gpu_limit
+
+    def test_too_big_for_the_card_names_the_gpu(self):
+        plan = plan_admission(
+            30 * GB,
+            mem(total=128, in_use=20, rss=0),
+            [],
+            0.85,
+            gpu=MemoryView(total=24 * GB, in_use=1 * GB, hfl_rss=0),
+        )
+        assert plan.reason == "too_big" and plan.constraint == "gpu"
+        assert plan.gpu_floor == 31 * GB
+
+    def test_without_a_gpu_nothing_changes(self):
+        with_none = plan_admission(10 * GB, mem(), [res("a", 10, 1)], 0.85, gpu=None)
+        plain = plan_admission(10 * GB, mem(), [res("a", 10, 1)], 0.85)
+        assert with_none == plain
+
+
+class TestNvidiaSmi:
+    @staticmethod
+    def _smi(monkeypatch, outputs):
+        import subprocess
+
+        from hfl.engine import residency
+
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            query = cmd[1]
+            if query not in outputs:
+                raise subprocess.CalledProcessError(1, cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=outputs[query], stderr="")
+
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+        monkeypatch.setattr(subprocess, "run", run)
+        return residency, calls
+
+    def test_two_cards_are_summed_and_our_share_found(self, monkeypatch):
+        import os
+
+        residency, _ = self._smi(
+            monkeypatch,
+            {
+                "--query-gpu=memory.total,memory.used": "24576, 2048\n24576, 1024\n",
+                "--query-compute-apps=pid,used_memory": f"{os.getpid()}, 1500\n999999, 300\n",
+            },
+        )
+        view = residency.current_gpu_memory()
+        mib = 1024**2
+        assert view == MemoryView(total=49152 * mib, in_use=3072 * mib, hfl_rss=1500 * mib)
+
+    def test_a_failing_nvidia_smi_is_no_measurement(self, monkeypatch):
+        residency, _ = self._smi(monkeypatch, {})
+        assert residency.current_gpu_memory() is None
+
+    def test_no_nvidia_smi_is_no_measurement(self, monkeypatch):
+        from hfl.engine import residency
+
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        assert residency.current_gpu_memory() is None
+
+    def test_rocm_is_a_gpu_we_cannot_measure(self, monkeypatch):
+        from hfl.engine import residency
+
+        monkeypatch.setattr(residency, "_UNMEASURED_GPU", None)
+        monkeypatch.setattr(residency, "current_gpu_memory", lambda: None)
+        monkeypatch.setattr(
+            "shutil.which", lambda name: "/opt/rocm/bin/rocm-smi" if name == "rocm-smi" else None
+        )
+        assert residency.discrete_gpu_unmeasured() is True
+
+    def test_a_measured_gpu_is_not_unmeasured(self, monkeypatch):
+        from hfl.engine import residency
+
+        monkeypatch.setattr(residency, "_UNMEASURED_GPU", None)
+        monkeypatch.setattr(residency, "current_gpu_memory", lambda: MemoryView(1, 0, 0))
+        assert residency.discrete_gpu_unmeasured() is False

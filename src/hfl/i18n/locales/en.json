@@ -285,7 +285,8 @@
     "no_sessions": "No saved sessions yet. Start one with: hfl run <model> --session <name>",
     "memory_report": "Memory: {in_use} of {total} GB in use ({pct}%). {model} needs ~{need} GB → after loading, {after} GB in use ({after_pct}%); budget {budget}%.",
     "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check.",
-    "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB"
+    "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB",
+    "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB"
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",
@@ -328,7 +329,8 @@
     "hub_unreachable": "Cannot reach huggingface.co — you appear to be offline.",
     "hub_unreachable_hint": "Models you have already pulled keep working: hfl list, hfl run <model>, hfl serve.",
     "memory_refused": "Not enough memory for {model}: it needs ~{need} GB, and the machine would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%.",
-    "memory_refused_hint": "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context (--ctx 8192), closing other programs, or raising HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 skips this check."
+    "memory_refused_hint": "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context (--ctx 8192), closing other programs, or raising HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 skips this check.",
+    "memory_refused_gpu": "Not enough GPU memory for {model}: it needs ~{need} GB, and the GPU would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%."
   },
   "warnings": {
     "download_cancelled": "Download cancelled.",

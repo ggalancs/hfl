@@ -201,14 +201,14 @@ async def list_running() -> dict[str, Any]:
 
 def _memory_summary(state: Any) -> dict[str, Any] | None:
     """The machine's memory and the residency budget, in bytes."""
-    from hfl.engine.residency import budget_fraction, current_memory
+    from hfl.engine.residency import budget_fraction, current_gpu_memory, current_memory
 
     memory = current_memory()
     if memory is None:
         return None
     budget = budget_fraction()
     models = sum(r.footprint for r in state.resident_models())
-    return {
+    summary: dict[str, Any] = {
         "total_bytes": memory.total,
         "in_use_bytes": memory.in_use,
         "in_use_percent": round(100.0 * memory.in_use / memory.total, 1) if memory.total else 0.0,
@@ -217,3 +217,14 @@ def _memory_summary(state: Any) -> dict[str, Any] | None:
         "free_within_budget_bytes": max(0, int(memory.total * budget) - memory.in_use),
         "models_bytes": models,
     }
+    gpu = current_gpu_memory()
+    if gpu is not None:
+        summary["gpu"] = {
+            "total_bytes": gpu.total,
+            "in_use_bytes": gpu.in_use,
+            "in_use_percent": round(100.0 * gpu.in_use / gpu.total, 1) if gpu.total else 0.0,
+            "budget_bytes": int(gpu.total * budget),
+            "free_within_budget_bytes": max(0, int(gpu.total * budget) - gpu.in_use),
+            "hfl_bytes": gpu.hfl_rss,
+        }
+    return summary

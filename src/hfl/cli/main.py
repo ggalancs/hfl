@@ -508,7 +508,16 @@ def _memory_check_or_exit(manifest: Any, n_ctx: int) -> None:
     if check.plan.fits:
         console.print(f"[dim]{escape(t('messages.memory_report', **fields))}[/]")
         return
-    console.print(f"[red]{escape(t('errors.memory_refused', **fields))}[/]")
+    if check.plan.constraint == "gpu" and check.plan.gpu_limit:
+        gpu_total = int(check.plan.gpu_limit / check.budget) or 1
+        fields.update(
+            after=f"{check.plan.gpu_floor / gib:.1f}",
+            total=f"{gpu_total / gib:.1f}",
+            after_pct=f"{100 * check.plan.gpu_floor / gpu_total:.0f}",
+        )
+        console.print(f"[red]{escape(t('errors.memory_refused_gpu', **fields))}[/]")
+    else:
+        console.print(f"[red]{escape(t('errors.memory_refused', **fields))}[/]")
     console.print(escape(t("errors.memory_refused_hint")))
     raise typer.Exit(1)
 
@@ -1074,6 +1083,18 @@ def _print_memory_summary(memory: Any) -> None:
         ),
         markup=False,
     )
+    gpu = memory.get("gpu")
+    if isinstance(gpu, dict) and gpu.get("total_bytes"):
+        console.print(
+            t(
+                "messages.memory_summary_gpu",
+                in_use=f"{gpu.get('in_use_bytes', 0) / gib:.1f}",
+                total=f"{gpu['total_bytes'] / gib:.1f}",
+                pct=f"{gpu.get('in_use_percent', 0):.0f}",
+                free=f"{gpu.get('free_within_budget_bytes', 0) / gib:.1f}",
+            ),
+            markup=False,
+        )
 
 
 @app.command()

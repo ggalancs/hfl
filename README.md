@@ -415,6 +415,10 @@ in use after the load, other programs included (default `85%`):
 - it cannot fit even alone → the load is refused with the numbers (HTTP
   507), before anything is unloaded.
 
+On a machine with an NVIDIA GPU the model must also fit the card's memory
+(read through `nvidia-smi`), since that is where the weights go; a GPU whose
+memory cannot be read keeps one model loaded at a time.
+
 Each load is logged with memory in use now and after, and `GET /api/ps`
 lists every resident model with its footprint plus a `memory` summary.
 `HFL_MAX_LOADED_MODELS` / `OLLAMA_MAX_LOADED_MODELS` remains available as

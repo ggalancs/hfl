@@ -390,20 +390,22 @@ class ServerState:
     async def _make_room(self, name: str, estimate: int, deadline: float) -> "AdmissionPlan | None":
         """Evict until ``estimate`` bytes fit, waiting for busy models if
         that is what it takes. Raises when it cannot fit."""
-        from hfl.config import config
         from hfl.engine.residency import (
             MemoryView,
             budget_fraction,
+            current_gpu_memory,
             current_memory,
             describe_memory,
             plan_admission,
         )
         from hfl.exceptions import MemoryBudgetExceededError, ModelsBusyError
 
-        max_models = int(getattr(config, "max_loaded_models", 0) or 0)
+        max_models = _effective_max_models()
         while True:
             self._lease_released.clear()
-            memory = None if _memory_checks_disabled() or estimate <= 0 else current_memory()
+            checks = not _memory_checks_disabled() and estimate > 0
+            memory = current_memory() if checks else None
+            gpu = current_gpu_memory() if checks else None
             views = self._views(exclude=name)
             if memory is None:
                 # No measurement (psutil absent, size unknown, or checks
@@ -412,14 +414,22 @@ class ServerState:
                 counted = [replace(v, footprint=0) for v in views]
                 plan = plan_admission(0, MemoryView(1, 0, 0), counted, 1.0, max_models)
             else:
-                plan = plan_admission(estimate, memory, views, budget_fraction(), max_models)
+                plan = plan_admission(
+                    estimate, memory, views, budget_fraction(), max_models, gpu=gpu
+                )
                 logger.info(
-                    "Loading %s (~%.1f GB): %s; after load ~%.1f GB (%.0f%%). Resident: %s",
+                    "Loading %s (~%.1f GB): %s; after load ~%.1f GB (%.0f%%)%s. Resident: %s",
                     name,
                     estimate / 1024**3,
                     describe_memory(memory, budget_fraction()),
                     plan.used_after / 1024**3,
                     100.0 * plan.used_after / memory.total if memory.total else 0.0,
+                    (
+                        f"; GPU {describe_memory(gpu, budget_fraction())}, after load "
+                        f"~{plan.gpu_used_after / 1024**3:.1f} GB"
+                        if gpu is not None
+                        else ""
+                    ),
                     ", ".join(f"{v.name} ({v.footprint / 1024**3:.1f} GB)" for v in views)
                     or "none",
                 )
@@ -450,14 +460,19 @@ class ServerState:
                 plan=plan,
                 total=memory.total if memory is not None else 0,
                 budget=budget_fraction(),
+                gpu_total=gpu.total if gpu is not None else 0,
             )
 
     async def _reconcile(self, name: str) -> None:
         """After a load, the measured footprint may exceed the estimate
         (llama.cpp can open a larger context than assumed). Unload idle
         models until the budget holds again; never the one just loaded."""
-        from hfl.config import config
-        from hfl.engine.residency import budget_fraction, current_memory, plan_admission
+        from hfl.engine.residency import (
+            budget_fraction,
+            current_gpu_memory,
+            current_memory,
+            plan_admission,
+        )
 
         if _memory_checks_disabled():
             return
@@ -468,10 +483,12 @@ class ServerState:
         loaded = self._residents.get(name)
         if loaded is None:
             return
-        max_models = int(getattr(config, "max_loaded_models", 0) or 0)
+        max_models = _effective_max_models()
         # The loaded model is not in ``views`` and counts as the "+1" the
         # planner adds for the incoming model; its memory is in hfl_rss.
-        plan = plan_admission(0, memory, views, budget_fraction(), max_models)
+        plan = plan_admission(
+            0, memory, views, budget_fraction(), max_models, gpu=current_gpu_memory()
+        )
         if plan.fits:
             for victim in plan.evict:
                 resident = self._residents.get(victim)
@@ -973,6 +990,37 @@ def _default_keep_alive() -> "timedelta | None":
     if is_never_expire(delta):
         return None
     return delta
+
+
+_WARNED_UNMEASURED_GPU = False
+
+
+def _effective_max_models() -> int:
+    """HFL_MAX_LOADED_MODELS, or 1 on a discrete GPU whose memory cannot be
+    read (ROCm, CUDA without nvidia-smi).
+
+    Admission by RAM alone would put several models into a VRAM it cannot
+    see — on such a host the pre-multi-residency behaviour, one model at a
+    time, is the safe one. An explicit HFL_MAX_LOADED_MODELS still wins:
+    the operator knows their card.
+    """
+    global _WARNED_UNMEASURED_GPU
+    from hfl.config import config
+
+    configured = int(getattr(config, "max_loaded_models", 0) or 0)
+    if configured or _memory_checks_disabled():
+        return configured
+    from hfl.engine.residency import discrete_gpu_unmeasured
+
+    if not discrete_gpu_unmeasured():
+        return 0
+    if not _WARNED_UNMEASURED_GPU:
+        _WARNED_UNMEASURED_GPU = True
+        logger.warning(
+            "A GPU is present but its memory cannot be read (no nvidia-smi); keeping one "
+            "model loaded at a time. Set HFL_MAX_LOADED_MODELS to allow more."
+        )
+    return 1
 
 
 def _memory_checks_disabled() -> bool:
