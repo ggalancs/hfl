@@ -162,6 +162,31 @@ async def _license_gate(repo_id: str) -> tuple["LicenseInfo", dict[str, Any] | N
     return info, error_event
 
 
+def _hub_answered(exc: BaseException, model: str) -> dict[str, str] | None:
+    """An error event for a repo the Hub reported unknown or gated, else None."""
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+    # GatedRepoError subclasses RepositoryNotFoundError: check it first.
+    if isinstance(exc, GatedRepoError):
+        return {
+            "status": "error",
+            "error": (
+                f"{model} is gated on the Hugging Face Hub: request access on its "
+                "page there, then set HF_TOKEN (or run `hfl login`)."
+            ),
+            "code": "gated",
+        }
+    if isinstance(exc, RepositoryNotFoundError) or (
+        isinstance(exc, ValueError) and str(exc).startswith("Model not found")
+    ):
+        return {
+            "status": "error",
+            "error": f"model not found on the Hugging Face Hub: {model}",
+            "code": "not_found",
+        }
+    return None
+
+
 def _record_server_pull(
     resolved: "ResolvedModel", local_path: Any, license_info: "LicenseInfo", policy: str
 ) -> None:
@@ -269,6 +294,13 @@ async def _run_pull_streaming(
             # answer 503 (the upstream is unavailable) instead of 500.
             logger.info("pull of %r: Hub unreachable (%s)", req.model, type(exc).__name__)
             yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
+            return
+        answered = _hub_answered(exc, req.model)
+        if answered is not None:
+            # The Hub answered: an unknown or gated repo is the caller's to
+            # fix, not a server fault (it used to be a 500 with a traceback).
+            logger.info("pull of %r: %s", req.model, answered["code"])
+            yield json.dumps(answered, separators=(",", ":")) + "\n"
             return
         detail = log_internal_failure(logger, f"resolving {req.model!r}", exc)
         yield _event("error", error=detail)
@@ -414,6 +446,8 @@ async def pull_model_route(req: PullRequest, request: Request) -> StreamingRespo
                 # network returns. 500 claimed the server itself had broken.
                 status_code = {
                     "license_not_accepted": 403,
+                    "gated": 403,
+                    "not_found": 404,
                     "hub_unreachable": 503,
                 }.get(event.get("code", ""), 500)
                 return JSONResponse(status_code=status_code, content=event)

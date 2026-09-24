@@ -76,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`/api/pull` of a repo that does not exist answered 500** and logged a
+  traceback (already so in 0.20.0). It now answers 404 `not_found`, and a
+  gated repo answers 403 `gated` with how to get access; the streaming
+  response ends with the same `code`.
 - **Hub calls could hang forever** on a network that drops packets
   (captive portal, dead VPN): `huggingface_hub` sends `timeout=None`.
   Every Hub call is now bounded; `hfl search`, `hfl pull`, `/api/pull`,
