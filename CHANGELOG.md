@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values typed from each tool's schema and code kept byte for byte. A model
   whose name hides its family (an alias like `coder`) has every native
   tool-call format tried when the request carries tools.
+- **Codex could not work through `/v1/responses`.** The stream carried only
+  `response.created` and `response.completed`; agents build the turn from
+  the `response.output_item.*` events, so every turn read as empty. The
+  stream now has the full item grammar (message and function-call items,
+  text and argument deltas, `sequence_number`). Tool history sent back as
+  `function_call` / `function_call_output` items reaches the model — it
+  used to arrive as empty user messages — flat Responses tool definitions
+  are converted for the chat template, hosted tools (`web_search`, ...) are
+  dropped, and the `developer` role maps to `system`. Verified with Codex
+  0.156.1 fixing a bug through a local Qwen3-Coder.
 
 ### Internal
 

@@ -10,6 +10,7 @@ without a new engine.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -427,3 +428,144 @@ class TestResponsesDefaults:
 
         cfg = _build_gen_config(ResponsesRequest(model="m", input="hi", max_output_tokens=64))
         assert cfg.max_tokens == 64
+
+
+class TestResponsesForAgents:
+    """What an agent on the Responses API (Codex) needs, found by running
+    Codex against HFL: it builds the turn from ``response.output_item.*``
+    events — a stream with only created/completed reads as an empty turn —
+    and sends the tool history back as ``function_call`` /
+    ``function_call_output`` items with flat tool definitions."""
+
+    READ = {
+        "type": "function",
+        "name": "Read",
+        "description": "Read a file",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+    }
+
+    def _stream(self, client, manifest, tokens, **body):
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        engine.chat_stream = MagicMock(return_value=iter(list(tokens)))
+        state.engine = engine
+        state.current_model = manifest
+        response = client.post(
+            "/v1/responses",
+            json={"model": manifest.name, "input": "hi", "stream": True, **body},
+        )
+        return engine, _parse_sse_events(response.text)
+
+    def test_a_text_turn_streams_its_message_item(self, client, llm_manifest):
+        _, events = self._stream(client, llm_manifest, ["Hel", "lo"])
+        types = [e["type"] for e in events]
+        assert types == [
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.output_text.delta",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.content_part.done",
+            "response.output_item.done",
+            "response.completed",
+        ]
+        added = events[2]["item"]
+        done = events[8]["item"]
+        assert added["type"] == "message" and added["id"] == done["id"]
+        assert all(e["item_id"] == added["id"] for e in events[3:8])
+        assert events[6]["text"] == "Hello"
+        assert done["content"] == [{"type": "output_text", "text": "Hello", "annotations": []}]
+        assert [e["sequence_number"] for e in events] == list(range(len(events)))
+
+    def test_a_tool_turn_streams_its_function_call_item(self, client, llm_manifest):
+        marker = '<tool_call>{"name": "Read", "arguments": {"path": "a.py"}}</tool_call>'
+        _, events = self._stream(
+            client, llm_manifest, [marker[:20], marker[20:]], tools=[self.READ]
+        )
+        types = [e["type"] for e in events]
+        assert types == [
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "response.completed",
+        ]
+        item = events[5]["item"]
+        assert item["type"] == "function_call" and item["name"] == "Read"
+        assert json.loads(item["arguments"]) == {"path": "a.py"}
+        assert item["call_id"].startswith("call_")
+        assert events[4]["arguments"] == item["arguments"]
+        assert events[-1]["response"]["output"] == [item]
+        assert "<tool_call>" not in json.dumps(events)
+
+    def test_flat_tools_reach_the_engine_nested_and_others_are_dropped(self, client, llm_manifest):
+        engine, _ = self._stream(
+            client,
+            llm_manifest,
+            ["ok"],
+            tools=[self.READ, {"type": "web_search"}, {"type": "namespace", "name": "mcp"}],
+        )
+        tools = engine.chat_stream.call_args.kwargs["tools"]
+        assert tools == [
+            {
+                "type": "function",
+                "function": {
+                    "name": "Read",
+                    "description": "Read a file",
+                    "parameters": self.READ["parameters"],
+                },
+            }
+        ]
+
+    def test_the_tool_history_reaches_the_model(self, client, llm_manifest):
+        engine, _ = self._stream(
+            client,
+            llm_manifest,
+            ["done"],
+            tools=[self.READ],
+            input=[
+                {"type": "message", "role": "developer", "content": "Be brief."},
+                {"type": "message", "role": "user", "content": "Read a.py"},
+                {"type": "reasoning", "summary": []},
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "Read",
+                    "arguments": '{"path": "a.py"}',
+                },
+                {"type": "function_call_output", "call_id": "call_1", "output": "x = 1"},
+            ],
+        )
+        messages = engine.chat_stream.call_args.args[0]
+        assert [(m.role, m.content) for m in messages] == [
+            ("system", "Be brief."),
+            ("user", "Read a.py"),
+            ("assistant", ""),
+            ("tool", "x = 1"),
+        ]
+        assert messages[2].tool_calls == [
+            {"id": "call_1", "function": {"name": "Read", "arguments": {"path": "a.py"}}}
+        ]
+        assert messages[3].tool_call_id == "call_1"
+        assert messages[3].name == "Read"
+
+    def test_consecutive_calls_share_one_assistant_turn(self, client, llm_manifest):
+        engine, _ = self._stream(
+            client,
+            llm_manifest,
+            ["done"],
+            tools=[self.READ],
+            input=[
+                {"type": "function_call", "call_id": "c1", "name": "Read", "arguments": "{}"},
+                {"type": "function_call", "call_id": "c2", "name": "Read", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "c1", "output": "1"},
+                {"type": "function_call_output", "call_id": "c2", "output": "2"},
+            ],
+        )
+        messages = engine.chat_stream.call_args.args[0]
+        assert [m.role for m in messages] == ["assistant", "tool", "tool"]
+        assert [c["id"] for c in messages[0].tool_calls] == ["c1", "c2"]

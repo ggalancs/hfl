@@ -98,6 +98,9 @@ def _input_to_messages(
       OpenAI multimodal shape) is reduced by concatenating the
       ``input_text`` / ``text`` fields; image parts are dropped here
       because /v1/responses' image support is not in scope yet.
+    - ``function_call`` / ``function_call_output`` items become an
+      assistant turn with ``tool_calls`` and ``tool`` results; the
+      ``developer`` role becomes ``system``; ``reasoning`` items are skipped.
     - ``instructions`` is prepended as a ``system`` message when
       present.
     """
@@ -109,28 +112,101 @@ def _input_to_messages(
         messages.append(ChatMessage(role="user", content=input_value))
         return messages
 
+    # Agents send the whole turn history as typed items (``store`` false):
+    # earlier tool calls as ``function_call`` and their results as
+    # ``function_call_output``. Consecutive calls belong to one assistant
+    # turn; ``reasoning`` items carry nothing a local model can use.
+    call_names: dict[str, str] = {}
     for raw in input_value:
+        kind = raw.get("type")
+        if kind == "reasoning":
+            continue
+        if kind == "function_call":
+            call_id = str(raw.get("call_id") or "")
+            name = str(raw.get("name") or "")
+            call_names[call_id] = name
+            call = {"id": call_id, "function": {"name": name, "arguments": _arguments(raw)}}
+            last = messages[-1] if messages else None
+            if last is not None and last.role == "assistant" and last.tool_calls:
+                last.tool_calls.append(call)
+            else:
+                messages.append(ChatMessage(role="assistant", content="", tool_calls=[call]))
+            continue
+        if kind == "function_call_output":
+            call_id = str(raw.get("call_id") or "")
+            messages.append(
+                ChatMessage(
+                    role="tool",
+                    content=_content_text(raw.get("output")),
+                    tool_call_id=call_id,
+                    name=call_names.get(call_id),
+                )
+            )
+            continue
         role = str(raw.get("role") or "user")
-        content = raw.get("content")
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            chunks: list[str] = []
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                # OpenAI uses ``input_text``/``output_text``; we accept
-                # both plus the legacy ``text`` shape.
-                ptype = part.get("type")
-                if ptype in {"input_text", "output_text", "text"}:
-                    txt = part.get("text") or ""
-                    if isinstance(txt, str):
-                        chunks.append(txt)
-            text = "".join(chunks)
-        else:
-            text = ""
-        messages.append(ChatMessage(role=role, content=text))
+        if role == "developer":
+            role = "system"  # chat templates know no "developer" role
+        messages.append(ChatMessage(role=role, content=_content_text(raw.get("content"))))
     return messages
+
+
+def _content_text(content: Any) -> str:
+    """Text of a Responses ``content``: a string, or a list of typed parts
+    (``input_text`` / ``output_text`` / legacy ``text``; images dropped)."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    chunks: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") in {"input_text", "output_text", "text"}:
+            txt = part.get("text") or ""
+            if isinstance(txt, str):
+                chunks.append(txt)
+    return "".join(chunks)
+
+
+def _arguments(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("arguments")
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else {}
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _chat_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Responses tools in the chat-completions shape the engines expect.
+
+    The Responses API defines function tools flat (``{"type": "function",
+    "name", "parameters"}``); chat templates read ``tool["function"]``.
+    Hosted tools (``web_search``, ``namespace``, ...) run on OpenAI's side
+    and have no local meaning, so they are dropped.
+    """
+    if not tools:
+        return None
+    out: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict) or tool.get("type") != "function":
+            continue
+        if isinstance(tool.get("function"), dict):
+            out.append(tool)
+            continue
+        if not tool.get("name"):
+            continue
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description") or "",
+                    "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+                },
+            }
+        )
+    return out or None
 
 
 def _resolve_thinking(reasoning: dict[str, Any] | None) -> str | None:
@@ -167,6 +243,60 @@ def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
     return cfg
 
 
+def _message_item(item_id: str, text: str, status: str = "completed") -> dict[str, Any]:
+    content = [{"type": "output_text", "text": text, "annotations": []}] if text else []
+    return {
+        "type": "message",
+        "id": item_id,
+        "role": "assistant",
+        "status": status,
+        "content": content,
+    }
+
+
+def _function_call_items(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for call in tool_calls:
+        fn = call.get("function") or {}
+        args = fn.get("arguments")
+        if not isinstance(args, str):
+            args = json.dumps(args, ensure_ascii=False)
+        items.append(
+            {
+                "type": "function_call",
+                "id": f"fc_{uuid.uuid4().hex[:24]}",
+                "call_id": call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+                "name": fn.get("name") or "",
+                "arguments": args,
+                "status": "completed",
+            }
+        )
+    return items
+
+
+def _envelope(
+    response_id: str,
+    model: str,
+    output: list[dict[str, Any]],
+    tokens_input: int,
+    tokens_output: int,
+) -> dict[str, Any]:
+    return {
+        "id": response_id,
+        "object": "response",
+        "created_at": int(time.time()),
+        "status": "completed",
+        "model": model,
+        "output": output,
+        "usage": {
+            "input_tokens": tokens_input,
+            "output_tokens": tokens_output,
+            "total_tokens": tokens_input + tokens_output,
+        },
+        "metadata": None,
+    }
+
+
 def _render_response(
     *,
     response_id: str,
@@ -185,7 +315,6 @@ def _render_response(
     ``function_call`` items.
     """
     output: list[dict[str, Any]] = []
-
     if reasoning_text:
         output.append(
             {
@@ -194,51 +323,11 @@ def _render_response(
                 "summary": [{"type": "summary_text", "text": reasoning_text}],
             }
         )
-
     if text:
-        output.append(
-            {
-                "type": "message",
-                "id": f"msg_{uuid.uuid4().hex[:24]}",
-                "role": "assistant",
-                "status": "completed",
-                "content": [
-                    {"type": "output_text", "text": text, "annotations": []},
-                ],
-            }
-        )
-
+        output.append(_message_item(f"msg_{uuid.uuid4().hex[:24]}", text))
     if tool_calls:
-        for call in tool_calls:
-            fn = call.get("function") or {}
-            args = fn.get("arguments")
-            if not isinstance(args, str):
-                args = json.dumps(args, ensure_ascii=False)
-            output.append(
-                {
-                    "type": "function_call",
-                    "id": f"fc_{uuid.uuid4().hex[:24]}",
-                    "call_id": call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
-                    "name": fn.get("name") or "",
-                    "arguments": args,
-                    "status": "completed",
-                }
-            )
-
-    return {
-        "id": response_id,
-        "object": "response",
-        "created_at": int(time.time()),
-        "status": "completed",
-        "model": model,
-        "output": output,
-        "usage": {
-            "input_tokens": tokens_input,
-            "output_tokens": tokens_output,
-            "total_tokens": tokens_input + tokens_output,
-        },
-        "metadata": None,
-    }
+        output.extend(_function_call_items(tool_calls))
+    return _envelope(response_id, model, output, tokens_input, tokens_output)
 
 
 async def _stream_response(
@@ -281,20 +370,75 @@ async def _stream_response(
             yield f"data: {json.dumps(err)}\n\n"
             return
 
-        created = {
-            "type": "response.created",
-            "response": {
-                "id": response_id,
-                "object": "response",
-                "created_at": int(time.time()),
-                "status": "in_progress",
-                "model": model,
-            },
+        seq = iter(range(1_000_000))
+
+        def event(kind: str, **fields: Any) -> str:
+            payload = {"type": kind, "sequence_number": next(seq), **fields}
+            return f"data: {json.dumps(payload)}\n\n"
+
+        in_progress = {
+            "id": response_id,
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "in_progress",
+            "model": model,
+            "output": [],
         }
-        yield f"data: {json.dumps(created)}\n\n"
+        yield event("response.created", response=in_progress)
+        yield event("response.in_progress", response=in_progress)
 
         tool_aware = bool(tools)
         accumulated: list[str] = []
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+
+        def message_opened() -> str:
+            return event(
+                "response.output_item.added",
+                output_index=0,
+                item=_message_item(msg_id, "", status="in_progress"),
+            ) + event(
+                "response.content_part.added",
+                item_id=msg_id,
+                output_index=0,
+                content_index=0,
+                part={"type": "output_text", "text": "", "annotations": []},
+            )
+
+        def message_closed(text: str) -> str:
+            part = {"type": "output_text", "text": text, "annotations": []}
+            return (
+                event(
+                    "response.output_text.done",
+                    item_id=msg_id,
+                    output_index=0,
+                    content_index=0,
+                    text=text,
+                )
+                + event(
+                    "response.content_part.done",
+                    item_id=msg_id,
+                    output_index=0,
+                    content_index=0,
+                    part=part,
+                )
+                + event(
+                    "response.output_item.done", output_index=0, item=_message_item(msg_id, text)
+                )
+            )
+
+        def text_delta(token: str) -> str:
+            return event(
+                "response.output_text.delta",
+                item_id=msg_id,
+                output_index=0,
+                content_index=0,
+                delta=token,
+            )
+
+        if not tool_aware:
+            # Agents build the turn from these item events, not from the
+            # list in response.completed: open the message before any text.
+            yield message_opened()
 
         def format_item(token: str) -> str:
             accumulated.append(token)
@@ -302,8 +446,7 @@ async def _stream_response(
             # so a raw tool-call marker is never streamed verbatim as text.
             if tool_aware:
                 return ""
-            evt = {"type": "response.output_text.delta", "delta": token}
-            return f"data: {json.dumps(evt)}\n\n"
+            return text_delta(token)
 
         def format_done() -> str:
             raw_text = "".join(accumulated)
@@ -321,19 +464,38 @@ async def _stream_response(
                         text = cleaned
                 except Exception:  # pragma: no cover — parser bugs must not break the stream
                     logger.exception("tool-call parser failed for /v1/responses stream")
-            completed = {
-                "type": "response.completed",
-                "response": _render_response(
-                    response_id=response_id,
-                    model=model,
-                    text=text,
-                    tokens_input=0,
-                    tokens_output=len(accumulated),
-                    tool_calls=tool_calls,
-                    reasoning_text=None,
-                ),
-            }
-            return f"data: {json.dumps(completed)}\n\n" + "data: [DONE]\n\n"
+            out = ""
+            output: list[dict[str, Any]] = []
+            if tool_calls:
+                for index, item in enumerate(_function_call_items(tool_calls)):
+                    out += event(
+                        "response.output_item.added",
+                        output_index=index,
+                        item={**item, "arguments": "", "status": "in_progress"},
+                    )
+                    out += event(
+                        "response.function_call_arguments.delta",
+                        item_id=item["id"],
+                        output_index=index,
+                        delta=item["arguments"],
+                    )
+                    out += event(
+                        "response.function_call_arguments.done",
+                        item_id=item["id"],
+                        output_index=index,
+                        arguments=item["arguments"],
+                    )
+                    out += event("response.output_item.done", output_index=index, item=item)
+                    output.append(item)
+            else:
+                if tool_aware:
+                    out += message_opened()
+                    if text:
+                        out += text_delta(text)
+                out += message_closed(text)
+                output.append(_message_item(msg_id, text))
+            completed = _envelope(response_id, model, output, 0, len(accumulated))
+            return out + event("response.completed", response=completed) + "data: [DONE]\n\n"
 
         if tool_aware:
             try:
@@ -402,6 +564,7 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
 
     messages = _input_to_messages(req.input, req.instructions)
     cfg = _build_gen_config(req)
+    tools = _chat_tools(req.tools)
 
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
 
@@ -411,18 +574,18 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
         # and drive the engine through stream_with_backpressure so the
         # iterator is closed on disconnect — matching every other dialect.
         return await prepare_stream_response(
-            lambda slot: _stream_response(response_id, req.model, messages, cfg, req.tools, slot),
+            lambda slot: _stream_response(response_id, req.model, messages, cfg, tools, slot),
             media_type="text/event-stream",
             path="/v1/responses",
         )
 
-    if req.tools is not None:
+    if tools is not None:
         try:
             result = await run_dispatched(
                 state.engine.chat,
                 messages,
                 cfg,
-                tools=req.tools,
+                tools=tools,
             )
         except TypeError:
             result = await run_dispatched(state.engine.chat, messages, cfg)
@@ -446,7 +609,7 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
         try:
             from hfl.api.tool_parsers import dispatch as parse_tool_calls
 
-            cleaned, parsed = parse_tool_calls(raw_text, req.model, req.tools)
+            cleaned, parsed = parse_tool_calls(raw_text, req.model, tools)
             if parsed:
                 tool_calls = parsed
                 cleaned_text = ""
