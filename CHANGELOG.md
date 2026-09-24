@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — read these before upgrading
+
+- **Several models stay loaded at once.** A request for another model no
+  longer unloads the current one. HFL keeps every model that fits under
+  `HFL_MEMORY_BUDGET` — the share of total RAM in use after a load, other
+  programs included (default `85`). When a load does not fit, idle models
+  are unloaded least-recently-used first; a model serving a request is
+  never unloaded (the load waits, then answers 503); a model that cannot
+  fit even alone is refused with the numbers (HTTP 507) before anything is
+  unloaded. With an NVIDIA GPU the model must also fit the card's memory
+  (read through `nvidia-smi`); a GPU whose memory cannot be read keeps one
+  model at a time.
+- **`keep_alive` is enforced.** It was recorded and shown by `/api/ps` as
+  `expires_at` but never applied. A model idle past it (default `5m`,
+  `HFL_KEEP_ALIVE` / `OLLAMA_KEEP_ALIVE`) and not in use is now unloaded.
+  The clock restarts on every request and when it ends, so a model in use
+  never expires between turns. An explicit `keep_alive` is remembered per
+  model; `-1` never expires; an unreadable default falls back to `5m`.
+- **`HFL_MAX_LOADED_MODELS` / `OLLAMA_MAX_LOADED_MODELS`** is now an
+  optional ceiling on the number of models, `0` (none) by default. It was
+  previously read and ignored.
+- **Loads of different models run one at a time**, so two cannot both
+  spend the same free memory.
+- **Audit log actor labels** for remote API keys change at every restart
+  (a keyed digest; see Security).
+- **Seven settings that did nothing were removed**: `queue_enabled`
+  (`HFL_QUEUE_ENABLED`), `download_timeout`, `conversion_timeout`,
+  `registry_sqlite_busy_timeout` (`HFL_REGISTRY_SQLITE_TIMEOUT`),
+  `default_tts_sample_rate`, `default_tts_format`, `api_request_timeout`.
+  None was ever applied.
+
+### Added
+
+- Memory reporting: every load logs memory in use now and after;
+  `/api/ps` adds a `memory` summary (and `memory.gpu`); `hfl ps` prints it;
+  `hfl run`, `hfl serve --model` and the tray say what a load will take
+  and refuse, before reading weights, a model that cannot fit.
+- MLX prompt cache (`LRUPromptCache`): a follow-up chat turn evaluates only
+  its new tokens. Measured on Qwen2.5-0.5B-4bit, a ~1 550-token chat:
+  prefill 180 ms → 20–27 ms from turn 2, output identical. Capped by
+  `HFL_MLX_PROMPT_CACHE_BYTES` (default 2 GiB, `0` disables).
+- `hfl run <model> --session <name>` and `hfl sessions list|show|rm`.
+- `hfl serve --sandbox <mode>` / `HFL_SANDBOX`, applied before the server
+  starts.
+- `hfl verify` checks model signatures (ed25519) instead of reporting
+  every manifest as unsigned.
+- Audit events from every privileged operation; OpenTelemetry spans at
+  startup and around every inference (with the `otel` extra).
+- `/api/embed` honours the `pooling` field (mean / cls / last); it was
+  accepted and ignored.
+- `/api/embeddings` announces its deprecation (RFC 8594 headers) in
+  favour of `/api/embed`.
+- A log line on Apple Silicon when an MLX build of a GGUF model may be
+  faster.
+
+### Fixed
+
+- **Hub calls could hang forever** on a network that drops packets
+  (captive portal, dead VPN): `huggingface_hub` sends `timeout=None`.
+  Every Hub call is now bounded; `hfl search`, `hfl pull`, `/api/pull`,
+  `/api/pull/smart` and `/api/discover` end in seconds.
+- **Offline is reported as offline**: "cannot reach huggingface.co", HTTP
+  503, instead of raw socket errors, a 500, or a false "no file sizes".
+- **Model size estimates for Mixture-of-Experts repos**: names like
+  `Qwen3-30B-A3B` were read by their active count (4.3x–57x too small at
+  Q4_K_M across the measured repos), and later `Qwen1.5-MoE-A2.7B`, `Hunyuan-A13B`,
+  `Llama-4-*-17B-16E/128E` and `2.4T-A95B` totals. Verified against 26
+  repos' Hub metadata; a name never yields a total below the real one.
+- **MLX kept a model's memory after unload** (16.7 GB of a 17 GB model);
+  transformers kept the MPS cache. Both now return it.
+- `HFL_STREAM_QUEUE_GET_TIMEOUT` was never read; a wedged producer made a
+  stream wait forever.
+- `hfl config` / `hfl debug` printed `[bold]` markup literally; `hfl
+  config` showed a timeout that nothing applied.
+- A possible deadlock when several models were unloaded concurrently on a
+  multi-slot backend (vLLM).
+
+### Security
+
+- The audit log labelled remote callers with a plain SHA-256 prefix of
+  their API key, which let a log reader test guesses of a weak key
+  offline (CodeQL `py/weak-sensitive-data-hashing`). It is now a PBKDF2
+  digest salted with a per-process secret.
+
+### Removed
+
+- Modules nothing used: `ModelPool` (superseded by the resident set),
+  `api/timeout.py` (a duplicate of `api/helpers.py`), `engine/async_wrapper`,
+  `engine/observability`, `engine/failover`, `utils/circuit_breaker`.
+
+### Internal
+
+- Tests: 4 018 in the full development environment, coverage 90 %. Guards added for settings
+  nothing reads, modules only their tests import, every outbound host,
+  KV prefix reuse (measured), request timeouts, offline behaviour with
+  DNS failure and with dropped packets, and a multi-model HTTP stress test.
+- `scripts/ci-local.sh` covers the lint scope and the 80 % coverage floor
+  the workflows enforce.
+
 ## [0.20.0] - 2026-09-22
 
 ### Security
