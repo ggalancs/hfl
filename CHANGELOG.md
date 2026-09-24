@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Models pulled before 2026-03-18 were stuck at 4096 tokens of context.**
+  Pulls used to save 4096 as the model's context, and both `hfl run` and
+  the server honour a saved context before sizing it to the model and the
+  machine. A 256K-context coder could not take Claude Code's first prompt
+  (20K tokens). A 4096 saved before that date now means "auto"; one saved
+  later came from an explicit `num_ctx` and is kept.
+- **Qwen3-Coder's tool calls came back as text.** Its template emits
+  `<function=NAME><parameter=KEY>…` instead of JSON; clients (Claude Code
+  among them) got the markup and never ran the tool. It is parsed now,
+  values typed from each tool's schema and code kept byte for byte. A model
+  whose name hides its family (an alias like `coder`) has every native
+  tool-call format tried when the request carries tools.
+
 ### Internal
 
 - **The test suite no longer writes to the real `~/.hfl`.** Isolation was

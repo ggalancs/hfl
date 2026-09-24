@@ -80,8 +80,13 @@ _QWEN_TOOL_CALL_RE = re.compile(
 )
 
 
-def parse_qwen(text: str) -> ParseResult:
-    """Parse qwen-family ``<tool_call>...</tool_call>`` markers."""
+def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
+    """Parse qwen-family ``<tool_call>...</tool_call>`` markers.
+
+    Both forms: the JSON one (Qwen 2.5 / Qwen 3) and Qwen3-Coder's XML
+    ``<function=NAME><parameter=KEY>value</parameter></function>``, whose
+    values are typed from the tool's JSON schema in ``tools``.
+    """
     calls: list[ToolCall] = []
 
     def _sub(match: re.Match) -> str:
@@ -95,8 +100,79 @@ def parse_qwen(text: str) -> ParseResult:
             )
         return ""
 
+    def _sub_xml(match: re.Match[str]) -> str:
+        name, body = match.group(1), match.group(2)
+        if body.lstrip().startswith("{"):
+            return match.group(0)  # Llama 3's ``<function=name>{json}``
+        schema = _parameter_schemas(tools, name)
+        arguments = {
+            key: _typed_value(_strip_template_newlines(raw), schema.get(key))
+            for key, raw in _QWEN_XML_PARAM_RE.findall(body)
+        }
+        calls.append(_wrap(name, arguments))
+        return ""
+
     cleaned = _QWEN_TOOL_CALL_RE.sub(_sub, text)
+    cleaned = _QWEN_XML_FUNCTION_RE.sub(_sub_xml, cleaned)
     return _strip_thinking(cleaned).strip(), calls
+
+
+_QWEN_XML_FUNCTION_RE = re.compile(
+    r"(?:<tool_call>\s*)?<function=([^>\s]+)>(.*?)</function>(?:\s*</tool_call>)?",
+    re.DOTALL,
+)
+# A value ends at its closing tag, or — when the model forgets it — at the
+# next parameter or the end of the function body.
+_QWEN_XML_PARAM_RE = re.compile(
+    r"<parameter=([^>\s]+)>(.*?)(?:</parameter>|(?=<parameter=)|\Z)",
+    re.DOTALL,
+)
+
+
+def _strip_template_newlines(value: str) -> str:
+    """Drop the one newline the template puts on each side of a value, and
+    nothing else: code in an ``Edit`` must match the file byte for byte."""
+    if value.startswith("\n"):
+        value = value[1:]
+    if value.endswith("\n"):
+        value = value[:-1]
+    return value
+
+
+def _parameter_schemas(tools: list[dict] | None, name: str) -> dict[str, Any]:
+    for tool in tools or []:
+        fn = tool.get("function", tool) if isinstance(tool, dict) else {}
+        if isinstance(fn, dict) and fn.get("name") == name:
+            params = fn.get("parameters") or fn.get("input_schema") or {}
+            props = params.get("properties") if isinstance(params, dict) else None
+            return props if isinstance(props, dict) else {}
+    return {}
+
+
+def _typed_value(value: str, schema: Any) -> Any:
+    """``value`` as the type its schema declares; the text itself when there
+    is no schema, the type is ``string``, or the value does not fit."""
+    declared = schema.get("type") if isinstance(schema, dict) else None
+    if isinstance(declared, list):
+        declared = next((t for t in declared if t != "null"), None)
+    text = value.strip()
+    if declared == "integer" and re.fullmatch(r"-?\d+", text):
+        return int(text)
+    if declared == "number":
+        number = _safe_json_load(text)
+        if isinstance(number, (int, float)) and not isinstance(number, bool):
+            return number
+    if declared == "boolean" and text.lower() in ("true", "false"):
+        return text.lower() == "true"
+    if declared == "array":
+        parsed = _safe_json_load(text)
+        if isinstance(parsed, list):
+            return parsed
+    if declared == "object":
+        parsed = _safe_json_load(text)
+        if isinstance(parsed, dict):
+            return parsed
+    return value
 
 
 # --- Llama 3.x ----------------------------------------------------------------
@@ -433,7 +509,7 @@ def dispatch(
 
     family = _detect_family(model_name or "")
     parsers_by_family = {
-        "qwen": parse_qwen,
+        "qwen": lambda t: parse_qwen(t, tools),
         "llama3": parse_llama3,
         "mistral": parse_mistral,
         "gemma4": parse_gemma4,
@@ -447,5 +523,14 @@ def dispatch(
 
     if not tools:
         return _strip_thinking(text).strip(), []
+
+    if parser is None:
+        # The name did not say which family (an alias such as "coder"), but
+        # the client sent tools: every native marker is unambiguous, so try
+        # them all before the loose JSON fallback.
+        for native in parsers_by_family.values():
+            cleaned, calls = native(text)
+            if calls:
+                return cleaned, calls
 
     return parse_fallback(text)
