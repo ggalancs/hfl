@@ -28,8 +28,29 @@ class TestFormula:
     def test_virtualenv_install(self):
         assert "virtualenv_install_with_resources" in self.text
 
-    def test_depends_on_python_3_12(self):
-        assert 'depends_on "python@3.12"' in self.text
+    def test_depends_on_a_homebrew_python(self):
+        # python@3.12 left homebrew-core; the formula pinned it and could not
+        # install. 3.14 is what the local CI runs too.
+        assert 'depends_on "python@3.14"' in self.text
+
+    def test_gguf_runs_on_homebrews_llama_cpp(self):
+        assert 'depends_on "llama.cpp"' in self.text
+
+    def test_a_real_sdist_not_a_placeholder(self):
+        assert 'sha256 "' + "0" * 64 + '"' not in self.text
+        assert "files.pythonhosted.org/packages/" in self.text
+
+    def test_every_core_dependency_is_a_resource(self):
+        """virtualenv_install_with_resources installs nothing it is not given:
+        the placeholder formula had no resources and could not run."""
+        import re
+
+        pyproject = _read("pyproject.toml")
+        block = pyproject.split("dependencies = [", 1)[1].split("]", 1)[0]
+        deps = re.findall(r'"([A-Za-z0-9_.-]+)', block)
+        resources = set(re.findall(r'resource "([^"]+)" do', self.text))
+        for dep in deps:
+            assert dep.lower().replace("_", "-") in resources, dep
 
     def test_service_block_launches_hfl_serve(self):
         assert 'run [opt_bin/"hfl", "serve"' in self.text

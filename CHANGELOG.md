@@ -127,6 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Homebrew and winget packaging, ready to publish** (`packaging/`). The
+  formula builds, installs, tests and audits clean from a local tap and
+  depends on Homebrew's llama.cpp for GGUF; the winget manifests validate
+  against the 1.9.0 schemas. The Homebrew tap workflow now takes the
+  canonical PyPI url and sha256 from PyPI's API and leaves the resources
+  alone. Publishing (the tap repository, the winget-pkgs PR) is the
+  maintainer's step.
 - **The test suite no longer writes to the real `~/.hfl`.** Isolation was
   opt-in, and five modelfile tests registered fake models in the
   developer's own registry (they showed up in `hfl list`). The whole

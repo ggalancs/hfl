@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: ggalancs.HFL
+PackageVersion: 0.21.0
+PackageLocale: en-US
+Publisher: Gabriel Galán Pelayo
+PublisherUrl: https://github.com/ggalancs
+PackageName: HFL
+PackageUrl: https://github.com/ggalancs/hfl
+License: Apache-2.0
+LicenseUrl: https://github.com/ggalancs/hfl/blob/main/LICENSE
+ShortDescription: Download, run and try any Hugging Face model on your own machine.
+Description: |-
+  HFL downloads models from the Hugging Face Hub and runs them locally, behind
+  an API compatible with OpenAI, Ollama and Anthropic clients. No account and
+  no cloud of its own.
+Moniker: hfl
+Tags:
+  - llm
+  - local-llm
+  - huggingface
+  - gguf
+  - openai-api
+  - ollama-compatible
+ReleaseNotesUrl: https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

@@ -41,12 +41,13 @@ jobs:
       - name: Wait for PyPI sdist
         id: pypi
         run: |
-          url="https://files.pythonhosted.org/packages/source/h/hfl/hfl-${{ steps.version.outputs.version }}.tar.gz"
+          # The canonical URL (with its hash path) and sha256, as `brew audit`
+          # wants them, from PyPI's JSON API.
+          version="${{ steps.version.outputs.version }}"
           for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -sfI "$url" >/dev/null; then
+            if curl -sf "https://pypi.org/pypi/hfl/${version}/json" -o release.json; then
+              read -r url sha256 < <(python3 -c "import json; u=[u for u in json.load(open('release.json'))['urls'] if u['packagetype']=='sdist'][0]; print(u['url'], u['digests']['sha256'])")
               echo "url=${url}" >>"$GITHUB_OUTPUT"
-              curl -sL "$url" -o sdist.tar.gz
-              sha256=$(shasum -a 256 sdist.tar.gz | awk '{print $1}')
               echo "sha256=${sha256}" >>"$GITHUB_OUTPUT"
               exit 0
             fi
@@ -58,10 +59,15 @@ jobs:
 
       - name: Render formula
         run: |
-          sed -i \
-            -e "s|hfl-[0-9.]*\.tar\.gz|hfl-${{ steps.version.outputs.version }}.tar.gz|g" \
-            -e "s|sha256 \"0\{64\}\"|sha256 \"${{ steps.pypi.outputs.sha256 }}\"|g" \
-            packaging/homebrew/hfl.rb
+          # Only the formula's own url/sha256 (the first pair); the resource
+          # blocks below it keep theirs. Regenerate those with
+          # `brew update-python-resources` when the dependencies change.
+          awk -v url="${{ steps.pypi.outputs.url }}" -v sha="${{ steps.pypi.outputs.sha256 }}" '
+            !done_url && /^  url "/ { print "  url \"" url "\""; done_url=1; next }
+            done_url && !done_sha && /^  sha256 "/ { print "  sha256 \"" sha "\""; done_sha=1; next }
+            { print }
+          ' packaging/homebrew/hfl.rb > hfl.rb.new
+          mv hfl.rb.new packaging/homebrew/hfl.rb
           cat packaging/homebrew/hfl.rb
 
       - name: Open PR against homebrew-hfl
