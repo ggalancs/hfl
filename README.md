@@ -18,7 +18,7 @@ Ollama- and Anthropic-compatible API. No account. No cloud of its own — by des
 </div>
 
 <p align="center">
-  <img src="docs/assets/hfl-run-demo.svg" alt="Terminal: hfl run downloads a model from the Hugging Face Hub on first use and starts a local chat (real output, abridged)" width="880">
+  <img src="https://raw.githubusercontent.com/ggalancs/hfl/main/docs/assets/hfl-run-demo.svg" alt="Terminal: hfl run downloads a model from the Hugging Face Hub on first use and starts a local chat (real output, abridged)" width="880">
 </p>
 
 ## Quick start
@@ -100,7 +100,7 @@ GGUF and MLX models need none of this.
 ### Search and pick from the terminal
 
 <p align="center">
-  <img src="docs/assets/hfl-search-demo.svg" alt="Terminal: hfl search lists Hugging Face Hub models page by page with size, downloads and format; pressing a number pulls the model (real output)" width="880">
+  <img src="https://raw.githubusercontent.com/ggalancs/hfl/main/docs/assets/hfl-search-demo.svg" alt="Terminal: hfl search lists Hugging Face Hub models page by page with size, downloads and format; pressing a number pulls the model (real output)" width="880">
 </p>
 
 ```bash
