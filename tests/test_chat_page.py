@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from html.parser import HTMLParser
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,36 @@ from fastapi.testclient import TestClient
 from hfl.api.server import app
 
 BROWSER = {"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+
+class _Page(HTMLParser):
+    """The page's script text, and everything else (text and attributes)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_script = False
+        self.script = ""
+        self.outside_script = ""
+
+    @classmethod
+    def of(cls, html: str) -> "_Page":
+        page = cls()
+        page.feed(html)
+        return page
+
+    def handle_starttag(self, tag, attrs):
+        self._in_script = tag == "script"
+        self.outside_script += " ".join(f"{k}={v}" for k, v in attrs if v) + " "
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self._in_script = False
+
+    def handle_data(self, data):
+        if self._in_script:
+            self.script += data
+        else:
+            self.outside_script += data
 
 
 @pytest.fixture
@@ -34,8 +65,8 @@ def test_a_browser_gets_the_page(client, path, headers):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<title>HFL</title>" in response.text
-    outside_script = re.sub(r"<script\b[\s\S]*</script\s*>", "", response.text, flags=re.I)
-    assert "__" not in outside_script  # every placeholder filled
+    page = _Page.of(response.text)
+    assert "__" not in page.outside_script  # every placeholder filled
 
 
 def test_the_policy_allows_only_its_own_script_and_this_server(client):
@@ -80,7 +111,7 @@ def test_an_api_key_does_not_lock_the_page_itself(client):
 def test_model_output_is_escaped_before_rendering(client):
     """The page's own render(): markup a model writes must come out as text."""
     page = client.get("/ui").text
-    script = re.search(r"<script\b[^>]*>([\s\S]*)</script\s*>", page, flags=re.I).group(1)
+    script = _Page.of(page).script
     functions = re.search(r"(function escapeHtml[\s\S]*?)\nfunction bubble", script).group(1)
     js = (
         'const T = {thinking: "Thinking"};\n' + functions + "\n"
