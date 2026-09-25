@@ -203,3 +203,18 @@ def test_a_stream_splits_as_a_finished_reply_does(text, size):
     a, t = splitter.flush()
     expected_answer, expected_thinking = extract_thinking(text)
     assert (answer + a, thinking + t) == (expected_answer, expected_thinking or "")
+
+
+def test_a_crafted_glm_reply_cannot_stall_the_parser():
+    """Model output can be steered by the prompt; a GLM parser whose pattern
+    repeated a group of lazy parts backtracked exponentially on this shape
+    (CodeQL py/redos). Run apart, so a regression is a timeout, not a hang."""
+    import subprocess
+    import sys
+
+    code = (
+        "from hfl.api.tool_parsers import dispatch\n"
+        "text = '<tool_call>!<arg_key>' + '</arg_key><arg_value></arg_value><arg_key>' * 40\n"
+        "dispatch(text, 'glm-4.5', [{'type': 'function', 'function': {'name': 'x'}}])\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=10)

@@ -438,9 +438,12 @@ def parse_deepseek(text: str) -> ParseResult:
 # --- GLM ----------------------------------------------------------------------
 
 
+# The body is taken whole and its pairs read by ``_GLM_ARG_RE``: matching
+# the pairs inside this pattern (a repeated group of lazy parts) could
+# backtrack exponentially on a crafted reply, and a reply can be steered by
+# whoever writes the prompt (CodeQL py/redos).
 _GLM_CALL_RE = re.compile(
-    r"<tool_call>\s*([^\s<{]+)\s*((?:<arg_key>.*?</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)"
-    r"(?:</tool_call>|$)",
+    r"<tool_call>\s*([^\s<{]+)\s*(.*?)(?:</tool_call>|$)",
     re.DOTALL,
 )
 _GLM_ARG_RE = re.compile(r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>", re.DOTALL)

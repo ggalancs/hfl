@@ -141,7 +141,8 @@ def test_every_placeholder_is_filled(client, monkeypatch, lang):
     finally:
         get_language.cache_clear()
     assert not re.findall(r"__[A-Z]+[A-Za-z_]*__", page)
-    assert "ui." not in re.sub(r"<script.*</script>", "", page, flags=re.S)
+    markup, _, rest = page.partition("<script")
+    assert "ui." not in markup + rest.partition("</script>")[2]
 
 
 def test_no_inline_event_handlers(client):
