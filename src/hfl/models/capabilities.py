@@ -177,6 +177,20 @@ def _search_corpus(manifest: "ModelManifest") -> str:
 # ----------------------------------------------------------------------
 
 
+def _sees_images(manifest: "ModelManifest", corpus: str) -> bool:
+    """A GGUF sees images when its projector (``mmproj``) is beside it —
+    the name says nothing reliable either way (SmolVLM's does not say
+    vision; a text-only Gemma-3-1B's does). Other formats go by family."""
+    from pathlib import Path
+
+    model = Path(manifest.local_path) if manifest.local_path else None
+    if (manifest.format or "").lower() == "gguf" and model is not None and model.exists():
+        from hfl.engine.projector import find_projector
+
+        return find_projector(model) is not None
+    return _matches_any(corpus, _VISION_FAMILIES)
+
+
 def detect_capabilities(manifest: "ModelManifest") -> list[str]:
     """Return the list of Ollama-style capabilities for a manifest.
 
@@ -192,7 +206,8 @@ def detect_capabilities(manifest: "ModelManifest") -> list[str]:
     - ``tools`` — the family matcher in ``tool_parsers._detect_family``
       recognises the model.
     - ``insert`` — the family belongs to a FIM-capable set.
-    - ``vision`` — the family is VL-known.
+    - ``vision`` — a GGUF with its image projector beside it; other
+      formats, a VL-known family.
     - ``embedding`` — the architecture is an embedding family, OR
       the manifest's ``model_type`` is explicitly ``"embed"``.
     - ``thinking`` — the family is known to expose a reasoning channel.
@@ -225,7 +240,7 @@ def detect_capabilities(manifest: "ModelManifest") -> list[str]:
         caps.append("insert")
 
     # Vision
-    if _matches_any(corpus, _VISION_FAMILIES):
+    if _sees_images(manifest, corpus):
         caps.append("vision")
 
     # Thinking / chain-of-thought

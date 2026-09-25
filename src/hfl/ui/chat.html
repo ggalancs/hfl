@@ -10,11 +10,13 @@
   :root {
     --bg: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea;
     --panel: #f5f5f7; --accent: #ff9d00; --user: #fff4e0; --code: #f0f0f3; --danger: #d70015;
+    --active: #ffe7bf;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161618; --fg: #f2f2f7; --muted: #98989f; --line: #2c2c2e;
       --panel: #1f1f22; --accent: #ffb340; --user: #3a2a10; --code: #232327; --danger: #ff453a;
+      --active: #4a3510;
     }
   }
   * { box-sizing: border-box; }
@@ -22,60 +24,176 @@
   body {
     background: var(--bg); color: var(--fg);
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column;
+    display: flex; overflow: hidden;
   }
-  header {
-    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
-  }
-  header strong { font-size: 16px; margin-right: 4px; }
-  select, button, textarea {
+  [hidden] { display: none !important; }
+  select, button, textarea, input {
     font: inherit; color: inherit; background: var(--bg);
     border: 1px solid var(--line); border-radius: 8px;
   }
-  select { padding: 6px 8px; max-width: 100%; min-width: 0; flex: 1 1 200px; }
   button { padding: 6px 12px; cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #1d1d1f; font-weight: 600; }
+  button.icon { padding: 6px 10px; }
   button:disabled { opacity: .5; cursor: default; }
+
+  /* Conversations */
+  #side {
+    width: 260px; flex: none; display: flex; flex-direction: column;
+    border-right: 1px solid var(--line); background: var(--panel);
+  }
+  #side .top { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #side .top strong { flex: 1; }
+  #chats { flex: 1; overflow-y: auto; padding: 6px; }
+  .chat { display: flex; align-items: center; border-radius: 8px; margin-bottom: 2px; }
+  .chat.active { background: var(--active); }
+  .chat .open {
+    flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 8px 10px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chat .del { border: 0; background: none; color: var(--muted); padding: 6px 8px; visibility: hidden; }
+  .chat:hover .del, .chat.active .del, .chat .del:focus { visibility: visible; }
+
+  /* Main column */
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  header {
+    display: flex; gap: 8px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header strong { font-size: 16px; margin-right: 4px; }
+  #menu { display: none; }
+  select { padding: 6px 8px; max-width: 100%; min-width: 0; flex: 1 1 200px; }
+  #settings {
+    display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  #settings label { font-size: 13px; color: var(--muted); }
+  #system { width: 100%; resize: vertical; min-height: 60px; padding: 8px; }
+  .temp { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .temp input[type=range] { flex: 1 1 160px; }
+  .temp output { min-width: 2.5em; font-variant-numeric: tabular-nums; }
+
   #log { flex: 1; overflow-y: auto; padding: 16px; }
   .msg { max-width: 820px; margin: 0 auto 14px; padding: 10px 14px; border-radius: 12px; overflow-wrap: anywhere; }
   .msg.user { background: var(--user); }
   .msg.assistant { background: var(--panel); }
-  .msg.error { color: var(--danger); background: transparent; border: 1px solid var(--danger); }
+  .msg.error, .msg.notice { color: var(--danger); background: transparent; border: 1px solid var(--danger); }
+  .msg.notice { color: var(--muted); border-color: var(--line); }
   .msg .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .msg p { margin: 0 0 8px; } .msg p:last-child { margin-bottom: 0; }
+  .msg .images { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .msg .images img { max-height: 160px; max-width: 100%; border-radius: 8px; }
   pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: auto; }
   code { background: var(--code); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   pre code { padding: 0; background: none; }
   details.think { color: var(--muted); margin-bottom: 8px; }
   .empty { color: var(--muted); text-align: center; margin-top: 18vh; padding: 0 16px; }
-  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); max-width: 852px; width: 100%; margin: 0 auto; }
-  textarea { flex: 1; resize: none; padding: 10px; min-height: 44px; max-height: 40vh; }
+
+  form { padding: 12px 16px; border-top: 1px solid var(--line); max-width: 852px; width: 100%; margin: 0 auto; }
+  form.drag { outline: 2px dashed var(--accent); outline-offset: -6px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  textarea#input { flex: 1; resize: none; padding: 10px; min-height: 44px; max-height: 40vh; }
+  #pending { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  #pending:empty { display: none; }
+  .pending { position: relative; }
+  .pending img { height: 64px; border-radius: 8px; display: block; }
+  .pending button {
+    position: absolute; top: -6px; right: -6px; padding: 0 6px; border-radius: 10px;
+    background: var(--fg); color: var(--bg); border: 0; font-size: 12px; line-height: 18px;
+  }
+
+  @media (max-width: 760px) {
+    #side { position: fixed; z-index: 10; inset: 0 auto 0 0; width: min(300px, 85vw); transform: translateX(-100%); transition: transform .2s; }
+    body.open #side { transform: none; box-shadow: 0 0 24px rgba(0,0,0,.3); }
+    #menu { display: inline-block; }
+    header { padding: 10px 12px; }
+    #log { padding: 12px; }
+    form { padding: 10px 12px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <strong>HFL</strong>
-  <select id="model" aria-label="__T_model__"></select>
-  <button id="new" type="button">__T_new_chat__</button>
-</header>
-<main id="log"><div class="empty" id="empty">__T_empty__</div></main>
-<form id="form">
-  <textarea id="input" rows="1" placeholder="__T_placeholder__" aria-label="__T_placeholder__"></textarea>
-  <button id="send" class="primary" type="submit">__T_send__</button>
-</form>
+<aside id="side" aria-label="__T_conversations__">
+  <div class="top">
+    <strong>__T_conversations__</strong>
+    <button id="new" type="button">__T_new_chat__</button>
+  </div>
+  <nav id="chats"></nav>
+</aside>
+<div id="main">
+  <header>
+    <button id="menu" class="icon" type="button" aria-label="__T_menu__">☰</button>
+    <strong>HFL</strong>
+    <select id="model" aria-label="__T_model__"></select>
+    <button id="toggle-settings" class="icon" type="button" aria-label="__T_settings__" title="__T_settings__" aria-expanded="false">⚙</button>
+  </header>
+  <section id="settings" hidden>
+    <label for="system">__T_system_prompt__</label>
+    <textarea id="system" rows="2" placeholder="__T_system_placeholder__"></textarea>
+    <div class="temp">
+      <label for="temp">__T_temperature__</label>
+      <input id="temp" type="range" min="0" max="2" step="0.1" value="0.7">
+      <output id="temp-out" for="temp">0.7</output>
+      <label><input id="temp-default" type="checkbox" checked> __T_model_default__</label>
+    </div>
+  </section>
+  <main id="log"><div class="empty" id="empty">__T_empty__</div></main>
+  <form id="form">
+    <div id="pending"></div>
+    <div class="row">
+      <button id="attach" class="icon" type="button" aria-label="__T_attach__" title="__T_attach__" hidden>＋</button>
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+      <textarea id="input" rows="1" placeholder="__T_placeholder__" aria-label="__T_placeholder__"></textarea>
+      <button id="send" class="primary" type="submit">__T_send__</button>
+    </div>
+  </form>
+</div>
 <script nonce="__NONCE__">
 "use strict";
 const T = __TEXT_JSON__;
 const $ = (id) => document.getElementById(id);
 const log = $("log"), input = $("input"), send = $("send"), modelSelect = $("model");
+const MAX_IMAGE = 20 * 1024 * 1024;  // the server's own limit per image
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+// Browser storage may be missing or full; nothing here depends on it.
 const store = {
   get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
-  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } },
 };
-let history = store.get("hfl.chat", []);
+
+// Conversations: [{id, title, model, system, temperature, messages, updated}],
+// each message {role, content, images?: [data URLs], meta?}.
+let chats = store.get("hfl.chats", null);
+if (!Array.isArray(chats)) {
+  const old = store.get("hfl.chat", []);  // the single conversation of the first page
+  chats = Array.isArray(old) && old.length ? [makeChat(old)] : [];
+}
+let chat = chats.find((c) => c.id === store.get("hfl.current", "")) || makeChat();
+let pending = [];         // images waiting to be sent: data URLs
 let controller = null;
+let visionOf = {};        // model name -> sees images (from /api/show)
 let apiKey = (() => { try { return sessionStorage.getItem("hfl.key") || ""; } catch { return ""; } })();
+
+function makeChat(messages = []) {
+  return {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    title: titleOf(messages), model: "", system: "", temperature: null,
+    messages, updated: Date.now(),
+  };
+}
+
+function titleOf(messages) {
+  const first = messages.find((m) => m.role === "user" && m.content);
+  return first ? first.content.replace(/\s+/g, " ").slice(0, 60) : "";
+}
+
+function save() {
+  store.set("hfl.current", chat.id);
+  if (store.set("hfl.chats", chats)) return;
+  // Full: keep every conversation, without its images.
+  const lean = chats.map((c) => ({ ...c, messages: c.messages.map(({ images, ...m }) => m) }));
+  if (store.set("hfl.chats", lean)) note(T.storage_full);
+}
 
 function headers() {
   const h = { "Content-Type": "application/json" };
@@ -100,10 +218,9 @@ function escapeHtml(text) {
 
 // Model text is escaped first; only then are fences, inline code and bold
 // turned into tags. No markup the model writes ever reaches the page.
-function render(text) {
-  let thinking = "";
+function render(text, thinking = "") {
   const think = text.match(/^\s*<think>([\s\S]*?)(<\/think>|$)/);
-  if (think) { thinking = think[1].trim(); text = text.slice(think[0].length); }
+  if (think) { thinking = (thinking + "\n" + think[1]).trim(); text = text.slice(think[0].length); }
   const parts = escapeHtml(text).split(/```/);
   let html = "";
   parts.forEach((part, i) => {
@@ -124,39 +241,97 @@ function render(text) {
   return html;
 }
 
-function bubble(role, text, meta) {
+function images(urls) {
+  const box = document.createElement("div");
+  box.className = "images";
+  for (const url of urls) {
+    const img = document.createElement("img");
+    img.src = url; img.alt = "";
+    box.appendChild(img);
+  }
+  return box;
+}
+
+function bubble(role, text, meta, urls, thinking) {
   $("empty")?.remove();
   const div = document.createElement("div");
   div.className = "msg " + role;
-  div.innerHTML = role === "user" || role === "error"
-    ? escapeHtml(text).replace(/\n/g, "<br>")
-    : render(text);
+  const body = document.createElement("div");
+  body.innerHTML = role === "assistant" ? render(text, thinking) : escapeHtml(text).replace(/\n/g, "<br>");
+  if (urls && urls.length) div.appendChild(images(urls));
+  div.appendChild(body);
   if (meta) {
     const m = document.createElement("div");
-    m.className = "meta";
-    m.textContent = meta;
+    m.className = "meta"; m.textContent = meta;
     div.appendChild(m);
   }
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
-  return div;
+  return body;
 }
+
+function note(text) { bubble("notice", text); }
 
 function redraw() {
   log.innerHTML = "";
-  if (!history.length) {
+  if (!chat.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty"; empty.id = "empty"; empty.textContent = T.empty;
     log.appendChild(empty);
   }
-  for (const m of history) bubble(m.role, m.content, m.meta);
+  for (const m of chat.messages) bubble(m.role, m.content, m.meta, m.images, m.thinking);
+  $("system").value = chat.system || "";
+  const fixed = typeof chat.temperature === "number";
+  $("temp-default").checked = !fixed;
+  $("temp").disabled = !fixed;
+  $("temp").value = fixed ? chat.temperature : 0.7;
+  $("temp-out").value = fixed ? chat.temperature.toFixed(1) : "–";
+  if (chat.model && [...modelSelect.options].some((o) => o.value === chat.model)) {
+    modelSelect.value = chat.model;
+    updateAttach();
+  }
+  drawList();
+}
+
+function drawList() {
+  const nav = $("chats");
+  nav.innerHTML = "";
+  for (const c of [...chats].sort((a, b) => b.updated - a.updated)) {
+    const row = document.createElement("div");
+    row.className = "chat" + (c.id === chat.id ? " active" : "");
+    const open = document.createElement("button");
+    open.type = "button"; open.className = "open";
+    open.textContent = c.title || T.untitled;
+    open.title = c.title || T.untitled;
+    open.addEventListener("click", () => switchTo(c));
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "del"; del.textContent = "✕";
+    del.setAttribute("aria-label", T.delete + ": " + (c.title || T.untitled));
+    del.addEventListener("click", () => remove(c));
+    row.append(open, del);
+    nav.appendChild(row);
+  }
+}
+
+function switchTo(c) {
+  if (controller) controller.abort();
+  chat = c;
+  pending = []; drawPending();
+  document.body.classList.remove("open");
+  save(); redraw(); input.focus();
+}
+
+function remove(c) {
+  chats = chats.filter((x) => x.id !== c.id);
+  if (c.id === chat.id) { if (controller) controller.abort(); chat = makeChat(); redraw(); }
+  save(); drawList();
 }
 
 async function loadModels() {
   try {
     const response = await call("/api/tags");
     const data = await response.json();
-    const saved = store.get("hfl.model", "");
+    const saved = chat.model || store.get("hfl.model", "");
     modelSelect.innerHTML = "";
     for (const m of data.models || []) {
       const option = document.createElement("option");
@@ -172,24 +347,92 @@ async function loadModels() {
     } else if (saved && [...modelSelect.options].some((o) => o.value === saved)) {
       modelSelect.value = saved;
     }
+    updateAttach();
   } catch (error) {
     bubble("error", T.unreachable);
   }
 }
 
-async function ask(text) {
-  history.push({ role: "user", content: text });
-  bubble("user", text);
-  const div = bubble("assistant", "");
+// Images are offered only for a model that can see them.
+async function updateAttach() {
   const model = modelSelect.value;
+  if (!model || modelSelect.disabled) { $("attach").hidden = true; return; }
+  if (!(model in visionOf)) {
+    try {
+      const response = await call("/api/show", { method: "POST", body: JSON.stringify({ model }) });
+      const data = response.ok ? await response.json() : {};
+      visionOf[model] = (data.capabilities || []).includes("vision");
+    } catch { visionOf[model] = false; }
+  }
+  if (modelSelect.value !== model) return;
+  $("attach").hidden = !visionOf[model];
+  if (!visionOf[model] && pending.length) { pending = []; drawPending(); }
+}
+
+function drawPending() {
+  const box = $("pending");
+  box.innerHTML = "";
+  pending.forEach((url, i) => {
+    const item = document.createElement("div");
+    item.className = "pending";
+    const img = document.createElement("img");
+    img.src = url; img.alt = "";
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "✕";
+    x.setAttribute("aria-label", T.remove);
+    x.addEventListener("click", () => { pending.splice(i, 1); drawPending(); });
+    item.append(img, x);
+    box.appendChild(item);
+  });
+}
+
+function addFiles(files) {
+  if ($("attach").hidden) return;
+  for (const file of files) {
+    if (!IMAGE_TYPES.includes(file.type) || file.size > MAX_IMAGE) {
+      bubble("error", T.image_error + " " + file.name);
+      continue;
+    }
+    const reader = new FileReader();
+    reader.onload = () => { pending.push(reader.result); drawPending(); };
+    reader.readAsDataURL(file);
+  }
+}
+
+function payload() {
+  const messages = [];
+  if (chat.system.trim()) messages.push({ role: "system", content: chat.system.trim() });
+  for (const m of chat.messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const entry = { role: m.role, content: m.content };
+    // Ollama's ``images``: base64 without the data: prefix.
+    if (m.images && m.images.length) entry.images = m.images.map((u) => u.slice(u.indexOf(",") + 1));
+    messages.push(entry);
+  }
+  const body = { model: modelSelect.value, stream: true, messages };
+  if (typeof chat.temperature === "number") body.options = { temperature: chat.temperature };
+  return body;
+}
+
+async function ask(text, urls) {
+  if (!chats.includes(chat)) chats.push(chat);
+  chat.model = modelSelect.value;
+  const turn = { role: "user", content: text };
+  if (urls.length) turn.images = urls;
+  chat.messages.push(turn);
+  if (!chat.title) chat.title = titleOf(chat.messages);
+  chat.updated = Date.now();
+  save(); drawList();
+  bubble("user", text, "", urls);
+  const div = bubble("assistant", "");
+  const model = chat.model;
+  const owner = chat;
   controller = new AbortController();
   send.textContent = T.stop;
-  let answer = "", meta = "";
+  let answer = "", thinking = "", meta = "";
   try {
     const response = await call("/api/chat", {
-      method: "POST",
-      signal: controller.signal,
-      body: JSON.stringify({ model, stream: true, messages: history.map(({ role, content }) => ({ role, content })) }),
+      method: "POST", signal: controller.signal, body: JSON.stringify(payload()),
     });
     if (!response.ok) {
       let detail = response.status + "";
@@ -210,9 +453,10 @@ async function ask(text) {
         if (!line) continue;
         const chunk = JSON.parse(line);
         if (chunk.error) throw new Error(chunk.error);
-        if (chunk.message && chunk.message.content) {
-          answer += chunk.message.content;
-          div.innerHTML = render(answer);
+        const m = chunk.message || {};
+        if (m.content || m.thinking) {
+          answer += m.content || ""; thinking += m.thinking || "";
+          div.innerHTML = render(answer, thinking);
           log.scrollTop = log.scrollHeight;
         }
         if (chunk.done && chunk.eval_count && chunk.eval_duration) {
@@ -222,31 +466,39 @@ async function ask(text) {
     }
   } catch (error) {
     if (error.name !== "AbortError") {
-      div.remove();
-      history.pop();
-      bubble("error", T.failed + " " + error.message);
+      div.parentElement.remove();
+      owner.messages.pop();
+      save();
+      if (owner === chat) bubble("error", T.failed + " " + error.message);
       return;
     }
   } finally {
     controller = null;
     send.textContent = T.send;
   }
-  history.push({ role: "assistant", content: answer, meta });
-  div.innerHTML = render(answer);
+  // The reasoning is kept apart: shown, never sent back to the model.
+  const reply = { role: "assistant", content: answer, meta };
+  if (thinking) reply.thinking = thinking;
+  owner.messages.push(reply);
+  owner.updated = Date.now();
+  save();
+  if (owner !== chat) return;
+  div.innerHTML = render(answer, thinking);
   if (meta) {
-    const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; div.appendChild(m);
+    const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; div.parentElement.appendChild(m);
   }
-  store.set("hfl.chat", history);
 }
 
 $("form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (controller) { controller.abort(); return; }
   const text = input.value.trim();
-  if (!text || modelSelect.disabled) return;
+  if ((!text && !pending.length) || modelSelect.disabled) return;
+  const urls = pending;
+  pending = []; drawPending();
   input.value = "";
   input.style.height = "";
-  ask(text);
+  ask(text, urls);
 });
 input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -258,13 +510,48 @@ input.addEventListener("input", () => {
   input.style.height = "auto";
   input.style.height = input.scrollHeight + "px";
 });
-modelSelect.addEventListener("change", () => store.set("hfl.model", modelSelect.value));
-$("new").addEventListener("click", () => {
-  if (controller) controller.abort();
-  history = [];
-  store.set("hfl.chat", history);
-  redraw();
-  input.focus();
+input.addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.files || [])];
+  if (files.length && !$("attach").hidden) { event.preventDefault(); addFiles(files); }
+});
+$("form").addEventListener("dragover", (event) => {
+  if ($("attach").hidden) return;
+  event.preventDefault(); $("form").classList.add("drag");
+});
+$("form").addEventListener("dragleave", () => $("form").classList.remove("drag"));
+$("form").addEventListener("drop", (event) => {
+  $("form").classList.remove("drag");
+  if ($("attach").hidden) return;
+  event.preventDefault();
+  addFiles([...(event.dataTransfer?.files || [])]);
+});
+$("attach").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", () => { addFiles([...$("file").files]); $("file").value = ""; });
+modelSelect.addEventListener("change", () => {
+  store.set("hfl.model", modelSelect.value);
+  chat.model = modelSelect.value;
+  if (chats.includes(chat)) save();
+  updateAttach();
+});
+$("new").addEventListener("click", () => switchTo(makeChat()));
+$("menu").addEventListener("click", () => document.body.classList.toggle("open"));
+$("toggle-settings").addEventListener("click", () => {
+  const panel = $("settings");
+  panel.hidden = !panel.hidden;
+  $("toggle-settings").setAttribute("aria-expanded", String(!panel.hidden));
+});
+$("system").addEventListener("input", () => { chat.system = $("system").value; if (chats.includes(chat)) save(); });
+$("temp").addEventListener("input", () => {
+  chat.temperature = Number($("temp").value);
+  $("temp-out").value = chat.temperature.toFixed(1);
+  if (chats.includes(chat)) save();
+});
+$("temp-default").addEventListener("change", () => {
+  const fixed = !$("temp-default").checked;
+  $("temp").disabled = !fixed;
+  chat.temperature = fixed ? Number($("temp").value) : null;
+  $("temp-out").value = fixed ? chat.temperature.toFixed(1) : "–";
+  if (chats.includes(chat)) save();
 });
 
 redraw();

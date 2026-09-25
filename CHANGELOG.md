@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browser's `Accept: text/html` gets the page. It carries a strict
   Content-Security-Policy (a nonce per response, connections only to this
   server) and escapes every model reply before rendering it.
+  Conversations are listed on the side (newest first; open, delete; a
+  drawer on a phone), each with its own model, system prompt and
+  temperature (the model's own unless set). For a model that can see
+  images, attach, paste or drop them; they are shown in the conversation
+  and sent to the model. Everything is kept in the browser; if its storage
+  fills up, conversations are kept without their images, and you are told.
+  Checked in Chrome with Qwen2.5-VL-7B: it read the attached image,
+  answered in the language the system prompt asked for, and used the image
+  again on the next turn; conversations survived a reload.
 - **Parallel requests: `hfl serve --parallel N`.** The backend is still
   chosen per model; asking for parallel requests (or `--backend llama-server`,
   or `HFL_LLM_LIBRARY=llama-server`) serves each GGUF model from a
@@ -139,6 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every chunk: a client collecting `tool_calls` across chunks, as Ollama's
   libraries let you, got each call several times, and cut-off ones (GLM-4.7:
   a call named `get` with no arguments).
+- **`/api/show` says `vision` for a GGUF when its image projector is there**,
+  whatever the name: SmolVLM was not recognised as seeing, a text-only
+  Gemma-3-1B was said to. Other formats still go by family.
 - **An Ollama `role: "tool"` message no longer needs a `name`.** Ollama does
   not require one, and its clients send `tool_name` (now read as the name)
   or nothing; HFL answered them 422.

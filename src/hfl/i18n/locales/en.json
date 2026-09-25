@@ -525,7 +525,20 @@
     "no_models": "No models yet — download one with `hfl pull`",
     "unreachable": "Cannot reach the HFL server.",
     "failed": "Something went wrong:",
-    "api_key": "This server needs an API key:"
+    "api_key": "This server needs an API key:",
+    "conversations": "Conversations",
+    "delete": "Delete",
+    "settings": "Settings",
+    "system_prompt": "System prompt",
+    "system_placeholder": "Instructions for the model in this conversation (optional)",
+    "temperature": "Temperature",
+    "model_default": "model default",
+    "attach": "Attach image",
+    "remove": "Remove",
+    "image_error": "Not an image this page can send:",
+    "storage_full": "The browser's storage is full: this conversation is kept without its images.",
+    "menu": "Conversations",
+    "untitled": "New conversation"
   },
   "shortname": {
     "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",

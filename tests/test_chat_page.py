@@ -91,7 +91,10 @@ def test_it_speaks_the_servers_language(client, monkeypatch):
 
     monkeypatch.setenv("HFL_LANG", "es")
     get_language.cache_clear()
-    page = client.get("/ui").text
+    try:
+        page = client.get("/ui").text
+    finally:
+        get_language.cache_clear()  # not Spanish for the tests after this one
     assert '<html lang="es">' in page and "Nueva conversación" in page
 
 
@@ -124,3 +127,25 @@ def test_model_output_is_escaped_before_rendering(client):
     assert "&lt;img src=x onerror=alert(1)&gt;" in out
     assert "<strong>bold</strong>" in out and "<code>a&lt;b</code>" in out
     assert "<pre><code>&lt;script&gt;x&lt;/script&gt;\n</code></pre>" in out
+
+
+@pytest.mark.parametrize("lang", ["en", "es"])
+def test_every_placeholder_is_filled(client, monkeypatch, lang):
+    """A key missing from ``_KEYS`` or a locale shows up as ``__T_x__``."""
+    from hfl.i18n import get_language
+
+    monkeypatch.setenv("HFL_LANG", lang)
+    get_language.cache_clear()
+    try:
+        page = client.get("/ui").text
+    finally:
+        get_language.cache_clear()
+    assert not re.findall(r"__[A-Z]+[A-Za-z_]*__", page)
+    assert "ui." not in re.sub(r"<script.*</script>", "", page, flags=re.S)
+
+
+def test_no_inline_event_handlers(client):
+    """The policy runs only the nonce'd script: an ``onclick=`` attribute
+    would be dead, silently."""
+    page = client.get("/ui").text
+    assert not re.findall(r"<[^>]*\son[a-z]+\s*=", page)

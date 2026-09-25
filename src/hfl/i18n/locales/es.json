@@ -525,7 +525,20 @@
     "no_models": "Aún no hay modelos: descarga uno con `hfl pull`",
     "unreachable": "No se puede contactar con el servidor HFL.",
     "failed": "Algo ha fallado:",
-    "api_key": "Este servidor pide una clave de API:"
+    "api_key": "Este servidor pide una clave de API:",
+    "conversations": "Conversaciones",
+    "delete": "Borrar",
+    "settings": "Ajustes",
+    "system_prompt": "Mensaje de sistema",
+    "system_placeholder": "Instrucciones para el modelo en esta conversación (opcional)",
+    "temperature": "Temperatura",
+    "model_default": "la del modelo",
+    "attach": "Adjuntar imagen",
+    "remove": "Quitar",
+    "image_error": "No es una imagen que esta página pueda enviar:",
+    "storage_full": "El almacenamiento del navegador está lleno: esta conversación se guarda sin sus imágenes.",
+    "menu": "Conversaciones",
+    "untitled": "Nueva conversación"
   },
   "shortname": {
     "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",

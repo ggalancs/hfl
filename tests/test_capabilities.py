@@ -202,3 +202,21 @@ class TestCombined:
         assert caps[0] in {"completion", "embedding"}
         rest = caps[1:]
         assert rest == sorted(rest)
+
+
+class TestVisionFromTheProjector:
+    """A GGUF on disk sees images when its projector is beside it: SmolVLM's
+    name says nothing of vision, a text-only Gemma-3-1B's does."""
+
+    def test_a_projector_makes_it_vision(self, tmp_path):
+        model = tmp_path / "SmolVLM-256M-Instruct-Q8_0.gguf"
+        model.write_bytes(b"GGUF")
+        (tmp_path / "mmproj-SmolVLM-256M-Instruct-f16.gguf").write_bytes(b"GGUF")
+        caps = detect_capabilities(_manifest(name="smolvlm-256m", local_path=str(model)))
+        assert "vision" in caps
+
+    def test_no_projector_no_vision_whatever_the_name(self, tmp_path):
+        model = tmp_path / "gemma-3-1b-it-Q4_K_M.gguf"
+        model.write_bytes(b"GGUF")
+        caps = detect_capabilities(_manifest(name="gemma-3-1b-it", local_path=str(model)))
+        assert "vision" not in caps

@@ -40,6 +40,10 @@ _KEYS = (
     "unreachable",
     "failed",
     "api_key",
+    *(
+        "conversations delete settings system_prompt system_placeholder temperature "
+        "model_default attach remove image_error storage_full menu untitled"
+    ).split(),
 )
 
 
