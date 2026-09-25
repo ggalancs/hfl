@@ -37,6 +37,8 @@ class DoctorReport:
 
     llama_cpp_available: bool = False
     llama_cpp_build_features: dict[str, bool] = field(default_factory=dict)
+    # llama.cpp's ``llama-server``: what ``hfl serve --parallel`` runs.
+    llama_server: str | None = None
 
     nvidia_devices: list[str] = field(default_factory=list)
     metal_available: bool = False
@@ -76,11 +78,16 @@ def _probe_llama_cpp() -> tuple[bool, dict[str, bool]]:
     # llama-cpp-python exposes a ``llama_supports_gpu_offload`` helper
     # and backend-specific flags via ``ggml.supports_*``. Both are
     # best-effort; wrapping in try/except keeps the probe resilient.
+    from hfl.engine.llama_cpp import _suppress_stderr
+
     for name in ("supports_gpu_offload", "llama_supports_gpu_offload"):
         fn = getattr(llama_cpp, name, None)
         if callable(fn):
+            # Asking initialises the GPU backend, which prints ~20 lines of
+            # ggml_metal_* setup straight to fd 2 before the report.
             try:
-                features["gpu_offload"] = bool(fn())
+                with _suppress_stderr():
+                    features["gpu_offload"] = bool(fn())
             except Exception:  # pragma: no cover
                 features["gpu_offload"] = False
             break
@@ -91,7 +98,7 @@ def _probe_nvidia() -> list[str]:
     try:
         import pynvml
     except ImportError:
-        return []
+        return _probe_nvidia_torch()
     try:
         pynvml.nvmlInit()
     except Exception:
@@ -113,6 +120,18 @@ def _probe_nvidia() -> list[str]:
         except Exception:
             pass
     return out
+
+
+def _probe_nvidia_torch() -> list[str]:
+    """NVIDIA devices seen by PyTorch, when pynvml is not installed."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return []
+        return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+    except Exception:
+        return []
 
 
 def _probe_metal() -> bool:
@@ -182,6 +201,12 @@ def build_report() -> DoctorReport:
     report.mlx_available = _probe_optional("mlx_lm")
     report.transformers_available = _probe_optional("transformers")
     report.vllm_available = _probe_optional("vllm")
+    try:
+        from hfl.engine.llama_server import binary
+
+        report.llama_server = binary()
+    except Exception:  # pragma: no cover — advisory only
+        report.llama_server = None
 
     try:
         from hfl.engine.vram import pick_ctx_size
@@ -208,6 +233,12 @@ def build_report() -> DoctorReport:
         )
     if not report.llama_cpp_available:
         recs.append("llama-cpp-python missing. Install with `pip install 'hfl[llama]'`.")
+    if report.llama_server is None:
+        recs.append(
+            "llama.cpp's llama-server not found: GGUF models answer one request at a "
+            "time. Install llama.cpp (e.g. `brew install llama.cpp`) for "
+            "`hfl serve --parallel N`."
+        )
     has_accel = bool(report.nvidia_devices) or report.metal_available or bool(report.rocm_devices)
     if not has_accel:
         recs.append(
@@ -224,6 +255,41 @@ def build_report() -> DoctorReport:
     return report
 
 
+# ----------------------------------------------------------------------
+# Shared rendering — `hfl check`, `hfl debug` and `hfl doctor` all read the
+# backends and accelerators from here, so they can no longer disagree.
+# ----------------------------------------------------------------------
+
+
+def backend_rows(report: DoctorReport) -> list[tuple[str, bool, str]]:
+    """(name, available, detail) for every inference backend."""
+    offload = report.llama_cpp_build_features.get("gpu_offload")
+    return [
+        (
+            "llama-cpp",
+            report.llama_cpp_available,
+            "" if offload is None else f"GPU offload {'✓' if offload else '✗'}",
+        ),
+        (
+            "llama-server",
+            report.llama_server is not None,
+            report.llama_server or "needed for `hfl serve --parallel`",
+        ),
+        ("transformers", report.transformers_available, ""),
+        ("vllm", report.vllm_available, ""),
+        ("mlx", report.mlx_available, ""),
+    ]
+
+
+def accelerator_rows(report: DoctorReport) -> list[tuple[str, str]]:
+    """(label, detail) for every accelerator found; CPU when there is none."""
+    rows = [("NVIDIA", name) for name in report.nvidia_devices]
+    if report.metal_available:
+        rows.append(("Apple Metal", ""))
+    rows += [("AMD ROCm", card) for card in report.rocm_devices]
+    return rows or [("CPU only", "no GPU accelerator found")]
+
+
 def format_report(report: DoctorReport) -> str:
     def _yn(value: bool) -> str:
         return "✓" if value else "✗"
@@ -236,24 +302,12 @@ def format_report(report: DoctorReport) -> str:
     lines.append(f"Python:           {py} ({plat})")
     lines.append("")
     lines.append("Backends:")
-    lines.append(f"  llama-cpp       {_yn(report.llama_cpp_available)}")
-    if report.llama_cpp_build_features:
-        flags = ", ".join(
-            f"{k}={_yn(v)}" for k, v in sorted(report.llama_cpp_build_features.items())
-        )
-        lines.append(f"                  ({flags})")
-    lines.append(f"  transformers    {_yn(report.transformers_available)}")
-    lines.append(f"  vllm            {_yn(report.vllm_available)}")
-    lines.append(f"  mlx-lm          {_yn(report.mlx_available)}")
+    for name, ok, detail in backend_rows(report):
+        lines.append(f"  {name:<15} {_yn(ok)}" + (f"  {detail}" if detail else ""))
     lines.append("")
     lines.append("Accelerators:")
-    lines.append(f"  NVIDIA          {len(report.nvidia_devices)} device(s)")
-    for dev in report.nvidia_devices:
-        lines.append(f"                  • {dev}")
-    lines.append(f"  Apple Metal     {_yn(report.metal_available)}")
-    lines.append(f"  AMD ROCm        {len(report.rocm_devices)} device(s)")
-    for dev in report.rocm_devices:
-        lines.append(f"                  • {dev}")
+    for label, detail in accelerator_rows(report):
+        lines.append(f"  {label:<15} " + (detail or "✓"))
     lines.append("")
     vram_text = f"{report.vram_gib:.1f} GiB" if report.vram_gib is not None else "unknown"
     ctx_rec = report.recommended_ctx

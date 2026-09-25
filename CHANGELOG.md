@@ -94,6 +94,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`hfl check`, `hfl debug` and `hfl doctor` could describe the same
+  machine differently.** They probed backends and accelerators with two
+  separate pieces of code that had drifted apart (the same Mac was "MPS" in
+  one and "Apple Metal" in another) and none looked for llama.cpp's
+  `llama-server`, which `hfl serve --parallel` needs. All three now read
+  one probe and keep what is their own: `check` its TTS and storage checks,
+  `debug` its versions and memory, `doctor` its VRAM, power and advice.
+  NVIDIA cards are found through PyTorch too when `pynvml` is missing, and
+  `doctor` no longer prints llama.cpp's Metal start-up messages first — the
+  silencer redirected Python's `sys.stderr` instead of file descriptor 2,
+  where the C library writes.
 - **Streamed replies reported chunks as tokens and 0 prompt tokens**, and
   ignored OpenAI's `stream_options.include_usage`. A chunk can carry several
   tokens (an unfinished UTF-8 character, a held-back stop sequence), so the

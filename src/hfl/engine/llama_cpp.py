@@ -46,8 +46,12 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def _suppress_stderr():
     """Temporarily suppresses stderr (to silence Metal/CUDA logs)."""
-    # Save the original descriptor
-    stderr_fd = sys.stderr.fileno()
+    # File descriptor 2 itself: that is where the C library writes. Python's
+    # ``sys.stderr`` is not always on it (a test runner, a redirected
+    # logger), and silencing whatever it points at let the noise through.
+    stderr_fd = 2
+    with contextlib.suppress(Exception):
+        sys.stderr.flush()
     saved_fd = os.dup(stderr_fd)
     try:
         # Redirect stderr to /dev/null

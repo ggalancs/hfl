@@ -1983,33 +1983,27 @@ def config():
 @app.command()
 def check():
     """Run diagnostic checks (dependencies, backends, GPU)."""
+    from hfl.cli.commands.doctor import accelerator_rows, backend_rows, build_report
     from hfl.engine.dependency_check import check_engine_availability
 
     console.print("[bold]Running HFL Diagnostics[/]\n")
 
-    # Check dependencies
+    # Backends and accelerators come from the same probe as `hfl doctor`
+    # and `hfl debug`, so the three commands can no longer disagree.
+    report = build_report()
     console.print("[bold cyan]Backend Availability[/]")
-    availability = check_engine_availability()
+    for name, ok, detail in backend_rows(report):
+        mark = "[green]✓[/]" if ok else "[red]✗[/]"
+        suffix = f" [dim]{escape_markup(detail)}[/]" if detail else ""
+        console.print(f"  {mark} {name}{suffix}")
 
-    for backend in ["llama-cpp", "transformers", "vllm", "mlx"]:
-        status = availability.get(backend, "unknown")
-        if status is True:
-            console.print(f"  [green]✓[/] {backend}")
-        else:
-            console.print(f"  [red]✗[/] {backend}: {status}")
-
-    # GPU check
     console.print("\n[bold cyan]GPU Support[/]")
-    if availability.get("torch") is True:
-        if availability.get("torch_cuda"):
-            device = availability.get("cuda_device", "unknown")
-            console.print(f"  [green]✓[/] CUDA: {device}")
-        elif availability.get("torch_mps"):
-            console.print("  [green]✓[/] MPS (Apple Silicon)")
-        else:
-            console.print("  [yellow]○[/] CPU only")
-    else:
-        console.print("  [red]✗[/] PyTorch not installed")
+    for label, detail in accelerator_rows(report):
+        mark = "[yellow]○[/]" if label == "CPU only" else "[green]✓[/]"
+        suffix = f": {escape_markup(detail)}" if detail else ""
+        console.print(f"  {mark} {label}{suffix}")
+
+    availability = check_engine_availability()
 
     # TTS check
     console.print("\n[bold cyan]TTS Support[/]")
@@ -2103,26 +2097,29 @@ def debug():
             info.append(f"  {dep}: {version}\n")
         else:
             info.append_text(Text.from_markup(f"  {dep}: [dim]not installed[/]\n"))
+    from hfl.engine.llama_server import binary as llama_server_binary
 
-    # GPU info
-    info.append_text(Text.from_markup("\n[bold]GPU[/]\n"))
-    if availability.get("torch") is True:
-        if availability.get("torch_cuda"):
-            device = availability.get("cuda_device", "unknown")
-            info.append(f"  CUDA: {device}\n")
-            try:
-                import torch
-
-                info.append(f"  CUDA Version: {torch.version.cuda}\n")
-                info.append(f"  cuDNN: {torch.backends.cudnn.version()}\n")
-            except Exception:
-                pass
-        elif availability.get("torch_mps"):
-            info.append("  MPS: Apple Silicon\n")
-        else:
-            info.append_text(Text.from_markup("  GPU: [dim]none available[/]\n"))
+    server = llama_server_binary()
+    if server:
+        info.append(f"  llama-server: {server}\n")
     else:
-        info.append_text(Text.from_markup("  GPU: [dim]torch not installed[/]\n"))
+        info.append_text(Text.from_markup("  llama-server: [dim]not installed[/]\n"))
+
+    # GPU info — the same probe as `hfl doctor` and `hfl check`.
+    from hfl.cli.commands.doctor import accelerator_rows, build_report
+
+    report = build_report()
+    info.append_text(Text.from_markup("\n[bold]GPU[/]\n"))
+    for label, detail in accelerator_rows(report):
+        info.append(f"  {label}" + (f": {detail}" if detail else "") + "\n")
+    if availability.get("torch_cuda"):
+        try:
+            import torch
+
+            info.append(f"  CUDA Version: {torch.version.cuda}\n")
+            info.append(f"  cuDNN: {torch.backends.cudnn.version()}\n")
+        except Exception:
+            pass
 
     # Memory info
     try:
