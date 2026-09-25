@@ -514,6 +514,17 @@
     "delete_model": "¿Eliminar {name} ({size})?",
     "pull_model": "¿Descargar este modelo?"
   },
+  "import": {
+    "not_found": "No hay nada en {path}.",
+    "no_gguf": "No hay ningún modelo GGUF en {path}.",
+    "several": "{path} contiene varios modelos ({files}); indica el fichero que quieres importar.",
+    "projector": "{path} es un proyector de imágenes (mmproj), no un modelo: importa el modelo que está a su lado.",
+    "not_gguf": "{path} no es un fichero GGUF.",
+    "no_first_part": "{path} es una parte posterior de un modelo dividido y la primera no está a su lado.",
+    "exists": "Ya existe un modelo llamado {name}; elige otro nombre con --name.",
+    "done": "Importado {name} ({size}); el fichero se queda donde está: {path}",
+    "use": "Úsalo con: hfl run {name}"
+  },
   "ui": {
     "model": "Modelo",
     "new_chat": "Nueva conversación",

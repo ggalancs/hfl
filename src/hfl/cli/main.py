@@ -1290,6 +1290,42 @@ def cp(
         raise typer.Exit(1)
 
 
+@app.command(name="import")
+def import_model(
+    path: str = typer.Argument(help="A GGUF file, or a folder holding one model"),
+    name: str | None = typer.Option(None, "--name", "-n", help="Name to register it under"),
+    alias: str | None = typer.Option(None, "--alias", "-a", help="Short alias"),
+) -> None:
+    """Register a GGUF you already have, where it is — no copy, no server.
+
+    For models downloaded by LM Studio, llama.cpp or by hand. The file stays
+    in place; ``hfl rm`` removes the entry and never deletes it. An image
+    projector (``mmproj``) beside the file is used for images.
+    """
+    from hfl.models.importer import ImportRefused, choose_gguf, default_name, manifest_for
+    from hfl.models.registry import ModelRegistry
+
+    try:
+        model = choose_gguf(Path(path))
+    except ImportRefused as refused:
+        console.print(f"[red]{escape_markup(t(refused.key, **refused.fields))}[/]")
+        raise typer.Exit(1) from refused
+    final = name or default_name(model)
+    registry = ModelRegistry()
+    if registry.get(final) is not None or (alias and registry.get(alias) is not None):
+        taken = final if registry.get(final) is not None else str(alias)
+        console.print(f"[red]{escape_markup(t('import.exists', name=taken))}[/]")
+        raise typer.Exit(1)
+    manifest = manifest_for(model, final, alias)
+    registry.add(manifest)
+    console.print(
+        "[green]"
+        + escape_markup(t("import.done", name=final, size=manifest.display_size, path=str(model)))
+        + "[/]"
+    )
+    console.print(t("import.use", name=alias or final))
+
+
 @app.command(name="stop")
 def stop(
     model: str = typer.Argument(None, help="Model name to unload. Omit to unload all."),

@@ -163,7 +163,14 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: revi
 hfl list                                # lo que hay en esta máquina
 hfl inspect llama70b                    # detalles y licencia
 hfl rm llama70b
+
+hfl import ~/.lmstudio/models/lmstudio-community/Qwen3-8B-GGUF   # un GGUF que ya tienes
 ```
+
+`hfl import` registra un GGUF donde está —sin copiarlo y sin servidor— para
+modelos descargados con LM Studio, llama.cpp o a mano; se ocupa de los modelos
+divididos y del proyector de un modelo de visión que esté a su lado. `hfl rm`
+nunca borra un fichero fuera de la carpeta de HFL.
 
 ### Encontrar el modelo adecuado
 

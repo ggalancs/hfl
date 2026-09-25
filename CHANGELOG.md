@@ -144,6 +144,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level (`Reasoning: low`) and up to `high`; DeepSeek-R1 always reasons. Not
   asking leaves each model's default.
 
+- **`hfl import <file or folder>`: a GGUF you already have, where it is.**
+  For models downloaded by LM Studio, llama.cpp or by hand: registered in
+  place, with no copy and no server running (a Modelfile's `FROM` over the
+  API still takes only files inside HFL's data folder). A folder holding one
+  model works, a split model is registered by its first part whichever part
+  is named, and a vision model's projector beside it is used for images.
+  `hfl rm` removes the entry and keeps the file. Checked with files outside
+  HFL's home: the split Qwen2.5-7B answered, the imported Qwen2.5-VL read
+  the image, and the file was still there after `hfl rm`.
 - **A compatibility table checked for real: `docs/compatibility.md`.**
   `scripts/compat_matrix.py` pulls a list of models and, on each backend
   that can run them, checks a plain answer, tool calling (a call and then

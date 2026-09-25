@@ -514,6 +514,17 @@
     "delete_model": "Delete {name} ({size})?",
     "pull_model": "Download this model?"
   },
+  "import": {
+    "not_found": "Nothing at {path}.",
+    "no_gguf": "No GGUF model in {path}.",
+    "several": "{path} holds several models ({files}); name the file to import.",
+    "projector": "{path} is an image projector (mmproj), not a model: import the model beside it.",
+    "not_gguf": "{path} is not a GGUF file.",
+    "no_first_part": "{path} is a later part of a split model and its first part is not beside it.",
+    "exists": "A model named {name} already exists; choose another name with --name.",
+    "done": "Imported {name} ({size}) — the file stays where it is: {path}",
+    "use": "Use: hfl run {name}"
+  },
   "ui": {
     "model": "Model",
     "new_chat": "New chat",
