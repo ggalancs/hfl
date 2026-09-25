@@ -171,6 +171,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A streamed reply from an MLX model reported no prompt tokens** (Ollama's
+  `prompt_eval_count` was 0, `eval_count` counted chunks) and no `usage`
+  on OpenAI's streamed reply. It reports what mlx-lm measured now, the
+  whole prompt even when a cached prefix was reused: 37 / 40 for
+  Qwen2.5-0.5B, the same as without streaming.
 - **A GGUF vision model pulled from the Hub could not see images**: `hfl
   pull` fetched the weights but not the image projector (`mmproj`) beside
   them. It fetches it now (F16 first) — pull the model again to get it.

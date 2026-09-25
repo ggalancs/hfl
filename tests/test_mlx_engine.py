@@ -458,3 +458,42 @@ class TestUnloadReleasesMemory:
         engine.load("/fake/model")
         engine.unload()
         assert calls == [1]
+
+
+class TestStreamCounts:
+    """A streamed MLX reply knows its token counts once read, as the other
+    backends' do; it used to report none (Ollama's ``eval_count`` missing,
+    OpenAI's ``usage`` absent)."""
+
+    def test_counted_from_mlx_lm_s_own_figures(self, fake_cache):
+        from hfl.engine.base import stream_counts
+
+        engine = _loaded()
+        stream = engine.generate_stream("hello", GenerationConfig(max_tokens=3))
+        assert "".join(stream) == "ABC"
+        assert stream_counts(stream) == (5, 3)
+
+    def test_a_reused_prefix_still_counts_as_prompt(self, fake_cache):
+        from hfl.engine.base import stream_counts
+
+        engine = _loaded()
+        engine._prompt_store.entries.append(list(range(8)))
+        stream = engine.chat_stream([ChatMessage(role="user", content="hello, world")])
+        "".join(stream)
+        prompt, completion = stream_counts(stream)
+        assert engine.last_prompt_tokens_reused > 0
+        assert prompt == len(
+            engine._tokenizer.encode(
+                engine._messages_to_prompt([ChatMessage(role="user", content="hello, world")])
+            )
+        )
+        assert completion == 3
+
+    def test_no_figures_no_numbers(self, fake_mlx):
+        """Responses without counts (plain strings here) leave them unknown."""
+        from hfl.engine.base import stream_counts
+
+        engine = _loaded()
+        stream = engine.generate_stream("hi", GenerationConfig())
+        "".join(stream)
+        assert stream_counts(stream) == (None, None)

@@ -22,6 +22,7 @@ from typing import Any, Generator, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
+    CountedStream,
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
@@ -466,18 +467,27 @@ class MLXEngine(InferenceEngine):
         self,
         prompt: str,
         config: GenerationConfig | None = None,
-    ) -> Iterator[str]:
-        """Token-by-token streaming via mlx-lm's ``stream_generate``."""
+    ) -> CountedStream:
+        """Token-by-token streaming via mlx-lm's ``stream_generate``.
+
+        The stream knows its token counts once read: mlx-lm reports them on
+        every response, so the streamed reply's ``prompt_eval_count`` /
+        ``eval_count`` (and OpenAI's ``usage``) are measured, not missing.
+        """
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
         stops = self._stop_strings(cfg)
+        counted = CountedStream()
+        last: list[Any] = [None]
 
         def _piece(token: Any) -> str:
+            last[0] = token
             return token.text if hasattr(token, "text") else str(token)
 
+        cached = self._prompt_store is not None
         gen: Iterator[Any]
-        if self._prompt_store is not None:
+        if cached:
             gen = self._cached_responses(prompt, cfg)
         else:
             from mlx_lm import stream_generate
@@ -486,16 +496,24 @@ class MLXEngine(InferenceEngine):
             kwargs = self._build_sampling(cfg)
             gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
 
-        try:
-            yield from self._stream_until_stop(gen, stops, _piece)
-        finally:
-            # Close now, on the thread holding the dispatcher slot: that is
-            # when the cached path stores this turn's KV. Left to the
-            # garbage collector it could land later, on another thread,
-            # while the next request is already using the store.
-            close = getattr(gen, "close", None)
-            if close is not None:
-                close()
+        def _stream() -> Iterator[str]:
+            try:
+                yield from self._stream_until_stop(gen, stops, _piece)
+            finally:
+                # Close now, on the thread holding the dispatcher slot: that
+                # is when the cached path stores this turn's KV. Left to the
+                # garbage collector it could land later, on another thread,
+                # while the next request is already using the store.
+                close = getattr(gen, "close", None)
+                if close is not None:
+                    close()
+                response = last[0]
+                if response is not None and hasattr(response, "generation_tokens"):
+                    reused = self.last_prompt_tokens_reused if cached else 0
+                    counted.prompt_tokens = reused + int(response.prompt_tokens or 0)
+                    counted.completion_tokens = int(response.generation_tokens or 0)
+
+        return counted.feed(_stream())
 
     def _stream_until_stop(
         self, gen: Iterator[Any], stops: list[str], _piece: Any
@@ -533,4 +551,4 @@ class MLXEngine(InferenceEngine):
         **_kwargs: Any,
     ) -> Iterator[str]:
         prompt = self._messages_to_prompt(messages)
-        yield from self.generate_stream(prompt, config)
+        return self.generate_stream(prompt, config)
