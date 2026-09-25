@@ -27,7 +27,10 @@ own count or its chunking:
 - throughput with ``--concurrency`` requests at once: all tokens over the
   wall time.
 
-Reported as medians of ``--runs`` runs, after one warm-up request.
+Reported as medians of ``--runs`` runs, after a warm-up of each kind of
+request measured. Every model stays loaded for the whole run
+(``OLLAMA_KEEP_ALIVE=-1``, read by Ollama and HFL alike): a 5-minute idle
+unload in the middle once put a model load into a measured request.
 Results go to stdout as a Markdown table and to ``--out`` as JSON.
 Check the power source first: on a laptop, battery can cut decode speed
 several times.
@@ -178,7 +181,7 @@ def _start(server: Server, log_dir: Path) -> tuple[subprocess.Popen, object]:
         stdout=log,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
-        env={**os.environ, **server.env},
+        env={**os.environ, "OLLAMA_KEEP_ALIVE": "-1", **server.env},
     )
     base = f"http://127.0.0.1:{server.port}"
     deadline = time.monotonic() + 120
@@ -190,7 +193,7 @@ def _start(server: Server, log_dir: Path) -> tuple[subprocess.Popen, object]:
         subprocess.run(
             step,
             check=True,
-            env={**os.environ, **server.env},
+            env={**os.environ, "OLLAMA_KEEP_ALIVE": "-1", **server.env},
             stdout=log,
             stderr=subprocess.STDOUT,
             timeout=900,
@@ -207,6 +210,14 @@ def bench(servers: list[Server], runs: int, max_tokens: int, concurrency: int) -
     speeds up during the run — a desktop in use does — shifts every server
     alike instead of whichever happened to be measured last.
     """
+    # Warm every server with each kind of request measured, not only a short
+    # one: with a short warm-up alone, the first measured round was 5-10x
+    # slower for all four servers at once (2026-09-25), which the medians
+    # only half absorbed.
+    for server in servers:
+        base = f"http://127.0.0.1:{server.port}"
+        _stream(base, server.model, LONG, 32)
+        _concurrent(base, server.model, concurrency, 32)
     samples: dict[str, dict[str, list[dict]]] = {
         s.name: {"short": [], "long": [], "concurrent": []} for s in servers
     }

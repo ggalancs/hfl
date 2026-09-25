@@ -143,6 +143,16 @@ lista antes de descargar nada (`--yes` toma el primero) y el nombre se guarda co
 alias, así que el siguiente `hfl run qwen3-coder` es local. Los clientes de Ollama
 obtienen lo mismo con `/api/pull {"model": "llama3.2"}`.
 
+`--session <nombre>` guarda la conversación: el siguiente `hfl run <modelo>
+--session <nombre>` la retoma donde se quedó. Las sesiones son ficheros JSON en
+`~/.hfl/sessions/`:
+
+```bash
+hfl sessions list          # nombre, modelo, mensajes, última actualización
+hfl sessions show work     # muestra los mensajes de una sesión
+hfl sessions rm work       # la borra
+```
+
 ### Descargar, buscar y gestionar
 
 ```bash
@@ -334,6 +344,10 @@ por su cuenta: lo hacen `hfl pull` o `hfl serve --model <referencia>`.
 Los ajustes que Ollama también tiene (`OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
 `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, …) se leen con cualquiera de los
 dos nombres. La lista completa está en [docs/env-vars.md](docs/env-vars.md).
+
+`hfl config` muestra los directorios, la dirección del servidor, los límites de
+peticiones, los valores por defecto de inferencia y los tiempos máximos en uso,
+ya aplicadas las variables de entorno.
 
 Protege la API con una clave: `hfl serve --api-key <secreto>` y envía
 `Authorization: Bearer <secreto>` o `X-API-Key: <secreto>`.

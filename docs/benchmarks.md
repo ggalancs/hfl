@@ -63,6 +63,40 @@ answer to the long prompt (256 tokens against 134) — at temperature 0 it
 applies the penalty differently from the in-process backend. With
 `repeat_penalty` 1.0 both wrote the same 134 tokens.
 
+## All four on AC power — 2026-09-25
+
+The comparison above repeated on AC power, with the unreleased HFL (after
+0.21.0: llama-cpp-python 0.3.34 in process, llama-server build 10964 as the
+optional backend), Ollama 0.34.2. Same machine, model and settings; medians
+of 5 interleaved rounds, a warm-up of every kind of request first, every
+model kept loaded throughout.
+[Raw data](benchmarks/2026-09-25-m3-max-phi-3.5-mini-ac-four-servers.json).
+
+| | HFL | HFL + llama-server | Ollama | llama-server |
+|---|---:|---:|---:|---:|
+| Time to first token, short prompt | 0.062 s | 0.115 s | 0.074 s | 0.161 s |
+| Time to first token, ~2,000-token prompt | 2.50 s | 2.49 s | 2.44 s | 2.46 s |
+| Decode, one request | 69.3 tok/s | 72.9 tok/s | 59.5 tok/s | 71.3 tok/s |
+| Throughput, 4 requests at once | 73.8 tok/s | 104.1 tok/s | 65.2 tok/s | **110.2 tok/s** |
+
+- **One request:** HFL, HFL + llama-server and llama-server within about 5%
+  of each other; Ollama about 15% behind on decode. Prefill of a long prompt
+  is the same for all four (2.4–2.5 s).
+- **Four at once:** the llama-server backend lifts HFL by 41% (73.8 → 104.1
+  tok/s), 6% behind llama-server run on its own; the in-process backend
+  serves them one after another, as Ollama did with its defaults.
+- Every server got slower from round 1 to round 5 (single-request decode
+  down 13–29%; the cause was not measured); the rounds rotate the order, so
+  the drift fell on all four, not on whichever ran last.
+- HFL + llama-server wrote 256 tokens for the long prompt where the others
+  wrote ~133: the `repeat_penalty` difference described in the previous
+  section. Its decode figure is not affected (tokens per second).
+
+A first run that evening was discarded: its first round was 5–10× slower
+for all four servers at once, and one model was unloaded after 5 idle
+minutes and reloaded mid-measurement. The script now warms each server
+with every kind of request and keeps the models loaded (below).
+
 ## Method
 
 - **Same file.** `hfl pull` fetches the GGUF once; HFL serves it by name,
@@ -83,7 +117,9 @@ applies the penalty differently from the in-process backend. With
 - **Decode rate** = tokens after the first ÷ time between the first and the
   last content chunk. **Throughput** = all tokens of the 4 simultaneous
   requests ÷ wall time.
-- One warm-up request per server before measuring; servers are started and
+- Warm-up before measuring: one short, one long and one batch of simultaneous
+  requests per server, and every model kept loaded for the whole run
+  (`OLLAMA_KEEP_ALIVE=-1`, read by Ollama and HFL). Servers are started and
   stopped by the script.
 
 ## Before you trust a number

@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Each such model gets its own queue, so its requests neither wait behind
   each other nor behind another model's; every other backend keeps the
   single, serialized queue. Measured with four requests at once on
-  Phi-3.5-mini: 79.9 tokens/s against 50.9 with the default backend (+57%),
-  level with llama-server run directly. The process listens on loopback
+  Phi-3.5-mini on AC power: 104.1 tokens/s against 73.8 with the default
+  backend (+41%), 6% behind llama-server run directly (docs/benchmarks.md). The process listens on loopback
   with a random key passed through its environment (never on the command
   line), no web UI and no `/slots`; a small guard stops it if HFL dies
   without unloading (SIGKILL, a crash). Without llama-cpp-python installed,
