@@ -252,6 +252,21 @@ def _llama_cpp_is_stubbed() -> bool:
 
 
 @pytest.fixture(autouse=True)
+def _no_torch_pollution(request):
+    """Same guard for ``torch``: a MagicMock left in ``sys.modules`` made
+    ``pytest.importorskip("torch")`` succeed without torch installed, and a
+    later test compute on mocks (test_selector's CUDA test did this)."""
+    before = sys.modules.get("torch")
+    yield
+    after = sys.modules.get("torch")
+    if after is not before and after is not None and getattr(after, "__file__", None) is None:
+        raise AssertionError(
+            f"{request.node.nodeid} left a stub torch in sys.modules; "
+            "monkeypatch.setitem(sys.modules, 'torch', ...) restores it for you."
+        )
+
+
+@pytest.fixture(autouse=True)
 def _no_llama_cpp_pollution(request):
     """Fail the test that leaves a stub behind, by name.
 

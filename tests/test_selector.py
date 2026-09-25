@@ -44,32 +44,17 @@ class TestHasCuda:
         result = _has_cuda()
         assert isinstance(result, bool)
 
-    def test_cuda_check_with_mock(self):
+    def test_cuda_check_with_mock(self, monkeypatch):
         """_has_cuda checks torch.cuda.is_available when torch is present."""
-        # Create a mock torch module
-        mock_torch = MagicMock()
-        mock_torch.cuda.is_available.return_value = True
-
-        # Test the function with mocked torch
         import sys
 
-        # Store original if present
-        original_torch = sys.modules.get("torch")
-
-        try:
-            sys.modules["torch"] = mock_torch
-            # Need to reload the module to pick up the mock
-            # But since the function does its own import, we test via the actual behavior
-            # Just verify the function returns a valid bool
-            result = _has_cuda()
-            assert isinstance(result, bool)
-        finally:
-            # Restore original
-            if original_torch is not None:
-                sys.modules["torch"] = original_torch
-            elif "torch" in sys.modules:
-                # If we added it, the mock might still be there
-                pass
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        # monkeypatch restores the entry — or removes it when torch was not
+        # installed. The old try/finally left the mock behind in that case,
+        # and every later test importing torch got a MagicMock.
+        monkeypatch.setitem(sys.modules, "torch", mock_torch)
+        assert _has_cuda() is True
 
 
 class TestGetEngines:
