@@ -85,8 +85,9 @@ def world(monkeypatch):
     monkeypatch.setattr(launcher.shutil, "which", lambda tool: f"/usr/bin/{tool}")
     monkeypatch.setattr(launcher, "server_up", lambda url: state["up"])
 
-    def start(port, api_key, log_path):
+    def start(port, api_key, log_path, parallel=0):
         calls["started"] += 1
+        calls["parallel"] = parallel
         return MagicMock(spec=subprocess.Popen)
 
     def stop(proc):
@@ -111,7 +112,7 @@ def world(monkeypatch):
     return calls, state
 
 
-def _run(tool="claude", host="127.0.0.1"):
+def _run(tool="claude", host="127.0.0.1", parallel=0, said=None):
     return launcher.run(
         tool,
         "m",
@@ -120,7 +121,8 @@ def _run(tool="claude", host="127.0.0.1"):
         api_key=None,
         extra=[],
         log_path=Path("/nowhere/launch.log"),
-        say=lambda message: None,
+        say=(said.append if said is not None else (lambda message: None)),
+        parallel=parallel,
     )
 
 
@@ -165,6 +167,19 @@ class TestRun:
         monkeypatch.setattr(launcher, "server_up", lambda url: pytest.fail("touched the server"))
         with pytest.raises(launcher.LaunchError, match="not installed"):
             _run()
+
+    def test_parallel_reaches_the_server_it_starts(self, world):
+        calls, state = world
+        state["up"] = False
+        _run(parallel=4)
+        assert calls["parallel"] == 4
+
+    def test_a_running_server_keeps_its_settings_and_says_so(self, world):
+        calls, state = world
+        said: list[str] = []
+        _run(parallel=4, said=said)
+        assert calls["started"] == 0
+        assert any("--parallel" in line for line in said)
 
 
 class TestPreload:

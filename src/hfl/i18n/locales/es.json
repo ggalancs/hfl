@@ -37,7 +37,9 @@
         "port": "Número de puerto",
         "model": "Pre-cargar un modelo al iniciar",
         "api_key": "Clave API para autenticación (recomendado para exposición en red)",
-        "sandbox": "Endurecimiento del proceso al arrancar: none (por defecto), seccomp (Linux), macos. También HFL_SANDBOX."
+        "sandbox": "Endurecimiento del proceso al arrancar: none (por defecto), seccomp (Linux), macos. También HFL_SANDBOX.",
+        "backend": "Backend: auto (según el modelo), llama-cpp, llama-server, transformers, vllm, mlx",
+        "parallel": "Peticiones que atiende a la vez cada modelo GGUF (usa llama-server de llama.cpp)"
       }
     },
     "list": {
@@ -236,7 +238,8 @@
         "host": "Host del servidor HFL",
         "port": "Puerto del servidor HFL",
         "api_key": "Clave de API, si el servidor la pide",
-        "print": "Muestra la configuración para tu shell en vez de lanzar nada"
+        "print": "Muestra la configuración para tu shell en vez de lanzar nada",
+        "parallel": "Atender N peticiones a la vez, si esto arranca el servidor (los agentes envían varias)"
       },
       "messages": {
         "unknown_tool": "Herramienta desconocida {tool}: elige una de {tools}.",
@@ -247,7 +250,8 @@
         "loading": "Cargando {model}...",
         "unreachable": "No se pudo contactar con {url}.",
         "model_required": "Indica el modelo con -m: un nombre local, un alias o una referencia del Hub.",
-        "model_missing": "{model} no es un modelo local. Una referencia del Hub (org/modelo[:CUANT]) lo descarga."
+        "model_missing": "{model} no es un modelo local. Una referencia del Hub (org/modelo[:CUANT]) lo descarga.",
+        "parallel_ignored": "{url} ya está en marcha y mantiene su configuración (arráncalo con `hfl serve --parallel N` para peticiones en paralelo)."
       }
     }
   },
@@ -312,7 +316,8 @@
     "memory_unknown": "Memoria: no se pudo estimar cuánto ocupará {model}; se carga sin comprobar la memoria.",
     "memory_summary": "Memoria: {in_use} de {total} GB en uso ({pct}%) · presupuesto {budget}% ({limit} GB) · margen: {free} GB · modelos: {models} GB",
     "memory_summary_gpu": "GPU: {in_use} de {total} GB en uso ({pct}%) · margen: {free} GB",
-    "run_pulling": "{model} aún no está en esta máquina: se descarga primero."
+    "run_pulling": "{model} aún no está en esta máquina: se descarga primero.",
+    "parallel_on": "Peticiones en paralelo: {slots} a la vez por modelo GGUF de texto (llama-server); los de visión y otros formatos usan su backend habitual."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",
@@ -355,7 +360,10 @@
     "hub_unreachable_hint": "Los modelos que ya descargaste siguen funcionando: hfl list, hfl run <modelo>, hfl serve.",
     "memory_refused": "No hay memoria suficiente para {model}: necesita ~{need} GB y la máquina llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%.",
     "memory_refused_hint": "Opciones: una cuantización menor (Q4_K_M, Q3_K_M), un contexto menor (--ctx 8192), cerrar otros programas o subir HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 omite esta comprobación.",
-    "memory_refused_gpu": "No hay memoria de GPU suficiente para {model}: necesita ~{need} GB y la GPU llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%."
+    "memory_refused_gpu": "No hay memoria de GPU suficiente para {model}: necesita ~{need} GB y la GPU llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%.",
+    "unknown_backend": "Backend desconocido {backend}: elige uno de {choices}.",
+    "bad_parallel": "--parallel debe ser 0 o más.",
+    "llama_server_missing": "Las peticiones en paralelo necesitan llama-server de llama.cpp, que no está instalado (p. ej. `brew install llama.cpp`), o define HFL_LLAMA_SERVER_BIN."
   },
   "warnings": {
     "download_cancelled": "Descarga cancelada.",

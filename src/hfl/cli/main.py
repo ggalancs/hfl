@@ -498,6 +498,7 @@ def launch(
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.launch.options.port")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.launch.options.api_key")),
     print_only: bool = typer.Option(False, "--print", help=t("commands.launch.options.print")),
+    parallel: int = typer.Option(0, "--parallel", help=t("commands.launch.options.parallel")),
 ) -> None:
     """Open Claude Code or Codex on a local model (``hfl launch claude -m NAME``)."""
     from hfl.cli.commands import launch as launcher
@@ -531,6 +532,7 @@ def launch(
             extra=list(ctx.args),
             log_path=config.home_dir / "logs" / "launch-server.log",
             say=lambda message: console.print(f"[dim]{escape_markup(message)}[/]"),
+            parallel=parallel,
         )
     except launcher.LaunchError as exc:
         console.print(f"[red]{escape_markup(str(exc))}[/]")
@@ -796,6 +798,49 @@ def _print_hub_unreachable() -> None:
     console.print(f"[dim]{t('errors.hub_unreachable_hint')}[/]")
 
 
+_BACKENDS = ("auto", "llama-cpp", "llama-server", "transformers", "vllm", "mlx")
+
+
+def _choose_backend(backend: str, parallel: int) -> None:
+    """Apply ``--backend`` / ``--parallel`` for this server.
+
+    The backend is still chosen per model: ``auto`` keeps the usual choice,
+    and a forced ``llama-server`` only takes the GGUF text models (a vision
+    model and anything that is not GGUF keep their own backend). ``--parallel
+    N`` above 1 asks for N requests at once per model, which on GGUF needs
+    llama-server — so it implies it when no backend was named.
+    """
+    import os
+
+    from hfl.config import config as hfl_config
+
+    backend = backend.strip().lower()
+    if backend not in _BACKENDS:
+        message = t("errors.unknown_backend", backend=backend, choices=", ".join(_BACKENDS))
+        console.print(f"[red]{escape_markup(message)}[/]")
+        raise typer.Exit(2)
+    if parallel < 0:
+        console.print(f"[red]{escape_markup(t('errors.bad_parallel'))}[/]")
+        raise typer.Exit(2)
+    if parallel > 1 and backend == "auto":
+        backend = "llama-server"
+    if backend == "llama-server":
+        from hfl.engine.llama_server import binary
+
+        if binary() is None:
+            console.print(f"[red]{escape_markup(t('errors.llama_server_missing'))}[/]")
+            raise typer.Exit(1)
+    if backend != "auto":
+        os.environ["HFL_LLM_LIBRARY"] = backend
+    if parallel > 0:
+        hfl_config.queue_max_inflight = parallel
+    if backend == "llama-server":
+        from hfl.engine.llama_server import DEFAULT_SLOTS
+
+        slots = parallel if parallel > 1 else DEFAULT_SLOTS
+        console.print(f"[cyan]{escape_markup(t('messages.parallel_on', slots=slots))}[/]")
+
+
 def _is_public_bind(host: str) -> bool:
     """Whether binding to ``host`` exposes the server beyond this machine.
 
@@ -840,6 +885,8 @@ def serve(
         help="Show system tray icon for server management",
     ),
     sandbox: str = typer.Option(None, "--sandbox", help=t("commands.serve.options.sandbox")),
+    backend: str = typer.Option("auto", "--backend", help=t("commands.serve.options.backend")),
+    parallel: int = typer.Option(0, "--parallel", help=t("commands.serve.options.parallel")),
 ):
     """Start the API server (OpenAI + Ollama + Anthropic compatible)."""
     from hfl.api.server import start_server
@@ -946,6 +993,7 @@ def serve(
     state = get_state()
     if ctx > 0:
         state.context_size_override = ctx
+    _choose_backend(backend, parallel)
 
     if model:
         from pathlib import Path

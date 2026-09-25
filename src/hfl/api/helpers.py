@@ -155,6 +155,27 @@ async def run_with_timeout(
         ) from None
 
 
+_parallel_suggested = False
+
+
+def suggest_parallel(dispatcher: Any, engine: Any) -> None:
+    """Say once, when a request is about to wait behind another, how to serve
+    several at once. Only for an engine that could (a GGUF on the in-process
+    backend); the choice itself stays the operator's (``--parallel``)."""
+    global _parallel_suggested
+    if _parallel_suggested or getattr(engine, "parallel_hint", False) is not True:
+        return
+    snapshot = dispatcher.snapshot()
+    if snapshot.in_flight < snapshot.max_inflight:
+        return
+    _parallel_suggested = True
+    logger.warning(
+        "A request is waiting for the model to finish another one. GGUF models can "
+        "serve several at once: start the server with `hfl serve --parallel 4` "
+        "(needs llama.cpp's llama-server)."
+    )
+
+
 async def run_dispatched(
     func: Callable[..., T],
     *args: Any,
@@ -182,7 +203,9 @@ async def run_dispatched(
 
     # The engine is the bound method's owner: a concurrent engine has its own
     # dispatcher; every other engine shares the global, serialized one.
-    dispatcher = dispatcher_for(getattr(func, "__self__", None))
+    engine = getattr(func, "__self__", None)
+    dispatcher = dispatcher_for(engine)
+    suggest_parallel(dispatcher, engine)
     effective_timeout = timeout if timeout is not None else config.generation_timeout
 
     # Acquire the slot manually (not via ``dispatcher.run``) so we control WHEN
@@ -273,7 +296,9 @@ async def acquire_stream_slot(
 
     # The request's own model (``load_llm`` bound it), which decides whether
     # it queues behind every other request or in its own parallel slots.
-    dispatcher = dispatcher_for(get_state().engine)
+    engine = get_state().engine
+    dispatcher = dispatcher_for(engine)
+    suggest_parallel(dispatcher, engine)
     cm = dispatcher.slot()
     try:
         await cm.__aenter__()

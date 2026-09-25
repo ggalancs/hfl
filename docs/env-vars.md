@@ -53,6 +53,11 @@ the host string does not.
 |----------------------|-------------------------|---------|--------------|
 | `HFL_LLM_LIBRARY`    | `OLLAMA_LLM_LIBRARY`    | (auto)  | Pin auto-selection to a specific backend: `llama-cpp`, `llama-server`, `transformers`, `vllm`, `mlx`. `llama-server` serves GGUF models only (others keep their backend) and needs llama.cpp's `llama-server` installed. Per-call `backend=` argument still wins. |
 | `HFL_LLAMA_SERVER_BIN` | — | (PATH) | The `llama-server` executable to run, when it is not on the PATH. |
+
+> On the command line: `hfl serve --parallel N` asks for N requests at once per
+> GGUF text model (it implies `llama-server`), and `hfl serve --backend NAME`
+> picks a backend. The choice stays per model either way: a vision GGUF (an
+> `mmproj-*.gguf` beside it) and non-GGUF models keep their usual backend.
 | `HFL_DISABLE_MLX`    | —                       | `0`     | When truthy, disables the MLX path on Apple Silicon (forces llama-cpp Metal). Useful for benchmarking. |
 | `HFL_KV_CACHE_TYPE`  | `OLLAMA_KV_CACHE_TYPE`  | `f16`   | KV cache dtype: `f16`, `q8_0`, `q4_0`. Halves / quarters VRAM at the cost of accuracy. |
 | `HFL_FLASH_ATTENTION`| `OLLAMA_FLASH_ATTENTION`| (auto)  | Toggle flash-attention fleet-wide (`1`/`0`). Per-load kwarg wins; per-arch safety list still rejects known-unsafe arches. |

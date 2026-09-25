@@ -1179,6 +1179,10 @@ class _LlamaModelDraftAdapter:
 class LlamaCppEngine(InferenceEngine):
     """llama.cpp inference engine."""
 
+    # One request at a time here; the same GGUF can serve several at once
+    # through llama-server. The dispatcher says so when a request waits.
+    parallel_hint = True
+
     def __init__(self):
         # ``Llama`` is an untyped optional-dependency handle (resolved
         # to ``Any`` when llama-cpp-python isn't installed). Annotating

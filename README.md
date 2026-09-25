@@ -258,7 +258,10 @@ stops it when the agent exits), loads the model and hands the agent its real
 context window. Nothing in the agent's own configuration is changed.
 Arguments after `--` go to the agent: `hfl launch claude -m qwen-coder -- -p "fix the tests"`.
 
-The server listens on `http://localhost:11434` and speaks three APIs.
+The server listens on `http://localhost:11434` and speaks three APIs. It answers
+one request at a time per GGUF model by default; `hfl serve --parallel 4` (with
+llama.cpp installed) serves several at once — what coding agents and several
+users need.
 
 **OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations`

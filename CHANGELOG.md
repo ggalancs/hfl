@@ -17,9 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browser's `Accept: text/html` gets the page. It carries a strict
   Content-Security-Policy (a nonce per response, connections only to this
   server) and escapes every model reply before rendering it.
-- **Parallel requests: the `llama-server` backend.** With
-  `HFL_LLM_LIBRARY=llama-server`, a GGUF model is served by a llama.cpp
-  `llama-server` process of its own, decoding several requests together in
+- **Parallel requests: `hfl serve --parallel N`.** The backend is still
+  chosen per model; asking for parallel requests (or `--backend llama-server`,
+  or `HFL_LLM_LIBRARY=llama-server`) serves each GGUF text model from a
+  llama.cpp `llama-server` process of its own — a vision model and anything
+  that is not GGUF keep their usual backend — decoding several requests together in
   parallel slots (`HFL_NUM_PARALLEL`, 4 by default) that share one KV
   buffer sized to the model's context — the memory of a single-slot load.
   Each such model gets its own queue, so its requests neither wait behind
@@ -34,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supported on this backend: images, LoRA hot-swap, KV snapshots. With the
   default `repeat_penalty` (1.1) its replies can differ from the in-process
   backend's; with 1.0 they matched.
+  When a request has to wait on the default GGUF backend, the log says once
+  how to serve several at once. `hfl launch --parallel N` passes the option
+  to the server it starts.
 - **`hfl launch claude|codex -m MODEL` opens a coding agent on a local
   model.** Claude Code talks to HFL's Anthropic API, Codex to its Responses
   API. HFL pulls the model if needed (a Hub reference works), starts a

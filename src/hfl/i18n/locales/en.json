@@ -37,7 +37,9 @@
         "port": "Port number",
         "model": "Pre-load a model at startup",
         "api_key": "API key for authentication (recommended for network exposure)",
-        "sandbox": "Process hardening at startup: none (default), seccomp (Linux), macos. Also HFL_SANDBOX."
+        "sandbox": "Process hardening at startup: none (default), seccomp (Linux), macos. Also HFL_SANDBOX.",
+        "backend": "Backend: auto (chosen per model), llama-cpp, llama-server, transformers, vllm, mlx",
+        "parallel": "Requests each GGUF model serves at once (uses llama.cpp's llama-server)"
       }
     },
     "list": {
@@ -236,7 +238,8 @@
         "host": "HFL server host",
         "port": "HFL server port",
         "api_key": "API key, if the server requires one",
-        "print": "Print the settings for your shell instead of launching"
+        "print": "Print the settings for your shell instead of launching",
+        "parallel": "Serve N requests at once, if this starts the server (coding agents send several)"
       },
       "messages": {
         "unknown_tool": "Unknown tool {tool}: choose one of {tools}.",
@@ -247,7 +250,8 @@
         "loading": "Loading {model}...",
         "unreachable": "Could not reach {url}.",
         "model_required": "Say which model with -m: a local name, an alias or a Hub reference.",
-        "model_missing": "{model} is not a local model. A Hub reference (org/model[:QUANT]) downloads it."
+        "model_missing": "{model} is not a local model. A Hub reference (org/model[:QUANT]) downloads it.",
+        "parallel_ignored": "{url} is already running; it keeps its own settings (start it with `hfl serve --parallel N` for parallel requests)."
       }
     }
   },
@@ -312,7 +316,8 @@
     "memory_unknown": "Memory: could not estimate what {model} will take; loading without a memory check.",
     "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB",
     "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB",
-    "run_pulling": "{model} is not on this machine yet — pulling it first."
+    "run_pulling": "{model} is not on this machine yet — pulling it first.",
+    "parallel_on": "Parallel requests: {slots} at once per GGUF text model (llama-server); vision models and other formats keep their usual backend."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",
@@ -355,7 +360,10 @@
     "hub_unreachable_hint": "Models you have already pulled keep working: hfl list, hfl run <model>, hfl serve.",
     "memory_refused": "Not enough memory for {model}: it needs ~{need} GB, and the machine would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%.",
     "memory_refused_hint": "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context (--ctx 8192), closing other programs, or raising HFL_MEMORY_BUDGET. HFL_DISABLE_MEMORY_PREFLIGHT=1 skips this check.",
-    "memory_refused_gpu": "Not enough GPU memory for {model}: it needs ~{need} GB, and the GPU would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%."
+    "memory_refused_gpu": "Not enough GPU memory for {model}: it needs ~{need} GB, and the GPU would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%.",
+    "unknown_backend": "Unknown backend {backend}: choose one of {choices}.",
+    "bad_parallel": "--parallel must be 0 or more.",
+    "llama_server_missing": "Parallel requests need llama.cpp's llama-server, which is not installed (e.g. `brew install llama.cpp`), or set HFL_LLAMA_SERVER_BIN."
   },
   "warnings": {
     "download_cancelled": "Download cancelled.",

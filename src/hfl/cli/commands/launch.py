@@ -109,7 +109,9 @@ def server_up(base_url: str) -> bool:
         return False
 
 
-def start_server(port: int, api_key: str | None, log_path: Path) -> subprocess.Popen[bytes]:
+def start_server(
+    port: int, api_key: str | None, log_path: Path, parallel: int = 0
+) -> subprocess.Popen[bytes]:
     """``hfl serve`` on 127.0.0.1:``port``, logging to ``log_path``."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -124,6 +126,8 @@ def start_server(port: int, api_key: str | None, log_path: Path) -> subprocess.P
     ]
     if api_key:
         cmd += ["--api-key", api_key]
+    if parallel:
+        cmd += ["--parallel", str(parallel)]
     with open(log_path, "ab") as log:
         return subprocess.Popen(
             cmd,
@@ -207,17 +211,22 @@ def run(
     extra: list[str],
     log_path: Path,
     say: Callable[[str], None],
+    parallel: int = 0,
 ) -> int:
     """Open ``tool`` on ``model``; return the tool's exit code."""
     check_tool(tool)
     base_url = f"http://{host}:{port}"
     started: subprocess.Popen[bytes] | None = None
     try:
-        if not server_up(base_url):
+        if server_up(base_url):
+            if parallel:
+                # A running server keeps the settings it was started with.
+                say(t("commands.launch.messages.parallel_ignored", url=base_url))
+        else:
             if host not in _LOOPBACK:
                 raise LaunchError(t("commands.launch.messages.no_server", url=base_url))
             say(t("commands.launch.messages.starting", url=base_url, log=log_path))
-            started = start_server(port, api_key, log_path)
+            started = start_server(port, api_key, log_path, parallel)
             if not wait_until_up(base_url, started):
                 raise LaunchError(t("commands.launch.messages.not_started", log=log_path))
         say(t("commands.launch.messages.loading", model=model))

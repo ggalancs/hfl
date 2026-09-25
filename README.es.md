@@ -264,7 +264,10 @@ HFL descarga el modelo si hace falta, arranca un servidor si no hay ninguno
 ventana de contexto real. No se toca la configuración propia del agente.
 Lo que va tras `--` se le pasa al agente: `hfl launch claude -m qwen-coder -- -p "arregla los tests"`.
 
-El servidor escucha en `http://localhost:11434` y habla tres APIs.
+El servidor escucha en `http://localhost:11434` y habla tres APIs. Por defecto
+atiende una petición a la vez por modelo GGUF; `hfl serve --parallel 4` (con
+llama.cpp instalado) atiende varias a la vez, lo que necesitan los agentes de
+programación y varios usuarios.
 
 **OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations`
