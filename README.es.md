@@ -125,6 +125,7 @@ no aparecen más pequeños de lo que son.
 
 ```bash
 hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M   # desde el Hub, se descarga la primera vez
+hfl run qwen3-coder                                          # un nombre corto, se busca en el Hub
 hfl run hf.co/mlx-community/Qwen2.5-0.5B-Instruct-4bit       # un build MLX en Apple Silicon
 hfl run llama70b --system "You are a Python expert"          # un nombre local o un alias
 hfl run llama70b --session work                              # retoma y guarda una conversación
@@ -132,6 +133,14 @@ hfl run llama70b --session work                              # retoma y guarda u
 
 El prefijo `hf.co/` es opcional. `:Q4_K_M` elige una cuantización y `@<ref>` fija
 una rama, etiqueta o commit.
+
+Un nombre corto (`qwen3-coder`, `llama3.2`, `qwen3:8b`, `gemma3:4b-q8_0`) que no
+es un modelo local se busca entre los builds GGUF del Hub: primero los instruct y
+los cuantizadores habituales, fuera los derivados (abliterated, merges...), y una
+cuantización que quepa en tu máquina (Q4_K_M salvo que no quepa). Eliges de la
+lista antes de descargar nada (`--yes` toma el primero) y el nombre se guarda como
+alias, así que el siguiente `hfl run qwen3-coder` es local. Los clientes de Ollama
+obtienen lo mismo con `/api/pull {"model": "llama3.2"}`.
 
 ### Descargar, buscar y gestionar
 

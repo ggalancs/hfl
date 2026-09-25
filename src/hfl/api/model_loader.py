@@ -83,6 +83,16 @@ def _canonical_model_name(model_name: str) -> str:
         if not valid:
             raise ModelNotFoundError(model_name)
     if not valid:
+        # An Ollama-style tagged short name (``qwen3:8b``) is kept locally
+        # under the alias its pull gave it (``qwen3-8b``: ':' is not allowed
+        # in a name). Unknown, it is a 404 like any missing model.
+        from hfl.hub.shortname import alias_for, is_short_name
+
+        if is_short_name(model_name):
+            remembered = get_registry().get(alias_for(model_name))
+            if remembered is not None:
+                return str(remembered.name)
+            raise ModelNotFoundError(model_name)
         raise APIValidationError(str(error)) from error
     return model_name
 

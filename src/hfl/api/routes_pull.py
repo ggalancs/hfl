@@ -188,7 +188,11 @@ def _hub_answered(exc: BaseException, model: str) -> dict[str, str] | None:
 
 
 def _record_server_pull(
-    resolved: "ResolvedModel", local_path: Any, license_info: "LicenseInfo", policy: str
+    resolved: "ResolvedModel",
+    local_path: Any,
+    license_info: "LicenseInfo",
+    policy: str,
+    alias: str | None = None,
 ) -> None:
     """Register the pulled model + log provenance for legal traceability.
 
@@ -235,7 +239,10 @@ def _record_server_pull(
         gated=license_info.gated,
         license_accepted_at=accepted_at,
     )
-    ModelRegistry().add(manifest)
+    registry = ModelRegistry()
+    if alias and registry.get(alias) is None:  # never steal a name in use
+        manifest.alias = alias
+    registry.add(manifest)
 
     log_conversion(
         source_repo=resolved.repo_id,
@@ -283,8 +290,36 @@ async def _run_pull_streaming(
     # --- Phase 1: resolve manifest ----------------------------------
     yield _event("pulling manifest")
 
+    # A short name (``llama3.2``, ``qwen3:8b``) — what Ollama clients such as
+    # Open WebUI ask for — becomes the best GGUF build for this machine, and
+    # is registered under it as an alias so the same name then chats.
+    from hfl.hub.resolver import parse_model_spec
+    from hfl.hub.shortname import alias_for, find, is_short_name
+
+    reference, alias = req.model, None
+    if parse_model_spec(req.model).repo_id is None and is_short_name(req.model):
+        try:
+            choice = await asyncio.to_thread(find, req.model)
+        except Exception as exc:
+            if is_network_error(exc):
+                logger.info("pull of %r: Hub unreachable (%s)", req.model, type(exc).__name__)
+                yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
+                return
+            raise
+        if choice is None:
+            logger.info("pull of %r: no GGUF build found", req.model)
+            yield _event(
+                "error",
+                error=f"no GGUF model on the Hugging Face Hub matches {req.model}",
+                code="not_found",
+            )
+            return
+        reference, quantization = choice.reference, choice.quantization
+        alias = alias_for(req.model)
+        yield _event(f"{req.model} is {choice.repo_id}:{choice.quantization}")
+
     try:
-        resolved = await asyncio.to_thread(resolve, req.model, quantization, req.revision)
+        resolved = await asyncio.to_thread(resolve, reference, quantization, req.revision)
     except Exception as exc:  # pragma: no cover — error envelope tested via mock
         # ``resolve`` talks to the Hub and the local cache; its failures quote
         # URLs and on-disk paths. Reference the log line instead.
@@ -400,7 +435,9 @@ async def _run_pull_streaming(
         from hfl.config import config
 
         policy = getattr(config, "license_policy", "permissive")
-        await asyncio.to_thread(_record_server_pull, resolved, local_path, license_info, policy)
+        await asyncio.to_thread(
+            _record_server_pull, resolved, local_path, license_info, policy, alias
+        )
     except Exception as exc:  # pragma: no cover — defensive; recording is non-critical
         logger.warning("server pull bookkeeping failed for %s: %s", resolved.repo_id, exc)
 

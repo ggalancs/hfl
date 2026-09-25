@@ -526,5 +526,13 @@
     "unreachable": "No se puede contactar con el servidor HFL.",
     "failed": "Algo ha fallado:",
     "api_key": "Este servidor pide una clave de API:"
+  },
+  "shortname": {
+    "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",
+    "none": "Nada en el Hub coincide con “{name}” como modelo GGUF. Prueba `hfl search {name}`.",
+    "pick": "¿Cuál descargo? Número, o n para cancelar",
+    "cancelled": "No se ha descargado nada.",
+    "not_interactive": "No descargo sin confirmación. Para tomar el primero: {command}",
+    "option_yes": "Si el modelo es un nombre corto que buscar, toma la primera coincidencia sin preguntar"
   }
 }

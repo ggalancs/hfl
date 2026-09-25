@@ -94,6 +94,7 @@ def pull(
     skip_license: bool = typer.Option(
         False, "--skip-license", help=t("commands.pull.options.skip_license")
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
 ):
     """Download a model from HuggingFace Hub."""
     from datetime import datetime
@@ -103,10 +104,26 @@ def pull(
     from hfl.converter.formats import ModelFormat, detect_format
     from hfl.hub.downloader import pull_model
     from hfl.hub.license_checker import check_model_license, require_user_acceptance
-    from hfl.hub.resolver import resolve
+
+    # 0. A short name (``qwen3-coder``, ``qwen3:8b``) is chosen on the Hub
+    # first and remembered as an alias. ``yes is True``: called as a plain
+    # function the option holds Typer's (truthy) default, never a yes.
+    from hfl.hub.resolver import parse_model_spec, resolve
+    from hfl.hub.shortname import is_short_name
     from hfl.models.manifest import ModelManifest
     from hfl.models.registry import ModelRegistry
     from hfl.utils.retry import RetryExhausted
+
+    if parse_model_spec(model).repo_id is None and is_short_name(model):
+        from hfl.hub.shortname import alias_for
+
+        choice = _choose_short_name(model, assume_yes=yes is True)
+        if choice is None:
+            console.print(f"[red]{t('errors.model_not_found')}:[/] {escape_markup(model)}")
+            raise typer.Exit(1)
+        if not isinstance(alias, str) or not alias:
+            alias = alias_for(model)
+        model, quantize = choice.reference, choice.quantization
 
     # 1. Resolve model
     console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
@@ -353,6 +370,7 @@ def run(
     ctx: int = typer.Option(0, "--ctx", "-c", help=t("commands.run.options.ctx")),
     system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
     session: str = typer.Option(None, "--session", help=t("commands.run.options.session")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -372,7 +390,7 @@ def run(
     from hfl.engine.selector import MissingDependencyError, select_engine
     from hfl.models.registry import ModelRegistry
 
-    manifest = _local_or_pulled(model, ModelRegistry)
+    manifest = _local_or_pulled(model, ModelRegistry, assume_yes=yes)
     if not manifest:
         console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
         console.print(t("errors.use_list_to_see"))
@@ -499,6 +517,7 @@ def launch(
     api_key: str = typer.Option(None, "--api-key", help=t("commands.launch.options.api_key")),
     print_only: bool = typer.Option(False, "--print", help=t("commands.launch.options.print")),
     parallel: int = typer.Option(0, "--parallel", help=t("commands.launch.options.parallel")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
 ) -> None:
     """Open Claude Code or Codex on a local model (``hfl launch claude -m NAME``)."""
     from hfl.cli.commands import launch as launcher
@@ -517,7 +536,7 @@ def launch(
                 typer.echo(line)
             return
         launcher.check_tool(tool)
-        manifest = _local_or_pulled(model, ModelRegistry)
+        manifest = _local_or_pulled(model, ModelRegistry, assume_yes=yes)
         if manifest is None:
             console.print(
                 f"[red]{escape_markup(t('commands.launch.messages.model_missing', model=model))}[/]"
@@ -553,7 +572,7 @@ def _load_tts_or_exit(model: str) -> tuple[Any, Any]:
     from hfl.engine.selector import MissingDependencyError, select_tts_engine
     from hfl.models.registry import ModelRegistry
 
-    manifest = _local_or_pulled(model, ModelRegistry)
+    manifest = _local_or_pulled(model, ModelRegistry, short_names=False)
     if manifest is None:
         console.print(f"[red]{t('errors.model_not_found')}:[/] {escape(model)}")
         console.print(t("errors.use_list_to_see"))
@@ -698,7 +717,9 @@ def _play_audio(audio: bytes, sample_rate: int) -> None:
         subprocess.run([player, f.name], check=True, timeout=600)
 
 
-def _local_or_pulled(model: str, registry_cls: Any) -> Any:
+def _local_or_pulled(
+    model: str, registry_cls: Any, *, assume_yes: bool = False, short_names: bool = True
+) -> Any:
     """The manifest ``hfl run`` should open, pulling it first if needed.
 
     ``model`` may be a local name or alias, or a Hub reference in the form
@@ -706,7 +727,8 @@ def _local_or_pulled(model: str, registry_cls: Any) -> Any:
     A reference already on disk (same repo, same quantization) is used as
     is, without touching the network; otherwise it is pulled with the same
     flow as ``hfl pull`` — license check included — and then opened. A bare
-    name that is not local is not guessed at: it returns None.
+    name that is not local (``qwen3-coder``, ``qwen3:8b``) is looked up on
+    the Hub and offered for confirmation (:func:`_from_short_name`).
     """
     from hfl.hub.resolver import parse_model_spec
 
@@ -716,7 +738,11 @@ def _local_or_pulled(model: str, registry_cls: Any) -> Any:
         return manifest
     spec = parse_model_spec(model)
     if spec.repo_id is None:
-        return None
+        from hfl.hub.shortname import is_short_name
+
+        if not short_names or not is_short_name(model):
+            return None
+        return _from_short_name(model, registry_cls, assume_yes=assume_yes)
     local = registry.find_pulled(spec.repo_id, spec.quantization)
     if local is not None:
         return local
@@ -730,6 +756,79 @@ def _local_or_pulled(model: str, registry_cls: Any) -> Any:
         skip_license=False,
     )
     return registry_cls().find_pulled(spec.repo_id, spec.quantization)
+
+
+def _choose_short_name(name: str, assume_yes: bool) -> Any:
+    """Look ``name`` up on the Hub and let the user pick; None if nothing.
+
+    Shows every candidate with its size, the most likely first. ``assume_yes``
+    takes the first; without a terminal nothing is downloaded — the exact
+    reference is printed instead, so a script never pulls gigabytes on a
+    guess.
+    """
+    import sys
+
+    from hfl.hub.shortname import find_options
+
+    console.print(f"[dim]{escape_markup(t('shortname.searching', name=name))}[/]")
+    try:
+        options = find_options(name)
+    except Exception as exc:
+        if _hub_unreachable(exc):
+            _print_hub_unreachable()
+            raise typer.Exit(1) from None
+        raise
+    if not options:
+        console.print(f"[red]{escape_markup(t('shortname.none', name=name))}[/]")
+        return None
+    for number, option in enumerate(options, start=1):
+        size = option.size_bytes / 1024**3
+        console.print(
+            f"  [cyan]{number}[/]  {escape_markup(option.repo_id)}:{option.quantization}"
+            f"  [dim]{size:.1f} GB · {option.downloads:,} downloads[/]"
+        )
+    if assume_yes:
+        return options[0]
+    if not sys.stdin.isatty():
+        console.print(
+            escape_markup(
+                t("shortname.not_interactive", command=f"hfl pull {options[0].reference}")
+            )
+        )
+        raise typer.Exit(1)
+    answer = typer.prompt(t("shortname.pick"), default="1").strip().lower()
+    if answer.isdigit() and 1 <= int(answer) <= len(options):
+        return options[int(answer) - 1]
+    console.print(f"[dim]{escape_markup(t('shortname.cancelled'))}[/]")
+    raise typer.Exit(1)
+
+
+def _from_short_name(name: str, registry_cls: Any, *, assume_yes: bool) -> Any:
+    """The model a short name stands for: the one chosen before (kept as an
+    alias), or one chosen now from the Hub, pulled and remembered."""
+    from hfl.hub.shortname import alias_for
+
+    alias = alias_for(name)
+    remembered = registry_cls().get(alias)
+    if remembered is not None:
+        return remembered
+    choice = _choose_short_name(name, assume_yes)
+    if choice is None:
+        return None
+    local = registry_cls().find_pulled(choice.repo_id, choice.quantization)
+    if local is None:
+        pull(
+            model=choice.reference,
+            quantize=choice.quantization,
+            format="auto",
+            revision=None,
+            alias=alias,
+            skip_license=False,
+        )
+        local = registry_cls().find_pulled(choice.repo_id, choice.quantization)
+    elif not local.alias:
+        registry_cls().set_alias(local.name, alias)
+    return local
 
 
 def escape_markup(text: str) -> str:

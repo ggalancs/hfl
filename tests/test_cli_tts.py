@@ -55,7 +55,7 @@ def cli(monkeypatch, temp_config, tmp_path):
         state.created += 1
         return engine
 
-    monkeypatch.setattr(main, "_local_or_pulled", lambda model, cls: state.manifest)
+    monkeypatch.setattr(main, "_local_or_pulled", lambda model, cls, **k: state.manifest)
     monkeypatch.setattr(main, "get_model_type", lambda m: state.model_type)
     monkeypatch.setattr(main, "_memory_check_or_exit", lambda m, ctx: None)
     monkeypatch.setattr("hfl.engine.selector.select_tts_engine", select)

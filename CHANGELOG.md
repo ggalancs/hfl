@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Short model names: `hfl run qwen3-coder`.** A name that is neither a
+  local model nor a Hub reference (`llama3.2`, `qwen3:8b`,
+  `gemma3:4b-q8_0`) is looked up among the Hub's GGUF repos: ranked by
+  downloads, instruct builds and the usual quantizers (unsloth, bartowski,
+  ggml-org...) first, derivatives (abliterated, uncensored, merges...) and
+  other tasks sharing the family name (ASR, rerankers, embeddings) left
+  out, one build per model. The quantization comes from the repo's real
+  file sizes: the one asked for, else Q4_K_M, else the next one down that
+  fits this machine's GPU or memory budget. `hfl run`, `hfl pull` and
+  `hfl launch` list the options and ask before downloading (`--yes` takes
+  the first; without a terminal they print the `hfl pull` command instead)
+  and keep the name as an alias, so it is local from then on. Over the
+  Ollama API, `/api/pull {"model": "llama3.2"}` does the same and
+  `/api/chat` then answers to `llama3.2` (and `qwen3:8b` to its alias
+  `qwen3-8b`); a name already in use is never taken over.
+
 - **A chat page in the browser.** Open `http://localhost:11434` (or `/ui`)
   in a browser: pick a local model and chat, with streamed replies, a stop
   button and the conversation kept in the browser. One self-contained file,

@@ -526,5 +526,13 @@
     "unreachable": "Cannot reach the HFL server.",
     "failed": "Something went wrong:",
     "api_key": "This server needs an API key:"
+  },
+  "shortname": {
+    "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",
+    "none": "Nothing on the Hub matches “{name}” as a GGUF model. Try `hfl search {name}`.",
+    "pick": "Download which one? Number, or n to cancel",
+    "cancelled": "Nothing downloaded.",
+    "not_interactive": "Not downloading without confirmation. To take the first one: {command}",
+    "option_yes": "If the model is a short name to look up, take the first match without asking"
   }
 }

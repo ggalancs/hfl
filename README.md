@@ -121,6 +121,7 @@ than they are.
 
 ```bash
 hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M   # from the Hub, pulled on first use
+hfl run qwen3-coder                                          # a short name, looked up on the Hub
 hfl run hf.co/mlx-community/Qwen2.5-0.5B-Instruct-4bit       # an MLX build on Apple Silicon
 hfl run llama70b --system "You are a Python expert"          # a local name or alias
 hfl run llama70b --session work                              # resume and save a conversation
@@ -128,6 +129,14 @@ hfl run llama70b --session work                              # resume and save a
 
 The `hf.co/` prefix is optional. `:Q4_K_M` picks a quantization, `@<ref>` pins a
 branch, tag or commit.
+
+A short name (`qwen3-coder`, `llama3.2`, `qwen3:8b`, `gemma3:4b-q8_0`) that is
+not a local model is looked up among the Hub's GGUF builds: instruct builds and
+the usual quantizers first, derivatives (abliterated, merges...) left out, and a
+quantization that fits your machine (Q4_K_M unless it does not). You pick from the
+list before anything is downloaded (`--yes` takes the first), and the name is kept
+as an alias, so the next `hfl run qwen3-coder` is local. Ollama clients get the
+same over `/api/pull {"model": "llama3.2"}`.
 
 ### Pull, search and manage
 

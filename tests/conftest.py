@@ -290,3 +290,26 @@ def _no_llama_cpp_pollution(request):
             "anything merely checking the backend is importable reports green "
             "while testing the stub."
         )
+
+
+@pytest.fixture(autouse=True)
+def _no_hub_for_short_names():
+    """Short names search the Hub; the suite never does. By default the Hub
+    has nothing — tests of the lookup pass their own fake ``api=``.
+
+    Patched and restored by hand, not with ``monkeypatch``: requesting it
+    here would create the shared monkeypatch before the pollution guards
+    (autouse fixtures set up alphabetically), so it would undo every test's
+    swaps only after the guards had checked, and they would report each
+    correctly restored stub as left behind.
+    """
+    import hfl.hub.shortname as shortname
+
+    empty = MagicMock()
+    empty.list_models.return_value = []
+    original = shortname._default_api
+    shortname._default_api = lambda: empty
+    try:
+        yield
+    finally:
+        shortname._default_api = original

@@ -237,7 +237,7 @@ class TestCommand:
 
         seen = {}
         monkeypatch.setattr(launcher.shutil, "which", lambda tool: "/usr/bin/claude")
-        monkeypatch.setattr(main, "_local_or_pulled", lambda *a: MagicMock(name="m"))
+        monkeypatch.setattr(main, "_local_or_pulled", lambda *a, **k: MagicMock(name="m"))
         monkeypatch.setattr(launcher, "run", lambda *a, **k: seen.update(k) or 0)
         result = cli("claude", "-m", "m", "--", "-p", "fix it", "--allowedTools", "Read")
         assert result.exit_code == 0
