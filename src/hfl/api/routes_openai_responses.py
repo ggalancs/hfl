@@ -236,6 +236,7 @@ def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
     if level is not None:
         cfg.thinking_level = level
         cfg.expose_reasoning = level != "off"
+        cfg.reasoning = level
     if req.response_format is not None:
         from hfl.api.structured_outputs import normalize_openai_response_format
 

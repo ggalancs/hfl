@@ -45,6 +45,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    reasoning_template_vars,
     repeat_penalty_for,
 )
 
@@ -423,6 +424,10 @@ class LlamaServerEngine(InferenceEngine):
             **_sampling(cfg),
             "repeat_penalty": penalty,
         }
+        template_vars = reasoning_template_vars(cfg.reasoning)
+        if template_vars:
+            # ``think: false`` & co. reach the template, not only the reply.
+            body["chat_template_kwargs"] = template_vars
         if tools:
             body["tools"] = tools
         response_format = _response_format(cfg.response_format)

@@ -667,3 +667,10 @@ class TestLora:
     def test_hot_apply_says_how_instead(self, engine):
         with pytest.raises(RuntimeError, match="ADAPTER in the model's Modelfile"):
             engine.apply_lora("/h/a.gguf", 1.0, adapter_id="x")
+
+
+def test_the_reasoning_switch_reaches_llama_server_s_template(engine, fake_server):
+    engine.chat([ChatMessage(role="user", content="hi")], GenerationConfig(reasoning="off"))
+    assert _last_body(fake_server)["chat_template_kwargs"]["enable_thinking"] is False
+    engine.chat([ChatMessage(role="user", content="hi")])
+    assert "chat_template_kwargs" not in _last_body(fake_server)

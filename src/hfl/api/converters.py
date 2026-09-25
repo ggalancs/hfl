@@ -53,7 +53,21 @@ def openai_to_generation_config(
         max_tokens=req.max_tokens or 2048,
         stop=stop,
         seed=req.seed or -1,
+        reasoning=_openai_reasoning(getattr(req, "reasoning_effort", None)),
     )
+
+
+def _openai_reasoning(effort: str | None) -> str | None:
+    """OpenAI's ``reasoning_effort`` as ``GenerationConfig.reasoning``."""
+    if effort is None:
+        return None
+    return {"none": "off", "minimal": "low"}.get(effort, effort)
+
+
+def _anthropic_reasoning(thinking: dict | None) -> str | None:
+    """Anthropic's ``thinking`` as ``GenerationConfig.reasoning``."""
+    kind = (thinking or {}).get("type")
+    return {"enabled": "medium", "disabled": "off"}.get(kind) if isinstance(kind, str) else None
 
 
 def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationConfig:
@@ -148,6 +162,7 @@ def anthropic_to_generation_config(
         max_tokens=req.max_tokens,
         stop=req.stop_sequences,
         seed=-1,
+        reasoning=_anthropic_reasoning(req.thinking),
     )
 
 

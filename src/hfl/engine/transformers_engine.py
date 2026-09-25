@@ -16,6 +16,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    reasoning_template_vars,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ class TransformersEngine(InferenceEngine):
         self,
         messages: list[ChatMessage],
         tools: list[dict] | None = None,
+        reasoning: str | None = None,
     ) -> str:
         """Builds the prompt using the tokenizer's chat template.
 
@@ -166,11 +168,16 @@ class TransformersEngine(InferenceEngine):
             }
             if tools:
                 template_kwargs["tools"] = tools
+            # ``think`` & co. reach the template (``enable_thinking``...).
+            extras = reasoning_template_vars(reasoning)
+            template_kwargs.update(extras)
             try:
                 return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
             except TypeError:
                 # Older transformers / templates without ``tools`` kwarg
                 template_kwargs.pop("tools", None)
+                for key in extras:
+                    template_kwargs.pop(key, None)
                 return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
 
         # Generic fallback (no template, no tool awareness)
@@ -312,7 +319,8 @@ class TransformersEngine(InferenceEngine):
         config: GenerationConfig | None = None,
         tools: list[dict] | None = None,
     ) -> GenerationResult:
-        prompt = self._build_prompt(messages, tools=tools)
+        reasoning = config.reasoning if config is not None else None
+        prompt = self._build_prompt(messages, tools=tools, reasoning=reasoning)
         return self.generate(prompt, config)
 
     def chat_stream(
@@ -321,7 +329,8 @@ class TransformersEngine(InferenceEngine):
         config: GenerationConfig | None = None,
         tools: list[dict] | None = None,
     ) -> Iterator[str]:
-        prompt = self._build_prompt(messages, tools=tools)
+        reasoning = config.reasoning if config is not None else None
+        prompt = self._build_prompt(messages, tools=tools, reasoning=reasoning)
         return self.generate_stream(prompt, config)
 
     @property

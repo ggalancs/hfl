@@ -291,3 +291,18 @@ def test_run_says_yes_with_the_flag(cli, monkeypatch):
     )
     CliRunner().invoke(main.app, ["run", "gemma3", "--yes"])
     assert seen.get("assume_yes") is True
+
+
+def test_the_usual_publishers_win_over_more_downloads():
+    """A copy of Qwen3-1.7B by an unknown publisher had 3x the downloads of
+    Qwen's own, no license, and — one build per model — hid the official ones."""
+    hub = FakeHub(
+        {
+            "someone/Qwen3-1.7B-GGUF": _repo(265_000, Q4_K_M=1.1),
+            "Qwen/Qwen3-1.7B-GGUF": _repo(82_000, Q8_0=1.8),
+            "unsloth/Qwen3-1.7B-GGUF": _repo(68_000, Q4_K_M=1.1),
+        }
+    )
+    options = find_options("qwen3:1.7b", api=hub, budget_bytes=100 * GB)
+    assert options[0].repo_id == "Qwen/Qwen3-1.7B-GGUF"
+    assert "someone/Qwen3-1.7B-GGUF" not in [o.repo_id for o in options]

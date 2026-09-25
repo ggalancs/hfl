@@ -220,6 +220,13 @@ class ChatCompletionRequest(BaseModel):
         le=2**32 - 1,
         description="Random seed for reproducibility (unsigned 32-bit)",
     )
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = Field(
+        None,
+        description=(
+            "How much the model reasons before answering; 'none' switches it "
+            "off where the model's template allows. Unset: the model's default."
+        ),
+    )
     response_format: dict | None = Field(
         None,
         description=(

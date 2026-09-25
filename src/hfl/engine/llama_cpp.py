@@ -22,6 +22,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    reasoning_template_vars,
     repeat_penalty_for,
 )
 
@@ -382,44 +383,59 @@ _TOOLS_PROMPT = (
 )
 
 
-def _give_templates_a_bos(model: Any) -> bool:
-    """Start every GGUF chat template's prompt with BOS when the vocabulary
-    wants one and the template does not write it.
+def _install_template_formatters(model: Any) -> tuple[list[Any], bool]:
+    """Serve every GGUF chat template of ``model`` through HFL's formatter.
 
-    llama-cpp-python tokenizes a template's prompt without adding BOS (its
-    formatter always reports the special tokens as already there), so a
-    template without ``{{ bos_token }}`` — Hermes-3's plain ChatML, for one
-    — ran with no BOS at all. llama.cpp's own server adds it; measured on
-    Hermes-3 3B, without it a tool call came out as broken JSON. Returns
-    whether any template was changed.
+    Two things llama-cpp-python's own handler cannot do:
+
+    - **Variables per request.** It renders a template with the messages and
+      tools only, so ``enable_thinking`` / ``reasoning_effort`` never reached
+      it: ``think: false`` hid the reasoning but the model still reasoned.
+      HFL's formatter adds the variables set on it (``template_vars``).
+    - **BOS.** It tokenizes the prompt without adding BOS, so a template
+      that does not write ``{{ bos_token }}`` — Hermes-3's plain ChatML — ran
+      with none, and Hermes-3 3B answered a tool prompt with broken JSON
+      (measured). Such a template gets BOS when the vocabulary wants one.
+
+    Returns the formatters installed and whether any template got BOS.
     """
     try:
         from llama_cpp import llama_chat_format
 
         vocab = model._model
-        if not vocab.add_bos_token() or vocab.token_bos() < 0:
-            return False
-        bos = vocab.token_get_text(vocab.token_bos())
+        bos_id = vocab.token_bos()
+        bos = vocab.token_get_text(bos_id) if bos_id >= 0 else ""
+        wants_bos = bool(bos) and bool(vocab.add_bos_token())
         eos_id = vocab.token_eos()
         eos = vocab.token_get_text(eos_id) if eos_id >= 0 else ""
     except Exception:  # an older llama-cpp-python, or a stand-in in tests
-        return False
-    changed = False
+        return [], False
+
+    class _Formatter(llama_chat_format.Jinja2ChatFormatter):
+        template_vars: dict[str, Any] = {}
+
+        def __call__(self, **kwargs: Any) -> Any:
+            return super().__call__(**{**self.template_vars, **kwargs})
+
+    formatters: list[Any] = []
+    added_bos = False
     for key, template in list((getattr(model, "metadata", None) or {}).items()):
         if key != "tokenizer.chat_template" and not key.startswith("tokenizer.chat_template."):
             continue
-        if not isinstance(template, str) or "bos_token" in template or bos in template:
+        if not isinstance(template, str):
             continue
+        if wants_bos and "bos_token" not in template and bos not in template:
+            template = "{{ bos_token }}" + template
+            added_bos = True
+        formatter = _Formatter(
+            template=template, eos_token=eos, bos_token=bos, stop_token_ids=[eos_id]
+        )
+        formatter.template_vars = {}
         # The names llama-cpp-python registers them under.
         name = "chat_template.default" if key == "tokenizer.chat_template" else key[10:]
-        model._chat_handlers[name] = llama_chat_format.Jinja2ChatFormatter(
-            template="{{ bos_token }}" + template,
-            eos_token=eos,
-            bos_token=bos,
-            stop_token_ids=[eos_id],
-        ).to_chat_handler()
-        changed = True
-    return changed
+        model._chat_handlers[name] = formatter.to_chat_handler()
+        formatters.append(formatter)
+    return formatters, added_bos
 
 
 def _render_special_tokens(model: Any, on: bool) -> None:
@@ -1452,6 +1468,9 @@ class LlamaCppEngine(InferenceEngine):
         # handler): how it renders past tool calls decides how HFL passes
         # them (``_tool_messages``).
         self._chat_template: str = ""
+        # HFL's formatters for the GGUF's templates (``_install_template_
+        # formatters``): the per-request template variables are set on them.
+        self._formatters: list[Any] = []
         # LoRA adapters on the context, in the order applied: (adapter id,
         # path, scale, llama.cpp handle). See ``apply_lora``.
         self._loras: list[tuple[str, str, float, Any]] = []
@@ -1808,8 +1827,11 @@ class LlamaCppEngine(InferenceEngine):
             for index, lora in enumerate(lora_paths):
                 logger.info("Loading LoRA adapter: %s", lora)
                 self.apply_lora(lora, 1.0, adapter_id=f"modelfile-{index}")
-            if chat_handler is None and _give_templates_a_bos(self._model):
-                logger.info("Chat template does not start with BOS; HFL adds it")
+            self._formatters = []
+            if chat_handler is None:
+                self._formatters, added_bos = _install_template_formatters(self._model)
+                if added_bos:
+                    logger.info("Chat template does not start with BOS; HFL adds it")
             # A vision chat handler has its own fixed format, never tools.
             template = (getattr(self._model, "metadata", None) or {}).get(
                 "tokenizer.chat_template", ""
@@ -2162,6 +2184,9 @@ class LlamaCppEngine(InferenceEngine):
 
         penalty = repeat_penalty_for(cfg, messages, tools)
         msgs, tools, markers = self._tool_messages(messages, tools)
+        # Set on every request, so one never inherits the last one's.
+        for formatter in self._formatters:
+            formatter.template_vars = reasoning_template_vars(cfg.reasoning)
 
         kwargs: dict = {
             "messages": msgs,
@@ -2300,6 +2325,9 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         penalty = repeat_penalty_for(cfg, messages, tools)
         msgs, tools, markers = self._tool_messages(messages, tools)
+        # Set on every request, so one never inherits the last one's.
+        for formatter in self._formatters:
+            formatter.template_vars = reasoning_template_vars(cfg.reasoning)
 
         kwargs: dict = {
             "messages": msgs,

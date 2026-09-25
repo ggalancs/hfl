@@ -159,6 +159,10 @@ def _model_key(repo_id: str) -> str:
     return _norm(name)
 
 
+def _trusted(repo_id: str) -> bool:
+    return repo_id.split("/", 1)[0].lower() in _TRUSTED
+
+
 def _score(repo_id: str, downloads: int, base: str) -> float:
     org, _, name = repo_id.lower().partition("/")
     score = float(downloads or 0)
@@ -252,7 +256,15 @@ def find_options(
             repo_id = getattr(model, "id", "") or ""
             if repo_id and repo_id not in seen and _matches(repo_id, base, size):
                 seen[repo_id] = int(getattr(model, "downloads", 0) or 0)
-    ranked = sorted(seen, key=lambda r: _score(r, seen[r], base), reverse=True)
+    # The usual publishers first, then downloads: an unknown one's copy of
+    # Qwen3-1.7B had 3x the downloads of Qwen's own, declared no license
+    # (so HFL's license gate stopped the pull) and, one build per model,
+    # hid Qwen's and unsloth's entirely.
+    ranked = sorted(
+        seen,
+        key=lambda r: (_trusted(r), _score(r, seen[r], base)),
+        reverse=True,
+    )
     options: list[ShortNameMatch] = []
     chosen: set[str] = set()
     for repo_id in ranked[: limit * 4]:

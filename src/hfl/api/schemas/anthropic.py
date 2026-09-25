@@ -122,6 +122,13 @@ class AnthropicMessagesRequest(BaseModel):
         ge=0,
         description="Top-k sampling",
     )
+    thinking: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Extended thinking: {'type': 'enabled', ...} or {'type': 'disabled'}. "
+            "Unset: the model's default."
+        ),
+    )
     stop_sequences: list[str] | None = Field(
         None,
         max_length=10,

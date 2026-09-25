@@ -497,3 +497,54 @@ class TestStreamCounts:
         stream = engine.generate_stream("hi", GenerationConfig())
         "".join(stream)
         assert stream_counts(stream) == (None, None)
+
+
+class _RecordingTokenizer:
+    """A tokenizer that keeps what the chat template was asked to render."""
+
+    def __init__(self, template):
+        self.chat_template = template
+        self.calls: list[tuple[list, dict]] = []
+
+    def encode(self, text):
+        return list(range(len(text)))
+
+    def apply_chat_template(self, dicts, **kwargs):
+        self.calls.append((dicts, kwargs))
+        return "PROMPT"
+
+
+WEATHER = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+CALL = {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
+
+
+class TestToolsAndReasoning:
+    """On MLX a model never saw its tools (``tools`` was dropped) and
+    ``think: false`` changed nothing; measured with Qwen3-1.7B-4bit."""
+
+    def _render(self, fake_mlx, template, tools=WEATHER, reasoning=None):
+        engine = _loaded()
+        engine._tokenizer = _RecordingTokenizer(template)
+        history = [
+            ChatMessage(role="user", content="w?"),
+            ChatMessage(role="assistant", content="", tool_calls=[CALL]),
+            ChatMessage(role="tool", content="31C", name="get_weather"),
+        ]
+        engine._messages_to_prompt(history, tools, reasoning)
+        return engine._tokenizer.calls[-1]
+
+    def test_a_template_with_tools_gets_them_and_the_history(self, fake_mlx):
+        dicts, kwargs = self._render(fake_mlx, "{% for t in tools %}{% endfor %}")
+        assert kwargs["tools"] == WEATHER
+        assert dicts[1]["tool_calls"] == [CALL] and dicts[2]["role"] == "tool"
+
+    def test_a_template_without_them_gets_them_written_in(self, fake_mlx):
+        dicts, kwargs = self._render(fake_mlx, "{{ messages }}")
+        assert "tools" not in kwargs
+        assert "<tools>" in dicts[0]["content"] and "<tool_call>" in dicts[2]["content"]
+
+    def test_the_reasoning_switch_reaches_the_template(self, fake_mlx):
+        _, kwargs = self._render(fake_mlx, "{{ tools }}", reasoning="off")
+        assert kwargs["enable_thinking"] is False
+        _, kwargs = self._render(fake_mlx, "{{ tools }}")
+        assert "enable_thinking" not in kwargs  # not asked: the model's default

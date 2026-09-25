@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -80,6 +80,14 @@ class GenerationConfig:
     # ``"medium"`` / ``"high"`` all as "expose reasoning"; the
     # route still honours ``"off"``.
     thinking_level: str = "off"
+    # Whether the model should reason at all, as the client asked (Ollama
+    # ``think``, OpenAI ``reasoning_effort`` / ``reasoning.effort``,
+    # Anthropic ``thinking``): ``None`` leaves the model's own default,
+    # ``"off"`` switches it off where the template can, ``"low"`` /
+    # ``"medium"`` / ``"high"`` switch it on. Unlike ``thinking_level``,
+    # which only decides what the reply shows, this reaches the prompt —
+    # see ``reasoning_template_vars``.
+    reasoning: str | None = None
     # Per-request chat-template override (OLLAMA_PARITY_PLAN P2-3).
     # When set, the engine uses this Jinja template in place of the
     # model's default for this request only. Ignored by engines that
@@ -111,6 +119,25 @@ class GenerationConfig:
     # Whether the client set ``repeat_penalty`` itself (the OpenAI and
     # Anthropic APIs have no such parameter). See ``repeat_penalty_for``.
     repeat_penalty_chosen: bool = False
+
+
+def reasoning_template_vars(reasoning: str | None) -> dict[str, Any]:
+    """The chat-template variables that turn a model's reasoning on or off.
+
+    Each family reads its own: Qwen3 and GLM ``enable_thinking``, DeepSeek
+    V3.1 ``thinking``, gpt-oss ``reasoning_effort`` (which cannot be off:
+    ``"low"`` is its least). A template ignores the ones it does not read.
+    Nothing is set when the client did not ask, so the model's default
+    stands.
+    """
+    if reasoning is None:
+        return {}
+    on = reasoning != "off"
+    return {
+        "enable_thinking": on,
+        "thinking": on,
+        "reasoning_effort": reasoning if on else "low",
+    }
 
 
 def repeat_penalty_for(

@@ -258,10 +258,9 @@ class TestEngine:
         raw = GenerationConfig(expose_reasoning=True)
         assert "They greet." in engine.chat([ChatMessage(role="user", content="hi")], raw).text
 
-    def test_bos_is_given_to_a_template_that_forgets_it(self, monkeypatch):
+    @staticmethod
+    def _stub_formatter(monkeypatch):
         from llama_cpp import llama_chat_format
-
-        from hfl.engine.llama_cpp import _give_templates_a_bos
 
         made: list[str] = []
 
@@ -272,22 +271,52 @@ class TestEngine:
             def to_chat_handler(self):
                 return "handler"
 
+            def __call__(self, **kwargs):  # what the template is rendered with
+                return kwargs
+
         monkeypatch.setattr(llama_chat_format, "Jinja2ChatFormatter", Formatter)
+        return made
+
+    @staticmethod
+    def _model(template, adds_bos=True):
         model = MagicMock()
-        model._model.add_bos_token.return_value = True
+        model._model.add_bos_token.return_value = adds_bos
         model._model.token_bos.return_value = 1
         model._model.token_eos.return_value = 2
         model._model.token_get_text.side_effect = {1: "<s>", 2: "</s>"}.get
         model._chat_handlers = {}
-        model.metadata = {"tokenizer.chat_template": "{{ x }}"}
-        assert _give_templates_a_bos(model) is True
-        assert made == ["{{ bos_token }}{{ x }}"]
+        model.metadata = {"tokenizer.chat_template": template}
+        return model
+
+    def test_bos_is_given_to_a_template_that_forgets_it(self, monkeypatch):
+        from hfl.engine.llama_cpp import _install_template_formatters
+
+        made = self._stub_formatter(monkeypatch)
+        model = self._model("{{ x }}")
+        formatters, added = _install_template_formatters(model)
+        assert added is True and made == ["{{ bos_token }}{{ x }}"]
         assert model._chat_handlers == {"chat_template.default": "handler"}
-        # Written by the template already, or not wanted: left alone.
-        for template in ("{{ bos_token }}{{ x }}", "<s>{{ x }}"):
-            model.metadata = {"tokenizer.chat_template": template}
-            assert _give_templates_a_bos(model) is False
-        model._model.add_bos_token.return_value = False
-        model.metadata = {"tokenizer.chat_template": "{{ x }}"}
-        assert _give_templates_a_bos(model) is False
-        assert len(made) == 1
+        # Written by the template already, or not wanted: left as it is.
+        for template, adds in (
+            ("{{ bos_token }}{{ x }}", True),
+            ("<s>{{ x }}", True),
+            ("{{ x }}", False),
+        ):
+            made.clear()
+            _, added = _install_template_formatters(self._model(template, adds))
+            assert added is False and made == [template]
+
+    def test_the_reasoning_switch_reaches_the_template(self, monkeypatch):
+        """``think: false`` used to hide the reasoning only: the template
+        never saw ``enable_thinking``, so the model reasoned anyway."""
+        from hfl.engine.llama_cpp import _install_template_formatters
+
+        self._stub_formatter(monkeypatch)
+        (formatter,), _ = _install_template_formatters(self._model("{{ x }}"))
+        engine, _ = self._engine()
+        engine._formatters = [formatter]
+        engine.chat([ChatMessage(role="user", content="hi")], GenerationConfig(reasoning="off"))
+        rendered = formatter(messages=[])
+        assert rendered["enable_thinking"] is False and rendered["reasoning_effort"] == "low"
+        engine.chat([ChatMessage(role="user", content="hi")])  # not asked: model default
+        assert "enable_thinking" not in formatter(messages=[])

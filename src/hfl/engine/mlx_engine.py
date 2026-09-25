@@ -26,6 +26,8 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    reasoning_template_vars,
+    repeat_penalty_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -249,26 +251,60 @@ class MLXEngine(InferenceEngine):
     # Prompt rendering
     # ------------------------------------------------------------------
 
-    def _messages_to_prompt(self, messages: list[ChatMessage]) -> str:
+    def _messages_to_prompt(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+        reasoning: str | None = None,
+    ) -> str:
         """Render messages via the tokenizer's chat template.
 
         mlx-lm's tokenizers wrap HF's ``AutoTokenizer``, which has
         ``apply_chat_template``. Fall back to a role-tagged
         concatenation when the tokenizer lacks a template.
+
+        Tools go to the template when it lists them, else they are written
+        in as the GGUF engines do; past calls and tool results are kept.
+        (They were all dropped: on MLX a model never saw its tools.) The
+        reasoning switch (``think`` & co.) reaches the template too.
         """
+        from hfl.engine.llama_cpp import (
+            _history_for_template,
+            _template_renders_tools,
+            _tools_as_text,
+        )
+
         if self._tokenizer is None:
             raise RuntimeError("tokenizer not loaded")
-        dicts = [
-            {
-                "role": m.role,
-                "content": m.content,
-            }
-            for m in messages
-        ]
+        dicts: list[dict[str, Any]] = []
+        for m in messages:
+            entry: dict[str, Any] = {"role": m.role, "content": m.content or ""}
+            if m.tool_calls:
+                entry["tool_calls"] = m.tool_calls
+            if m.name:
+                entry["name"] = m.name
+            if m.tool_call_id:
+                entry["tool_call_id"] = m.tool_call_id
+            dicts.append(entry)
+        template = getattr(self._tokenizer, "chat_template", None)
+        template = template if isinstance(template, str) else ""
+        extras: dict[str, Any] = reasoning_template_vars(reasoning)
+        if _template_renders_tools(template, None):
+            dicts = _history_for_template(dicts, template)
+            if tools:
+                extras["tools"] = tools
+        else:
+            dicts = _tools_as_text(dicts, tools)
         apply = getattr(self._tokenizer, "apply_chat_template", None)
         if callable(apply):
             try:
-                return cast(str, apply(dicts, tokenize=False, add_generation_prompt=True))
+                return cast(str, apply(dicts, tokenize=False, add_generation_prompt=True, **extras))
+            except TypeError:
+                # An old tokenizer without extra template variables.
+                try:
+                    return cast(str, apply(dicts, tokenize=False, add_generation_prompt=True))
+                except Exception:
+                    logger.debug("apply_chat_template failed; manual", exc_info=True)
             except Exception:
                 logger.debug("apply_chat_template failed; falling back to manual", exc_info=True)
         parts: list[str] = []
@@ -460,8 +496,20 @@ class MLXEngine(InferenceEngine):
         tools: list[dict] | None = None,
         **_kwargs: Any,
     ) -> GenerationResult:
-        prompt = self._messages_to_prompt(messages)
-        return self.generate(prompt, config)
+        cfg = self._chat_config(config, messages, tools)
+        prompt = self._messages_to_prompt(messages, tools, cfg.reasoning)
+        return self.generate(prompt, cfg)
+
+    @staticmethod
+    def _chat_config(
+        config: GenerationConfig | None, messages: list[ChatMessage], tools: list[dict] | None
+    ) -> GenerationConfig:
+        """The config for a chat turn: no repetition penalty on a tool turn
+        unless the client chose one (``repeat_penalty_for``)."""
+        import dataclasses
+
+        cfg = config or GenerationConfig()
+        return dataclasses.replace(cfg, repeat_penalty=repeat_penalty_for(cfg, messages, tools))
 
     def generate_stream(
         self,
@@ -550,5 +598,6 @@ class MLXEngine(InferenceEngine):
         tools: list[dict] | None = None,
         **_kwargs: Any,
     ) -> Iterator[str]:
-        prompt = self._messages_to_prompt(messages)
-        return self.generate_stream(prompt, config)
+        cfg = self._chat_config(config, messages, tools)
+        prompt = self._messages_to_prompt(messages, tools, cfg.reasoning)
+        return self.generate_stream(prompt, cfg)

@@ -336,6 +336,9 @@ async def api_generate(
     gen_config.thinking_level = _resolve_thinking_level(req.think)
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
+    # ``think`` absent: the model's own default; present: it reaches the
+    # prompt (``think: false`` used to only hide the reasoning).
+    gen_config.reasoning = None if req.think is None else gen_config.thinking_level
 
     # OLLAMA_PARITY_PLAN P2-3: per-request template override and raw
     # prompt mode. The engine decides how to honour each — llama-cpp
@@ -585,6 +588,9 @@ async def api_chat(
     gen_config.thinking_level = _resolve_thinking_level(req.think)
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
+    # ``think`` absent: the model's own default; present: it reaches the
+    # prompt (``think: false`` used to only hide the reasoning).
+    gen_config.reasoning = None if req.think is None else gen_config.thinking_level
 
     # P1-1: system-prompt override. Inserted as the FIRST message so
     # the model's chat template reads it before any user / tool

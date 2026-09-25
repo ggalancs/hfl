@@ -133,6 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (stories15M + Shakespeare): the same text as llama-server gives with
   `--lora`, and the original text again after removing it.
 
+- **Turning a model's reasoning off, or up, for real.** `think: false` used
+  to hide the reasoning while the model still spent the time and tokens on
+  it; it now reaches the chat template, on the default GGUF backend,
+  llama-server, MLX and Transformers. OpenAI's `reasoning_effort` and
+  Anthropic's `thinking` are accepted and do the same. Qwen3-1.7B, asked
+  17 × 23 with reasoning off: 23 tokens instead of 1,500 (14 on MLX, 126 on
+  llama-server), same answer. Families differ in what they can do: Qwen3,
+  GLM and DeepSeek V3.1 switch it off; gpt-oss goes down to its lowest
+  level (`Reasoning: low`) and up to `high`; DeepSeek-R1 always reasons. Not
+  asking leaves each model's default.
+
 ### Changed
 
 - **No repetition penalty on a tool turn unless the client sets one.** A
@@ -171,6 +182,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MLX models never saw their tools**: the MLX engine dropped `tools`, past
+  calls and tool results, so Qwen3-1.7B-4bit answered "I don't have access
+  to external tools". They reach the template now (written in, as on the
+  GGUF backends, when a template has no place for them): 6 of 6 real checks
+  over the Ollama, OpenAI and Anthropic APIs, streamed or not.
+- **A short name could pick an unknown publisher's copy over the model's
+  own**: `qwen3:1.7b` chose a copy with 3× the downloads of Qwen's, which
+  declared no license (so the pull stopped at the license gate) and, one
+  build per model, hid Qwen's and unsloth's. The usual publishers now come
+  first.
 - **A streamed reply from an MLX model reported no prompt tokens** (Ollama's
   `prompt_eval_count` was 0, `eval_count` counted chunks) and no `usage`
   on OpenAI's streamed reply. It reports what mlx-lm measured now, the
