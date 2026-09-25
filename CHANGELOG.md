@@ -35,9 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server) and escapes every model reply before rendering it.
 - **Parallel requests: `hfl serve --parallel N`.** The backend is still
   chosen per model; asking for parallel requests (or `--backend llama-server`,
-  or `HFL_LLM_LIBRARY=llama-server`) serves each GGUF text model from a
-  llama.cpp `llama-server` process of its own — a vision model and anything
-  that is not GGUF keep their usual backend — decoding several requests together in
+  or `HFL_LLM_LIBRARY=llama-server`) serves each GGUF model from a
+  llama.cpp `llama-server` process of its own — vision models with their
+  projector (`--mmproj`), a Modelfile's LoRA adapters loaded at start;
+  anything that is not GGUF keeps its usual backend — decoding several requests together in
   parallel slots (`HFL_NUM_PARALLEL`, 4 by default) that share one KV
   buffer sized to the model's context — the memory of a single-slot load.
   Each such model gets its own queue, so its requests neither wait behind
@@ -49,9 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line), no web UI and no `/slots`; a small guard stops it if HFL dies
   without unloading (SIGKILL, a crash). Without llama-cpp-python installed,
   GGUF models fall back to `llama-server` when it is on the PATH. Not
-  supported on this backend: images, LoRA hot-swap, KV snapshots. With the
-  default `repeat_penalty` (1.1) its replies can differ from the in-process
-  backend's; with 1.0 they matched.
+  supported on this backend: applying a LoRA adapter to a running model
+  (llama-server loads adapter files only when it starts: declare it with
+  `ADAPTER`), KV snapshots. With the default `repeat_penalty` (1.1) its
+  replies can differ from the in-process backend's; with 1.0 they matched.
+  Vision verified with Qwen2.5-VL-7B over the Ollama, OpenAI and Anthropic
+  APIs, and LoRA with llama.cpp's own test adapter: the same text on both
+  backends.
   When a request has to wait on the default GGUF backend, the log says once
   how to serve several at once. `hfl launch --parallel N` passes the option
   to the server it starts.
@@ -109,6 +114,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   called the tool on the default backend. `/api/show` lists `tools` for
   these families.
 
+- **LoRA adapters applied to a running model, for real.** `POST
+  /api/lora/apply` and `/api/lora/remove` could only answer 503: the
+  llama-cpp-python API they called does not exist. They now use llama.cpp's
+  own adapter API on the default GGUF backend, adapters stack, and each
+  change waits its turn in the model's queue instead of changing the
+  weights under a reply in progress. A Modelfile's `ADAPTER` lines are all
+  applied now, not only the first. Checked with llama.cpp's test adapter
+  (stories15M + Shakespeare): the same text as llama-server gives with
+  `--lora`, and the original text again after removing it.
+
 ### Changed
 
 - **No repetition penalty on a tool turn unless the client sets one.** A
@@ -144,6 +159,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A GGUF vision model pulled from the Hub could not see images**: `hfl
+  pull` fetched the weights but not the image projector (`mmproj`) beside
+  them. It fetches it now (F16 first) — pull the model again to get it.
+  The same pull left **split models** (`...-00001-of-00002.gguf`, how large
+  models are published) half-downloaded and unloadable; it fetches every
+  part now. It could also take a projector for the model when asked for a
+  quantization both share, and `F16` matched `BF16` files.
+- **A model created with `ADAPTER` ran without its adapter** under `hfl
+  serve`, `hfl run`, `hfl serve --model` and the tray: only one of the
+  load paths passed the Modelfile's adapters to the engine.
+- **Images sent through the Anthropic Messages API were dropped**: an
+  `image` block never reached the model, which answered about a picture
+  it had not seen. Base64 images are passed on now; image URLs are refused
+  (400), as for the OpenAI API.
 - **Models whose chat template does not write BOS ran without it**, on both
   GGUF backends: llama-cpp-python and llama-server render a template's
   prompt without adding BOS, so Hermes-3 (plain ChatML) answered a tool

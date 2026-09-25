@@ -248,7 +248,13 @@ def _llama_cpp_is_stubbed() -> bool:
         return False
     # The real package carries the ctypes bindings; every stub in this
     # suite is a bare ModuleType or a MagicMock standing in for it.
-    return not hasattr(module, "llama_model_params")
+    if not hasattr(module, "llama_model_params"):
+        return True
+    # ...and so does its ``llama_cpp`` submodule, which ``from llama_cpp
+    # import llama_cpp`` reads off the package: a stub set there by hand
+    # outlived its test (test_gguf_add_bos, test_kv_cache_type did).
+    sub = getattr(module, "llama_cpp", None)
+    return sub is not None and not hasattr(sub, "llama_model_params")
 
 
 @pytest.fixture(autouse=True)

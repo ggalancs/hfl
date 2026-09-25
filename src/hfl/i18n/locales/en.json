@@ -317,7 +317,7 @@
     "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB",
     "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB",
     "run_pulling": "{model} is not on this machine yet — pulling it first.",
-    "parallel_on": "Parallel requests: {slots} at once per GGUF text model (llama-server); vision models and other formats keep their usual backend."
+    "parallel_on": "Parallel requests: {slots} at once per GGUF model (llama-server); other formats keep their usual backend."
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

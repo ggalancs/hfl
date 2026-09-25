@@ -1136,3 +1136,61 @@ class TestAnthropicTools:
         assert all(b["type"] != "tool_use" for b in data["content"])
         # Tools were not forwarded to the engine's tool-aware template.
         assert engine.chat.call_args.kwargs["tools"] is None
+
+
+class TestAnthropicImages:
+    """``image`` blocks were silently dropped: a vision model answered about
+    a picture it never saw (measured with Qwen2.5-VL-7B)."""
+
+    @pytest.fixture(autouse=True)
+    def reset_state(self):
+        state = get_state()
+        state.api_key = None
+        yield
+        state.engine = None
+        state.current_model = None
+
+    PNG = (  # a 1x1 PNG
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ"
+        "DwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+    def _post(self, source):
+        engine = _make_engine()
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+        response = TestClient(app).post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 64,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": source},
+                            {"type": "text", "text": "What is it?"},
+                        ],
+                    }
+                ],
+            },
+        )
+        return response, engine
+
+    def test_the_image_reaches_the_model(self):
+        import base64
+
+        response, engine = self._post(
+            {"type": "base64", "media_type": "image/png", "data": self.PNG}
+        )
+        assert response.status_code == 200
+        message = engine.chat.call_args.args[0][-1]
+        assert message.content == "What is it?"
+        assert message.images == [base64.b64decode(self.PNG)]
+
+    def test_an_image_url_is_not_fetched(self):
+        response, engine = self._post({"type": "url", "url": "https://example.com/cat.png"})
+        assert response.status_code == 400
+        assert "not fetched" in response.text
+        engine.chat.assert_not_called()

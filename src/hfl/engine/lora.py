@@ -129,7 +129,9 @@ def _engine_id(engine: "InferenceEngine") -> str:
     return f"engine-{id(engine)}"
 
 
-def _set_lora(engine: "InferenceEngine", lora_path: str, scale: float) -> None:
+def _set_lora(
+    engine: "InferenceEngine", lora_path: str, scale: float, adapter_id: str | None = None
+) -> None:
     """Apply a LoRA via the engine's hot-swap entry point.
 
     llama-cpp-python ≥ 0.3 exposes ``Llama.set_lora_adapter`` which
@@ -139,7 +141,8 @@ def _set_lora(engine: "InferenceEngine", lora_path: str, scale: float) -> None:
     """
     setter = getattr(engine, "apply_lora", None)
     if callable(setter):
-        setter(lora_path, scale)
+        # The id goes to the engine too: ``remove_lora`` finds it by it.
+        setter(lora_path, scale, adapter_id=adapter_id)
         return
 
     inner = getattr(engine, "_model", None)
@@ -212,10 +215,11 @@ def apply_lora(
         # rather than silently accepting nonsense.
         raise ValueError(f"scale must be in [0.0, 5.0]; got {scale}")
 
-    _set_lora(engine, str(p), scale)
+    adapter_id = str(uuid.uuid4())
+    _set_lora(engine, str(p), scale, adapter_id)
 
     info = AdapterInfo(
-        adapter_id=str(uuid.uuid4()),
+        adapter_id=adapter_id,
         path=str(p),
         name=name,
         scale=scale,

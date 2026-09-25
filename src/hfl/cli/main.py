@@ -416,8 +416,10 @@ def run(
     _memory_check_or_exit(manifest, ctx)
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
     try:
+        from hfl.api.model_loader import load_kwargs_for
+
         engine = select_engine(Path(manifest.local_path), backend=backend)
-        engine.load(manifest.local_path, n_ctx=ctx, verbose=verbose)
+        engine.load(manifest.local_path, **load_kwargs_for(manifest, ctx), verbose=verbose)
     except MissingDependencyError as e:
         console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
         raise typer.Exit(1) from e
@@ -904,8 +906,8 @@ def _choose_backend(backend: str, parallel: int) -> None:
     """Apply ``--backend`` / ``--parallel`` for this server.
 
     The backend is still chosen per model: ``auto`` keeps the usual choice,
-    and a forced ``llama-server`` only takes the GGUF text models (a vision
-    model and anything that is not GGUF keep their own backend). ``--parallel
+    and a forced ``llama-server`` only takes the GGUF models (vision ones with
+    their projector; anything that is not GGUF keeps its own backend). ``--parallel
     N`` above 1 asks for N requests at once per model, which on GGUF needs
     llama-server — so it implies it when no backend was named.
     """
@@ -1109,8 +1111,10 @@ def serve(
             console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
             try:
                 n_ctx = ctx if ctx > 0 else 0  # 0 = auto-detect from model
+                from hfl.api.model_loader import load_kwargs_for
+
                 state.engine = select_engine(Path(manifest.local_path))
-                state.engine.load(manifest.local_path, n_ctx=n_ctx)
+                state.engine.load(manifest.local_path, **load_kwargs_for(manifest, n_ctx))
                 state.current_model = manifest
             except MissingDependencyError as e:
                 console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")

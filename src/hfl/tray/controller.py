@@ -198,8 +198,10 @@ class TrayServerController:
                     check.budget * 100,
                 )
                 return
+            from hfl.api.model_loader import load_kwargs_for
+
             engine = select_engine(Path(manifest.local_path))
-            engine.load(manifest.local_path, n_ctx=n_ctx)
+            engine.load(manifest.local_path, **load_kwargs_for(manifest, n_ctx))
             state.engine = engine
             state.current_model = manifest
             logger.info("Model pre-loaded: %s", manifest.name)

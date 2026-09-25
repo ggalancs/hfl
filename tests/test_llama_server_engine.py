@@ -85,6 +85,8 @@ class H(BaseHTTPRequestHandler):
                 message = {"role": "assistant", "content": "", "tool_calls": [call]}
             else:
                 said = body["messages"][-1]["content"]
+                if isinstance(said, list):  # content parts: text and images
+                    said = " ".join(p.get("text", "") for p in said)
                 reply = os.environ.get("FAKE_REPLY") or "Hello " + said
                 message = {"role": "assistant", "content": reply}
             return self._send(200, {"choices": [{"message": message, "finish_reason": "stop"}],
@@ -300,8 +302,8 @@ class TestRequests:
         assert result.text == "ab" and result.tokens_generated == 2
         assert list(engine.generate_stream("x")) == ["a", "b"]
 
-    def test_images_are_refused_plainly(self, engine):
-        with pytest.raises(ValueError, match="images need the llama-cpp backend"):
+    def test_images_are_refused_plainly_without_a_projector(self, engine):
+        with pytest.raises(ValueError, match="no image projector"):
             engine.chat([ChatMessage(role="user", content="x", images=[b"\x89PNG"])])
 
 
@@ -313,6 +315,9 @@ class TestSelection:
         monkeypatch.setenv("HFL_LLM_LIBRARY", "llama-server")
         gguf = tmp_path / "m.gguf"
         gguf.write_bytes(b"GGUF" + b"\0" * 64)
+        assert isinstance(select_engine(gguf), LlamaServerEngine)
+        # A vision model too: llama-server serves it with its projector.
+        (tmp_path / "mmproj-F16.gguf").write_bytes(b"GGUF")
         assert isinstance(select_engine(gguf), LlamaServerEngine)
         folder = tmp_path / "hf"
         folder.mkdir()
@@ -626,3 +631,39 @@ class TestTemplates:
         chosen = GenerationConfig(repeat_penalty=1.3, repeat_penalty_chosen=True)
         engine.chat([ChatMessage(role="user", content="w?")], chosen, tools=WEATHER)
         assert _last_body(fake_server)["repeat_penalty"] == 1.3
+
+
+class TestVision:
+    def test_the_projector_is_served_and_images_sent_as_parts(self, fake_server):
+        model, _ = fake_server
+        (model.parent / "mmproj-F16.gguf").write_bytes(b"GGUF")
+        eng = _loaded(fake_server)
+        try:
+            eng.chat([ChatMessage(role="user", content="What is it?", images=[b"\x89PNGxx"])])
+        finally:
+            eng.unload()
+        argv = _launches(fake_server)[0]
+        assert argv[argv.index("--mmproj") + 1] == str(model.parent / "mmproj-F16.gguf")
+        content = _last_body(fake_server)["messages"][0]["content"]
+        assert content[0] == {"type": "text", "text": "What is it?"}
+        assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    def test_a_text_model_is_served_without_one(self, fake_server):
+        _loaded(fake_server).unload()
+        assert "--mmproj" not in _launches(fake_server)[0]
+
+
+class TestLora:
+    def test_a_modelfile_s_adapters_are_loaded_at_start(self, fake_server):
+        from hfl.engine.llama_server import LlamaServerEngine
+
+        model, _ = fake_server
+        eng = LlamaServerEngine()
+        eng.load(str(model), lora_paths=["/h/a.gguf", "/h/b.gguf"])
+        eng.unload()
+        argv = _launches(fake_server)[0]
+        assert argv[argv.index("--lora") + 1] == "/h/a.gguf,/h/b.gguf"
+
+    def test_hot_apply_says_how_instead(self, engine):
+        with pytest.raises(RuntimeError, match="ADAPTER in the model's Modelfile"):
+            engine.apply_lora("/h/a.gguf", 1.0, adapter_id="x")

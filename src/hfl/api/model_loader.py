@@ -195,7 +195,9 @@ async def load_llm(
         # unload on failure so a half-loaded engine never leaks.
         engine = select_engine(model_path)
         try:
-            await asyncio.to_thread(engine.load, manifest.local_path, n_ctx=n_ctx)
+            await asyncio.to_thread(
+                engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx)
+            )
         except Exception:
             if engine.is_loaded:
                 try:
@@ -316,11 +318,20 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
         raise ValueError(f"Expected LLM model, got {model_type.value}")
 
     engine = select_engine(model_path)
-    # Phase 8 P3-2: pass LoRA adapter paths from the manifest
-    # (populated by ``POST /api/create`` when a Modelfile declared
-    # ``ADAPTER`` instructions). Engines that don't support LoRA
-    # ignore the kwarg.
-    load_kwargs: dict[str, Any] = {"n_ctx": manifest.context_length}
+    engine.load(manifest.local_path, **load_kwargs_for(manifest, manifest.context_length))
+
+    return engine, manifest
+
+
+def load_kwargs_for(manifest: "ModelManifest", n_ctx: int | None) -> dict[str, Any]:
+    """What ``engine.load`` gets for ``manifest``: the context, and the LoRA
+    adapters of its Modelfile (``ADAPTER``, stored by ``POST /api/create``).
+
+    Every LLM load goes through here — ``hfl run``, the server, ``hfl serve
+    --model`` and the tray used to pass only the context, so a model created
+    with ``ADAPTER`` ran without its adapter (measured).
+    """
+    load_kwargs: dict[str, Any] = {"n_ctx": n_ctx}
     if getattr(manifest, "adapter_paths", None):
         # ADAPTER paths come from a Modelfile via POST /api/create — untrusted.
         # Contain each to the HFL data dir so a manifest can't make the engine
@@ -337,7 +348,6 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
                 # Don't echo the containment message: it prints the base
                 # directory. ``from exc`` keeps the detail for the log.
                 raise ValueError("adapter path rejected: outside the HFL data dir") from exc
-        load_kwargs["lora_paths"] = safe_adapters
-    engine.load(manifest.local_path, **load_kwargs)
-
-    return engine, manifest
+        if safe_adapters:
+            load_kwargs["lora_paths"] = safe_adapters
+    return load_kwargs

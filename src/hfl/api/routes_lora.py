@@ -8,8 +8,8 @@
   GET  /api/lora/{model}                      list adapters for model
 
 The endpoints mutate engine state, so they go through the same
-dispatcher as /api/chat — concurrent apply + chat doesn't corrupt
-the inflight request.
+dispatcher as /api/chat — an apply waits for the reply in progress
+instead of changing the weights under it.
 """
 
 from __future__ import annotations
@@ -85,8 +85,19 @@ async def api_lora_apply(req: ApplyLoraRequest, request: Request) -> dict[str, A
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
+    from hfl.api.helpers import run_dispatched
+
     try:
-        info = apply_lora(engine, lora_path=safe_lora_path, scale=req.scale, name=req.name)
+        # Through the model's queue: changing adapters under a running
+        # generation would change the weights mid-reply.
+        info = await run_dispatched(
+            apply_lora,
+            engine,
+            lora_path=safe_lora_path,
+            scale=req.scale,
+            name=req.name,
+            operation="lora_apply",
+        )
     except FileNotFoundError as exc:
         # ``safe_lora_path`` is an absolute path under the HFL home dir;
         # echo back what the caller sent, not where it landed on disk.
@@ -128,8 +139,10 @@ async def api_lora_remove(req: RemoveLoraRequest, request: Request) -> dict[str,
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
+    from hfl.api.helpers import run_dispatched
+
     try:
-        ok = remove_lora(engine, req.adapter_id)
+        ok = await run_dispatched(remove_lora, engine, req.adapter_id, operation="lora_remove")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

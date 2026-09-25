@@ -142,9 +142,15 @@ def _request_to_messages(req: AnthropicMessagesRequest) -> list[ChatMessage]:
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         tool_results: list[Any] = []
-        for block in msg.content:
+        images: list[bytes] = []
+        for index, block in enumerate(msg.content):
             if block.type == "text" and block.text:
                 text_parts.append(block.text)
+            elif block.type == "image":
+                from hfl.api.vision import decode_anthropic_image
+
+                source = (block.model_extra or {}).get("source")
+                images.append(decode_anthropic_image(source, f"content[{index}]"))
             elif block.type == "tool_use":
                 if block.id and block.name:
                     id_to_name[block.id] = block.name
@@ -159,10 +165,10 @@ def _request_to_messages(req: AnthropicMessagesRequest) -> list[ChatMessage]:
             messages.append(
                 ChatMessage(role="assistant", content=text, tool_calls=tool_calls or None)
             )
-        elif text or not tool_results:
+        elif text or images or not tool_results:
             # A user turn that is purely tool_result blocks adds no text
-            # message; otherwise carry the user's text.
-            messages.append(ChatMessage(role=msg.role, content=text))
+            # message; otherwise carry the user's text, and its images.
+            messages.append(ChatMessage(role=msg.role, content=text, images=images or None))
 
         for tr in tool_results:
             messages.append(

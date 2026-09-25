@@ -66,6 +66,24 @@ def decode_ollama_images(images: list[str] | None) -> list[bytes] | None:
 # ----------------------------------------------------------------------
 
 
+def decode_anthropic_image(source: Any, where: str) -> bytes:
+    """Decode + validate an Anthropic ``image`` block's ``source``.
+
+    ``{"type": "base64", "media_type": "image/png", "data": "..."}`` is
+    accepted; a ``url`` source is refused, as OpenAI's http URLs are: HFL
+    does not fetch web content from inside a prompt.
+    """
+    kind = source.get("type") if isinstance(source, dict) else None
+    if kind != "base64":
+        raise APIValidationError(
+            f"{where}.source must be base64 image data; image URLs are not fetched by HFL"
+        )
+    try:
+        return validate_image(str(source.get("data") or "")).data
+    except APIValidationError as exc:
+        raise APIValidationError(f"{where}: {exc}") from exc
+
+
 def split_openai_content(
     content: str | list[Any],
 ) -> tuple[str, list[bytes] | None]:

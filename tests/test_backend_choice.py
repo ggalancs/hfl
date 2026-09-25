@@ -3,9 +3,9 @@
 """The backend is chosen per model; parallel requests are an option.
 
 `hfl serve --backend auto` (the default) picks per model as always.
-`--parallel N` asks for N requests at once per GGUF text model, which needs
-llama-server; a vision model and anything that is not GGUF keep their
-usual backend. When a request has to wait on the in-process GGUF backend,
+`--parallel N` asks for N requests at once per GGUF model, which needs
+llama-server (vision models included, with their projector); anything that
+is not GGUF keeps its usual backend. When a request has to wait on the in-process GGUF backend,
 the log says once how to serve several at once.
 """
 
@@ -82,7 +82,9 @@ def test_parallel_without_llama_server_says_what_to_install(serve):
     started.assert_not_called()
 
 
-def test_a_vision_model_keeps_the_in_process_engine(monkeypatch, tmp_path):
+def test_a_vision_model_goes_to_llama_server_too(monkeypatch, tmp_path):
+    """llama-server serves it with its projector (``--mmproj``); it used to
+    stay on the in-process engine, which then took no parallel requests."""
     from hfl.engine.llama_server import LlamaServerEngine
     from hfl.engine.selector import select_engine
 
@@ -93,7 +95,7 @@ def test_a_vision_model_keeps_the_in_process_engine(monkeypatch, tmp_path):
     model.write_bytes(b"GGUF" + b"\0" * 64)
     assert isinstance(select_engine(model), LlamaServerEngine)
     (folder / "mmproj-model-f16.gguf").write_bytes(b"GGUF" + b"\0" * 64)
-    assert not isinstance(select_engine(model), LlamaServerEngine)
+    assert isinstance(select_engine(model), LlamaServerEngine)
 
 
 class _Engine:

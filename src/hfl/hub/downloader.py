@@ -154,14 +154,28 @@ def pull_model(resolved: ResolvedModel) -> Path:
     )
 
     if resolved.format == "gguf" and resolved.filename:
-        # Individual GGUF file download with retry
-        return _download_file(
+        # Individual GGUF file download with retry — with the rest of a
+        # split model and a vision model's projector, which llama.cpp reads
+        # from beside it (without them the model does not load, or cannot
+        # see images).
+        path = _download_file(
             repo_id=resolved.repo_id,
             filename=resolved.filename,
             revision=resolved.revision,
             local_dir=model_dir,
             token=token,
         )
+        extras = [*getattr(resolved, "parts", []), getattr(resolved, "projector", None)]
+        for filename in filter(None, extras):
+            console.print(f"[bold cyan]Downloading[/] {filename}")
+            _download_file(
+                repo_id=resolved.repo_id,
+                filename=filename,
+                revision=resolved.revision,
+                local_dir=model_dir,
+                token=token,
+            )
+        return path
     # Complete snapshot download with retry
     # Filter only the necessary files
     allow_patterns = []

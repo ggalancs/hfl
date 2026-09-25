@@ -73,8 +73,9 @@ class TestApplyLora:
 
     def test_engine_apply_lora_is_called(self, adapter_file):
         engine = _engine_with_apply()
-        apply_lora(engine, lora_path=adapter_file, scale=0.5)
-        engine.apply_lora.assert_called_once_with(adapter_file, 0.5)
+        info = apply_lora(engine, lora_path=adapter_file, scale=0.5)
+        # The engine gets the id too: removing finds the adapter by it.
+        engine.apply_lora.assert_called_once_with(adapter_file, 0.5, adapter_id=info.adapter_id)
 
     def test_inner_set_lora_adapter_path(self, adapter_file):
         """When the engine doesn't expose ``apply_lora`` directly,

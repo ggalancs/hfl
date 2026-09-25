@@ -329,6 +329,25 @@ _ARCHITECTURE_CTX_CAP: dict[str, int] = {
 _ARCHITECTURE_NO_FLASH_ATTN: set[str] = {"gemma4"}
 
 
+def _image_data_uri(image_bytes: bytes) -> str:
+    """An image as the ``data:image/...;base64,...`` URI that llama.cpp's
+    multimodal handlers (and llama-server's OpenAI endpoint) take on
+    ``image_url.url``, its MIME type sniffed from the magic bytes."""
+    import base64
+
+    if image_bytes.startswith(b"\x89PNG"):
+        mime = "image/png"
+    elif image_bytes.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif image_bytes.startswith((b"GIF87a", b"GIF89a")):
+        mime = "image/gif"
+    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        mime = "image/png"  # Best-effort fallback.
+    return f"data:{mime};base64," + base64.b64encode(image_bytes).decode("ascii")
+
+
 def _template_renders_tools(template: str, chat_format: str | None) -> bool:
     """Whether the prompt the model gets will list the request's tools.
 
@@ -1433,6 +1452,9 @@ class LlamaCppEngine(InferenceEngine):
         # handler): how it renders past tool calls decides how HFL passes
         # them (``_tool_messages``).
         self._chat_template: str = ""
+        # LoRA adapters on the context, in the order applied: (adapter id,
+        # path, scale, llama.cpp handle). See ``apply_lora``.
+        self._loras: list[tuple[str, str, float, Any]] = []
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -1614,11 +1636,12 @@ class LlamaCppEngine(InferenceEngine):
         # ``images`` in its messages.
         clip_model_path: str | None = kwargs.get("clip_model_path")
         if clip_model_path is None:
-            # Convention: ``mmproj-*.gguf`` in the same directory.
-            for candidate in path.parent.glob("mmproj-*.gguf"):
+            from hfl.engine.projector import find_projector
+
+            candidate = find_projector(path)
+            if candidate is not None:
                 clip_model_path = str(candidate)
                 logger.info("Auto-detected CLIP projector: %s", candidate.name)
-                break
 
         chat_handler = None
         if clip_model_path:
@@ -1692,23 +1715,13 @@ class LlamaCppEngine(InferenceEngine):
                     # template.
                     llama_kwargs["chat_handler"] = chat_handler
                     llama_kwargs.pop("chat_format", None)
-                # Phase 8 P3-2: LoRA adapters. llama-cpp-python accepts
-                # a single ``lora_path`` at load time; we honour the
-                # first path the Modelfile declared. Stacking more
-                # than one requires a post-load ``apply_lora_from_file``
-                # call which landed in llama-cpp 0.3+. For portability
-                # we only wire the first path here and log the rest.
-                lora_paths = kwargs.get("lora_paths") or []
-                if lora_paths:
-                    primary = lora_paths[0]
-                    logger.info("Loading LoRA adapter: %s", primary)
-                    llama_kwargs["lora_path"] = primary
-                    if len(lora_paths) > 1:
-                        logger.warning(
-                            "%d additional LoRA adapter(s) ignored — "
-                            "llama-cpp's ``lora_path`` accepts only one",
-                            len(lora_paths) - 1,
-                        )
+                # Phase 8 P3-2: LoRA adapters (a Modelfile's ADAPTER lines)
+                # are applied after the load, all of them, through the same
+                # list as hot-applied ones (``apply_lora``): llama.cpp sets
+                # a context's adapters as one set, so an adapter handed to
+                # ``Llama(lora_path=...)`` would be dropped by the first
+                # hot-apply.
+                lora_paths = list(kwargs.get("lora_paths") or [])
                 # V4 F5 — speculative decoding.
                 #
                 # Two modes are supported through the same kwarg:
@@ -1791,6 +1804,10 @@ class LlamaCppEngine(InferenceEngine):
             # mirrors llama-cpp-python's old behaviour.
             self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
             self._is_multimodal = chat_handler is not None
+            self._loras = []
+            for index, lora in enumerate(lora_paths):
+                logger.info("Loading LoRA adapter: %s", lora)
+                self.apply_lora(lora, 1.0, adapter_id=f"modelfile-{index}")
             if chat_handler is None and _give_templates_a_bos(self._model):
                 logger.info("Chat template does not start with BOS; HFL adds it")
             # A vision chat handler has its own fixed format, never tools.
@@ -1825,9 +1842,58 @@ class LlamaCppEngine(InferenceEngine):
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
 
+    # ------------------------------------------------------------------ LoRA
+
+    def _set_loras(self) -> None:
+        """Put the adapter list on the context, as one set, and forget the
+        cached prompt: its KV was computed with the previous weights."""
+        import ctypes
+
+        from llama_cpp import llama_cpp as _lcpp
+
+        count = len(self._loras)
+        handles = (_lcpp.llama_adapter_lora_p_ctypes * count)(*[h for *_, h in self._loras])
+        scales = (ctypes.c_float * count)(*[scale for _, _, scale, _ in self._loras])
+        if _lcpp.llama_set_adapters_lora(self._model.ctx, handles, count, scales) != 0:
+            raise RuntimeError("llama.cpp refused the LoRA adapter set")
+        self._model.reset()
+
+    def apply_lora(self, path: str, scale: float, adapter_id: str | None = None) -> None:
+        """Apply a LoRA adapter to the loaded model, on top of any already
+        applied (``POST /api/lora/apply``, and a Modelfile's ADAPTER lines at
+        load). llama-cpp-python has no API for it; llama.cpp's own has."""
+        if self._model is None:
+            raise RuntimeError("no model loaded")
+        from llama_cpp import llama_cpp as _lcpp
+
+        handle = _lcpp.llama_adapter_lora_init(self._model.model, str(path).encode())
+        if not handle:
+            raise ValueError(
+                f"{os.path.basename(path)} is not a LoRA adapter llama.cpp can load for this model"
+            )
+        self._loras.append((adapter_id or str(path), str(path), float(scale), handle))
+        try:
+            self._set_loras()
+        except Exception:
+            self._loras.pop()
+            _lcpp.llama_adapter_lora_free(handle)
+            raise
+
+    def remove_lora(self, adapter_id: str) -> None:
+        """Take an applied adapter off the model."""
+        found = next((entry for entry in self._loras if entry[0] == adapter_id), None)
+        if found is None:
+            raise RuntimeError(f"adapter {adapter_id!r} is not applied to this model")
+        from llama_cpp import llama_cpp as _lcpp
+
+        self._loras.remove(found)
+        self._set_loras()
+        _lcpp.llama_adapter_lora_free(found[3])
+
     def unload(self) -> None:
         if self._model:
             model_name = self.model_name
+            self._loras = []  # llama.cpp frees them with the model
             logger.info("Unloading model: %s", model_name)
             del self._model
             self._model = None
@@ -2064,8 +2130,6 @@ class LlamaCppEngine(InferenceEngine):
         "image_url":{"url":"data:image/png;base64,..."}}]``) which
         the multimodal chat handlers recognise.
         """
-        import base64 as _base64
-
         out: list[dict] = []
         for m in messages:
             # Text-only fast path
@@ -2076,22 +2140,7 @@ class LlamaCppEngine(InferenceEngine):
                 if m.content:
                     parts.append({"type": "text", "text": m.content})
                 for image_bytes in m.images:
-                    # llama-cpp's multimodal handlers accept
-                    # ``data:image/...;base64,...`` URIs on the
-                    # ``image_url.url`` field. Sniff the MIME from
-                    # magic bytes so the URI is correct even if we
-                    # came in as raw bytes.
-                    if image_bytes.startswith(b"\x89PNG"):
-                        mime = "image/png"
-                    elif image_bytes.startswith(b"\xff\xd8\xff"):
-                        mime = "image/jpeg"
-                    elif image_bytes.startswith((b"GIF87a", b"GIF89a")):
-                        mime = "image/gif"
-                    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
-                        mime = "image/webp"
-                    else:
-                        mime = "image/png"  # Best-effort fallback.
-                    uri = f"data:{mime};base64," + _base64.b64encode(image_bytes).decode("ascii")
+                    uri = _image_data_uri(image_bytes)
                     parts.append({"type": "image_url", "image_url": {"url": uri}})
                 entry = {"role": m.role, "content": parts}
             if m.tool_calls:

@@ -9,7 +9,8 @@ Supports multiple input formats:
   - "TheBloke/Llama-3.3-70B-Instruct-GGUF"     -> pre-quantized GGUF
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from huggingface_hub import HfApi
 
@@ -23,6 +24,10 @@ class ResolvedModel:
     quantization: str | None = None  # Q4_K_M, Q5_K_M, etc.
     pipeline_tag: str | None = None  # text-generation, text-to-speech, etc.
     commit_sha: str | None = None  # immutable commit the revision resolved to
+    # GGUF only: the files that must come with ``filename`` — the other parts
+    # of a split model, and a vision model's projector (``mmproj``).
+    parts: list[str] = field(default_factory=list)
+    projector: str | None = None
 
 
 _HUB_PREFIXES = ("https://huggingface.co/", "http://huggingface.co/", "huggingface.co/", "hf.co/")
@@ -153,17 +158,21 @@ def resolve(
     gguf_files = [f for f in filenames if f.endswith(".gguf")]
     safetensor_files = [f for f in filenames if f.endswith(".safetensors")]
 
-    if gguf_files:
+    model_files = [f for f in gguf_files if not _is_projector(f)]
+    if model_files:
         # Select the GGUF that best matches the requested quantization
-        target_file = _select_gguf(gguf_files, quantization)
+        target_file = _select_gguf(model_files, quantization)
+        parts = _split_parts(target_file, model_files)
         return ResolvedModel(
             repo_id=repo_id,
             revision=resolved_revision,
             commit_sha=commit_sha,
-            filename=target_file,
+            filename=parts[0] if parts else target_file,
             format="gguf",
             quantization=_detect_quant(target_file),
             pipeline_tag=pipeline_tag,
+            parts=parts[1:],
+            projector=_select_projector([f for f in gguf_files if _is_projector(f)]),
         )
     if safetensor_files:
         return ResolvedModel(
@@ -184,9 +193,23 @@ def resolve(
     )
 
 
+def _is_projector(filename: str) -> bool:
+    """A vision model's image projector (``mmproj-F16.gguf``...), not a model."""
+    return "mmproj" in filename.rsplit("/", 1)[-1].lower()
+
+
+def _has_quant(filename: str, quant: str) -> bool:
+    """``quant`` names the file as a whole token: ``F16`` is not ``BF16``."""
+    pattern = rf"(?<![A-Z0-9]){re.escape(quant.upper())}(?![A-Z0-9])"
+    return re.search(pattern, filename.upper()) is not None
+
+
 def _select_gguf(files: list[str], quant: str | None) -> str:
     """Select the most appropriate GGUF file."""
     if quant:
+        for f in files:
+            if _has_quant(f, quant):
+                return f
         quant_upper = quant.upper()
         for f in files:
             if quant_upper in f.upper():
@@ -196,18 +219,46 @@ def _select_gguf(files: list[str], quant: str | None) -> str:
     priority = ["Q4_K_M", "Q5_K_M", "Q4_K_S", "Q5_K_S", "Q6_K", "Q8_0"]
     for q in priority:
         for f in files:
-            if q in f.upper():
+            if _has_quant(f, q):
                 return f
 
     return files[0]
 
 
+_SPLIT_PART = re.compile(r"^(.*)-(\d{5})-of-(\d{5})\.gguf$", re.IGNORECASE)
+
+
+def _split_parts(target: str, files: list[str]) -> list[str]:
+    """Every part of a split GGUF (``...-00001-of-00004.gguf``), first part
+    first; empty for a single file. llama.cpp opens the first part and reads
+    the others from beside it, so all must be downloaded."""
+    match = _SPLIT_PART.match(target)
+    if match is None:
+        return []
+    prefix, total = match.group(1), match.group(3)
+    parts = sorted(
+        f
+        for f in files
+        if (m := _SPLIT_PART.match(f)) and m.group(1) == prefix and m.group(3) == total
+    )
+    return parts
+
+
+def _select_projector(files: list[str]) -> str | None:
+    """The projector to fetch with a vision model: F16 as llama.cpp's own
+    examples use, else BF16, else the next best, else whatever is there."""
+    for quant in ("F16", "BF16", "Q8_0", "F32"):
+        for f in files:
+            if _has_quant(f, quant):
+                return f
+    return files[0] if files else None
+
+
 def _detect_quant(filename: str) -> str | None:
     """Detect the quantization level from the filename."""
     quant_levels = _get_quant_levels()
-    upper = filename.upper()
     for q in quant_levels:
-        if q in upper:
+        if _has_quant(filename, q):
             return q
     return None
 
@@ -230,6 +281,7 @@ def _get_quant_levels() -> list[str]:
         "Q6_K",
         "Q8_0",
         "F16",
+        "BF16",
         "F32",
         "IQ1_S",
         "IQ1_M",

@@ -191,12 +191,6 @@ def _resolve_forced_backend() -> str | None:
     return None
 
 
-def _has_vision_projector(model_path: Path) -> bool:
-    """A GGUF vision model ships its projector as ``mmproj-*.gguf`` beside it."""
-    folder = model_path if model_path.is_dir() else model_path.parent
-    return any(folder.glob("mmproj-*.gguf"))
-
-
 def select_engine(
     model_path: Path,
     backend: str = "auto",
@@ -220,13 +214,10 @@ def select_engine(
 
     if backend == "auto":
         forced = _resolve_forced_backend()
-        if forced == "llama-server" and (
-            fmt != ModelFormat.GGUF or _has_vision_projector(model_path)
-        ):
-            # Chosen per model: llama-server takes the GGUF text models; a
-            # vision model (its mmproj projector beside it) keeps the
-            # in-process engine, which handles images, and anything that is
-            # not GGUF keeps its own backend.
+        if forced == "llama-server" and fmt != ModelFormat.GGUF:
+            # Chosen per model: llama-server takes the GGUF models — vision
+            # ones too, with their projector (``--mmproj``) — and anything
+            # that is not GGUF keeps its own backend.
             forced = None
         if forced is not None:
             return _create_engine(forced)

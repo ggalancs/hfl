@@ -317,7 +317,7 @@
     "memory_summary": "Memoria: {in_use} de {total} GB en uso ({pct}%) · presupuesto {budget}% ({limit} GB) · margen: {free} GB · modelos: {models} GB",
     "memory_summary_gpu": "GPU: {in_use} de {total} GB en uso ({pct}%) · margen: {free} GB",
     "run_pulling": "{model} aún no está en esta máquina: se descarga primero.",
-    "parallel_on": "Peticiones en paralelo: {slots} a la vez por modelo GGUF de texto (llama-server); los de visión y otros formatos usan su backend habitual."
+    "parallel_on": "Peticiones en paralelo: {slots} a la vez por modelo GGUF (llama-server); los demás formatos usan su backend habitual."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",

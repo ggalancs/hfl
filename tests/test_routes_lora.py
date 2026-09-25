@@ -177,3 +177,31 @@ class TestListLoraRoute:
         body = client.get(f"/api/lora/{llm_manifest.name}").json()
         assert body["model"] == llm_manifest.name
         assert len(body["adapters"]) == 1
+
+
+def test_apply_and_remove_wait_their_turn_in_the_model_queue(
+    client, llm_manifest, adapter_file, monkeypatch
+):
+    """Changing adapters under a running generation would change the
+    weights mid-reply: both go through the dispatcher, like a chat."""
+    import hfl.api.helpers as helpers
+
+    real = helpers.run_dispatched
+    operations: list[str] = []
+
+    async def _recording(func, *args, operation="operation", **kwargs):
+        operations.append(operation)
+        return await real(func, *args, operation=operation, **kwargs)
+
+    monkeypatch.setattr(helpers, "run_dispatched", _recording)
+    _wire_engine(llm_manifest)
+    applied = client.post(
+        "/api/lora/apply", json={"model": llm_manifest.name, "lora_path": adapter_file}
+    )
+    assert applied.status_code == 200
+    removed = client.post(
+        "/api/lora/remove",
+        json={"model": llm_manifest.name, "adapter_id": applied.json()["adapter_id"]},
+    )
+    assert removed.status_code == 200
+    assert operations == ["lora_apply", "lora_remove"]

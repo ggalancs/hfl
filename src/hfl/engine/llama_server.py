@@ -101,15 +101,25 @@ def _response_format(value: str | dict | None) -> dict[str, Any] | None:
     return None  # GBNF passthrough is an llama-cpp-python feature
 
 
-def _wire_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+def _wire_messages(messages: list[ChatMessage], vision: bool = False) -> list[dict[str, Any]]:
+    from hfl.engine.llama_cpp import _image_data_uri
+
     wire: list[dict[str, Any]] = []
     for message in messages:
+        content: Any = message.content
         if message.images:
-            raise ValueError(
-                "images need the llama-cpp backend; unset HFL_LLM_LIBRARY=llama-server "
-                "for vision models"
-            )
-        entry: dict[str, Any] = {"role": message.role, "content": message.content}
+            if not vision:
+                raise ValueError(
+                    "this model cannot see images: it has no image projector (mmproj) "
+                    "beside it; pull the model again to fetch it"
+                )
+            # OpenAI's content parts, which llama-server reads with --mmproj.
+            content = [{"type": "text", "text": message.content}] if message.content else []
+            content += [
+                {"type": "image_url", "image_url": {"url": _image_data_uri(image)}}
+                for image in message.images
+            ]
+        entry: dict[str, Any] = {"role": message.role, "content": content}
         if message.tool_calls:
             entry["tool_calls"] = [
                 {
@@ -172,6 +182,8 @@ class LlamaServerEngine(InferenceEngine):
         # itself; when not, HFL writes them in (``_tools_as_text``).
         self._chat_template = ""
         self._template_knows_tools = True
+        # The image projector served with the model (None: text only).
+        self._projector: Path | None = None
 
     # ------------------------------------------------------------------ life
 
@@ -203,6 +215,13 @@ class LlamaServerEngine(InferenceEngine):
             # context to free memory (``--fit``, on by default).
             n_ctx = None
         slots = _slots()
+        from hfl.engine.projector import find_projector
+
+        lora_paths = [str(p) for p in kwargs.get("lora_paths") or []]
+        requested_projector = kwargs.get("clip_model_path")
+        self._projector = (
+            Path(requested_projector) if requested_projector else find_projector(Path(model_path))
+        )
         base_argv = [
             exe,
             "-m",
@@ -220,6 +239,10 @@ class LlamaServerEngine(InferenceEngine):
             "none",
             "--no-webui",
             "--no-slots",
+            # A vision model's projector: llama-server then takes images.
+            *(["--mmproj", str(self._projector)] if self._projector else []),
+            # A Modelfile's ADAPTER lines: every one, at full scale.
+            *(["--lora", ",".join(lora_paths)] if lora_paths else []),
         ]
         log_dir = config.home_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -386,7 +409,7 @@ class LlamaServerEngine(InferenceEngine):
         from hfl.engine.llama_cpp import _history_for_template, _tools_as_text
 
         penalty = repeat_penalty_for(cfg, messages, tools)
-        wire = _wire_messages(messages)
+        wire = _wire_messages(messages, vision=self._projector is not None)
         if self._template_knows_tools:
             wire = _history_for_template(wire, self._chat_template)
         else:
@@ -550,6 +573,16 @@ class LlamaServerEngine(InferenceEngine):
             total_duration=time.monotonic_ns() - started_ns,
             prompt_eval_duration=int(float(timings.get("prompt_ms") or 0.0) * 1e6),
             eval_duration=int(eval_ms * 1e6),
+        )
+
+    # ----------------------------------------------------------------- LoRA
+
+    def apply_lora(self, path: str, scale: float, adapter_id: str | None = None) -> None:
+        """llama-server loads adapter files only when it starts."""
+        raise RuntimeError(
+            "llama-server loads LoRA adapters only when it starts: declare the adapter "
+            "with ADAPTER in the model's Modelfile (hfl create), or serve the model "
+            "with the default backend to apply it now"
         )
 
     # ----------------------------------------------------------- properties

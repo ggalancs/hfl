@@ -35,7 +35,9 @@ def fake_llama(monkeypatch):
     fake_c.GGML_TYPE_F16 = 1  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "llama_cpp.llama_cpp", fake_c)
     fake_parent = sys.modules.get("llama_cpp") or ModuleType("llama_cpp")
-    fake_parent.llama_cpp = fake_c  # type: ignore[attr-defined]
+    # Through monkeypatch: set by hand on the real package, the stub stayed
+    # there for every later test (``from llama_cpp import llama_cpp``).
+    monkeypatch.setattr(fake_parent, "llama_cpp", fake_c, raising=False)
     monkeypatch.setitem(sys.modules, "llama_cpp", fake_parent)
     return _FakeLlama
 

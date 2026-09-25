@@ -76,11 +76,19 @@ class TestStructuralGuard:
 
         The draft model is a separate object with its own KV and IS reset
         deliberately (speculative decoding rewinds it), so the assertion
-        is about the receiver, not about the method name.
+        is about the receiver, not about the method name. So is the model
+        when its LoRA adapters change (``_set_loras``): the cached prompt
+        was computed with the old weights — never on a request's path.
         """
+        tree = self._tree()
+        allowed = {"_set_loras"}
+        exempt: set[int] = set()
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef) and fn.name in allowed:
+                exempt.update(id(n) for n in ast.walk(fn))
         offenders = []
-        for node in ast.walk(self._tree()):
-            if not isinstance(node, ast.Call):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or id(node) in exempt:
                 continue
             func = node.func
             if not isinstance(func, ast.Attribute) or func.attr != "reset":
