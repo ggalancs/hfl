@@ -221,6 +221,8 @@ class TransformersEngine(InferenceEngine):
             tokens_generated=n_gen,
             tokens_prompt=prompt_tokens,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
+            # generate() returns no reason; all max_new_tokens used = cut.
+            stop_reason="length" if cfg.max_tokens and n_gen >= cfg.max_tokens else "stop",
         )
 
     def generate_stream(

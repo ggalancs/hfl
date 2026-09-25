@@ -396,7 +396,9 @@ class MLXEngine(InferenceEngine):
             tokens_generated=n_gen,
             tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
-            stop_reason="stop",
+            # mlx_lm.generate returns only text; n_gen re-tokenises it, so
+            # reaching max_tokens is the best available sign it was cut.
+            stop_reason="length" if cfg.max_tokens and n_gen >= cfg.max_tokens else "stop",
             total_duration=total_ns,
             load_duration=0,
             prompt_eval_duration=int(total_ns * n_prompt / max(1, n_prompt + n_gen)),

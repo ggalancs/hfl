@@ -186,10 +186,12 @@ class VLLMEngine(InferenceEngine):
         outputs = self._engine.generate([prompt], sampling_params)
         output = outputs[0]
 
+        completion = output.outputs[0]
         return GenerationResult(
-            text=output.outputs[0].text,
-            tokens_generated=len(output.outputs[0].token_ids),
-            stop_reason="stop",
+            text=completion.text,
+            tokens_generated=len(completion.token_ids),
+            # vLLM says why it stopped; "length" = max_tokens cut the reply.
+            stop_reason="length" if completion.finish_reason == "length" else "stop",
         )
 
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:

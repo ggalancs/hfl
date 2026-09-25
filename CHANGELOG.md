@@ -94,8 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A reply cut by `max_tokens` was reported as finished normally** on the
-  default GGUF backend without streaming: OpenAI's `finish_reason`,
+- **A reply cut by `max_tokens` was reported as finished normally** without
+  streaming, on the default GGUF backend and on MLX, Transformers and vLLM: OpenAI's `finish_reason`,
   Ollama's `done_reason` and Anthropic's `stop_reason` said stop instead of
   length / max_tokens, so a client could not tell it had half an answer.
 - **`hfl check`, `hfl debug` and `hfl doctor` could describe the same
