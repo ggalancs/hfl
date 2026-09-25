@@ -26,7 +26,7 @@ from hfl.api.helpers import (
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
-from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.base import ChatMessage, GenerationConfig, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -205,7 +205,9 @@ async def chat_completions(
 
     if req.stream:
         return await prepare_stream_response(
-            lambda slot: _stream_chat(req.model, messages, gen_config, tools, slot),
+            lambda slot: _stream_chat(
+                req.model, messages, gen_config, tools, slot, _include_usage(req)
+            ),
             media_type="text/event-stream",
             path="/v1/chat/completions",
         )
@@ -266,12 +268,18 @@ async def chat_completions(
     }
 
 
+def _include_usage(req: Any) -> bool:
+    options = getattr(req, "stream_options", None) or {}
+    return bool(isinstance(options, dict) and options.get("include_usage"))
+
+
 async def _stream_chat(
     model: str,
     messages: list[ChatMessage],
     config: GenerationConfig,
     tools: list[dict] | None = None,
     slot_cm: Any | None = None,
+    include_usage: bool = False,
 ) -> AsyncIterator[str]:
     """Generate OpenAI-compatible SSE responses with backpressure.
 
@@ -333,15 +341,38 @@ async def _stream_chat(
             first_chunk = False
         return _chunk_json(delta, None)
 
+    stream = state.engine.chat_stream(messages, config, tools)
+
+    def _usage_chunk() -> str:
+        # ``stream_options.include_usage``: one last chunk, empty choices,
+        # with the tokens the engine counted — none when it cannot count.
+        prompt_n, generated = stream_counts(stream)
+        if not include_usage or prompt_n is None or generated is None:
+            return ""
+        chunk = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "system_fingerprint": None,
+            "choices": [],
+            "usage": {
+                "prompt_tokens": prompt_n,
+                "completion_tokens": generated,
+                "total_tokens": prompt_n + generated,
+            },
+        }
+        return f"data: {json.dumps(chunk)}\n\n"
+
     def format_done() -> str:
         # API-13: report "length" when generation hit the token cap, else
         # "stop" (real OpenAI distinguishes them; the stream only exposes the
         # emitted-token count, so this is best-effort but accurate at the cap).
-        stop_finish = (
-            "length" if (config.max_tokens and emitted[0] >= config.max_tokens) else "stop"
-        )
+        generated = stream_counts(stream)[1]
+        count = generated if generated is not None else emitted[0]
+        stop_finish = "length" if (config.max_tokens and count >= config.max_tokens) else "stop"
         if not tool_aware:
-            return _chunk_json({}, stop_finish) + "data: [DONE]\n\n"
+            return _chunk_json({}, stop_finish) + _usage_chunk() + "data: [DONE]\n\n"
 
         cleaned, canonical = parse_tool_calls("".join(accumulated), model, tools)
         if canonical:
@@ -350,17 +381,23 @@ async def _stream_chat(
                 "role": "assistant",
                 "tool_calls": [{"index": i, **tc} for i, tc in enumerate(calls)],
             }
-            return _chunk_json(delta, None) + _chunk_json({}, "tool_calls") + "data: [DONE]\n\n"
+            return (
+                _chunk_json(delta, None)
+                + _chunk_json({}, "tool_calls")
+                + _usage_chunk()
+                + "data: [DONE]\n\n"
+            )
         # No tool call after all — surface the cleaned text as one delta.
         return (
             _chunk_json({"role": "assistant", "content": cleaned}, None)
             + _chunk_json({}, stop_finish)
+            + _usage_chunk()
             + "data: [DONE]\n\n"
         )
 
     try:
         async for chunk in stream_with_backpressure(
-            sync_iterator=state.engine.chat_stream(messages, config, tools),
+            sync_iterator=stream,
             format_item=format_chunk,
             format_done=format_done,
         ):
@@ -424,7 +461,9 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
 
     if req.stream:
         return await prepare_stream_response(
-            lambda slot: _stream_completion(req.model, prompt, gen_config, slot),
+            lambda slot: _stream_completion(
+                req.model, prompt, gen_config, slot, _include_usage(req)
+            ),
             media_type="text/event-stream",
             path="/v1/completions",
         )
@@ -466,6 +505,7 @@ async def _stream_completion(
     prompt: str,
     config: GenerationConfig,
     slot_cm: Any | None = None,
+    include_usage: bool = False,
 ) -> AsyncIterator[str]:
     """Generate text completion SSE responses with backpressure.
 
@@ -489,6 +529,7 @@ async def _stream_completion(
         return
 
     completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+    stream = state.engine.generate_stream(prompt, config)
     created = int(time.time())  # Consistent timestamp across all chunks
     emitted = [0]  # API-13: token count → report finish_reason "length" on cap
 
@@ -508,8 +549,10 @@ async def _stream_completion(
         # API-13: emit a final chunk carrying finish_reason — the legacy
         # completions stream previously sent only [DONE], so clients never
         # saw a stop reason at all.
-        finish = "length" if (config.max_tokens and emitted[0] >= config.max_tokens) else "stop"
-        final = {
+        prompt_n, generated = stream_counts(stream)
+        count = generated if generated is not None else emitted[0]
+        finish = "length" if (config.max_tokens and count >= config.max_tokens) else "stop"
+        final: dict[str, Any] = {
             "id": completion_id,
             "object": "text_completion",
             "created": created,
@@ -517,11 +560,23 @@ async def _stream_completion(
             "system_fingerprint": None,
             "choices": [{"text": "", "index": 0, "finish_reason": finish}],
         }
-        return f"data: {json.dumps(final)}\n\n" + "data: [DONE]\n\n"
+        usage = ""
+        if include_usage and prompt_n is not None and generated is not None:
+            usage_chunk = {
+                **final,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": prompt_n,
+                    "completion_tokens": generated,
+                    "total_tokens": prompt_n + generated,
+                },
+            }
+            usage = f"data: {json.dumps(usage_chunk)}\n\n"
+        return f"data: {json.dumps(final)}\n\n" + usage + "data: [DONE]\n\n"
 
     try:
         async for chunk in stream_with_backpressure(
-            sync_iterator=state.engine.generate_stream(prompt, config),
+            sync_iterator=stream,
             format_item=format_chunk,
             format_done=format_done,
         ):

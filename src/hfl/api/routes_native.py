@@ -48,6 +48,15 @@ def _get_state() -> "ServerState":
     return get_state()
 
 
+def _counts(stream: object, emitted: int) -> tuple[int, int]:
+    """(prompt, generated) tokens of a finished stream: the engine's own
+    counts when it keeps them, else 0 and the number of emitted chunks."""
+    from hfl.engine.base import stream_counts
+
+    prompt_n, generated = stream_counts(stream)
+    return (prompt_n or 0, generated if generated is not None else emitted)
+
+
 async def _preload_reply(
     model: str, options: dict | None, unload: bool, *, chat: bool
 ) -> dict[str, Any] | Response:
@@ -426,10 +435,10 @@ async def _stream_generate(
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     # API-5: derive the usage/timing fields the non-streaming envelope
-    # provides. The stream yields bare tokens, so eval_count counts emitted
-    # chunks (≈ one token per chunk for these backends) and durations are
-    # wall-clock nanoseconds (Ollama's unit). prompt_eval_count/load_duration
-    # are unavailable on the streaming path (the engine discards them) — 0.
+    # provides. Token counts come from the engine's stream when it counts
+    # them (llama.cpp, llama-server); otherwise eval_count falls back to the
+    # emitted chunks and prompt_eval_count to 0. Durations are wall-clock
+    # nanoseconds (Ollama's unit).
     start_ns = time.monotonic_ns()
     first_token_ns: list[int | None] = [None]
     emitted = [0]
@@ -446,28 +455,31 @@ async def _stream_generate(
         }
         return json.dumps(chunk) + "\n"
 
+    stream = state.engine.generate_stream(prompt, config)
+
     def format_done() -> str:
         ft = first_token_ns[0]
+        prompt_n, generated = _counts(stream, emitted[0])
         chunk = {
             "model": model_name,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "response": "",
             "done": True,
             "done_reason": "length"
-            if (config.max_tokens and emitted[0] >= config.max_tokens)
+            if (config.max_tokens and generated >= config.max_tokens)
             else "stop",
             "total_duration": time.monotonic_ns() - start_ns,
             "load_duration": 0,
-            "prompt_eval_count": 0,
+            "prompt_eval_count": prompt_n,
             "prompt_eval_duration": (ft - start_ns) if ft else 0,
-            "eval_count": emitted[0],
+            "eval_count": generated,
             "eval_duration": time.monotonic_ns() - (ft or start_ns),
         }
         return json.dumps(chunk) + "\n"
 
     try:
         async for chunk in stream_with_backpressure(
-            sync_iterator=state.engine.generate_stream(prompt, config),
+            sync_iterator=stream,
             format_item=format_chunk,
             format_done=format_done,
         ):
@@ -802,6 +814,7 @@ async def _stream_chat(
             final_message["content"] = cleaned
 
         ft = first_token_ns[0]
+        prompt_n, generated = _counts(sync_iterator, emitted[0])
         chunk = {
             "model": model_name,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -809,13 +822,13 @@ async def _stream_chat(
             "done": True,
             # API-5: mirror the non-streaming envelope's keys/units (ns).
             "done_reason": "length"
-            if (config.max_tokens and emitted[0] >= config.max_tokens)
+            if (config.max_tokens and generated >= config.max_tokens)
             else "stop",
             "total_duration": time.monotonic_ns() - start_ns,
             "load_duration": 0,
-            "prompt_eval_count": 0,
+            "prompt_eval_count": prompt_n,
             "prompt_eval_duration": (ft - start_ns) if ft else 0,
-            "eval_count": emitted[0],
+            "eval_count": generated,
             "eval_duration": time.monotonic_ns() - (ft or start_ns),
         }
         return json.dumps(chunk) + "\n"

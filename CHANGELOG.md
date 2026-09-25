@@ -89,6 +89,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Streamed replies reported chunks as tokens and 0 prompt tokens**, and
+  ignored OpenAI's `stream_options.include_usage`. A chunk can carry several
+  tokens (an unfinished UTF-8 character, a held-back stop sequence), so the
+  counts were low. The llama.cpp and llama-server backends now count what
+  a stream really cost — checked equal to the non-streaming `usage` on
+  both, with emoji, a cached prompt and a reply cut by `max_tokens` — and
+  every API reports it: OpenAI's usage chunk (when asked), Ollama's
+  `prompt_eval_count`/`eval_count`, Anthropic's `usage`, the Responses
+  envelope. An engine that cannot count keeps the old fallback, and OpenAI's
+  usage chunk is then left out rather than made up.
 - **Models pulled before 2026-03-18 were stuck at 4096 tokens of context.**
   Pulls used to save 4096 as the model's context, and both `hfl run` and
   the server honour a saved context before sizing it to the model and the

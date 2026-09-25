@@ -196,6 +196,8 @@ class ChatCompletionRequest(BaseModel):
         False,
         description="Whether to stream the response",
     )
+    # {"include_usage": true} adds a last chunk with the token counts.
+    stream_options: dict | None = Field(default=None)
     stop: list[str] | str | None = Field(
         None,
         description="Stop sequences",
@@ -326,6 +328,8 @@ class CompletionRequest(BaseModel):
         False,
         description="Whether to stream the response",
     )
+    # {"include_usage": true} adds a last chunk with the token counts.
+    stream_options: dict | None = Field(default=None)
     stop: list[str] | str | None = Field(
         None,
         description="Stop sequences",

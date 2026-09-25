@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Iterator, cast
 
 from hfl.engine.base import (
     ChatMessage,
+    CountedStream,
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
@@ -751,6 +752,25 @@ def _fit_ctx_to_memory(model_path: str, info: dict | None, n_ctx: int) -> int:
             available_bytes / (1024**3),
         )
     return fitted
+
+
+def _count(counted: CountedStream, model: Any, first: int | None, finish: str | None) -> None:
+    """Token counts of a stream that ran to its end.
+
+    llama-cpp-python's streams carry no ``usage`` and their chunks merge
+    tokens (an unfinished UTF-8 character, a possible stop sequence), so the
+    counts come from the context instead — measured against the
+    non-streaming ``usage``, including a cached prompt prefix and emoji:
+    when the first chunk arrives the prompt has been evaluated and nothing
+    else (``n_tokens`` = prompt); at the end ``n_tokens`` = prompt +
+    completion, less the last token when generation hit ``max_tokens``
+    (sampled, never evaluated).
+    """
+    final = getattr(model, "n_tokens", None)
+    if not isinstance(first, int) or not isinstance(final, int):
+        return  # a backend (or a stub) that does not expose the context
+    counted.prompt_tokens = first
+    counted.completion_tokens = final - first + (1 if finish == "length" else 0)
 
 
 def resolve_n_ctx(
@@ -1722,21 +1742,33 @@ class LlamaCppEngine(InferenceEngine):
         config: GenerationConfig | None = None,
     ) -> Iterator[str]:
         cfg = config or GenerationConfig()
+        counted = CountedStream()
+        model = self._model
 
-        for chunk in self._model(
-            prompt,
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            top_k=cfg.top_k,
-            repeat_penalty=cfg.repeat_penalty,
-            stop=cfg.stop,
-            seed=cfg.seed if cfg.seed >= 0 else None,
-            stream=True,
-        ):
-            text = chunk["choices"][0]["text"]
-            if text:
-                yield text
+        def _chunks() -> Iterator[str]:
+            first: int | None = None
+            finish: str | None = None
+            for chunk in model(
+                prompt,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                top_p=cfg.top_p,
+                top_k=cfg.top_k,
+                repeat_penalty=cfg.repeat_penalty,
+                stop=cfg.stop,
+                seed=cfg.seed if cfg.seed >= 0 else None,
+                stream=True,
+            ):
+                if first is None:
+                    first = getattr(model, "n_tokens", None)
+                choice = chunk["choices"][0]
+                finish = choice.get("finish_reason") or finish
+                text = choice["text"]
+                if text:
+                    yield text
+            _count(counted, model, first, finish)
+
+        return counted.feed(_chunks())
 
     def _build_stop_list(
         self, caller_stop: list[str] | None, tools: list[dict] | None
@@ -1970,19 +2002,27 @@ class LlamaCppEngine(InferenceEngine):
             kwargs.pop("tools", None)
             iterator = self._model.create_chat_completion(**kwargs)
 
+        counted = CountedStream()
+        model = self._model
+
         def _raw_chunks() -> Iterator[str]:
+            first: int | None = None
+            finish: str | None = None
             for chunk in iterator:
-                delta = chunk["choices"][0].get("delta", {})
-                text = delta.get("content", "")
+                if first is None:
+                    first = getattr(model, "n_tokens", None)
+                choice = chunk["choices"][0]
+                finish = choice.get("finish_reason") or finish
+                text = choice.get("delta", {}).get("content", "")
                 if text:
                     yield text
+            _count(counted, model, first, finish)
 
         if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
-            yield from _filter_gemma4_stream(_raw_chunks())
-        else:
-            # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
-            # chunks through so the caller sees the reasoning channel.
-            yield from _raw_chunks()
+            return counted.feed(_filter_gemma4_stream(_raw_chunks()))
+        # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
+        # chunks through so the caller sees the reasoning channel.
+        return counted.feed(_raw_chunks())
 
     @property
     def model_name(self) -> str:

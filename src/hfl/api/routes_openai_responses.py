@@ -494,7 +494,16 @@ async def _stream_response(
                         out += text_delta(text)
                 out += message_closed(text)
                 output.append(_message_item(msg_id, text))
-            completed = _envelope(response_id, model, output, 0, len(accumulated))
+            from hfl.engine.base import stream_counts
+
+            prompt_n, generated = stream_counts(sync_iter)
+            completed = _envelope(
+                response_id,
+                model,
+                output,
+                prompt_n or 0,
+                generated if generated is not None else len(accumulated),
+            )
             return out + event("response.completed", response=completed) + "data: [DONE]\n\n"
 
         if tool_aware:

@@ -57,7 +57,11 @@ class H(BaseHTTPRequestHandler):
                 chunks = b"".join(
                     b"data: " + json.dumps({"choices": [{"delta": {"content": t}}]}).encode()
                     + b"\n\n" for t in ("Hel", "lo")
-                ) + b"data: [DONE]\n\n"
+                )
+                if (body.get("stream_options") or {}).get("include_usage"):
+                    chunks += b"data: " + json.dumps({"choices": [], "usage": usage}).encode()
+                    chunks += b"\n\n"
+                chunks += b"data: [DONE]\n\n"
                 return self._send(200, chunks, "text/event-stream")
             if body.get("tools"):
                 call = {"id": "c1", "type": "function",
@@ -72,7 +76,9 @@ class H(BaseHTTPRequestHandler):
             if body.get("stream"):
                 chunks = b"".join(
                     b"data: " + json.dumps({"content": t}).encode() + b"\n\n" for t in ("a", "b")
-                )
+                ) + b"data: " + json.dumps(
+                    {"content": "", "stop": True, "tokens_predicted": 2, "tokens_evaluated": 3}
+                ).encode() + b"\n\n"
                 return self._send(200, chunks, "text/event-stream")
             return self._send(200, {"content": "ab", "tokens_predicted": 2, "tokens_evaluated": 3,
                                     "timings": timings})
@@ -246,7 +252,14 @@ class TestRequests:
         assert result.eval_duration == 20_000_000 and result.prompt_eval_duration == 10_000_000
 
     def test_chat_stream(self, engine):
-        assert list(engine.chat_stream([ChatMessage(role="user", content="x")])) == ["Hel", "lo"]
+        stream = engine.chat_stream([ChatMessage(role="user", content="x")])
+        assert list(stream) == ["Hel", "lo"]
+        assert (stream.prompt_tokens, stream.completion_tokens) == (7, 2)
+
+    def test_generate_stream_counts(self, engine):
+        stream = engine.generate_stream("x")
+        assert list(stream) == ["a", "b"]
+        assert (stream.prompt_tokens, stream.completion_tokens) == (3, 2)
 
     def test_structured_tool_calls(self, engine):
         tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]

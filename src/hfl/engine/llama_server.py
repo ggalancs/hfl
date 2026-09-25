@@ -39,7 +39,13 @@ from typing import Any
 
 import httpx
 
-from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult, InferenceEngine
+from hfl.engine.base import (
+    ChatMessage,
+    CountedStream,
+    GenerationConfig,
+    GenerationResult,
+    InferenceEngine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -348,27 +354,45 @@ class LlamaServerEngine(InferenceEngine):
         tools: list[dict] | None = None,
     ) -> Iterator[str]:
         cfg = config or GenerationConfig()
+        counted = CountedStream()
         if tools:
             # llama-server streams tool calls as structured deltas, and this
             # interface carries text. The routes buffer tool-aware turns and
             # parse them at the end anyway, so answer in one piece and write
             # any call back as the marker their parsers read.
-            result = self.chat(messages, cfg, tools)
-            if result.text:
-                yield result.text
-            for call in result.tool_calls or []:
-                yield _as_marker(call)
-            return
-        body = {**self._chat_body(messages, cfg, None), "stream": True}
-        with self._http().stream("POST", "/v1/chat/completions", json=body) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line.startswith("data: ") or line == "data: [DONE]":
-                    continue
-                for choice in json.loads(line[6:]).get("choices") or []:
-                    text = (choice.get("delta") or {}).get("content")
-                    if text:
-                        yield text
+            def _whole() -> Iterator[str]:
+                result = self.chat(messages, cfg, tools)
+                counted.prompt_tokens = result.tokens_prompt
+                counted.completion_tokens = result.tokens_generated
+                if result.text:
+                    yield result.text
+                for call in result.tool_calls or []:
+                    yield _as_marker(call)
+
+            return counted.feed(_whole())
+        body = {
+            **self._chat_body(messages, cfg, None),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        def _stream() -> Iterator[str]:
+            with self._http().stream("POST", "/v1/chat/completions", json=body) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.startswith("data: ") or line == "data: [DONE]":
+                        continue
+                    event = json.loads(line[6:])
+                    usage = event.get("usage")
+                    if usage:
+                        counted.prompt_tokens = usage.get("prompt_tokens")
+                        counted.completion_tokens = usage.get("completion_tokens")
+                    for choice in event.get("choices") or []:
+                        text = (choice.get("delta") or {}).get("content")
+                        if text:
+                            yield text
+
+        return counted.feed(_stream())
 
     def _completion_body(self, prompt: str, cfg: GenerationConfig) -> dict[str, Any]:
         return {"prompt": prompt, "n_predict": cfg.max_tokens, **_sampling(cfg)}
@@ -384,14 +408,24 @@ class LlamaServerEngine(InferenceEngine):
 
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:
         cfg = config or GenerationConfig()
+        counted = CountedStream()
         body = {**self._completion_body(prompt, cfg), "stream": True}
-        with self._http().stream("POST", "/completion", json=body) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if line.startswith("data: "):
-                    text = json.loads(line[6:]).get("content")
+
+        def _stream() -> Iterator[str]:
+            with self._http().stream("POST", "/completion", json=body) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    event = json.loads(line[6:])
+                    if event.get("stop") and "tokens_predicted" in event:
+                        counted.prompt_tokens = event.get("tokens_evaluated")
+                        counted.completion_tokens = event.get("tokens_predicted")
+                    text = event.get("content")
                     if text:
                         yield text
+
+        return counted.feed(_stream())
 
     def _result(
         self,

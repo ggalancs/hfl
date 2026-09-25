@@ -142,6 +142,46 @@ class GenerationResult:
     logprobs: list[dict] | None = None
 
 
+class CountedStream(Iterator[str]):
+    """A token stream that knows, once exhausted, how many tokens it cost.
+
+    ``prompt_tokens`` / ``completion_tokens`` stay ``None`` until the
+    engine has counted them — and for good if it cannot; callers must not
+    make a number up in their place. One object per request, so concurrent
+    streams never share their counts.
+    """
+
+    def __init__(self) -> None:
+        self.prompt_tokens: int | None = None
+        self.completion_tokens: int | None = None
+        self._it: Iterator[str] = iter(())
+
+    def feed(self, source: Iterator[str]) -> "CountedStream":
+        self._it = source
+        return self
+
+    def __iter__(self) -> "CountedStream":
+        return self
+
+    def __next__(self) -> str:
+        return next(self._it)
+
+    def close(self) -> None:
+        close = getattr(self._it, "close", None)
+        if close is not None:
+            close()
+
+
+def stream_counts(stream: object) -> tuple[int | None, int | None]:
+    """``(prompt_tokens, completion_tokens)`` of an exhausted engine stream,
+    or ``(None, None)`` when the engine does not count them."""
+    counts = (getattr(stream, "prompt_tokens", None), getattr(stream, "completion_tokens", None))
+    return tuple(  # type: ignore[return-value]
+        value if isinstance(value, int) and not isinstance(value, bool) else None
+        for value in counts
+    )
+
+
 class InferenceEngine(ABC):
     """Interface that all backends must implement."""
 

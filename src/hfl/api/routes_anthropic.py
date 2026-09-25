@@ -28,7 +28,7 @@ from hfl.api.helpers import (
     run_dispatched,
 )
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
-from hfl.engine.base import ChatMessage
+from hfl.engine.base import ChatMessage, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -438,12 +438,22 @@ async def _stream_messages(
             + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
         )
 
+    stream = state.engine.chat_stream(messages, config, tools)
+
+    def _usage() -> dict[str, int]:
+        # The engine's own counts when it keeps them (llama.cpp,
+        # llama-server); otherwise the live chunk counter.
+        prompt_n, generated = stream_counts(stream)
+        usage = {"output_tokens": generated if generated is not None else output_tokens}
+        if prompt_n is not None:
+            usage["input_tokens"] = prompt_n
+        return usage
+
     def _plain_stop_reason() -> str:
-        # API-10: report max_tokens when the cap was hit, else end_turn (the
-        # streaming path only exposes the emitted-token count).
+        # API-10: report max_tokens when the cap was hit, else end_turn.
         return (
             "max_tokens"
-            if (config.max_tokens and output_tokens >= config.max_tokens)
+            if (config.max_tokens and _usage()["output_tokens"] >= config.max_tokens)
             else "end_turn"
         )
 
@@ -456,7 +466,7 @@ async def _stream_messages(
                     {
                         "type": "message_delta",
                         "delta": {"stop_reason": _plain_stop_reason(), "stop_sequence": None},
-                        "usage": {"output_tokens": output_tokens},
+                        "usage": _usage(),
                     },
                 )
                 + _sse("message_stop", {"type": "message_stop"})
@@ -511,10 +521,10 @@ async def _stream_messages(
                 {
                     "type": "message_delta",
                     "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                    # Use the live token counter (as the plain path and the
-                    # stop-reason logic do), not a whitespace word count, which
-                    # diverges from real tokenisation for sub-word/BPE tokens.
-                    "usage": {"output_tokens": output_tokens},
+                    # Real token counts (as the plain path and the stop-reason
+                    # logic use), never a whitespace word count, which diverges
+                    # from real tokenisation for sub-word/BPE tokens.
+                    "usage": _usage(),
                 },
             )
         )
@@ -523,7 +533,7 @@ async def _stream_messages(
 
     try:
         async for chunk in stream_with_backpressure(
-            sync_iterator=state.engine.chat_stream(messages, config, tools),
+            sync_iterator=stream,
             format_item=format_delta,
             format_done=format_done,
         ):
