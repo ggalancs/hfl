@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""Tests for streaming partial tool calls on /api/chat (Phase 10 P1)."""
+"""Tool calls in an /api/chat stream: each one once, complete."""
 
 from __future__ import annotations
 
@@ -37,11 +37,11 @@ def _install_streaming_engine(manifest, tokens: list[str]):
     return engine
 
 
-class TestStreamingPartialToolCalls:
-    def test_partial_call_appears_on_intermediate_chunk(self, client):
-        # Gemma 4 style tool-call: the parser's OpenAI-ish branch sees
-        # ``[{"name":"search","arguments":{"q":"cats"}}]`` once complete,
-        # and can surface the partial after enough arrives.
+class TestStreamingToolCalls:
+    def test_each_call_reaches_the_client_once(self, client):
+        """A client that collects ``tool_calls`` from every chunk (as
+        Ollama's libraries let you) must see each call once, complete —
+        not again on every chunk after it appeared, nor cut short."""
         manifest = ModelManifest(
             name="m",
             repo_id="org/m",
@@ -78,14 +78,10 @@ class TestStreamingPartialToolCalls:
         events = [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
         # Final event always has done=true.
         assert events[-1]["done"] is True
-        # At least one intermediate event carries a non-null tool_calls
-        # (the partial surfaces once enough of the JSON is accumulated).
-        partials = [
-            e for e in events if not e.get("done") and (e.get("message") or {}).get("tool_calls")
-        ]
-        assert len(partials) >= 1
-        # Final envelope's tool_calls matches the parsed call.
-        assert events[-1]["message"]["tool_calls"][0]["function"]["name"] == "search"
+        collected = [c for e in events for c in (e.get("message") or {}).get("tool_calls") or []]
+        assert collected == [{"function": {"name": "search", "arguments": {"q": "cats"}}}]
+        # ...on the final chunk, where clients reading only that one look.
+        assert events[-1]["message"]["tool_calls"] == collected
 
     def test_no_tool_call_stays_null(self, client):
         manifest = ModelManifest(
@@ -212,3 +208,39 @@ class TestStreamingUsageAndContent:
         # Intermediate chunks still carry the response text.
         inter = [e for e in events if not e.get("done")]
         assert "".join(e["response"] for e in inter) == "foobar"
+
+
+class TestStreamedReasoning:
+    TOKENS = ["<think>\nThey", " greet.\n</th", "ink>\n\nHel", "lo!"]
+
+    def _events(self, client, think):
+        manifest = ModelManifest(
+            name="r1", repo_id="org/r1", local_path="/tmp/x.gguf", format="gguf"
+        )
+        _install_streaming_engine(manifest, self.TOKENS)
+        resp = client.post(
+            "/api/chat",
+            json={
+                "model": manifest.name,
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+                "think": think,
+            },
+        )
+        assert resp.status_code == 200
+        return [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
+
+    def _joined(self, events, field):
+        return "".join((e.get("message") or {}).get(field) or "" for e in events)
+
+    def test_think_sends_the_reasoning_apart(self, client):
+        events = self._events(client, True)
+        assert self._joined(events, "content") == "Hello!"
+        assert self._joined(events, "thinking") == "They greet."
+
+    def test_without_think_the_reasoning_is_not_in_the_answer(self, client):
+        """As the non-streamed reply: DeepSeek-R1 streamed its <think> block
+        as content before."""
+        events = self._events(client, False)
+        assert self._joined(events, "content") == "Hello!"
+        assert self._joined(events, "thinking") == ""

@@ -56,8 +56,8 @@ y abrir esa dirección en el navegador te da una página de chat servida por el 
   código. Sin red, todo lo que ya descargaste sigue funcionando.
 - **Se conecta a lo que ya usas.** Las APIs de OpenAI (chat, completions,
   embeddings, Responses), Ollama y Anthropic Messages en un solo puerto, con
-  llamadas a herramientas estructuradas para las familias Qwen, Llama 3 y Mistral
-  y salidas con esquema JSON. Respeta las variables `OLLAMA_*` que ya tengas, como
+  llamadas a herramientas estructuradas para las familias Qwen, Llama 3, Mistral,
+  Gemma 4, gpt-oss, DeepSeek, GLM y Hermes, y salidas con esquema JSON. Respeta las variables `OLLAMA_*` que ya tengas, como
   `OLLAMA_HOST`.
 - **Tantos modelos como quepan en tu memoria.** Antes de cada carga HFL estima lo
   que ocupará el modelo (pesos + caché KV) y mantiene la máquina bajo el
@@ -190,10 +190,14 @@ margen queda.
 <details>
 <summary><b>Llamadas a herramientas</b>: los agentes funcionan sin configurar nada</summary>
 
-Envía `tools` en `/api/chat` o `/v1/chat/completions`: HFL las pasa por la
-plantilla de chat del propio modelo (Qwen `<tool_call>`, Llama 3 `<|python_tag|>`,
-Mistral `[TOOL_CALLS]`), convierte la respuesta en `message.tool_calls` con los
-argumentos como objeto y acepta resultados `role: "tool"` en el siguiente turno.
+Envía `tools` en `/api/chat`, `/v1/chat/completions` o `/v1/messages`: HFL las
+pasa por la plantilla de chat del propio modelo (Qwen y Hermes `<tool_call>`,
+Llama 3 `<|python_tag|>`, Mistral `[TOOL_CALLS]`, los canales Harmony de
+gpt-oss, las marcas propias de DeepSeek y GLM), convierte la respuesta en
+`message.tool_calls` con los argumentos como objeto y acepta resultados
+`role: "tool"` en el siguiente turno. Cuando la plantilla de un modelo no tiene
+sitio para herramientas (Hermes-3, DeepSeek-R1), HFL las escribe en el mensaje
+de sistema con la convención de Hermes.
 
 ```bash
 curl http://localhost:11434/api/chat -d '{

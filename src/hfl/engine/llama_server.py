@@ -45,6 +45,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    repeat_penalty_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,10 @@ class LlamaServerEngine(InferenceEngine):
         self._n_ctx = 0
         self._slots = 0
         self._log_path: Path | None = None
+        # The template llama-server renders, and whether it lists the tools
+        # itself; when not, HFL writes them in (``_tools_as_text``).
+        self._chat_template = ""
+        self._template_knows_tools = True
 
     # ------------------------------------------------------------------ life
 
@@ -197,15 +202,13 @@ class LlamaServerEngine(InferenceEngine):
             # context unset: llama-server reads the GGUF itself and fits the
             # context to free memory (``--fit``, on by default).
             n_ctx = None
-        port, key, slots = _free_port(), secrets.token_urlsafe(24), _slots()
-        argv = [
+        slots = _slots()
+        base_argv = [
             exe,
             "-m",
             model_path,
             "--host",
             "127.0.0.1",
-            "--port",
-            str(port),
             *(["-c", str(n_ctx)] if n_ctx else []),
             "-np",
             str(slots),
@@ -221,6 +224,32 @@ class LlamaServerEngine(InferenceEngine):
         log_dir = config.home_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         self._log_path = log_dir / f"llama-server-{Path(model_path).stem}.log"
+        timeout = float(getattr(config, "model_load_timeout", 600) or 600)
+        self._launch(base_argv, model_path, timeout)
+        fixed = self._template_with_bos(config.home_dir / "templates", Path(model_path).stem)
+        if fixed is not None:
+            # Once more with the template that writes BOS (see
+            # ``_template_with_bos``): llama-server reads it only at start.
+            logger.info("Chat template does not start with BOS; HFL adds it")
+            self.unload()
+            self._launch([*base_argv, "--chat-template-file", str(fixed)], model_path, timeout)
+        self._read_template()
+        if not n_ctx:
+            n_ctx = self._reported_ctx()
+        self._model_path, self._n_ctx, self._slots = model_path, n_ctx, slots
+        logger.info(
+            "llama-server serving %s: %d-token context shared by %d parallel slots",
+            Path(model_path).name,
+            n_ctx,
+            slots,
+        )
+
+    def _launch(self, base_argv: list[str], model_path: str, timeout: float) -> None:
+        """Start llama-server on a fresh port and key and wait until it
+        answers; on failure it is stopped before the error propagates."""
+        port, key = _free_port(), secrets.token_urlsafe(24)
+        argv = [*base_argv, "--port", str(port)]
+        assert self._log_path is not None
         with open(self._log_path, "ab") as log:
             # The key goes in the environment, not argv: argv is visible to
             # every local user in ``ps``.
@@ -243,7 +272,7 @@ class LlamaServerEngine(InferenceEngine):
                 env={**os.environ, "LLAMA_API_KEY": key},
             )
         base = f"http://127.0.0.1:{port}"
-        deadline = time.monotonic() + float(getattr(config, "model_load_timeout", 600) or 600)
+        deadline = time.monotonic() + timeout
         try:
             while True:
                 if self._proc.poll() is not None:
@@ -267,22 +296,64 @@ class LlamaServerEngine(InferenceEngine):
             headers={"Authorization": f"Bearer {key}"},
             timeout=httpx.Timeout(None, connect=10.0),
         )
-        if not n_ctx:
-            n_ctx = self._reported_ctx()
-        self._model_path, self._n_ctx, self._slots = model_path, n_ctx, slots
-        logger.info(
-            "llama-server serving %s: %d-token context shared by %d parallel slots",
-            Path(model_path).name,
-            n_ctx,
-            slots,
-        )
 
-    def _reported_ctx(self) -> int:
-        """The context llama-server chose, from ``/props`` (0 if unknown)."""
+    def _props(self) -> dict[str, Any]:
         try:
             props = self._http().get("/props", timeout=10).json()
         except (httpx.HTTPError, ValueError):
-            return 0
+            return {}
+        return props if isinstance(props, dict) else {}
+
+    def _template_with_bos(self, directory: Path, stem: str) -> Path | None:
+        """A copy of the model's chat template that starts with BOS, written
+        to ``directory``, when the vocabulary wants BOS and the template does
+        not write it; else None.
+
+        llama-server renders a template's prompt without adding BOS, as
+        llama-cpp-python does: Hermes-3 3B then answered a tool prompt with
+        ``】,\\n762\\n##...`` (measured). Whether BOS is wanted is asked of
+        llama-server itself — its tokenizer, with special tokens on.
+        """
+        props = self._props()
+        template, bos = props.get("chat_template"), props.get("bos_token")
+        if not isinstance(template, str) or not isinstance(bos, str) or not bos:
+            return None
+        if "bos_token" in template or bos in template:
+            return None
+        try:
+            with_special = self._http().post(
+                "/tokenize", json={"content": "a", "add_special": True}, timeout=10
+            )
+            without = self._http().post(
+                "/tokenize", json={"content": "a", "add_special": False}, timeout=10
+            )
+            adds_bos = len(with_special.json()["tokens"]) > len(without.json()["tokens"])
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
+        if not adds_bos:
+            return None
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{stem}.jinja"
+        path.write_text("{{ bos_token }}" + template, encoding="utf-8")
+        return path
+
+    def _read_template(self) -> None:
+        """What the running template does with tools (llama.cpp's own
+        probe of it, ``chat_template_caps``)."""
+        props = self._props()
+        template = props.get("chat_template")
+        caps = props.get("chat_template_caps")
+        self._chat_template = template if isinstance(template, str) else ""
+        if isinstance(caps, dict) and "supports_tools" in caps:
+            self._template_knows_tools = bool(caps["supports_tools"])
+        else:
+            from hfl.engine.llama_cpp import _template_renders_tools
+
+            self._template_knows_tools = _template_renders_tools(self._chat_template, None)
+
+    def _reported_ctx(self) -> int:
+        """The context llama-server chose, from ``/props`` (0 if unknown)."""
+        props = self._props()
         ctx = (props.get("default_generation_settings") or {}).get("n_ctx") or props.get("n_ctx")
         return int(ctx) if isinstance(ctx, int) else 0
 
@@ -312,10 +383,22 @@ class LlamaServerEngine(InferenceEngine):
     def _chat_body(
         self, messages: list[ChatMessage], cfg: GenerationConfig, tools: list[dict] | None
     ) -> dict[str, Any]:
+        from hfl.engine.llama_cpp import _history_for_template, _tools_as_text
+
+        penalty = repeat_penalty_for(cfg, messages, tools)
+        wire = _wire_messages(messages)
+        if self._template_knows_tools:
+            wire = _history_for_template(wire, self._chat_template)
+        else:
+            # The same as the in-process backend: llama-server's own
+            # handling of such a template did not get Hermes-3 or
+            # DeepSeek-R1 to call a tool at all (measured).
+            wire, tools = _tools_as_text(wire, tools), None
         body: dict[str, Any] = {
-            "messages": _wire_messages(messages),
+            "messages": wire,
             "max_tokens": cfg.max_tokens,
             **_sampling(cfg),
+            "repeat_penalty": penalty,
         }
         if tools:
             body["tools"] = tools
@@ -340,7 +423,7 @@ class LlamaServerEngine(InferenceEngine):
         choice = data["choices"][0]
         message = choice.get("message") or {}
         return self._result(
-            message.get("content") or "",
+            self._answer(message.get("content") or "", cfg),
             data,
             started,
             choice.get("finish_reason"),
@@ -392,6 +475,10 @@ class LlamaServerEngine(InferenceEngine):
                         if text:
                             yield text
 
+        if self._harmony and not cfg.expose_reasoning:
+            from hfl.engine.llama_cpp import _filter_gemma4_stream
+
+            return counted.feed(_filter_gemma4_stream(_stream(), harmony=True))
         return counted.feed(_stream())
 
     def _completion_body(self, prompt: str, cfg: GenerationConfig) -> dict[str, Any]:
@@ -426,6 +513,19 @@ class LlamaServerEngine(InferenceEngine):
                         yield text
 
         return counted.feed(_stream())
+
+    @property
+    def _harmony(self) -> bool:
+        """gpt-oss's template: its replies carry Harmony channels, which
+        ``--reasoning-format none`` leaves in the text."""
+        return "<|channel|>" in self._chat_template
+
+    def _answer(self, text: str, cfg: GenerationConfig) -> str:
+        if self._harmony and not cfg.expose_reasoning:
+            from hfl.engine.llama_cpp import _strip_harmony_channels
+
+            return _strip_harmony_channels(text)
+        return text
 
     def _result(
         self,

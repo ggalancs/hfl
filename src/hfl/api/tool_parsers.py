@@ -15,6 +15,14 @@ This module implements the mapping described in ``hfl-tool-calling-spec.md``
 - **Llama 3.x**: ``<|python_tag|>{json}<|eom_id|>`` or
   ``<function=name>{json}</function>``
 - **Mistral / Mixtral**: ``[TOOL_CALLS][{json array}]``
+- **gpt-oss** (Harmony): ``<|channel|>commentary to=functions.NAME
+  <|constrain|>json<|message|>{json}<|call|>``
+- **DeepSeek**: ``<｜tool▁call▁begin｜>NAME<｜tool▁sep｜>{json}<｜tool▁call▁end｜>``
+  (V3.1) or ``...begin｜>function<｜tool▁sep｜>NAME\n```json {json}```...``
+  (V3 / R1)
+- **GLM**: ``<tool_call>NAME<arg_key>k</arg_key><arg_value>v</arg_value>
+  </tool_call>`` (4.5+) or ``NAME\n{json}`` (GLM-4-0414)
+- **Hermes**: Qwen's ``<tool_call>{json}</tool_call>``
 - **Gemma 4**: split-pipe DSL
   ``<|tool_call>call:NAME{key:<|"|>val<|"|>,k2:42}<tool_call|>``
   (not JSON — keys are bare, strings wrapped in Gemma 4's dedicated
@@ -74,8 +82,10 @@ def _safe_json_load(payload: str) -> Any:
 # --- Qwen 2.5 / Qwen 3 --------------------------------------------------------
 
 
+# The closing tag is optional at the very end: Hermes-3 stops right after
+# the JSON (its end-of-turn token comes first).
 _QWEN_TOOL_CALL_RE = re.compile(
-    r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
+    r"<tool_call>\s*(\{.*?\})\s*(?:</tool_call>|$)",
     re.DOTALL,
 )
 
@@ -345,6 +355,161 @@ def parse_gemma4(text: str) -> ParseResult:
     return cleaned, calls
 
 
+# --- gpt-oss (Harmony) --------------------------------------------------------
+
+
+# The recipient comes after the channel when the model writes a call and
+# before it in the template's own rendering; the JSON starts after
+# ``<|message|>`` and runs to ``<|call|>`` (dropped as the stop token, so
+# often absent).
+_HARMONY_CALL_RE = re.compile(
+    r"(?:<\|start\|>assistant\s*)?(?:<\|channel\|>\w+\s*)?to=functions\.([^\s<]+)"
+    r"(?:(?!<\|message\|>).)*<\|message\|>",
+    re.DOTALL,
+)
+_HARMONY_FINAL_RE = re.compile(
+    r"<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|return\|>|$)", re.DOTALL
+)
+_HARMONY_ANY_RE = re.compile(
+    r"<\|channel\|>analysis<\|message\|>.*?(?:<\|end\|>|$)|<\|start\|>assistant|"
+    r"<\|channel\|>\w*|<\|message\|>|<\|end\|>|<\|return\|>|<\|call\|>|<\|constrain\|>\w*",
+    re.DOTALL,
+)
+
+
+def parse_harmony(text: str) -> ParseResult:
+    """Parse gpt-oss's Harmony tool calls; the content is the ``final``
+    channel (reasoning and channel markers dropped)."""
+    calls: list[ToolCall] = []
+    consumed: list[tuple[int, int]] = []
+    for match in _HARMONY_CALL_RE.finditer(text):
+        found = _extract_first_json_object(text[match.end() :])
+        if found is None:
+            continue
+        raw, (start, end) = found
+        if text[match.end() : match.end() + start].strip():
+            continue  # the JSON must start the message
+        calls.append(_wrap(match.group(1), _safe_json_load(raw) or {}))
+        consumed.append((match.start(), match.end() + end))
+    if not calls and "<|channel|>" not in text:
+        return text, calls
+    final = _HARMONY_FINAL_RE.search(text)
+    if final:
+        return final.group(1).strip(), calls
+    for start, end in reversed(consumed):
+        text = text[:start] + text[end:]
+    return _HARMONY_ANY_RE.sub("", text).strip(), calls
+
+
+# --- DeepSeek -----------------------------------------------------------------
+
+
+_DEEPSEEK_CALL_RE = re.compile(
+    r"<｜tool▁call▁begin｜>(.*?)<｜tool▁sep｜>(.*?)(?:<｜tool▁call▁end｜>|$)",
+    re.DOTALL,
+)
+_DEEPSEEK_WRAPPERS_RE = re.compile(r"<｜tool▁calls▁(?:begin|end)｜>")
+_DEEPSEEK_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def parse_deepseek(text: str) -> ParseResult:
+    """Parse DeepSeek's tool-call tokens, both spellings: V3.1's
+    ``NAME<｜tool▁sep｜>{json}`` and V3 / R1's
+    ``function<｜tool▁sep｜>NAME`` followed by a fenced JSON block."""
+    calls: list[ToolCall] = []
+
+    def _sub(match: re.Match[str]) -> str:
+        head, body = match.group(1).strip(), match.group(2)
+        if head == "function":
+            name, _, body = body.partition("\n")
+            fenced = _DEEPSEEK_FENCE_RE.search(body)
+            body = fenced.group(1) if fenced else body
+        else:
+            name = head
+        calls.append(_wrap(name.strip(), _safe_json_load(body.strip()) or {}))
+        return ""
+
+    cleaned = _DEEPSEEK_CALL_RE.sub(_sub, text)
+    if calls:
+        cleaned = _DEEPSEEK_WRAPPERS_RE.sub("", cleaned)
+    return _strip_thinking(cleaned).strip(), calls
+
+
+# --- GLM ----------------------------------------------------------------------
+
+
+_GLM_CALL_RE = re.compile(
+    r"<tool_call>\s*([^\s<{]+)\s*((?:<arg_key>.*?</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)"
+    r"(?:</tool_call>|$)",
+    re.DOTALL,
+)
+_GLM_ARG_RE = re.compile(r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>", re.DOTALL)
+# GLM-4-0414: a call is the function's name on a line of its own, then its
+# JSON arguments, each call in an assistant turn of its own.
+_GLM4_HEAD_RE = re.compile(r"^\s*([A-Za-z_][\w.\-]*)\n\s*(?=\{)")
+_GLM4_TURN_RE = re.compile(r"<\|assistant\|>")
+
+
+def _tool_names(tools: list[dict] | None) -> set[str]:
+    names = set()
+    for tool in tools or []:
+        fn = tool.get("function", tool) if isinstance(tool, dict) else {}
+        if isinstance(fn, dict) and fn.get("name"):
+            names.add(str(fn["name"]))
+    return names
+
+
+def parse_glm(text: str, tools: list[dict] | None = None) -> ParseResult:
+    """Parse GLM's tool calls: GLM-4.5+'s ``<arg_key>``/``<arg_value>``
+    pairs (values typed from the tool's schema; the template writes
+    non-strings as JSON) and GLM-4-0414's ``NAME\n{json}`` — the latter
+    only for a name among ``tools``, since it has no marker of its own."""
+    calls: list[ToolCall] = []
+    # ``<|observation|>`` hands the turn to the tool; anything after it is
+    # the model imagining the tool's answer (GLM-4-0414 did, measured).
+    text = text.split("<|observation|>", 1)[0]
+
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        schema = _parameter_schemas(tools, name)
+        arguments: dict[str, Any] = {}
+        for key, raw in _GLM_ARG_RE.findall(match.group(2)):
+            key = key.strip()
+            typed = _typed_value(raw, schema.get(key))
+            if typed is raw and (schema.get(key) or {}).get("type") != "string":
+                parsed = _safe_json_load(raw.strip())
+                typed = raw if parsed is None else parsed
+            arguments[key] = typed
+        calls.append(_wrap(name, arguments))
+        return ""
+
+    cleaned = _GLM_CALL_RE.sub(_sub, text)
+    if calls:
+        return _strip_thinking(cleaned).strip(), calls
+
+    names = _tool_names(tools)
+    if names:
+        rest: list[str] = []
+        for turn in _GLM4_TURN_RE.split(text):
+            head = _GLM4_HEAD_RE.match(turn)
+            found = (
+                _extract_first_json_object(turn[head.end() :])
+                if head and head.group(1) in names
+                else None
+            )
+            args = _safe_json_load(found[0]) if found else None
+            if head and isinstance(args, dict):
+                # The call is the whole turn: whatever follows it is not the
+                # model's to say. (On llama-server, where ``<|observation|>``
+                # cannot stop it, GLM-4-0414 went on to invent the result.)
+                calls.append(_wrap(head.group(1), args))
+            else:
+                rest.append(turn)
+        if calls:
+            return "".join(rest).strip(), calls
+    return text, calls
+
+
 # --- Generic JSON envelope fallback -------------------------------------------
 
 
@@ -357,8 +522,13 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove qwen/DeepSeek-style ``<think>...</think>`` blocks."""
-    return _THINK_RE.sub("", text)
+    """Remove qwen/DeepSeek-style ``<think>...</think>`` blocks — and, when
+    the template opened the block in the prompt (so only ``</think>``
+    reaches the text), everything up to that close."""
+    text = _THINK_RE.sub("", text)
+    if "</think>" in text and "<think>" not in text:
+        text = text.split("</think>", 1)[1]
+    return text
 
 
 def parse_fallback(text: str) -> ParseResult:
@@ -473,6 +643,16 @@ def _detect_family(model_name: str) -> str:
     *not* routed to ``parse_gemma4``.
     """
     name = (model_name or "").lower()
+    if "gpt-oss" in name or "gpt_oss" in name:
+        return "harmony"
+    # Before "qwen" and "llama": R1's distills (DeepSeek-R1-Distill-Qwen,
+    # DeepSeek-R1-0528-Qwen3) are DeepSeek-templated.
+    if "deepseek" in name:
+        return "deepseek"
+    if "glm" in name:
+        return "glm"
+    if "hermes" in name:
+        return "qwen"  # Hermes' <tool_call> is Qwen's
     if "qwen" in name:
         return "qwen"
     if "llama-3" in name or "llama3" in name or "llama 3" in name:
@@ -485,6 +665,14 @@ def _detect_family(model_name: str) -> str:
     if "gemma-4" in name or "gemma4" in name or "gemma 4" in name:
         return "gemma4"
     return "generic"
+
+
+def _answer_text(text: str) -> str:
+    """The reply without reasoning, when no native call was found: a Harmony
+    reply's ``final`` channel, or the text without ``<think>`` blocks."""
+    if "<|channel|>" in text:
+        return parse_harmony(text)[0]
+    return _strip_thinking(text).strip()
 
 
 def dispatch(
@@ -513,6 +701,9 @@ def dispatch(
         "llama3": parse_llama3,
         "mistral": parse_mistral,
         "gemma4": parse_gemma4,
+        "harmony": parse_harmony,
+        "deepseek": parse_deepseek,
+        "glm": lambda t: parse_glm(t, tools),
     }
     parser = parsers_by_family.get(family)
 
@@ -522,7 +713,7 @@ def dispatch(
             return cleaned, calls
 
     if not tools:
-        return _strip_thinking(text).strip(), []
+        return _answer_text(text), []
 
     # The client sent tools and the family's own parser found nothing: the
     # name may hide the family (an alias such as "coder"), or the text may
@@ -535,4 +726,4 @@ def dispatch(
             if calls:
                 return cleaned, calls
 
-    return parse_fallback(text)
+    return parse_fallback(_answer_text(text))

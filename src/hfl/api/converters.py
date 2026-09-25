@@ -75,6 +75,7 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
     top_k = clamp(int(opts.get("top_k", 40)), 1, 1000)
     max_tokens = clamp(int(opts.get("num_predict", 2048)), 1, 128000)
     repeat_penalty = clamp(float(opts.get("repeat_penalty", 1.1)), 0.0, 2.0)
+    repeat_penalty_chosen = opts.get("repeat_penalty") is not None
     seed = int(opts.get("seed", -1))
 
     # Phase 12 P1 — V2 row 7. Clamp ``logprobs`` to [0, 20] so a
@@ -91,6 +92,7 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
         top_k=int(top_k),
         max_tokens=int(max_tokens),
         repeat_penalty=repeat_penalty,
+        repeat_penalty_chosen=repeat_penalty_chosen,
         seed=seed,
         stop=opts.get("stop"),
         # Phase 7 P2-4: ``options.keep_context=true`` activates the

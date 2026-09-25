@@ -91,8 +91,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   llama-server on one request and ahead of Ollama; llama-server well ahead
   with four requests at once, since HFL runs one inference at a time.
 
+- **Tool calling for gpt-oss, DeepSeek, GLM and Hermes.** Parsers for
+  gpt-oss's Harmony channels, DeepSeek's tool tokens (V3.1's spelling and
+  V3 / R1's), GLM-4.5+'s `<arg_key>`/`<arg_value>` pairs (typed from the
+  tool's schema) and GLM-4's `name` + JSON turns; Hermes uses Qwen's
+  `<tool_call>`, now also without its closing tag. Many templates have no
+  place for tools — Hermes-3's is plain ChatML, DeepSeek's render past
+  calls but never the tool list — so those models never knew the tools
+  existed; HFL now writes them into the system prompt in Hermes' own words
+  (a paraphrase was measured to fail) and past calls and results as text.
+  GLM-4-0414's template drops `role: "tool"` results, so they are passed as
+  its `observation` turns. Verified end to end with real GGUFs on both GGUF
+  backends — gpt-oss-20b, DeepSeek-R1-0528-Qwen3-8B, GLM-4-9B-0414,
+  GLM-4.7-Flash, Hermes-3-Llama-3.2-3B, each calling the tool and then
+  answering from its result, over the Ollama, OpenAI and Anthropic APIs,
+  streamed and not: 30 of 30 on each backend. Before, none of the five
+  called the tool on the default backend. `/api/show` lists `tools` for
+  these families.
+
 ### Changed
 
+- **No repetition penalty on a tool turn unless the client sets one.** A
+  turn with tools, or answering from a tool's result, has to repeat what it
+  was just given, and the default penalty (1.1) pushes against exactly
+  those tokens: DeepSeek-R1-0528 8B, handed a weather result, answered
+  "I cannot fulfill your request" with it and correctly without it. Such
+  turns now sample with 1.0 (llama.cpp's own default); an explicit
+  `repeat_penalty` is still honoured. The OpenAI and Anthropic APIs have no
+  such parameter, so their tool turns always get 1.0.
+- **An `/api/chat` stream sends each tool call once, complete, on the final
+  chunk.** It used to re-parse the text so far and attach what it found to
+  every chunk: a client collecting `tool_calls` across chunks, as Ollama's
+  libraries let you, got each call several times, and cut-off ones (GLM-4.7:
+  a call named `get` with no arguments).
+- **An Ollama `role: "tool"` message no longer needs a `name`.** Ollama does
+  not require one, and its clients send `tool_name` (now read as the name)
+  or nothing; HFL answered them 422.
 - **`hfl rm` deletes only files inside HFL's models folder.** An entry
   pointing anywhere else — a GGUF of yours registered in place — loses its
   registry entry and keeps its file (you are told where). Same rule for
@@ -110,6 +144,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Models whose chat template does not write BOS ran without it**, on both
+  GGUF backends: llama-cpp-python and llama-server render a template's
+  prompt without adding BOS, so Hermes-3 (plain ChatML) answered a tool
+  prompt with garbage. HFL now starts such a template with BOS when the
+  vocabulary wants one (on llama-server by restarting it once with a copy
+  of the template, kept under `~/.hfl/templates/`).
+- **gpt-oss showed its whole chain of thought as the answer** on the
+  default GGUF backend and on llama-server: its Harmony `analysis` channel
+  reached the reply, markers included. The answer is its `final` channel
+  now, streamed or not; `think=true` still gets the reasoning as
+  `thinking`.
+- **GLM-4 went on past its own tool call** to invent the tool's reply and
+  answer from it (`<|observation|>` is not an end-of-generation token in its
+  GGUFs). Tool turns stop there now, and what follows a GLM-4 call is not
+  read as the model's.
+- **A streamed `/api/chat` reply carried the reasoning inside the answer.**
+  With `think: true` the reasoning never went to `message.thinking` as it
+  does without streaming (and as Ollama streams it): gpt-oss sent its
+  Harmony channels as content, DeepSeek-R1 its `<think>` block. Without
+  `think`, DeepSeek-R1 still streamed its `<think>` block as content while
+  the non-streamed reply had it removed. Both now match the non-streamed
+  reply, whatever the chunking.
+- **Tool-call markers written with special tokens never reached the
+  parsers** on the default backend (Hermes' `<tool_call>`, DeepSeek's tool
+  tokens): llama-cpp-python drops special tokens from the text. Requests
+  with tools keep them.
 - **A reply cut by `max_tokens` was reported as finished normally** without
   streaming, on the default GGUF backend and on MLX, Transformers and vLLM: OpenAI's `finish_reason`,
   Ollama's `done_reason` and Anthropic's `stop_reason` said stop instead of

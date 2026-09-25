@@ -101,6 +101,17 @@ class TestSearch:
         ]
         assert options[0].reference == "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M"
 
+    @pytest.mark.parametrize(
+        "repo",
+        [
+            "someone/gpt-oss-20b-Derestricted-GGUF",
+            "someone/DeepSeek-R1-Distill-Qwen-1.5B-OBLITERATED",
+            "unsloth/GLM-4.7-Flash-REAP-23B-A3B-GGUF",  # pruned experts
+        ],
+    )
+    def test_derivatives_seen_on_the_hub_are_left_out(self, repo):
+        assert shortname._DERIVATIVE.search(repo)
+
     def test_a_name_must_start_a_word(self):
         hub = FakeHub({"acme/Delphi-7B-GGUF": _repo(10, Q4_K_M=4)})
         assert find_options("phi", api=hub, budget_bytes=100 * GB) == []

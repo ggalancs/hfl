@@ -52,7 +52,8 @@ class OllamaChatMessage(BaseModel):
 
     Supports four roles: ``system``, ``user``, ``assistant``, and ``tool``.
     Assistant messages may carry ``tool_calls`` instead of (or alongside)
-    ``content``. Tool messages must carry ``name`` bound to the prior call.
+    ``content``. A tool message may name its tool as ``tool_name`` (what
+    Ollama's clients send) or ``name``; Ollama requires neither.
     """
 
     role: Literal["system", "user", "assistant", "tool"] = Field(
@@ -67,7 +68,12 @@ class OllamaChatMessage(BaseModel):
     name: str | None = Field(
         None,
         max_length=128,
-        description="Tool name (required when role=tool)",
+        description="Tool name (role=tool; optional)",
+    )
+    tool_name: str | None = Field(
+        None,
+        max_length=128,
+        description="Ollama's spelling of the tool name on a role=tool message",
     )
     tool_calls: list[OllamaToolCall] | None = Field(
         None,
@@ -95,8 +101,10 @@ class OllamaChatMessage(BaseModel):
     @model_validator(mode="after")
     def _check_role_fields(self) -> "OllamaChatMessage":
         if self.role == "tool":
-            if not self.name:
-                raise ValueError("tool messages must include a 'name' field")
+            # Ollama's clients send ``tool_name`` (the official Python
+            # library's examples) or no name at all; both are accepted.
+            if not self.name and self.tool_name:
+                self.name = self.tool_name
             if self.content is None:
                 raise ValueError("tool messages must include 'content'")
         elif self.role in ("system", "user"):

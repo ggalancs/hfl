@@ -761,6 +761,14 @@ async def _stream_chat(
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     accumulated: list[str] = []
     tool_aware = bool(tools)  # API-7: buffer content when tools are declared
+    # Reasoning never goes out inside the answer (the non-streamed reply
+    # strips it too): with ``think`` it goes in ``message.thinking``, as
+    # Ollama sends it, and without it is dropped. DeepSeek-R1 streamed its
+    # ``<think>`` block as content either way (measured).
+    from hfl.api.thinking import ThinkingSplitter
+
+    splitter = ThinkingSplitter()
+    show_thinking = config.expose_reasoning
     # API-5: monotonic clock + emitted-chunk counter (see _stream_generate).
     start_ns = time.monotonic_ns()
     first_token_ns: list[int | None] = [None]
@@ -772,32 +780,29 @@ async def _stream_chat(
         if first_token_ns[0] is None:
             first_token_ns[0] = time.monotonic_ns()
 
-        # Phase 10 P1 — streaming partial tool calls. Probe the accumulated
-        # text on every chunk; when the parser can already see one or more
-        # (possibly incomplete) calls, attach them so the client can render
-        # partial state. Preserved across the API-7 change below.
-        partial_calls = None
-        try:
-            _cleaned, calls = parse_tool_calls("".join(accumulated), model_name, tools)
-            if calls:
-                partial_calls = calls
-        except Exception:
-            partial_calls = None
+        # Tool calls go out once, complete, on the final chunk. (They used
+        # to be re-parsed from the text so far and attached to every chunk:
+        # a client collecting ``tool_calls`` across chunks, as Ollama's own
+        # libraries let you, got each call several times — and cut-off ones
+        # such as GLM-4.7's ``get`` with no arguments. Measured.)
 
         # API-7: when tools are declared, never stream the raw token as
         # content — a <tool_call>{...}</tool_call> marker would otherwise
         # leak as visible text. Withhold content (emit "") while still
         # surfacing partial tool_calls; the cleaned narration is flushed once
         # in format_done. Plain turns (no tools) stream content verbatim.
-        content = "" if tool_aware else token
+        answer, thinking = splitter.feed(token)
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": "" if tool_aware else answer,
+            "tool_calls": None,
+        }
+        if thinking and show_thinking:
+            message["thinking"] = thinking
         chunk = {
             "model": model_name,
             "created_at": created_at,
-            "message": {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": partial_calls,
-            },
+            "message": message,
             "done": False,
         }
         return json.dumps(chunk) + "\n"
@@ -806,6 +811,10 @@ async def _stream_chat(
         full_text = "".join(accumulated)
         cleaned, calls = parse_tool_calls(full_text, model_name, tools)
         final_message: dict = {"role": "assistant", "content": "", "tool_calls": []}
+        answer, thinking = splitter.flush()
+        final_message["content"] = "" if tool_aware else answer
+        if thinking and show_thinking:
+            final_message["thinking"] = thinking
         if calls:
             final_message["tool_calls"] = calls
         elif tool_aware:

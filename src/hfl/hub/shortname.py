@@ -43,8 +43,9 @@ _TRUSTED = {
 }
 # Derivatives nobody asking for "llama3.2" means.
 _DERIVATIVE = re.compile(
-    r"abliterat|uncensor|heretic|nsfw|roleplay|\brp\b|merge|franken|lora|"
-    r"orpo|dpo|imatrix-calib|draft|pruned|reasoning-distill",
+    r"abliterat|obliterat|uncensor|derestrict|heretic|nsfw|roleplay|\brp\b|"
+    r"merge|franken|lora|orpo|dpo|imatrix-calib|draft|pruned|\breap\b|"
+    r"reasoning-distill",
     re.IGNORECASE,
 )
 # Other tasks sharing a family's name; only when the name asks for them.

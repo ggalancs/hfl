@@ -90,9 +90,13 @@ class TestToolRoleMessage:
         assert msg.name == "get_weather"
         assert msg.content == "22C sunny"
 
-    def test_tool_message_requires_name(self):
-        with pytest.raises(ValidationError):
-            OllamaChatMessage(role="tool", content="result")
+    def test_tool_message_needs_no_name(self):
+        """Ollama accepts a tool result without a name; its clients send one."""
+        assert OllamaChatMessage(role="tool", content="result").name is None
+
+    def test_ollamas_tool_name_is_the_name(self):
+        msg = OllamaChatMessage(role="tool", tool_name="get_weather", content="22C")
+        assert msg.name == "get_weather"
 
     def test_tool_message_requires_content(self):
         with pytest.raises(ValidationError):

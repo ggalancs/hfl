@@ -32,6 +32,15 @@ port = int(args[args.index("--port") + 1])
 key = os.environ.get("LLAMA_API_KEY", "")
 with open(os.environ["FAKE_ARGV_OUT"], "w") as out:
     json.dump({"argv": args, "key_in_env": bool(key), "pid": os.getpid()}, out)
+with open(os.environ["FAKE_ARGV_OUT"] + ".all", "a") as out:  # every launch
+    out.write(json.dumps(args) + "\n")
+# The chat template it reports, whether llama.cpp found it lists tools,
+# and whether the vocabulary adds BOS.
+TEMPLATE = os.environ.get("FAKE_TEMPLATE", "{% for tool in tools %}{{ tool }}{% endfor %}")
+if "--chat-template-file" in args:
+    TEMPLATE = open(args[args.index("--chat-template-file") + 1]).read()
+TOOLS = os.environ.get("FAKE_SUPPORTS_TOOLS", "1") == "1"
+ADDS_BOS = os.environ.get("FAKE_ADDS_BOS", "0") == "1"
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -44,12 +53,19 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/health":
             return self._send(200, {"status": "ok"})
         if self.path == "/props" and self.headers.get("Authorization") == f"Bearer {key}":
-            return self._send(200, {"default_generation_settings": {"n_ctx": 32768}})
+            return self._send(200, {"default_generation_settings": {"n_ctx": 32768},
+                                    "chat_template": TEMPLATE, "bos_token": "<s>",
+                                    "chat_template_caps": {"supports_tools": TOOLS}})
         self._send(404, {})
     def do_POST(self):
         if self.headers.get("Authorization") != f"Bearer {key}":
             return self._send(401, {"error": "bad key"})
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/tokenize":
+            bos = [1] if body.get("add_special") and ADDS_BOS else []
+            return self._send(200, {"tokens": bos + [64]})
+        with open(os.environ["FAKE_ARGV_OUT"] + ".body", "w") as out:  # the last request
+            json.dump(body, out)
         usage = {"prompt_tokens": 7, "completion_tokens": 2}
         timings = {"prompt_ms": 10.0, "predicted_ms": 20.0}
         if self.path == "/v1/chat/completions":
@@ -69,7 +85,8 @@ class H(BaseHTTPRequestHandler):
                 message = {"role": "assistant", "content": "", "tool_calls": [call]}
             else:
                 said = body["messages"][-1]["content"]
-                message = {"role": "assistant", "content": "Hello " + said}
+                reply = os.environ.get("FAKE_REPLY") or "Hello " + said
+                message = {"role": "assistant", "content": reply}
             return self._send(200, {"choices": [{"message": message, "finish_reason": "stop"}],
                                     "usage": usage, "timings": timings})
         if self.path == "/completion":
@@ -489,3 +506,123 @@ def test_only_a_real_true_gets_its_own_dispatcher(temp_config):
         assert dispatcher_for(MagicMock()) is get_dispatcher()  # truthy mock attribute
     finally:
         reset_container()
+
+
+# --- Tools, templates, BOS and Harmony: what the real models needed ----------
+
+WEATHER = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+        },
+    }
+]
+
+
+def _loaded(fake_server):
+    from hfl.engine.llama_server import LlamaServerEngine
+
+    model, _ = fake_server
+    eng = LlamaServerEngine()
+    eng.load(str(model))
+    return eng
+
+
+def _last_body(fake_server) -> dict:
+    return json.loads(Path(str(fake_server[1]) + ".body").read_text())
+
+
+def _launches(fake_server) -> list[list[str]]:
+    lines = Path(str(fake_server[1]) + ".all").read_text().splitlines()
+    return [json.loads(line) for line in lines]
+
+
+class TestTemplates:
+    def test_a_template_that_lists_tools_gets_them(self, fake_server):
+        eng = _loaded(fake_server)
+        try:
+            eng.chat([ChatMessage(role="user", content="weather?")], tools=WEATHER)
+        finally:
+            eng.unload()
+        assert _last_body(fake_server)["tools"] == WEATHER
+
+    def test_a_template_without_tools_gets_them_written_in(self, fake_server, monkeypatch):
+        """Hermes-3 and DeepSeek-R1 never called a tool through llama-server's
+        own handling of their templates; HFL writes the tools in."""
+        monkeypatch.setenv("FAKE_SUPPORTS_TOOLS", "0")
+        eng = _loaded(fake_server)
+        history = [
+            ChatMessage(role="user", content="weather?"),
+            ChatMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}],
+            ),
+            ChatMessage(role="tool", content="31C", name="get_weather"),
+        ]
+        try:
+            eng.chat(history, tools=WEATHER)
+        finally:
+            eng.unload()
+        body = _last_body(fake_server)
+        assert "tools" not in body
+        messages = body["messages"]
+        assert messages[0]["role"] == "system" and "<tools>" in messages[0]["content"]
+        assert '"get_weather"' in messages[0]["content"]
+        assert "<tool_call>" in messages[2]["content"] and "tool_calls" not in messages[2]
+        assert messages[3] == {"role": "user", "content": "<tool_response>\n31C\n</tool_response>"}
+
+    def test_bos_is_added_when_the_template_forgets_it(self, fake_server, monkeypatch):
+        """llama-server does not add BOS to a template's prompt: Hermes-3
+        answered garbage without it. HFL relaunches with a template that
+        writes it — only when the vocabulary wants BOS."""
+        monkeypatch.setenv("FAKE_ADDS_BOS", "1")
+        _loaded(fake_server).unload()
+        launches = _launches(fake_server)
+        assert len(launches) == 2
+        template = Path(launches[1][launches[1].index("--chat-template-file") + 1])
+        assert template.read_text().startswith("{{ bos_token }}")
+        assert "--chat-template-file" not in launches[0]
+
+    @pytest.mark.parametrize(
+        ("adds_bos", "template"),
+        [("0", "{{ messages }}"), ("1", "{{ bos_token }}{{ messages }}"), ("1", "<s>{{ x }}")],
+    )
+    def test_no_relaunch_when_bos_is_there_or_unwanted(
+        self, fake_server, monkeypatch, adds_bos, template
+    ):
+        monkeypatch.setenv("FAKE_ADDS_BOS", adds_bos)
+        monkeypatch.setenv("FAKE_TEMPLATE", template)
+        _loaded(fake_server).unload()
+        assert len(_launches(fake_server)) == 1
+
+    def test_gpt_oss_answers_without_its_channels(self, fake_server, monkeypatch):
+        """``--reasoning-format none`` leaves gpt-oss's Harmony channels in
+        the text; the answer is the ``final`` one."""
+        monkeypatch.setenv("FAKE_TEMPLATE", "<|start|>{{ m }}<|channel|>final<|message|>")
+        monkeypatch.setenv(
+            "FAKE_REPLY",
+            "<|channel|>analysis<|message|>They greet.<|end|>"
+            "<|start|>assistant<|channel|>final<|message|>Hi!",
+        )
+        eng = _loaded(fake_server)
+        try:
+            plain = eng.chat([ChatMessage(role="user", content="hi")]).text
+            raw = eng.chat(
+                [ChatMessage(role="user", content="hi")], GenerationConfig(expose_reasoning=True)
+            ).text
+        finally:
+            eng.unload()
+        assert plain == "Hi!"
+        assert "They greet." in raw  # think=true: the routes separate it
+
+    def test_no_repeat_penalty_on_a_tool_turn_unless_asked(self, engine, fake_server):
+        engine.chat([ChatMessage(role="user", content="w?")], tools=WEATHER)
+        assert _last_body(fake_server)["repeat_penalty"] == 1.0
+        engine.chat([ChatMessage(role="user", content="hi")])
+        assert _last_body(fake_server)["repeat_penalty"] == 1.1
+        chosen = GenerationConfig(repeat_penalty=1.3, repeat_penalty_chosen=True)
+        engine.chat([ChatMessage(role="user", content="w?")], chosen, tools=WEATHER)
+        assert _last_body(fake_server)["repeat_penalty"] == 1.3

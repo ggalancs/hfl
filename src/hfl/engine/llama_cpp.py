@@ -22,6 +22,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    repeat_penalty_for,
 )
 
 # ``llama_cpp`` is an optional dependency (HFL ``[llama]`` extra). The
@@ -328,13 +329,190 @@ _ARCHITECTURE_CTX_CAP: dict[str, int] = {
 _ARCHITECTURE_NO_FLASH_ATTN: set[str] = {"gemma4"}
 
 
+def _template_renders_tools(template: str, chat_format: str | None) -> bool:
+    """Whether the prompt the model gets will list the request's tools.
+
+    An embedded Jinja template does when it reads ``tools`` (Qwen, Llama
+    3.1+, gpt-oss, GLM...); many do not — Hermes-3 ships plain ChatML,
+    DeepSeek's templates render past calls but never the tool list. A
+    static ``chat_format`` does only if it is a function-calling one.
+    """
+    if chat_format:
+        return "function" in chat_format
+    return bool(re.search(r"\btools\b", template or ""))
+
+
+# The tool prompt HFL writes in when the model's template has none: the
+# Hermes function-calling prompt, word for word — the convention most open
+# models were trained on, and whose ``<tool_call>`` replies
+# ``hfl.api.tool_parsers`` reads. (A paraphrase of it was measured to fail:
+# Hermes-3 3B then garbled the opening marker.)
+_TOOLS_PROMPT = (
+    "You are a function calling AI model. You are provided with function "
+    "signatures within <tools></tools> XML tags. You may call one or more "
+    "functions to assist with the user query. Don't make assumptions about "
+    "what values to plug into functions. Here are the available tools: "
+    "<tools> {tools} </tools> "
+    "Use the following pydantic model json schema for each tool call you will "
+    'make: {{"properties": {{"arguments": {{"title": "Arguments", "type": '
+    '"object"}}, "name": {{"title": "Name", "type": "string"}}}}, "required": '
+    '["arguments", "name"], "title": "FunctionCall", "type": "object"}} '
+    "For each function call return a json object with function name and "
+    "arguments within <tool_call></tool_call> XML tags as follows:\n"
+    '<tool_call>\n{{"arguments": <args-dict>, "name": <function-name>}}\n</tool_call>'
+)
+
+
+def _give_templates_a_bos(model: Any) -> bool:
+    """Start every GGUF chat template's prompt with BOS when the vocabulary
+    wants one and the template does not write it.
+
+    llama-cpp-python tokenizes a template's prompt without adding BOS (its
+    formatter always reports the special tokens as already there), so a
+    template without ``{{ bos_token }}`` — Hermes-3's plain ChatML, for one
+    — ran with no BOS at all. llama.cpp's own server adds it; measured on
+    Hermes-3 3B, without it a tool call came out as broken JSON. Returns
+    whether any template was changed.
+    """
+    try:
+        from llama_cpp import llama_chat_format
+
+        vocab = model._model
+        if not vocab.add_bos_token() or vocab.token_bos() < 0:
+            return False
+        bos = vocab.token_get_text(vocab.token_bos())
+        eos_id = vocab.token_eos()
+        eos = vocab.token_get_text(eos_id) if eos_id >= 0 else ""
+    except Exception:  # an older llama-cpp-python, or a stand-in in tests
+        return False
+    changed = False
+    for key, template in list((getattr(model, "metadata", None) or {}).items()):
+        if key != "tokenizer.chat_template" and not key.startswith("tokenizer.chat_template."):
+            continue
+        if not isinstance(template, str) or "bos_token" in template or bos in template:
+            continue
+        # The names llama-cpp-python registers them under.
+        name = "chat_template.default" if key == "tokenizer.chat_template" else key[10:]
+        model._chat_handlers[name] = llama_chat_format.Jinja2ChatFormatter(
+            template="{{ bos_token }}" + template,
+            eos_token=eos,
+            bos_token=bos,
+            stop_token_ids=[eos_id],
+        ).to_chat_handler()
+        changed = True
+    return changed
+
+
+def _render_special_tokens(model: Any, on: bool) -> None:
+    """Make ``model``'s completions keep (or drop, the library's default)
+    control tokens in their text.
+
+    A tool call is often written with them — Hermes' ``<tool_call>``,
+    gpt-oss's ``<|channel|>``/``<|call|>``, DeepSeek's ``<｜tool▁call▁begin｜>``
+    — and llama-cpp-python drops them when it turns tokens into text, so
+    the parsers would never see the call. Only requests with tools turn it
+    on, and every request sets it, so a stream abandoned half-way cannot
+    leave it on for the next one.
+    """
+    import functools
+
+    detokenize = getattr(type(model), "detokenize", None)
+    if on and detokenize is not None:
+        model.detokenize = functools.partial(detokenize, model, special=True)
+    elif "detokenize" in getattr(model, "__dict__", {}):
+        del model.detokenize
+
+
+def _history_for_template(msgs: list[dict], template: str) -> list[dict]:
+    """Past calls and results in the shape the template renders.
+
+    GLM-4-0414's template drops ``tool_calls`` and ``role: "tool"``: it
+    renders a call as an assistant turn whose ``metadata`` is the function
+    and whose content its JSON arguments, and a result as an
+    ``observation`` turn. Without this the model never saw the result and
+    called the tool again (measured). Other templates get the history as is.
+    """
+    if not ("metadata" in template and "observation" in template):
+        return msgs
+    import json as _json
+
+    out: list[dict] = []
+    for msg in msgs:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            if msg.get("content"):
+                out.append({"role": "assistant", "content": msg["content"]})
+            for call in msg["tool_calls"]:
+                fn = call.get("function", call)
+                args = fn.get("arguments", {})
+                text = args if isinstance(args, str) else _json.dumps(args, ensure_ascii=False)
+                out.append({"role": "assistant", "metadata": fn.get("name", ""), "content": text})
+        elif msg.get("role") == "tool":
+            out.append({"role": "observation", "content": msg.get("content") or ""})
+        else:
+            out.append(msg)
+    return out
+
+
+def _tools_as_text(msgs: list[dict], tools: list[dict] | None) -> list[dict]:
+    """Write the tools, past calls and their results into plain messages,
+    for a template that would drop them: the tool list goes into the
+    system message, an assistant's calls become ``<tool_call>`` text and
+    tool results a user turn of ``<tool_response>`` blocks (consecutive
+    results merged, so turns still alternate for strict templates).
+
+    Also for a template that renders past calls but not the tool list
+    (DeepSeek's): its own rendering ends the prompt after the tool output
+    without reopening the assistant turn, and DeepSeek-R1-0528 8B then
+    answered nothing; with this text it answered from the result (measured).
+    """
+    import json as _json
+
+    out: list[dict] = []
+    merged_results = False  # the last message is a user turn of tool results
+    for msg in msgs:
+        role = msg.get("role")
+        if role == "tool":
+            block = f"<tool_response>\n{msg.get('content') or ''}\n</tool_response>"
+            if merged_results:
+                out[-1]["content"] += "\n" + block
+            else:
+                out.append({"role": "user", "content": block})
+            merged_results = True
+            continue
+        merged_results = False
+        if role == "assistant" and msg.get("tool_calls"):
+            calls = []
+            for call in msg["tool_calls"]:
+                fn = call.get("function", call)
+                args = fn.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = _json.loads(args)
+                    except ValueError:
+                        pass
+                payload = _json.dumps({"name": fn.get("name", ""), "arguments": args})
+                calls.append(f"<tool_call>\n{payload}\n</tool_call>")
+            text = msg.get("content") or ""
+            out.append({"role": "assistant", "content": "\n".join([text, *calls]).strip()})
+        else:
+            out.append(msg)
+    if tools:
+        listing = " ".join(_json.dumps(t, ensure_ascii=False) for t in tools)
+        prompt = _TOOLS_PROMPT.format(tools=listing)
+        if out and out[0].get("role") == "system" and isinstance(out[0].get("content"), str):
+            out[0] = {**out[0], "content": f"{out[0]['content']}\n\n{prompt}".strip()}
+        else:
+            out.insert(0, {"role": "system", "content": prompt})
+    return out
+
+
 # Architectures whose vocabulary contains split-pipe channel/think/turn
 # markers (``<|channel>...<channel|>`` etc.) that need post-filtering
 # on chat output. This is a separate set from ``_ARCHITECTURE_CHAT_FORMAT``
 # because the override to ``gemma`` (= Gemma 2 format) is not enough to
 # stop the model from emitting its reasoning-format markers when the
 # GGUF doesn't ship a proper ``tokenizer.chat_template``.
-_ARCHITECTURE_CHANNEL_FILTER: set[str] = {"gemma4"}
+_ARCHITECTURE_CHANNEL_FILTER: set[str] = {"gemma4", "gpt-oss"}
 
 # Regexes that strip Gemma 4-family split-pipe markers from chat output.
 # Applied to the text in ``chat()`` and to the stream in ``chat_stream()``
@@ -412,6 +590,39 @@ _GEMMA4_STREAM_MARKERS: list[tuple[str, str]] = [
 ]
 
 
+# gpt-oss writes every reply in OpenAI's Harmony format — its reasoning in
+# an ``analysis`` channel, the answer in ``final``, tool calls in
+# ``commentary`` — and its GGUF keeps those markers in the text, so a plain
+# ``hfl run gpt-oss`` showed the whole chain of thought as the answer
+# (measured on unsloth/gpt-oss-20b-GGUF). The reasoning is dropped as
+# Gemma 4's is; the ``commentary`` tool-call markers are left for
+# ``hfl.api.tool_parsers.parse_harmony``.
+_HARMONY_ANALYSIS_BLOCK = re.compile(r"<\|channel\|>analysis<\|message\|>[\s\S]*?(?:<\|end\|>|$)")
+_HARMONY_MARKERS = re.compile(
+    r"<\|start\|>assistant|<\|channel\|>final<\|message\|>|<\|end\|>|<\|return\|>"
+)
+
+_HARMONY_STREAM_MARKERS: list[tuple[str, str]] = [
+    ("<|channel|>analysis<|message|>", "thought_open"),
+    ("<|channel|>final<|message|>", "final_open"),
+    ("<|start|>assistant", "open"),
+    ("<|end|>", "close"),
+    ("<|return|>", "close"),
+]
+
+
+def _strip_harmony_channels(text: str) -> str:
+    """The answer of a finished Harmony reply: reasoning out, channel
+    markers out, tool-call markers kept."""
+    return _HARMONY_MARKERS.sub("", _HARMONY_ANALYSIS_BLOCK.sub("", text))
+
+
+def _strip_channel_markers(text: str, architecture: str | None) -> str:
+    if architecture == "gpt-oss":
+        return _strip_harmony_channels(text)
+    return _strip_gemma4_channel_markers(text)
+
+
 class _Gemma4StreamFilter:
     """Stateful char-level filter that strips Gemma 4 channel/think/
     turn markers from a token stream.
@@ -425,11 +636,14 @@ class _Gemma4StreamFilter:
     multi-chunk thought blocks of arbitrary length.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, harmony: bool = False) -> None:
         self._buffer: str = ""
         # ``True`` while we're inside a thought/think block that
         # should be fully suppressed (content included).
         self._suppress: bool = False
+        # The same filter reads gpt-oss's Harmony markers.
+        self._markers = _HARMONY_STREAM_MARKERS if harmony else _GEMMA4_STREAM_MARKERS
+        self._strip = _strip_harmony_channels if harmony else _strip_gemma4_channel_markers
 
     def feed(self, chunk: str) -> str:
         """Feed a new chunk, return whatever text is safe to emit now."""
@@ -455,7 +669,7 @@ class _Gemma4StreamFilter:
             # content that arrives in the next chunk.
             matched: tuple[str, str] | None = None
             could_grow = False
-            for marker, kind in _GEMMA4_STREAM_MARKERS:
+            for marker, kind in self._markers:
                 if self._buffer.startswith(marker):
                     if matched is None or len(marker) > len(matched[0]):
                         matched = (marker, kind)
@@ -501,12 +715,12 @@ class _Gemma4StreamFilter:
         # those up before emitting.
         leftover = self._buffer
         self._buffer = ""
-        return _strip_gemma4_channel_markers(leftover)
+        return self._strip(leftover)
 
 
-def _filter_gemma4_stream(iterator: Iterator[str]) -> Iterator[str]:
+def _filter_gemma4_stream(iterator: Iterator[str], harmony: bool = False) -> Iterator[str]:
     """Stream wrapper around :class:`_Gemma4StreamFilter`."""
-    filt = _Gemma4StreamFilter()
+    filt = _Gemma4StreamFilter(harmony=harmony)
     for chunk in iterator:
         piece = filt.feed(chunk)
         if piece:
@@ -1212,6 +1426,13 @@ class LlamaCppEngine(InferenceEngine):
         # accepts images in ``create_chat_completion`` messages.
         # Phase 4 P0-6.
         self._is_multimodal: bool = False
+        # Whether the prompt lists the request's tools by itself; when not,
+        # ``_tools_as_text`` writes them in. Set at load.
+        self._template_knows_tools: bool = True
+        # The GGUF chat template in use ("" for a static format or a vision
+        # handler): how it renders past tool calls decides how HFL passes
+        # them (``_tool_messages``).
+        self._chat_template: str = ""
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -1570,6 +1791,18 @@ class LlamaCppEngine(InferenceEngine):
             # mirrors llama-cpp-python's old behaviour.
             self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
             self._is_multimodal = chat_handler is not None
+            if chat_handler is None and _give_templates_a_bos(self._model):
+                logger.info("Chat template does not start with BOS; HFL adds it")
+            # A vision chat handler has its own fixed format, never tools.
+            template = (getattr(self._model, "metadata", None) or {}).get(
+                "tokenizer.chat_template", ""
+            )
+            if not isinstance(template, str) or chat_handler is not None or chat_format:
+                template = ""  # a static format or a vision handler is used instead
+            self._chat_template = template
+            self._template_knows_tools = chat_handler is None and _template_renders_tools(
+                template, chat_format
+            )
             elapsed = time.perf_counter() - start_time
             mm_note = " (multimodal)" if self._is_multimodal else ""
             logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
@@ -1799,7 +2032,25 @@ class LlamaCppEngine(InferenceEngine):
         if tools and self._architecture == "gemma4":
             if "<tool_call|>" not in stop:
                 stop.append("<tool_call|>")
+        # GLM hands the turn to the tool with ``<|observation|>``, which its
+        # GGUFs do not mark as end of generation: GLM-4-0414 went on to
+        # invent the tool's reply and answer from it (measured). No other
+        # family writes that string.
+        if tools and "<|observation|>" not in stop:
+            stop.append("<|observation|>")
         return stop
+
+    def _tool_messages(
+        self, messages: list[ChatMessage], tools: list[dict] | None
+    ) -> tuple[list[dict], list[dict] | None, bool]:
+        """The messages for ``create_chat_completion``, the tools to hand the
+        template (None when HFL wrote them in itself), and whether to keep
+        the model's control tokens in the text for the tool parsers."""
+        msgs = self._messages_to_llama_cpp(messages)
+        markers = bool(tools)
+        if self._template_knows_tools:
+            return _history_for_template(msgs, self._chat_template), tools, markers
+        return _tools_as_text(msgs, tools), None, markers
 
     @staticmethod
     def _messages_to_llama_cpp(messages: list[ChatMessage]) -> list[dict]:
@@ -1860,7 +2111,8 @@ class LlamaCppEngine(InferenceEngine):
     ) -> GenerationResult:
         cfg = config or GenerationConfig()
 
-        msgs = self._messages_to_llama_cpp(messages)
+        penalty = repeat_penalty_for(cfg, messages, tools)
+        msgs, tools, markers = self._tool_messages(messages, tools)
 
         kwargs: dict = {
             "messages": msgs,
@@ -1868,7 +2120,7 @@ class LlamaCppEngine(InferenceEngine):
             "temperature": cfg.temperature,
             "top_p": cfg.top_p,
             "top_k": cfg.top_k,
-            "repeat_penalty": cfg.repeat_penalty,
+            "repeat_penalty": penalty,
             "stop": self._build_stop_list(cfg.stop, tools),
             "seed": cfg.seed if cfg.seed >= 0 else None,
         }
@@ -1909,6 +2161,7 @@ class LlamaCppEngine(InferenceEngine):
         # See generate(): zero the per-context perf counters first.
         _perf_reset(self._model)
         start_ns = time.monotonic_ns()
+        _render_special_tokens(self._model, markers)
         try:
             output = self._model.create_chat_completion(**kwargs)
         except TypeError:
@@ -1919,6 +2172,8 @@ class LlamaCppEngine(InferenceEngine):
             kwargs.pop("response_format", None)
             kwargs.pop("grammar", None)
             output = self._model.create_chat_completion(**kwargs)
+        finally:
+            _render_special_tokens(self._model, False)
         total_ns = time.monotonic_ns() - start_ns
         elapsed = total_ns / 1e9  # seconds, for the tokens/s ratio
 
@@ -1932,7 +2187,7 @@ class LlamaCppEngine(InferenceEngine):
         # ``think=true``) we leave the markers IN the text so the
         # route layer can separate reasoning from answer.
         if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
-            text = _strip_gemma4_channel_markers(text)
+            text = _strip_channel_markers(text, self._architecture)
         tool_calls = message.get("tool_calls")
 
         # Normalise tool_calls shape: llama-cpp-python may return
@@ -1994,7 +2249,8 @@ class LlamaCppEngine(InferenceEngine):
         tools: list[dict] | None = None,
     ) -> Iterator[str]:
         cfg = config or GenerationConfig()
-        msgs = self._messages_to_llama_cpp(messages)
+        penalty = repeat_penalty_for(cfg, messages, tools)
+        msgs, tools, markers = self._tool_messages(messages, tools)
 
         kwargs: dict = {
             "messages": msgs,
@@ -2002,7 +2258,7 @@ class LlamaCppEngine(InferenceEngine):
             "temperature": cfg.temperature,
             "top_p": cfg.top_p,
             "top_k": cfg.top_k,
-            "repeat_penalty": cfg.repeat_penalty,
+            "repeat_penalty": penalty,
             "stop": self._build_stop_list(cfg.stop, tools),
             "seed": cfg.seed if cfg.seed >= 0 else None,
             "stream": True,
@@ -2022,18 +2278,25 @@ class LlamaCppEngine(InferenceEngine):
         def _raw_chunks() -> Iterator[str]:
             first: int | None = None
             finish: str | None = None
-            for chunk in iterator:
-                if first is None:
-                    first = getattr(model, "n_tokens", None)
-                choice = chunk["choices"][0]
-                finish = choice.get("finish_reason") or finish
-                text = choice.get("delta", {}).get("content", "")
-                if text:
-                    yield text
+            # The stream detokenizes as it is read, so the markers stay on
+            # for as long as it is.
+            _render_special_tokens(model, markers)
+            try:
+                for chunk in iterator:
+                    if first is None:
+                        first = getattr(model, "n_tokens", None)
+                    choice = chunk["choices"][0]
+                    finish = choice.get("finish_reason") or finish
+                    text = choice.get("delta", {}).get("content", "")
+                    if text:
+                        yield text
+            finally:
+                _render_special_tokens(model, False)
             _count(counted, model, first, finish)
 
         if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
-            return counted.feed(_filter_gemma4_stream(_raw_chunks()))
+            harmony = self._architecture == "gpt-oss"
+            return counted.feed(_filter_gemma4_stream(_raw_chunks(), harmony=harmony))
         # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
         # chunks through so the caller sees the reasoning channel.
         return counted.feed(_raw_chunks())

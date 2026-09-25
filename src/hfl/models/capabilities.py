@@ -62,6 +62,14 @@ _TOOL_CAPABLE_FAMILIES = {
     "gemma-4",
     "gemma 4",
     "mixtral",
+    # Verified end to end on both GGUF backends (call and answer from the
+    # result, Ollama/OpenAI/Anthropic APIs): gpt-oss-20b, DeepSeek-R1-0528,
+    # GLM-4-9B-0414, GLM-4.7-Flash, Hermes-3.
+    "gpt-oss",
+    "gpt_oss",
+    "deepseek",
+    "glm",
+    "hermes",
 }
 
 # Families that ship fill-in-the-middle tokens.

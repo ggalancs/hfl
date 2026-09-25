@@ -58,6 +58,11 @@ class TestTools:
             ("mistral-7b-instruct", "mistral"),
             ("gemma-4-27b-it", "gemma4"),
             ("mixtral-8x7b", "mixtral"),
+            ("gpt-oss-20b", "gpt-oss"),
+            ("deepseek-r1-0528-qwen3-8b", "qwen3"),
+            ("glm-4-9b-0414", "glm4"),
+            ("GLM-4.7-Flash", "deepseek2"),
+            ("Hermes-3-Llama-3.2-3B", "llama"),
         ],
     )
     def test_tool_capable_families(self, name, arch):

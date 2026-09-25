@@ -108,6 +108,28 @@ class GenerationConfig:
     # disables speculation (the default). Engines that don't expose
     # the knob silently ignore it.
     draft_model: str | None = None
+    # Whether the client set ``repeat_penalty`` itself (the OpenAI and
+    # Anthropic APIs have no such parameter). See ``repeat_penalty_for``.
+    repeat_penalty_chosen: bool = False
+
+
+def repeat_penalty_for(
+    cfg: GenerationConfig, messages: list[ChatMessage], tools: list[dict] | None
+) -> float:
+    """The repetition penalty to sample with.
+
+    A turn with tools, or answering from a tool's result, has to repeat
+    what it was just given — argument names, the values in the result — and
+    the default penalty (1.1) pushes against exactly those tokens:
+    DeepSeek-R1-0528 8B, handed a weather result, answered "I cannot fulfill
+    your request" with it and correctly without it (measured). So such turns
+    use none (1.0, llama.cpp's own default) unless the client chose one.
+    """
+    if cfg.repeat_penalty_chosen:
+        return cfg.repeat_penalty
+    if tools or any(m.role == "tool" or m.tool_calls for m in messages):
+        return 1.0
+    return cfg.repeat_penalty
 
 
 @dataclass

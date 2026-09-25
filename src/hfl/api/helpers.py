@@ -512,6 +512,7 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
             0.0,
             10.0,
         )
+        config.repeat_penalty_chosen = True
     if "stop" in options:
         config.stop = options["stop"]
     if "seed" in options and options["seed"] is not None:
