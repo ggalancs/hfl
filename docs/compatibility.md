@@ -40,6 +40,8 @@ to a real model, not a claim. ✓ passed, ✗ failed (the reason is in the
 | `hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M` | gpt-oss | llama-server | ✓ | 6/6 | ✓ | — |
 | `hf.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Q4_K_M` | Qwen2.5-VL | default | ✓ | 6/6 | — | ✓ |
 | `hf.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Q4_K_M` | Qwen2.5-VL | llama-server | ✓ | 6/6 | — | ✓ |
+| `hf.co/Qwen/Qwen3-VL-2B-Instruct-GGUF:Q4_K_M` | Qwen3-VL | default | ✓ | 6/6 | — | ✗ |
+| `hf.co/Qwen/Qwen3-VL-2B-Instruct-GGUF:Q4_K_M` | Qwen3-VL | llama-server | ✓ | 6/6 | — | ✗ |
 | `hf.co/mlx-community/Qwen3-1.7B-4bit` | Qwen3 (MLX) | default | ✓ | 6/6 | ✓ | — |
 | `hf.co/mlx-community/Llama-3.2-3B-Instruct-4bit` | Llama 3.2 (MLX) | — | license to be accepted by its owner | | | |
 
@@ -54,6 +56,11 @@ to a real model, not a claim. ✓ passed, ✗ failed (the reason is in the
   (Meta's) asks to be accepted, and accepting it is the owner's decision,
   not a script's. Hermes-3-Llama-3.2-3B, downloaded directly for testing,
   passed every check when tool calling was verified (CHANGELOG, Unreleased).
+- **Qwen3-VL-2B** sees the image the same on both backends (the red circle)
+  but reads "HFL 42" as "HFL 2" on both: the 2B model's reading, not HFL's.
+  On the default backend its replies start with a stray ": " — llama-cpp-
+  python has no chat handler of its own for Qwen3-VL and serves it with
+  Qwen2.5-VL's; llama-server does not show it.
 - **Gemma** is left out for the same reason (Google's terms).
 - Found and fixed by this matrix before it was published: Mistral,
   Phi-4-mini, SmolLM3 and Qwen2.5 never called a tool on the default

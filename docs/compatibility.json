@@ -850,6 +850,86 @@
         }
       }
     },
+    "c-qwen3-vl": {
+      "reference": "hf.co/Qwen/Qwen3-VL-2B-Instruct-GGUF:Q4_K_M",
+      "family": "Qwen3-VL",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": ": pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            }
+          },
+          "vision": {
+            "ok": false,
+            "detail": "The circle is red. The text in the image is \"HFL 2\"."
+          },
+          "seconds": 24
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm.'"
+            }
+          },
+          "vision": {
+            "ok": false,
+            "detail": "The circle is red.\nThe text in the image is \"HFL 2\"."
+          },
+          "seconds": 16
+        }
+      }
+    },
     "c-qwen3-mlx": {
       "reference": "hf.co/mlx-community/Qwen3-1.7B-4bit",
       "family": "Qwen3 (MLX)",

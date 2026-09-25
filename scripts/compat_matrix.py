@@ -91,6 +91,7 @@ DEFAULT_MODELS = [
     Model("c-glm4", "hf.co/bartowski/THUDM_GLM-4-9B-0414-GGUF:Q4_K_M", "GLM-4"),
     Model("c-gpt-oss", "hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M", "gpt-oss", reasons=True),
     Model("c-qwen2.5-vl", "hf.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Q4_K_M", "Qwen2.5-VL"),
+    Model("c-qwen3-vl", "hf.co/Qwen/Qwen3-VL-2B-Instruct-GGUF:Q4_K_M", "Qwen3-VL"),
     Model(
         "c-qwen3-mlx",
         "hf.co/mlx-community/Qwen3-1.7B-4bit",
