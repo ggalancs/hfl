@@ -34,7 +34,8 @@ def test_a_browser_gets_the_page(client, path, headers):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<title>HFL</title>" in response.text
-    assert "__" not in re.sub(r"<script[\s\S]*</script>", "", response.text)  # all filled
+    outside_script = re.sub(r"<script\b[\s\S]*</script\s*>", "", response.text, flags=re.I)
+    assert "__" not in outside_script  # every placeholder filled
 
 
 def test_the_policy_allows_only_its_own_script_and_this_server(client):
@@ -79,7 +80,7 @@ def test_an_api_key_does_not_lock_the_page_itself(client):
 def test_model_output_is_escaped_before_rendering(client):
     """The page's own render(): markup a model writes must come out as text."""
     page = client.get("/ui").text
-    script = re.search(r"<script[^>]*>([\s\S]*)</script>", page).group(1)
+    script = re.search(r"<script\b[^>]*>([\s\S]*)</script\s*>", page, flags=re.I).group(1)
     functions = re.search(r"(function escapeHtml[\s\S]*?)\nfunction bubble", script).group(1)
     js = (
         'const T = {thinking: "Thinking"};\n' + functions + "\n"

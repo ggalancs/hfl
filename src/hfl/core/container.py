@@ -301,7 +301,9 @@ def dispatcher_for(engine: object | None) -> "InferenceDispatcher":
     sized to its ``parallel_slots`` (or ``HFL_NUM_PARALLEL``), so its
     requests neither wait behind another model's nor are held to one.
     """
-    if engine is None or not getattr(engine, "supports_concurrent_inference", False):
+    # ``is True``: a mock (or any truthy non-bool) must not route an engine
+    # away from the serialized queue.
+    if engine is None or getattr(engine, "supports_concurrent_inference", False) is not True:
         return get_dispatcher()
     own = getattr(engine, "_hfl_dispatcher", None)
     if own is None:

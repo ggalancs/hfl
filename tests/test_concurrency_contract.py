@@ -344,7 +344,7 @@ class TestExceptionSafety:
 
 class TestHealthzLive:
     async def test_healthz_reports_live_in_flight(self, aclient):
-        _install_fake_engine(delay=0.3)
+        _install_fake_engine(delay=1.5)
         _install_dispatcher(max_inflight=1, max_queued=4)
 
         async def _do_chat():
@@ -358,11 +358,16 @@ class TestHealthzLive:
             )
 
         task = asyncio.create_task(_do_chat())
-        # Let the chat begin.
-        await asyncio.sleep(0.05)
-        probe = await aclient.get("/healthz")
-        assert probe.status_code == 200
-        body = probe.json()
+        # Poll until the chat holds its slot: a fixed 50 ms wait raced the
+        # request's way through the middleware stack on a loaded machine.
+        body: dict = {}
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            probe = await aclient.get("/healthz")
+            assert probe.status_code == 200
+            body = probe.json()
+            if body["queue_in_flight"] >= 1:
+                break
         assert body["queue_in_flight"] >= 1
         assert "queue_depth" in body
 

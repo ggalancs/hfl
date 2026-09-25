@@ -477,3 +477,15 @@ def test_several_calls_written_back_as_markers_all_reach_the_client():
 
 def test_os_environ_is_not_leaked_between_tests():
     assert "FAKE_ARGV_OUT" not in os.environ or Path(os.environ["FAKE_ARGV_OUT"]).exists()
+
+
+def test_only_a_real_true_gets_its_own_dispatcher(temp_config):
+    from unittest.mock import MagicMock
+
+    from hfl.core import dispatcher_for, get_dispatcher, reset_container
+
+    reset_container()
+    try:
+        assert dispatcher_for(MagicMock()) is get_dispatcher()  # truthy mock attribute
+    finally:
+        reset_container()
