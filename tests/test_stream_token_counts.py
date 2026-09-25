@@ -187,3 +187,31 @@ def test_responses_counts(client):
     )
     usage = events[-1]["response"]["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (11, 5)
+
+
+class _ChatModel(FakeLlama):
+    def __call__(self, *a, **k):  # pragma: no cover - chat only
+        raise AssertionError
+
+    def create_chat_completion(self, **kwargs):
+        if kwargs.get("stream"):
+            return super().create_chat_completion(**kwargs)
+        return {
+            "choices": [{"message": {"content": "1, 2, 3"}, "finish_reason": self.finish}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 60},
+        }
+
+
+@pytest.mark.parametrize(("finish", "expected"), [("length", "length"), ("stop", "stop")])
+def test_a_reply_cut_by_max_tokens_says_so(finish, expected):
+    """chat() never set stop_reason, so a reply cut by max_tokens reached
+    every API as a normal stop (OpenAI finish_reason, Ollama done_reason,
+    Anthropic stop_reason)."""
+    from hfl.engine.base import ChatMessage, GenerationConfig
+    from hfl.engine.llama_cpp import LlamaCppEngine
+
+    engine = LlamaCppEngine()
+    engine._model = _ChatModel(prompt=20, pieces=[], finish=finish)
+    engine._architecture = "qwen3"
+    result = engine.chat([ChatMessage(role="user", content="x")], GenerationConfig(max_tokens=60))
+    assert result.stop_reason == expected

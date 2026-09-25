@@ -1974,6 +1974,12 @@ class LlamaCppEngine(InferenceEngine):
             tokens_generated=n_gen,
             tokens_prompt=n_prompt,
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
+            # "length" when max_tokens cut the reply; the routes report it as
+            # OpenAI's finish_reason, Ollama's done_reason, Anthropic's
+            # stop_reason. (Tool calls are reported by the routes themselves.)
+            stop_reason="length"
+            if output["choices"][0].get("finish_reason") == "length"
+            else "stop",
             tool_calls=normalised_tool_calls,
             total_duration=total_ns,
             load_duration=0,  # Model was already loaded — this is chat, not load()
