@@ -1,0 +1,903 @@
+{
+  "meta": {
+    "date": "2026-09-26",
+    "machine": "Apple M3 Max",
+    "hfl": "after 0.21.0: the commit that adds this file",
+    "raw": "compatibility.json"
+  },
+  "results": {
+    "c-qwen3": {
+      "reference": "hf.co/Qwen/Qwen3-1.7B-GGUF:Q8_0",
+      "family": "Qwen3",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 1500 -> 23, answer '17 \u00d7 23 = 391\\n\\nSo, the answer is **391**.'"
+          },
+          "seconds": 41
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\u00b0C** with a **thunderstorm**. Let me know if you need further details! \ud83c\udf27\ufe0f'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 1500 -> 126, answer 'To find $ 17 \\\\times 23 $:\\n\\n$$\\n17 \\\\times 23 = (10 + 7) \\\\times'"
+          },
+          "seconds": 40
+        }
+      }
+    },
+    "c-qwen2.5": {
+      "reference": "hf.co/Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",
+      "family": "Qwen2.5",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 20
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 20
+        }
+      }
+    },
+    "c-qwen2.5-coder": {
+      "reference": "hf.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
+      "family": "Qwen2.5-Coder",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 21
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 21
+        }
+      }
+    },
+    "c-llama3.2": {
+      "reference": "hf.co/unsloth/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",
+      "family": "Llama 3.2",
+      "backends": {},
+      "skipped": "license to be accepted by its owner"
+    },
+    "c-mistral": {
+      "reference": "hf.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF:Q4_K_M",
+      "family": "Mistral",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong! Let's play a game of virtual table tennis if you'd like. Just let me know when you're ready!"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 11
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "Ping! (I'm trying to incorporate a bit of humor into our conversation, as \"pong\" is a response that might be expected in a game of table tennis, but \"ping\" is more appropriate for an echo or bouncing ball.)"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 13
+        }
+      }
+    },
+    "c-phi4-mini": {
+      "reference": "hf.co/unsloth/Phi-4-mini-instruct-GGUF:Q4_K_M",
+      "family": "Phi-4-mini",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            }
+          },
+          "seconds": 20
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31 degrees Celsius with a thunderstorm occurring.'"
+            }
+          },
+          "seconds": 20
+        }
+      }
+    },
+    "c-granite": {
+      "reference": "hf.co/ibm-granite/granite-3.3-2b-instruct-GGUF:Q4_K_M",
+      "family": "Granite 3.3",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong."
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 11
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong."
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 11
+        }
+      }
+    },
+    "c-smollm3": {
+      "reference": "hf.co/ggml-org/SmolLM3-3B-GGUF:Q4_K_M",
+      "family": "SmolLM3",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 808 -> 20, answer '17 * 23 = 391\\n\\nThe product of 17 and 23 is 391.'"
+          },
+          "seconds": 55
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is reported as a **thunderstorm** with a temperature of **31\u00b0C**. This is quite unusual for'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 674 -> 24, answer 'The product of 17 and 23 is 391. So, 17 * 23 = 391.'"
+          },
+          "seconds": 55
+        }
+      }
+    },
+    "c-hermes3": {
+      "reference": "hf.co/bartowski/Hermes-3-Llama-3.2-3B-GGUF:Q4_K_M",
+      "family": "Hermes 3",
+      "backends": {},
+      "skipped": "license to be accepted by its owner"
+    },
+    "c-r1": {
+      "reference": "hf.co/unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF:Q4_K_M",
+      "family": "DeepSeek-R1 distill",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "ollama stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "openai": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "openai stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "anthropic": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "anthropic stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            }
+          },
+          "reasoning_off": {
+            "ok": null,
+            "detail": "always reasons (no switch)"
+          },
+          "seconds": 37
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "ollama stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "openai": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "openai stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "anthropic": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            },
+            "anthropic stream": {
+              "ok": false,
+              "detail": "answer: 'To get the weather in Paris right now, follow these steps:\\n\\n1. **Call the `get_weather` function** with the city paramet'"
+            }
+          },
+          "reasoning_off": {
+            "ok": null,
+            "detail": "always reasons (no switch)"
+          },
+          "seconds": 38
+        }
+      }
+    },
+    "c-glm4": {
+      "reference": "hf.co/bartowski/THUDM_GLM-4-9B-0414-GGUF:Q4_K_M",
+      "family": "GLM-4",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 24
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is a thunderstorm with a temperature of 31 degrees Celsius.'"
+            }
+          },
+          "seconds": 28
+        }
+      }
+    },
+    "c-gpt-oss": {
+      "reference": "hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M",
+      "family": "gpt-oss",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 76 -> 19, answer '391'"
+          },
+          "seconds": 41
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is **31\\u202f\u00b0C** with a **thunderstorm**.'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 44 -> 20, answer '391'"
+          },
+          "seconds": 42
+        }
+      }
+    },
+    "c-qwen2.5-vl": {
+      "reference": "hf.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Q4_K_M",
+      "family": "Qwen2.5-VL",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            }
+          },
+          "vision": {
+            "ok": true,
+            "detail": "The circle is red, and the text in the image says \"HFL 42\"."
+          },
+          "seconds": 28
+        },
+        "llama-server": {
+          "chat": {
+            "ok": true,
+            "detail": "Pong!"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current temperature in Paris is 31\u00b0C and the sky is currently a thunderstorm.'"
+            }
+          },
+          "vision": {
+            "ok": true,
+            "detail": "The circle is red, and the text reads \"HFL 42\"."
+          },
+          "seconds": 24
+        }
+      }
+    },
+    "c-qwen3-mlx": {
+      "reference": "hf.co/mlx-community/Qwen3-1.7B-4bit",
+      "family": "Qwen3 (MLX)",
+      "backends": {
+        "default": {
+          "chat": {
+            "ok": true,
+            "detail": "pong"
+          },
+          "tools": {
+            "ollama": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            },
+            "ollama stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            },
+            "openai": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            },
+            "openai stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            },
+            "anthropic": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            },
+            "anthropic stream": {
+              "ok": true,
+              "detail": "answer: 'The current weather in Paris is 31\u00b0C with a thunderstorm sky. You might want an umbrella!'"
+            }
+          },
+          "reasoning_off": {
+            "ok": true,
+            "detail": "tokens 1500 -> 14, answer '17 * 23 = **391**.'"
+          },
+          "seconds": 18
+        }
+      }
+    },
+    "c-llama3.2-mlx": {
+      "reference": "hf.co/mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "family": "Llama 3.2 (MLX)",
+      "backends": {},
+      "skipped": "license to be accepted by its owner"
+    }
+  }
+}

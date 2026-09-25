@@ -518,6 +518,10 @@ WEATHER = [{"type": "function", "function": {"name": "get_weather", "parameters"
 CALL = {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
 
 
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("jinja2") is None,
+    reason="the template probe needs jinja2 (it comes with mlx-lm)",
+)
 class TestToolsAndReasoning:
     """On MLX a model never saw its tools (``tools`` was dropped) and
     ``think: false`` changed nothing; measured with Qwen3-1.7B-4bit."""
@@ -534,7 +538,7 @@ class TestToolsAndReasoning:
         return engine._tokenizer.calls[-1]
 
     def test_a_template_with_tools_gets_them_and_the_history(self, fake_mlx):
-        dicts, kwargs = self._render(fake_mlx, "{% for t in tools %}{% endfor %}")
+        dicts, kwargs = self._render(fake_mlx, "{% for t in tools %}{{ t | tojson }}{% endfor %}")
         assert kwargs["tools"] == WEATHER
         assert dicts[1]["tool_calls"] == [CALL] and dicts[2]["role"] == "tool"
 
@@ -544,7 +548,7 @@ class TestToolsAndReasoning:
         assert "<tools>" in dicts[0]["content"] and "<tool_call>" in dicts[2]["content"]
 
     def test_the_reasoning_switch_reaches_the_template(self, fake_mlx):
-        _, kwargs = self._render(fake_mlx, "{{ tools }}", reasoning="off")
+        _, kwargs = self._render(fake_mlx, "{{ tools | tojson }}", reasoning="off")
         assert kwargs["enable_thinking"] is False
-        _, kwargs = self._render(fake_mlx, "{{ tools }}")
+        _, kwargs = self._render(fake_mlx, "{{ tools | tojson }}")
         assert "enable_thinking" not in kwargs  # not asked: the model's default

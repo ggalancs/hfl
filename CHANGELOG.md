@@ -144,6 +144,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level (`Reasoning: low`) and up to `high`; DeepSeek-R1 always reasons. Not
   asking leaves each model's default.
 
+- **A compatibility table checked for real: `docs/compatibility.md`.**
+  `scripts/compat_matrix.py` pulls a list of models and, on each backend
+  that can run them, checks a plain answer, tool calling (a call and then
+  an answer from its result, over the Ollama, OpenAI and Anthropic APIs,
+  streamed and not), reasoning off and vision. First run: 13 families
+  (Qwen3, Qwen2.5, Qwen2.5-Coder, Mistral, Phi-4-mini, Granite 3.3,
+  SmolLM3, DeepSeek-R1 distill, GLM-4, gpt-oss, Qwen2.5-VL, and Qwen3 on
+  MLX); every one passes everything but DeepSeek-R1-Distill-1.5B, which
+  calls the tool but does not answer from its result on either backend.
+  Models whose license must be accepted (Llama, Gemma) are listed, not
+  accepted. The script's own checks are tested to fail on wrong answers.
+
 ### Changed
 
 - **No repetition penalty on a tool turn unless the client sets one.** A
@@ -182,6 +194,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Mistral, Phi-4-mini, SmolLM3 and Qwen2.5 never called a tool on the
+  default GGUF backend** (0 of 6 checks each; 6 of 6 on llama-server),
+  found by the compatibility table. HFL decided what a template does with
+  tools by reading it, and was wrong: Phi-4-mini's names `tools` but reads
+  them off the system message, SmolLM3's takes `xml_tools` (behind a
+  `{% generation %}` tag the check could not parse), Mistral's rejects a
+  system message — and llama-cpp-python replaced it with a built-in format
+  that silently dropped system messages, the tools with them, and HFL's BOS
+  and reasoning handling. HFL now renders the template with a stand-in tool
+  and system message, as llama.cpp does; puts the tools (and a client's
+  system prompt) in the first user message where a template takes no
+  system message; always serves the GGUF's own template; and reads a call
+  in doubled braces, as Qwen2.5-7B copies them from its template, or named
+  under `function`, as DeepSeek-R1-Distill writes it. All four: 6 of 6.
 - **MLX models never saw their tools**: the MLX engine dropped `tools`, past
   calls and tool results, so Qwen3-1.7B-4bit answered "I don't have access
   to external tools". They reach the template now (written in, as on the

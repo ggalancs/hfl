@@ -8,6 +8,7 @@ Supports CPU, CUDA, Metal, and Vulkan.
 """
 
 import contextlib
+import functools
 import logging
 import os
 import re
@@ -349,17 +350,121 @@ def _image_data_uri(image_bytes: bytes) -> str:
     return f"data:{mime};base64," + base64.b64encode(image_bytes).decode("ascii")
 
 
+_TOOL_PROBE = "hfl_probe_tool_7f3a"
+_SYSTEM_PROBE = "hfl-probe-system-7f3a"
+
+
+@functools.lru_cache(maxsize=64)
+def _probe_template(template: str) -> tuple[bool, bool]:
+    """``(lists the tools, takes a system message)``, found by rendering the
+    template with a stand-in tool and system message — as llama.cpp does —
+    rather than by reading it.
+
+    Reading was wrong both ways: Phi-4-mini's template names ``tools`` but
+    reads them from the system message, SmolLM3's takes ``xml_tools``, so
+    they were handed tools they never showed the model; Mistral's rejects a
+    system message outright. A template that cannot be rendered here is
+    taken not to show tools (HFL then writes them in: at worst the model
+    sees them twice, instead of never) and to take a system message.
+    """
+    import json as _json
+    from datetime import datetime
+
+    try:
+        import jinja2
+        import jinja2.ext
+        from jinja2.ext import loopcontrols
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+    except ImportError:  # not a core dependency; every backend that renders
+        return False, True  # templates in-process brings it
+
+    def _raise(message: str) -> None:
+        raise jinja2.TemplateError(message)
+
+    def _tojson(value: Any, ensure_ascii: bool = False, indent: Any = None, **_: Any) -> str:
+        return _json.dumps(value, ensure_ascii=ensure_ascii, indent=indent)
+
+    class _IgnoreGeneration(jinja2.ext.Extension):
+        """``{% generation %}`` (SmolLM3's template): its content, as
+        llama-cpp-python and Transformers render it."""
+
+        tags = {"generation"}
+
+        def parse(self, parser: Any) -> Any:
+            next(parser.stream)
+            return parser.parse_statements(("name:endgeneration",), drop_needle=True)
+
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True, lstrip_blocks=True, extensions=[loopcontrols, _IgnoreGeneration]
+    )
+    env.filters["tojson"] = _tojson
+    env.globals.update(raise_exception=_raise, strftime_now=lambda f: datetime.now().strftime(f))
+    tool = {
+        "type": "function",
+        "function": {
+            "name": _TOOL_PROBE,
+            "description": "probe",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    user = {"role": "user", "content": "hi"}
+
+    def render(messages: list[dict]) -> str | None:
+        try:
+            compiled = env.from_string(template)
+            return str(
+                compiled.render(
+                    messages=messages,
+                    tools=[tool],
+                    add_generation_prompt=True,
+                    bos_token="",
+                    eos_token="",
+                )
+            )
+        except Exception:
+            return None
+
+    with_system = render([{"role": "system", "content": _SYSTEM_PROBE}, user])
+    takes_system = with_system is not None and _SYSTEM_PROBE in with_system
+    out = with_system if takes_system else render([user])
+    if out is None:
+        return False, True
+    return _TOOL_PROBE in out, takes_system
+
+
 def _template_renders_tools(template: str, chat_format: str | None) -> bool:
     """Whether the prompt the model gets will list the request's tools.
 
-    An embedded Jinja template does when it reads ``tools`` (Qwen, Llama
-    3.1+, gpt-oss, GLM...); many do not — Hermes-3 ships plain ChatML,
-    DeepSeek's templates render past calls but never the tool list. A
-    static ``chat_format`` does only if it is a function-calling one.
+    Many templates do not — Hermes-3 ships plain ChatML, DeepSeek's render
+    past calls but never the tool list, Phi-4-mini's and SmolLM3's want
+    them elsewhere. A static ``chat_format`` does only if it is a
+    function-calling one.
     """
     if chat_format:
         return "function" in chat_format
-    return bool(re.search(r"\btools\b", template or ""))
+    return bool(template) and _probe_template(template)[0]
+
+
+def _template_takes_system(template: str) -> bool:
+    """Whether a system message survives the template (Mistral's rejects
+    one); unknown or no template: assumed to."""
+    return not template or _probe_template(template)[1]
+
+
+def _fold_system(msgs: list[dict]) -> list[dict]:
+    """System messages as the start of the first user message, for a
+    template that takes none (Mistral: "Only user and assistant roles")."""
+    system = "\n\n".join(
+        str(m.get("content") or "") for m in msgs if m.get("role") == "system"
+    ).strip()
+    rest = [m for m in msgs if m.get("role") != "system"]
+    if not system:
+        return rest
+    for i, m in enumerate(rest):
+        if m.get("role") == "user" and isinstance(m.get("content"), str):
+            rest[i] = {**m, "content": f"{system}\n\n{m['content']}"}
+            return rest
+    return [{"role": "user", "content": system}, *rest]
 
 
 # The tool prompt HFL writes in when the model's template has none: the
@@ -1471,6 +1576,9 @@ class LlamaCppEngine(InferenceEngine):
         # HFL's formatters for the GGUF's templates (``_install_template_
         # formatters``): the per-request template variables are set on them.
         self._formatters: list[Any] = []
+        # Whether the template takes a system message (Mistral's does not:
+        # HFL folds system text into the first user turn).
+        self._template_takes_system: bool = True
         # LoRA adapters on the context, in the order applied: (adapter id,
         # path, scale, llama.cpp handle). See ``apply_lora``.
         self._loras: list[tuple[str, str, float, Any]] = []
@@ -1832,6 +1940,17 @@ class LlamaCppEngine(InferenceEngine):
                 self._formatters, added_bos = _install_template_formatters(self._model)
                 if added_bos:
                     logger.info("Chat template does not start with BOS; HFL adds it")
+                if (
+                    chat_format is None
+                    and self._formatters
+                    and "chat_template.default" in self._model._chat_handlers
+                ):
+                    # The GGUF's own template, through HFL's formatter — not
+                    # the built-in format llama-cpp-python swaps in when it
+                    # recognises the template (Mistral's): that one dropped
+                    # system messages, the tools HFL wrote there with them,
+                    # and bypassed the BOS fix and the reasoning switch.
+                    self._model.chat_format = "chat_template.default"
             # A vision chat handler has its own fixed format, never tools.
             template = (getattr(self._model, "metadata", None) or {}).get(
                 "tokenizer.chat_template", ""
@@ -1842,6 +1961,7 @@ class LlamaCppEngine(InferenceEngine):
             self._template_knows_tools = chat_handler is None and _template_renders_tools(
                 template, chat_format
             )
+            self._template_takes_system = _template_takes_system(template)
             elapsed = time.perf_counter() - start_time
             mm_note = " (multimodal)" if self._is_multimodal else ""
             logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
@@ -2137,8 +2257,12 @@ class LlamaCppEngine(InferenceEngine):
         msgs = self._messages_to_llama_cpp(messages)
         markers = bool(tools)
         if self._template_knows_tools:
-            return _history_for_template(msgs, self._chat_template), tools, markers
-        return _tools_as_text(msgs, tools), None, markers
+            msgs = _history_for_template(msgs, self._chat_template)
+        else:
+            msgs, tools = _tools_as_text(msgs, tools), None
+        if not self._template_takes_system:
+            msgs = _fold_system(msgs)
+        return msgs, tools, markers
 
     @staticmethod
     def _messages_to_llama_cpp(messages: list[ChatMessage]) -> list[dict]:

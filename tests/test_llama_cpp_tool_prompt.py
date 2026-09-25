@@ -28,6 +28,12 @@ from hfl.engine.llama_cpp import (
 )
 
 _HAS_LLAMA_CPP = importlib.util.find_spec("llama_cpp") is not None
+# The template probe renders with jinja2 — not a core dependency (it comes
+# with llama-cpp-python, transformers, mlx-lm); without it the probe says
+# "write the tools in", which the tests below cannot tell apart.
+needs_jinja = pytest.mark.skipif(
+    importlib.util.find_spec("jinja2") is None, reason="jinja2 not installed"
+)
 
 WEATHER = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
 CALL = {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
@@ -37,7 +43,18 @@ CALL = {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
     ("template", "chat_format", "knows"),
     [
         ("{% for tool in tools %}{{ tool }}{% endfor %}", None, True),
-        ("{% if tools %}...{% endif %}", None, True),
+        ("{% if tools %}{{ tools | tojson }}{% endif %}", None, True),
+        # Found by the compatibility matrix: these name tools but never
+        # show them — Phi-4-mini reads them off the system message,
+        # SmolLM3 takes ``xml_tools``.
+        (
+            "{% for m in messages %}{% if m['role'] == 'system' and 'tools' in m %}"
+            "{{ m['tools'] }}{% endif %}{{ m['content'] }}{% endfor %}",
+            None,
+            False,
+        ),
+        ("{% if xml_tools %}{{ xml_tools }}{% endif %}{{ messages }}", None, False),
+        ("{% if tools %}...{% endif %}", None, False),
         # Hermes-3's plain ChatML; DeepSeek's renders past calls, not the list.
         ("{% for message in messages %}{{ message['content'] }}{% endfor %}", None, False),
         ("{% if message['tool_calls'] %}...{% endif %}", None, False),
@@ -45,6 +62,7 @@ CALL = {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
         ("", "chatml-function-calling", True),
     ],
 )
+@needs_jinja
 def test_which_templates_list_the_tools(template, chat_format, knows):
     assert _template_renders_tools(template, chat_format) is knows
 
@@ -320,3 +338,75 @@ class TestEngine:
         assert rendered["enable_thinking"] is False and rendered["reasoning_effort"] == "low"
         engine.chat([ChatMessage(role="user", content="hi")])  # not asked: model default
         assert "enable_thinking" not in formatter(messages=[])
+
+
+MISTRAL = (
+    "{{ bos_token }}{% for message in messages %}{% if message['role'] == 'user' %}"
+    "{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == "
+    "'assistant' %}{{ message['content'] + eos_token }}{% else %}"
+    "{{ raise_exception('Only user and assistant roles are supported!') }}{% endif %}{% endfor %}"
+)
+
+
+@needs_jinja
+def test_a_template_without_a_system_role_gets_it_in_the_first_user_turn():
+    """Mistral's template rejects a system message; the tools HFL writes in
+    (and a client's own system prompt) go at the start of the first user
+    message instead. Found by the compatibility matrix: tools 0/6."""
+    from hfl.engine.llama_cpp import _fold_system, _template_takes_system
+
+    assert _template_takes_system(MISTRAL) is False
+    assert _template_takes_system("{% for m in messages %}{{ m.content }}{% endfor %}") is True
+    msgs = _fold_system(
+        _tools_as_text(
+            [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "w?"}],
+            WEATHER,
+        )
+    )
+    assert [m["role"] for m in msgs] == ["user"]
+    assert msgs[0]["content"].startswith("Be brief.") and msgs[0]["content"].endswith("w?")
+    assert "<tools>" in msgs[0]["content"]
+
+
+@pytest.mark.skipif(not _HAS_LLAMA_CPP, reason="llama-cpp-python not installed ([llama] extra)")
+def test_the_engine_folds_system_text_for_such_a_template():
+    engine, seen = TestEngine()._engine(knows_tools=False)
+    engine._template_takes_system = False
+    engine.chat(
+        [ChatMessage(role="system", content="Be brief."), ChatMessage(role="user", content="w?")],
+        tools=WEATHER,
+    )
+    assert [m["role"] for m in seen["messages"]] == ["user"]
+    assert "<tools>" in seen["messages"][0]["content"]
+
+
+@needs_jinja
+def test_a_generation_tag_does_not_hide_what_a_template_does():
+    """SmolLM3's template uses ``{% generation %}``; the probe could not
+    render it and wrongly concluded the model saw the tools."""
+    from hfl.engine.llama_cpp import _probe_template
+
+    body = "{% for m in messages %}{% generation %}{{ m.content }}{% endgeneration %}{% endfor %}"
+    assert _probe_template("{% for t in tools %}{{ t | tojson }}{% endfor %}" + body)[0] is True
+    assert _probe_template("{% for t in xml_tools %}{{ t }}{% endfor %}" + body)[0] is False
+
+
+def test_a_template_that_cannot_be_rendered_gets_the_tools_written_in():
+    from hfl.engine.llama_cpp import _probe_template
+
+    assert _probe_template("{% for t in tools %}{{ t }} {% broken") == (False, True)
+
+
+def test_without_jinja2_the_tools_are_written_in(monkeypatch):
+    """jinja2 is not a core dependency (a llama-server-only install may not
+    have it): the probe must not crash, and must choose the safe side."""
+    import sys
+
+    from hfl.engine.llama_cpp import _probe_template
+
+    _probe_template.cache_clear()
+    monkeypatch.setitem(sys.modules, "jinja2", None)
+    try:
+        assert _probe_template("{% for t in tools %}{{ t }}{% endfor %}") == (False, True)
+    finally:
+        _probe_template.cache_clear()

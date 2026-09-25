@@ -218,3 +218,28 @@ def test_a_crafted_glm_reply_cannot_stall_the_parser():
         "dispatch(text, 'glm-4.5', [{'type': 'function', 'function': {'name': 'x'}}])\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True, timeout=10)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # DeepSeek-R1-Distill-Qwen-1.5B, as it wrote it (found by the matrix).
+        '</think>\n\n```json\n{\n  "function": "get_weather",\n  "arguments": {\n'
+        '    "city": "Paris"\n  }\n}\n```',
+        '{"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}',
+    ],
+)
+def test_the_tool_named_under_function(text):
+    assert dispatch(text, "deepseek-r1-distill-qwen-1.5b", WEATHER) == ("", [PARIS])
+
+
+def test_function_is_not_a_call_without_tools():
+    text = '{"function": "get_weather", "arguments": {"city": "Paris"}}'
+    assert dispatch(text, "m", None)[1] == []
+
+
+def test_a_call_in_doubled_braces():
+    """Qwen2.5-7B's GGUF template shows the format with ``{{ }}`` and the
+    model copies it (found by the compatibility matrix)."""
+    text = '<tool_call>\n{{"name": "get_weather", "arguments": {"city": "Paris"}}}\n</tool_call>'
+    assert dispatch(text, "qwen2.5-7b-instruct", WEATHER) == ("", [PARIS])

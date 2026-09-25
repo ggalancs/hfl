@@ -407,6 +407,7 @@ cubre los módulos, la selección del motor, el proceso de conversión y cada en
 - [Variables de entorno](docs/env-vars.md): cada ajuste y su valor por defecto
 - [Apple Silicon y clientes en Docker](docs/apple-silicon-and-docker-clients.md)
 - [Benchmarks](docs/benchmarks.md): HFL, Ollama y llama-server con el mismo GGUF, y el script para repetirlo
+- [Compatibilidad de modelos](docs/compatibility.md): chat, herramientas, razonamiento y visión comprobados de verdad en 13 familias y los dos backends GGUF
 - [Guía de arquitectura](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html)
 - [Registro de cambios](CHANGELOG.md)
 

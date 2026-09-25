@@ -269,8 +269,10 @@ class MLXEngine(InferenceEngine):
         reasoning switch (``think`` & co.) reaches the template too.
         """
         from hfl.engine.llama_cpp import (
+            _fold_system,
             _history_for_template,
             _template_renders_tools,
+            _template_takes_system,
             _tools_as_text,
         )
 
@@ -295,6 +297,8 @@ class MLXEngine(InferenceEngine):
                 extras["tools"] = tools
         else:
             dicts = _tools_as_text(dicts, tools)
+        if not _template_takes_system(template):
+            dicts = _fold_system(dicts)
         apply = getattr(self._tokenizer, "apply_chat_template", None)
         if callable(apply):
             try:

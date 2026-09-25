@@ -100,7 +100,12 @@ def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
     calls: list[ToolCall] = []
 
     def _sub(match: re.Match) -> str:
-        payload = _safe_json_load(match.group(1))
+        raw = match.group(1)
+        payload = _safe_json_load(raw)
+        if payload is None and raw.startswith("{{") and raw.endswith("}}"):
+            # Qwen2.5-7B's GGUF template shows the call format with doubled
+            # braces, and the model copies them (found by the matrix).
+            payload = _safe_json_load(raw[1:-1])
         if isinstance(payload, dict) and "name" in payload:
             calls.append(
                 _wrap(
@@ -568,6 +573,19 @@ def parse_fallback(text: str) -> ParseResult:
                 calls.append(_wrap(inner["name"], args))
                 state["cleaned"] = state["cleaned"].replace(full_match, "", 1)
                 return True
+        # Form 4: the tool named under "function" — a string
+        # (DeepSeek-R1-Distill 1.5B wrote {"function": "get_weather",
+        # "arguments": {...}}) or OpenAI's {"function": {"name", ...}}.
+        fn = payload.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            args = fn.get("arguments", payload.get("arguments", {}))
+            calls.append(_wrap(fn["name"], args))
+            state["cleaned"] = state["cleaned"].replace(full_match, "", 1)
+            return True
+        if isinstance(fn, str) and fn and "arguments" in payload:
+            calls.append(_wrap(fn, payload["arguments"]))
+            state["cleaned"] = state["cleaned"].replace(full_match, "", 1)
+            return True
         # Form 3: {"name": "...", "arguments": {...}}
         if "name" in payload and (
             "arguments" in payload or "parameters" in payload or "args" in payload
