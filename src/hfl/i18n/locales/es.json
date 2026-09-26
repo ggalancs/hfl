@@ -549,7 +549,10 @@
     "image_error": "No es una imagen que esta página pueda enviar:",
     "storage_full": "El almacenamiento del navegador está lleno: esta conversación se guarda sin sus imágenes.",
     "menu": "Conversaciones",
-    "untitled": "Nueva conversación"
+    "untitled": "Nueva conversación",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "export": "Guardar conversación"
   },
   "shortname": {
     "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",

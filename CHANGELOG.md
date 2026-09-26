@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   images, attach, paste or drop them; they are shown in the conversation
   and sent to the model. Everything is kept in the browser; if its storage
   fills up, conversations are kept without their images, and you are told.
+  Replies render headings, lists and tables (still escaped first), code
+  blocks have a Copy button, and a conversation can be saved as a Markdown
+  file, made in the browser.
   Checked in Chrome with Qwen2.5-VL-7B: it read the attached image,
   answered in the language the system prompt asked for, and used the image
   again on the next turn; conversations survived a reload.

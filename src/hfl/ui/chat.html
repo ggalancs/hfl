@@ -86,6 +86,12 @@
   code { background: var(--code); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   pre code { padding: 0; background: none; }
   details.think { color: var(--muted); margin-bottom: 8px; }
+  .msg ul, .msg ol { margin: 0 0 8px; padding-left: 22px; }
+  .msg h4 { margin: 10px 0 6px; font-size: 15px; }
+  .msg table { border-collapse: collapse; margin: 0 0 8px; display: block; overflow-x: auto; }
+  .msg th, .msg td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+  .code { position: relative; }
+  .code .copy { position: absolute; top: 6px; right: 6px; font-size: 12px; padding: 2px 8px; opacity: .8; }
   .empty { color: var(--muted); text-align: center; margin-top: 18vh; padding: 0 16px; }
 
   form { padding: 12px 16px; border-top: 1px solid var(--line); max-width: 852px; width: 100%; margin: 0 auto; }
@@ -124,6 +130,7 @@
     <button id="menu" class="icon" type="button" aria-label="__T_menu__">☰</button>
     <strong>HFL</strong>
     <select id="model" aria-label="__T_model__"></select>
+    <button id="export" class="icon" type="button" aria-label="__T_export__" title="__T_export__">⤓</button>
     <button id="toggle-settings" class="icon" type="button" aria-label="__T_settings__" title="__T_settings__" aria-expanded="false">⚙</button>
   </header>
   <section id="settings" hidden>
@@ -226,17 +233,56 @@ function render(text, thinking = "") {
   parts.forEach((part, i) => {
     if (i % 2 === 1) {
       const body = part.replace(/^[\w+-]*\n/, "");
-      html += "<pre><code>" + body + "</code></pre>";
+      html += '<div class="code"><button type="button" class="copy">' + escapeHtml(T.copy) +
+        "</button><pre><code>" + body + "</code></pre></div>";
     } else {
-      html += part.split(/\n{2,}/).filter((p) => p.trim()).map((p) =>
-        "<p>" + p.replace(/`([^`\n]+)`/g, "<code>$1</code>")
-                 .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-                 .replace(/\n/g, "<br>") + "</p>").join("");
+      html += blocks(part);
     }
   });
   if (thinking) {
     html = '<details class="think"><summary>' + escapeHtml(T.thinking) + "</summary>" +
       escapeHtml(thinking).replace(/\n/g, "<br>") + "</details>" + html;
+  }
+  return html;
+}
+
+// Inline marks on already-escaped text: code, bold, italic.
+function inline(text) {
+  return text.replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
+}
+
+// Headings, lists, tables and paragraphs, line by line (escaped text in).
+function blocks(text) {
+  const lines = text.split("\n");
+  const kind = (line) =>
+    /^\s*[-*+] /.test(line) ? "ul" :
+    /^\s*\d+[.)] /.test(line) ? "ol" :
+    /^\s*\|.*\|\s*$/.test(line) ? "table" :
+    /^#{1,4} /.test(line) ? "h" :
+    line.trim() ? "p" : "";
+  let html = "", i = 0;
+  while (i < lines.length) {
+    const k = kind(lines[i]);
+    if (!k) { i++; continue; }
+    if (k === "h") {
+      html += "<h4>" + inline(lines[i].replace(/^#{1,4} /, "")) + "</h4>";
+      i++; continue;
+    }
+    const run = [];
+    while (i < lines.length && kind(lines[i]) === k) run.push(lines[i++]);
+    if (k === "ul" || k === "ol") {
+      const items = run.map((l) => "<li>" + inline(l.replace(/^\s*(?:[-*+]|\d+[.)]) /, "")) + "</li>");
+      html += "<" + k + ">" + items.join("") + "</" + k + ">";
+    } else if (k === "table" && run.length >= 2 && /^[\s|:-]+$/.test(run[1])) {
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim()));
+      const head = cells(run[0]).map((c) => "<th>" + c + "</th>").join("");
+      const rows = run.slice(2).map((l) => "<tr>" + cells(l).map((c) => "<td>" + c + "</td>").join("") + "</tr>");
+      html += "<table><thead><tr>" + head + "</tr></thead><tbody>" + rows.join("") + "</tbody></table>";
+    } else {
+      html += "<p>" + inline(run.join("\n")).replace(/\n/g, "<br>") + "</p>";
+    }
   }
   return html;
 }
@@ -534,6 +580,34 @@ modelSelect.addEventListener("change", () => {
   updateAttach();
 });
 $("new").addEventListener("click", () => switchTo(makeChat()));
+// Copy a code block (one listener for every block, present and future).
+log.addEventListener("click", async (event) => {
+  const button = event.target.closest?.(".copy");
+  if (!button) return;
+  const code = button.parentElement.querySelector("code");
+  try {
+    await navigator.clipboard.writeText(code.innerText);
+    button.textContent = T.copied;
+    setTimeout(() => { button.textContent = T.copy; }, 1500);
+  } catch {}
+});
+// The conversation as a Markdown file, made in the browser.
+$("export").addEventListener("click", () => {
+  if (!chat.messages.length) return;
+  const lines = ["# " + (chat.title || T.untitled), ""];
+  if (chat.system) lines.push("> " + chat.system.replace(/\n/g, "\n> "), "");
+  for (const m of chat.messages) {
+    lines.push("**" + m.role + "**" + (m.meta ? " · " + m.meta : ""), "", m.content || "", "");
+  }
+  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (chat.title || "conversation").replace(/[^\w.-]+/g, "-").slice(0, 60) + ".md";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 $("menu").addEventListener("click", () => document.body.classList.toggle("open"));
 $("toggle-settings").addEventListener("click", () => {
   const panel = $("settings");

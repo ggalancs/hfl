@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -117,7 +118,7 @@ def test_model_output_is_escaped_before_rendering(client):
     script = _Page.of(page).script
     functions = re.search(r"(function escapeHtml[\s\S]*?)\nfunction bubble", script).group(1)
     js = (
-        'const T = {thinking: "Thinking"};\n' + functions + "\n"
+        'const T = {thinking: "Thinking", copy: "Copy"};\n' + functions + "\n"
         "const out = render('<img src=x onerror=alert(1)> **bold** `a<b`\\n\\n"
         "```html\\n<script>x</script>\\n```');\n"
         "process.stdout.write(out);"
@@ -127,6 +128,30 @@ def test_model_output_is_escaped_before_rendering(client):
     assert "&lt;img src=x onerror=alert(1)&gt;" in out
     assert "<strong>bold</strong>" in out and "<code>a&lt;b</code>" in out
     assert "<pre><code>&lt;script&gt;x&lt;/script&gt;\n</code></pre>" in out
+    assert '<button type="button" class="copy">Copy</button>' in out
+
+
+def test_lists_tables_and_headings_render_and_stay_escaped(client):
+    """Markdown models write constantly; markup inside it is still text."""
+    page = client.get("/ui").text
+    script = _Page.of(page).script
+    functions = re.search(r"(function escapeHtml[\s\S]*?)\nfunction bubble", script).group(1)
+    text = (
+        "## Plan\n"
+        "Steps:\n- first *step*\n- second\n\n"
+        "1. one\n2. two\n\n"
+        "| Name | Note |\n|---|---|\n| a | <script>x</script> |"
+    )
+    js = (
+        'const T = {thinking: "Thinking", copy: "Copy"};\n' + functions + "\n"
+        f"process.stdout.write(render({json.dumps(text)}));"
+    )
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30).stdout
+    assert "<h4>Plan</h4>" in out and "<p>Steps:</p>" in out
+    assert "<ul><li>first <em>step</em></li><li>second</li></ul>" in out
+    assert "<ol><li>one</li><li>two</li></ol>" in out
+    assert "<thead><tr><th>Name</th><th>Note</th></tr></thead>" in out
+    assert "<td>&lt;script&gt;x&lt;/script&gt;</td>" in out and "<script>" not in out
 
 
 @pytest.mark.parametrize("lang", ["en", "es"])

@@ -549,7 +549,10 @@
     "image_error": "Not an image this page can send:",
     "storage_full": "The browser's storage is full: this conversation is kept without its images.",
     "menu": "Conversations",
-    "untitled": "New conversation"
+    "untitled": "New conversation",
+    "copy": "Copy",
+    "copied": "Copied",
+    "export": "Save conversation"
   },
   "shortname": {
     "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",
