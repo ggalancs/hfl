@@ -104,6 +104,12 @@ class TestStaticPyprojectPins:
         pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["mcp"], "mcp")
         assert "<2" in pin.replace(" ", ""), f"mcp must stay below 2.0: {pin!r}"
 
+    def test_coqui_brings_its_codec(self):
+        """From torch 2.9 coqui-tts refuses to import without torchcodec,
+        which its [codec] extra installs (local audit C5)."""
+        pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["coqui"], "coqui-tts")
+        assert "[codec]" in pin, pin
+
     def test_llama_cpp_python_pin_supports_gemma4(self):
         """The ``[llama]`` extra must require a llama-cpp-python build
         that recognises the ``gemma4`` GGUF architecture.

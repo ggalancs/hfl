@@ -33,6 +33,8 @@ MODULES = {
     "vulkan": ["llama_cpp"],
 }
 LINUX_CUDA = {"vllm"}
+# Each extra's check id, as the loop at the bottom numbers them.
+EXTRA_ID = {name: f"C{index}" for index, name in enumerate(sorted(MODULES), 1)}
 
 
 def _extra(a: Audit, extra: str) -> str:
@@ -68,5 +70,5 @@ def _extra(a: Audit, extra: str) -> str:
     return f"installs; {', '.join(modules)} import; hfl runs"
 
 
-for index, name in enumerate(sorted(MODULES), 1):
-    check(f"C{index}", f"[{name}]")(lambda a, name=name: _extra(a, name))
+for name, cid in EXTRA_ID.items():
+    check(cid, f"[{name}]")(lambda a, name=name: _extra(a, name))

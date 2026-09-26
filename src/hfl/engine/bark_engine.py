@@ -26,8 +26,17 @@ logger = logging.getLogger(__name__)
 class BarkEngine(AudioEngine):
     """TTS engine using Bark via HuggingFace Transformers."""
 
+    # The model and its processor, not transformers' "text-to-audio"
+    # pipeline: under transformers 5 that pipeline calls
+    # ``BatchEncoding.to(dtype=...)``, which does not exist, so every Bark
+    # synthesis failed (local audit: /api/tts, /v1/audio/speech, hfl tts and
+    # hfl speak all 500). The direct path also honours the voice preset,
+    # which the pipeline call never passed.
+
     def __init__(self):
-        self._pipeline: Any = None
+        self._model: Any = None
+        self._processor: Any = None
+        self._device: str = "cpu"
         self._model_name: str = ""
         self._sample_rate: int = 24000  # Bark outputs at 24kHz
 
@@ -41,7 +50,7 @@ class BarkEngine(AudioEngine):
                 dtype: torch dtype (torch.float16, torch.float32)
         """
         try:
-            from transformers import pipeline
+            from transformers import AutoProcessor, BarkModel
         except ImportError as e:
             raise ImportError(
                 "Bark engine requires transformers.\n\n"
@@ -67,14 +76,12 @@ class BarkEngine(AudioEngine):
 
         start_time = time.time()
         try:
-            self._pipeline = pipeline(
-                "text-to-audio",
-                model=model_path,
-                device=device if device != "cpu" else -1,
-                torch_dtype=torch_dtype,
-            )
+            self._processor = AutoProcessor.from_pretrained(model_path)
+            self._model = BarkModel.from_pretrained(model_path, dtype=torch_dtype).to(device)
+            self._device = device
             self._model_name = model_path
-            self._sample_rate = 24000  # Bark native sample rate
+            rate = getattr(self._model.generation_config, "sample_rate", None)
+            self._sample_rate = int(rate) if rate else 24000  # Bark native sample rate
             elapsed = time.time() - start_time
             logger.info("Bark model loaded in %.2fs", elapsed)
         except Exception as e:
@@ -83,9 +90,9 @@ class BarkEngine(AudioEngine):
 
     def unload(self) -> None:
         """Release model from memory."""
-        if self._pipeline is not None:
-            del self._pipeline
-            self._pipeline = None
+        if self._model is not None:
+            self._model = None
+            self._processor = None
             self._model_name = ""
 
             # Clear CUDA cache if available
@@ -113,10 +120,24 @@ class BarkEngine(AudioEngine):
 
         config = config or TTSConfig()
 
-        # Generate audio
-        output = self._pipeline(text)
-        audio_array = output["audio"]
-        sampling_rate = output["sampling_rate"]
+        # A Bark preset ("v2/en_speaker_6") is used as asked; any other name —
+        # "default", or an OpenAI voice such as "alloy" sent to
+        # /v1/audio/speech — takes Bark's own voice.
+        preset = config.voice if "/" in (config.voice or "") else None
+        try:
+            inputs = self._processor(text, voice_preset=preset)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"Unknown Bark voice {config.voice!r}; try one of: "
+                + ", ".join(self.supported_voices[:6])
+                + ", ..."
+            ) from exc
+        import torch
+
+        with torch.no_grad():
+            generated = self._model.generate(**inputs.to(self._device))
+        audio_array = generated.cpu().float().numpy()
+        sampling_rate = self._sample_rate
 
         # Handle multi-dimensional output (stereo or batched)
         if len(audio_array.shape) > 1:
@@ -171,7 +192,7 @@ class BarkEngine(AudioEngine):
 
     @property
     def is_loaded(self) -> bool:
-        return self._pipeline is not None
+        return self._model is not None
 
     @property
     def model_name(self) -> str:

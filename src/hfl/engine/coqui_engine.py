@@ -20,6 +20,25 @@ import numpy as np
 from hfl.engine.base import AudioEngine, AudioResult, TTSConfig
 
 
+def _transformers5_compat() -> None:
+    """Give transformers 5 the helper coqui-tts still imports.
+
+    coqui-tts (0.27.x, the latest) imports ``isin_mps_friendly`` from
+    ``transformers.pytorch_utils``, which transformers 5 removed — and HFL's
+    other extras need transformers 5 — so ``import TTS`` failed and the
+    [coqui] extra never worked (local audit C5). In transformers 4 it was
+    ``torch.isin`` with a workaround for an old MPS gap that torch has since
+    closed. Added only where it is missing."""
+    try:
+        import torch
+        import transformers.pytorch_utils as pytorch_utils
+    except ImportError:
+        return
+    if not hasattr(pytorch_utils, "isin_mps_friendly"):
+        # setattr: typed either way whether transformers is installed or not.
+        setattr(pytorch_utils, "isin_mps_friendly", lambda a, b: torch.isin(a, b))  # noqa: B010
+
+
 class CoquiEngine(AudioEngine):
     """TTS engine using Coqui TTS library."""
 
@@ -38,6 +57,7 @@ class CoquiEngine(AudioEngine):
                 gpu: Whether to use GPU (default: auto-detect)
                 progress_bar: Show download progress (default: True)
         """
+        _transformers5_compat()
         try:
             from TTS.api import TTS
         except ImportError as e:

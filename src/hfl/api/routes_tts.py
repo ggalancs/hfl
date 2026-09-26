@@ -10,7 +10,7 @@ Implements:
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
 from hfl.api.helpers import run_with_timeout
@@ -123,9 +123,12 @@ async def openai_tts(req: OpenAITTSRequest) -> Response:
     )
 
     # Synthesize with timeout
-    result = await run_with_timeout(
-        state.tts_engine.synthesize, req.input, config, operation="tts_synthesize"
-    )
+    try:
+        result = await run_with_timeout(
+            state.tts_engine.synthesize, req.input, config, operation="tts_synthesize"
+        )
+    except ValueError as exc:  # the engine's own words: an unknown voice
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return Response(
         content=result.audio,
@@ -198,9 +201,12 @@ async def native_tts(req: NativeTTSRequest) -> Response | StreamingResponse:
         )
 
     # Synthesize with timeout
-    result = await run_with_timeout(
-        state.tts_engine.synthesize, req.text, config, operation="tts_synthesize"
-    )
+    try:
+        result = await run_with_timeout(
+            state.tts_engine.synthesize, req.text, config, operation="tts_synthesize"
+        )
+    except ValueError as exc:  # the engine's own words: an unknown voice
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return Response(
         content=result.audio,

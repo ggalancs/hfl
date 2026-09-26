@@ -27,6 +27,8 @@ from local_audit import (
     need_llama_server,
 )
 
+from audit_checks.c_extras import EXTRA_ID
+
 USER = [{"role": "user", "content": QUESTION}]
 TOOL = {
     "type": "function",
@@ -58,9 +60,12 @@ def suite(
         prose = "Name the capital of France."
         for path, body, text in (
             ("/api/generate", {"prompt": prose, "format": "json"}, lambda r: r["response"]),
-            ("/api/chat", {"messages": [{"role": "user", "content": prose}], "format": "json"},
-             lambda r: r["message"]["content"]),
-        ):  # fmt: skip
+            (
+                "/api/chat",
+                {"messages": [{"role": "user", "content": prose}], "format": "json"},
+                lambda r: r["message"]["content"],
+            ),
+        ):
             payload = {"model": model, "stream": False, "options": {"num_predict": 200}, **body}
             out = c.post(path, json=payload)
             if not formats:
@@ -329,6 +334,38 @@ def e7(a: Audit) -> str:
             ),
         )
     return part.verdict()
+
+
+COQUI_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"  # Apache-2.0, as its hifigan vocoder
+
+
+@check("E12", "TTS (Coqui)", needs=(EXTRA_ID["coqui"],))
+def e12(a: Audit) -> str:
+    """Speech from coqui-tts, in the [coqui] extra's own venv (section C built
+    it). Importing was not enough: it imported nothing under transformers 5."""
+    python = a.work / "extras" / "coqui" / "bin" / "python"
+    if not python.exists():
+        raise Uncheckable("the [coqui] extra's venv is missing (its C check did not install it)")
+    code = (
+        "from hfl.engine.coqui_engine import CoquiEngine\n"
+        "from hfl.engine.base import TTSConfig\n"
+        "e = CoquiEngine(); e.load(%r, progress_bar=False)\n"
+        "r = e.synthesize('Hello from the audit.', TTSConfig())\n"
+        "print('SECONDS', r.duration)\n"
+    ) % COQUI_MODEL
+    env = {**a.env, "TTS_HOME": str(a.work / "tts_home")}  # its models stay in <work>
+    out = subprocess.run(
+        [str(python), "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        env=env,
+        cwd=a.scratch,
+    )
+    lines = [x for x in out.stdout.splitlines() if x.startswith("SECONDS")]
+    seconds = float(lines[0].split()[1]) if lines else 0.0
+    expect(seconds > 0.5, (out.stdout + out.stderr)[-300:])
+    return f"{seconds:.1f}s of speech from {COQUI_MODEL}"
 
 
 @check("B33", "POST /api/tts")

@@ -126,7 +126,10 @@ tts = [
     "soundfile>=0.12.1",
 ]
 coqui = [
-    "coqui-tts>=0.24.0,<1.0",
+    # [codec]: from torch 2.9 coqui-tts needs torchcodec for audio IO and
+    # refuses to import without it. HFL's coqui engine supplies the one
+    # transformers-4 helper coqui-tts still imports (local audit C5).
+    "coqui-tts[codec]>=0.24.0,<1.0",
     "torch>=2.5.0,<3.0",
     "torchaudio>=2.2.0,<3.0",
     "soundfile>=0.12.1",

@@ -13,12 +13,9 @@ from pathlib import Path
 import httpx
 from local_audit import Audit, Uncheckable, check, expect
 
-from audit_checks.c_extras import MODULES
+from audit_checks.c_extras import EXTRA_ID
 
 REPO = Path(__file__).resolve().parents[2]
-EXTRA_ID = {
-    name: f"C{index}" for index, name in enumerate(sorted(MODULES), 1)
-}  # as c_extras numbers them
 EXTRA_CHECKS = tuple(EXTRA_ID.values())
 
 

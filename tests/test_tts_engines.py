@@ -67,48 +67,71 @@ class TestBarkEngine:
         with pytest.raises(RuntimeError, match="not loaded"):
             engine.synthesize("Hello")
 
-    @patch("hfl.engine.bark_engine.BarkEngine._encode_wav")
-    def test_synthesize_with_mock_pipeline(self, mock_encode):
-        """Should synthesize audio with mocked pipeline."""
+    @staticmethod
+    def _loaded(monkeypatch, audio):
+        """A BarkEngine with a stand-in processor and model (and torch)."""
+        import contextlib
+        import sys
+        import types
+
         from hfl.engine.bark_engine import BarkEngine
 
+        fake_torch = types.SimpleNamespace(no_grad=contextlib.nullcontext)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
         engine = BarkEngine()
-
-        # Mock the pipeline
-        mock_pipeline = MagicMock()
-        mock_pipeline.return_value = {
-            "audio": np.zeros(24000, dtype=np.float32),  # 1 second at 24kHz
-            "sampling_rate": 24000,
-        }
-        engine._pipeline = mock_pipeline
+        engine._processor = MagicMock()
+        engine._processor.return_value.to.return_value = {"input_ids": "ids"}
+        engine._model = MagicMock()
+        engine._model.generate.return_value.cpu.return_value.float.return_value.numpy.return_value = audio  # noqa: E501
         engine._model_name = "test-model"
+        return engine
 
-        # Mock encoding
+    @patch("hfl.engine.bark_engine.BarkEngine._encode_wav")
+    def test_synthesize_through_the_model(self, mock_encode, monkeypatch):
+        """Transformers 5's text-to-audio pipeline broke Bark
+        (``BatchEncoding.to(dtype=...)``); the engine drives the model."""
+        engine = self._loaded(monkeypatch, np.zeros((1, 24000), dtype=np.float32))
         mock_encode.return_value = b"RIFF...wav data..."
 
-        config = TTSConfig(format="wav", sample_rate=24000)
-        result = engine.synthesize("Hello world", config)
+        result = engine.synthesize("Hello world", TTSConfig(format="wav", sample_rate=24000))
 
         assert isinstance(result, AudioResult)
-        assert result.format == "wav"
-        assert result.sample_rate == 24000
-        mock_pipeline.assert_called_once_with("Hello world")
+        assert result.format == "wav" and result.sample_rate == 24000
+        assert result.duration == pytest.approx(1.0)
+        engine._processor.assert_called_once_with("Hello world", voice_preset=None)
+        engine._model.generate.assert_called_once_with(input_ids="ids")
 
-    @patch("hfl.engine.bark_engine.torch", create=True)
-    def test_unload(self, mock_torch):
+    @patch("hfl.engine.bark_engine.BarkEngine._encode_wav", return_value=b"RIFF")
+    def test_the_voice_reaches_the_model(self, _encode, monkeypatch):
+        engine = self._loaded(monkeypatch, np.zeros(2400, dtype=np.float32))
+        engine.synthesize("Hola", TTSConfig(voice="v2/es_speaker_0", sample_rate=24000))
+        engine._processor.assert_called_once_with("Hola", voice_preset="v2/es_speaker_0")
+
+    def test_an_unknown_voice_is_a_clear_error(self, monkeypatch):
+        engine = self._loaded(monkeypatch, np.zeros(10, dtype=np.float32))
+        engine._processor.side_effect = FileNotFoundError("nope.npz")
+        with pytest.raises(ValueError, match="Unknown Bark voice"):
+            engine.synthesize("x", TTSConfig(voice="v2/nope"))
+
+    @patch("hfl.engine.bark_engine.BarkEngine._encode_wav", return_value=b"RIFF")
+    def test_an_openai_voice_name_takes_barks_own(self, _encode, monkeypatch):
+        """/v1/audio/speech sends OpenAI names ("alloy"): not a Bark preset."""
+        engine = self._loaded(monkeypatch, np.zeros(10, dtype=np.float32))
+        engine.synthesize("x", TTSConfig(voice="alloy", sample_rate=24000))
+        engine._processor.assert_called_once_with("x", voice_preset=None)
+
+    def test_unload(self):
         """Should unload model."""
         from hfl.engine.bark_engine import BarkEngine
 
-        # Mock torch.cuda
-        mock_torch.cuda.is_available.return_value = False
-
         engine = BarkEngine()
-        engine._pipeline = MagicMock()
+        engine._model = MagicMock()
+        engine._processor = MagicMock()
         engine._model_name = "test"
 
         engine.unload()
 
-        assert engine._pipeline is None
+        assert engine._model is None and engine._processor is None
         assert engine._model_name == ""
         assert engine.is_loaded is False
 
@@ -364,3 +387,26 @@ class TestAudioResult:
 
         assert result.metadata["model"] == "bark"
         assert result.metadata["voice"] == "en_speaker_0"
+
+
+def test_coqui_gets_the_helper_transformers_5_removed(monkeypatch):
+    """coqui-tts imports ``isin_mps_friendly``, gone in transformers 5: the
+    [coqui] extra never imported (local audit C5). Supplied only if missing."""
+    import sys
+    import types
+
+    from hfl.engine.coqui_engine import _transformers5_compat
+
+    utils = types.ModuleType("transformers.pytorch_utils")
+    fake_torch = types.SimpleNamespace(isin=lambda a, b: ("isin", a, b))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
+    monkeypatch.setitem(sys.modules, "transformers.pytorch_utils", utils)
+    sys.modules["transformers"].pytorch_utils = utils
+    _transformers5_compat()
+    assert utils.isin_mps_friendly(1, 2) == ("isin", 1, 2)
+
+    own = object()
+    utils.isin_mps_friendly = own
+    _transformers5_compat()
+    assert utils.isin_mps_friendly is own  # a transformers that has it keeps its own
