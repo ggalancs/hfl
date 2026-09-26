@@ -379,7 +379,11 @@ async function loadModels() {
     const data = await response.json();
     const saved = chat.model || store.get("hfl.model", "");
     modelSelect.innerHTML = "";
-    for (const m of data.models || []) {
+    // Chat models only: embedding and speech models cannot answer, and the
+    // first one listed used to be the default — a new user's first message
+    // failed with "not a llm model". A server without the field lists all.
+    const chatty = (m) => !m.capabilities || m.capabilities.includes("completion");
+    for (const m of (data.models || []).filter(chatty)) {
       const option = document.createElement("option");
       option.value = m.name;
       option.textContent = m.name + (m.details && m.details.parameter_size ? " · " + m.details.parameter_size : "");

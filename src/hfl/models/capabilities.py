@@ -191,6 +191,21 @@ def _sees_images(manifest: "ModelManifest", corpus: str) -> bool:
     return _matches_any(corpus, _VISION_FAMILIES)
 
 
+# Model types (ModelType values, plus older spellings) that do not complete text.
+_NOT_COMPLETION = {
+    "tts",
+    "stt",
+    "audio",
+    "embed",
+    "embedding",
+    "image-generation",
+    "image-classification",
+    "object-detection",
+    "image-segmentation",
+    "video",
+}
+
+
 def detect_capabilities(manifest: "ModelManifest") -> list[str]:
     """Return the list of Ollama-style capabilities for a manifest.
 
@@ -219,12 +234,16 @@ def detect_capabilities(manifest: "ModelManifest") -> list[str]:
     corpus = _search_corpus(manifest)
     model_type = (manifest.model_type or "").lower()
 
-    # Completion — every non-audio model
-    if model_type not in {"tts", "stt", "audio"}:
+    # Completion — a text model, or one of unknown type (a GGUF carries
+    # none). Pulled models store ModelType values, so an embedding, image or
+    # video model is "embedding" / "image-generation" / "video", which the
+    # old audio-only exclusion let through as chat models (the chat web UI
+    # offered them, and defaulted to one — local audit F8).
+    if model_type not in _NOT_COMPLETION:
         caps.append("completion")
 
     # Embedding — dedicated path (these models don't do completion)
-    if model_type == "embed" or _matches_any(corpus, _EMBEDDING_FAMILIES):
+    if model_type in {"embed", "embedding"} or _matches_any(corpus, _EMBEDDING_FAMILIES):
         # Pure embedding models shouldn't also advertise completion —
         # drop it if we accidentally added it above.
         if "completion" in caps:

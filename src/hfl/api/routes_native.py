@@ -38,6 +38,7 @@ from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
+from hfl.models.capabilities import detect_capabilities
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -886,10 +887,24 @@ async def api_tags() -> dict[str, Any]:
                     "parameter_size": m.parameters,  # None instead of ""
                     "quantization_level": m.quantization,  # None instead of ""
                 },
+                # As /api/show reports them: lets a client (the chat web UI)
+                # offer only the models that can do what it needs, without a
+                # /api/show per model. An extra field, ignored by Ollama clients.
+                **_capabilities_field(m),
             }
             for m in registry.list_all()
         ]
     }
+
+
+def _capabilities_field(manifest: Any) -> dict[str, Any]:
+    """``{"capabilities": [...]}``, or nothing for a manifest they cannot be
+    worked out for — one odd entry must not fail the whole listing."""
+    try:
+        return {"capabilities": detect_capabilities(manifest)}
+    except Exception:
+        logger.debug("capabilities unavailable for %r", getattr(manifest, "name", "?"))
+        return {}
 
 
 @router.get("/api/version", tags=["Ollama"], summary="Get server version")
