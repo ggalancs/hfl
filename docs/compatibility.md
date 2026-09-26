@@ -66,5 +66,18 @@ to a real model, not a claim. ✓ passed, ✗ failed (the reason is in the
   Phi-4-mini, SmolLM3 and Qwen2.5 never called a tool on the default
   backend (0/6, 6/6 on llama-server). See the CHANGELOG.
 
+## Platforms
+
+| | Evidence |
+|---|---|
+| macOS, Apple Silicon (M3 Max) | This table; `scripts/agent_check.py` (Claude Code and Codex); benchmarks |
+| Linux, CPU | The test suite (CI, manual) |
+| Windows | Builds and installers are published; `windows-tests.yml` runs the suite there — manual, **not run yet** |
+| Linux / Windows with NVIDIA (CUDA) | **Not verified**: no NVIDIA machine was available |
+
+To add a row: run `python scripts/compat_matrix.py` and
+`python scripts/agent_check.py --model <a coding model>` on that machine
+and publish what they print.
+
 Re-run it with `python scripts/compat_matrix.py` (about 45 minutes and
 40 GB of downloads on an M3 Max; `--only <name>` for one model).

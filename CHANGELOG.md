@@ -360,6 +360,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A Windows test job** (`windows-tests.yml`, manual like every workflow):
+  the suite had never run on Windows. Tests that need POSIX (the fake
+  llama-server run through its shebang, symlinks) skip there. Not run yet;
+  CUDA remains unverified. `docs/compatibility.md` says which platform has
+  what evidence.
+
 - **Homebrew and winget packaging, ready to publish** (`packaging/`). The
   formula builds, installs, tests and audits clean from a local tap and
   depends on Homebrew's llama.cpp for GGUF; the winget manifests validate

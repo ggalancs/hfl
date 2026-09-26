@@ -2,6 +2,8 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Tests for security utilities."""
 
+import sys
+
 import pytest
 
 from hfl.security import (
@@ -77,6 +79,9 @@ class TestSanitizePath:
         base.mkdir()
         assert sanitize_path(base, str(base)) == base.resolve()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating a symlink needs privileges on Windows"
+    )
     def test_symlink_escaping_base_is_blocked(self, temp_dir):
         """Containment is decided after ``realpath``, so a symlink planted
         inside the base directory cannot be used to read outside it."""

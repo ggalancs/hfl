@@ -23,6 +23,13 @@ import pytest
 
 from hfl.engine.base import ChatMessage, GenerationConfig
 
+# The fake llama-server is a Python script run through its shebang, and the
+# guard test kills with SIGKILL: POSIX only. The backend itself has not been
+# verified on Windows (see CHANGELOG).
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="fake llama-server runs via shebang; POSIX only"
+)
+
 FAKE = r"""
 import json, os, socketserver, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

@@ -131,6 +131,7 @@ def test_model_output_is_escaped_before_rendering(client):
     assert '<button type="button" class="copy">Copy</button>' in out
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_lists_tables_and_headings_render_and_stay_escaped(client):
     """Markdown models write constantly; markup inside it is still text."""
     page = client.get("/ui").text
