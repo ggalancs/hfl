@@ -97,6 +97,26 @@ class TestBenchCli:
         assert "Invalid --lengths" in result.stdout
 
 
+@pytest.fixture
+def server(monkeypatch, temp_config):
+    """The CLI's HTTP calls answered by the real app, in process: ``lora``
+    and ``snapshot`` talk to the running server now, not a model of their own."""
+    from fastapi.testclient import TestClient
+
+    from hfl.api.server import app as api
+
+    client = TestClient(api)
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def request(method, url, json=None, headers=None, timeout=None):  # noqa: ANN001
+        path = "/" + url.split("/", 3)[3]
+        calls.append((method, path, json))
+        return client.request(method, path, json=json, headers=headers)
+
+    monkeypatch.setattr("httpx.request", request)
+    return calls
+
+
 class TestSnapshotCli:
     def test_unknown_action_exits_nonzero(self, runner):
         result = runner.invoke(app, ["snapshot", "explode"])
@@ -111,16 +131,70 @@ class TestSnapshotCli:
         result = runner.invoke(app, ["snapshot", "save", "", "--name", "warm-1"])
         assert result.exit_code == 1
 
-    def test_list_empty_dashboard(self, runner, temp_config):
+    def test_list_empty_dashboard(self, runner, server):
         # An empty snapshots directory: list should print "No snapshots
         # saved." and exit 0.
         result = runner.invoke(app, ["snapshot", "list"])
         assert result.exit_code == 0
         assert "No snapshots" in result.stdout
 
-    def test_delete_missing_exits_nonzero(self, runner, temp_config):
+    def test_delete_missing_exits_nonzero(self, runner, server):
         result = runner.invoke(app, ["snapshot", "delete", "--name", "nope"])
         assert result.exit_code == 1
+        assert server == [("DELETE", "/api/snapshot/nope", None)]
+
+    def test_save_goes_to_the_server(self, runner, monkeypatch):
+        sent: list = []
+
+        class Answer:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"tokens": 41, "bytes": 1024}
+
+        monkeypatch.setattr("httpx.request", lambda *a, **k: sent.append((a, k)) or Answer())
+        result = runner.invoke(app, ["snapshot", "save", "qwen", "--name", "warm", "-p", "9999"])
+        assert result.exit_code == 0 and "tokens=41" in result.stdout
+        (method, url), kwargs = sent[0]
+        assert (method, url) == ("POST", "http://127.0.0.1:9999/api/snapshot/save")
+        assert kwargs["json"] == {"model": "qwen", "name": "warm"}
+
+    def test_no_server_is_a_message(self, runner, monkeypatch):
+        import httpx
+
+        def refused(*a, **k):
+            raise httpx.ConnectError("refused")
+
+        monkeypatch.setattr("httpx.request", refused)
+        result = runner.invoke(app, ["snapshot", "list"])
+        assert result.exit_code == 1 and "Cannot reach HFL server" in result.stdout
+
+
+class TestLoraCli:
+    def test_apply_goes_to_the_server(self, runner, monkeypatch):
+        """It used to apply the adapter to a model this CLI loaded itself,
+        then exit — the server's model never had it (local audit A20)."""
+        sent: list = []
+
+        class Answer:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"adapter_id": "abc"}
+
+        monkeypatch.setattr("httpx.request", lambda *a, **k: sent.append((a, k)) or Answer())
+        result = runner.invoke(app, ["lora", "apply", "qwen", "--path", "a.gguf", "-p", "9999"])
+        assert result.exit_code == 0 and "abc" in result.stdout
+        (method, url), kwargs = sent[0]
+        assert (method, url) == ("POST", "http://127.0.0.1:9999/api/lora/apply")
+        assert kwargs["json"]["model"] == "qwen" and kwargs["json"]["lora_path"] == "a.gguf"
+
+    def test_list_reads_the_server(self, runner, server):
+        result = runner.invoke(app, ["lora", "list"])
+        assert result.exit_code == 0 and "No adapters active" in result.stdout
+        assert server == [("GET", "/api/lora", None)]
 
 
 class TestComplianceDashboardCli:

@@ -382,8 +382,8 @@ def create(a: Audit) -> str:
 
 @check("A20", "hfl lora")
 def lora(a: Audit) -> str:
-    """``hfl lora`` has no --host/--port: it loads its own copy of the model
-    in the CLI process. Checked against a running server of the same home."""
+    """``hfl lora`` changes the running server's model (it used to load a copy
+    of its own in the CLI process). Checked on the server it was sent to."""
     from huggingface_hub import hf_hub_download
 
     adapters = a.home / "adapters"
@@ -403,7 +403,7 @@ def lora(a: Audit) -> str:
             },
             timeout=120,
         )
-        out = a.ok("lora", "apply", "stories", "--path", str(adapter))
+        out = a.ok("lora", "apply", "stories", "--path", str(adapter), "--port", str(a.port))
         seen = httpx.get(base + "/api/lora/stories", timeout=30).json().get("adapters")
         expect(
             seen,
@@ -415,7 +415,8 @@ def lora(a: Audit) -> str:
 
 @check("A35", "hfl snapshot")
 def snapshot(a: Audit) -> str:
-    """Like ``hfl lora``: no --host/--port, a model of its own in the CLI."""
+    """The running server's KV cache, saved and listed (it used to save an
+    empty one from a model the CLI loaded itself)."""
     with a.server("--model", "chat") as base:
         httpx.post(
             base + "/api/generate",
@@ -427,15 +428,16 @@ def snapshot(a: Audit) -> str:
             },
             timeout=120,
         )
-        out = a.ok("snapshot", "save", "chat", "--name", "audit-snap", timeout=300)
+        port = ("--port", str(a.port))
+        out = a.ok("snapshot", "save", "chat", "--name", "audit-snap", *port, timeout=300)
         tokens = re.search(r"tokens=(\d+)", out)
         expect(
             tokens and int(tokens.group(1)) > 0,
             "the CLI saved the KV of a model it loaded "
             f"itself — empty — not the server's: {out.strip()[-120:]}",
         )
-        expect("audit-snap" in a.ok("snapshot", "list"), "not listed")
-        a.ok("snapshot", "delete", "--name", "audit-snap")
+        expect("audit-snap" in a.ok("snapshot", "list", *port), "not listed")
+        a.ok("snapshot", "delete", "--name", "audit-snap", *port)
     return "saved the server's KV, listed, deleted"
 
 

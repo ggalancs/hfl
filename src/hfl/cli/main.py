@@ -2771,6 +2771,41 @@ def recommend(
     console.print(table)
 
 
+def _server_request(
+    method: str, host: str, port: int | None, path: str, body: dict | None = None
+) -> Any:
+    """``method path`` on the running HFL server; its JSON. A server that
+    cannot be reached, or answers an error, is a message and exit 1 — the
+    server's own ``detail`` shown — never a traceback. Sends HFL_API_KEY
+    when set, for a server started with one."""
+    import httpx
+
+    url = f"http://{host}:{_configured_port(port)}{path}"
+    headers = {}
+    key = os.environ.get("HFL_API_KEY")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        response = httpx.request(method, url, json=body, headers=headers, timeout=600.0)
+    except httpx.ConnectError:
+        console.print(
+            f"[red]Cannot reach HFL server at {url}[/]\n"
+            f"[dim]Start it first with:[/] [cyan]hfl serve[/]"
+        )
+        raise typer.Exit(1) from None
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Server error:[/] {escape_markup(str(exc))}")
+        raise typer.Exit(1) from exc
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get("detail") or response.json().get("error")
+        except ValueError:
+            detail = response.text
+        console.print(f"[red]{response.status_code}:[/] {escape_markup(str(detail))}")
+        raise typer.Exit(1)
+    return response.json()
+
+
 @app.command(name="lora", help=t("commands.lora.description"))
 def lora_cmd(
     action: str = typer.Argument(help=t("commands.lora.args.action")),
@@ -2779,8 +2814,13 @@ def lora_cmd(
     adapter_id: str | None = typer.Option(None, "--id", help=t("commands.lora.options.id")),
     scale: float = typer.Option(1.0, "--scale", help=t("commands.lora.options.scale")),
     name: str | None = typer.Option(None, "--name", help=t("commands.lora.options.name")),
-):
-    """hot-swap LoRA adapters on a loaded model.
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("options.server_port")),
+) -> None:
+    """hot-swap LoRA adapters on a model of the running server.
+
+    It used to load the model into this CLI process, change the adapter
+    there and exit: the server's model never had it (local audit A20).
 
     Examples::
 
@@ -2788,61 +2828,45 @@ def lora_cmd(
         hfl lora list qwen-7b
         hfl lora remove qwen-7b --id <adapter-uuid>
     """
-    import asyncio
-
     from rich.table import Table
-
-    from hfl.api.model_loader import load_llm
-    from hfl.engine.lora import apply_lora, list_loras, remove_lora
 
     if action not in {"apply", "remove", "list"}:
         console.print("[red]Action must be one of: apply, remove, list[/]")
         raise typer.Exit(1)
-
     if action != "list" and not model:
         console.print("[red]Model name is required for apply/remove[/]")
         raise typer.Exit(1)
 
-    async def _run() -> None:
-        if action == "list" and not model:
-            adapters = list_loras()
-        else:
-            engine, _ = await load_llm(model)
-            if engine is None:
-                console.print("[red]Engine not available[/]")
-                raise typer.Exit(1)
-            if action == "apply":
-                if not lora_path:
-                    console.print("[red]--path is required for apply[/]")
-                    raise typer.Exit(1)
-                info = apply_lora(engine, lora_path=lora_path, scale=scale, name=name)
-                console.print(f"[green]Applied[/] adapter id=[cyan]{info.adapter_id}[/]")
-                return
-            if action == "remove":
-                if not adapter_id:
-                    console.print("[red]--id is required for remove[/]")
-                    raise typer.Exit(1)
-                ok = remove_lora(engine, adapter_id)
-                if ok:
-                    console.print("[green]Removed[/]")
-                else:
-                    console.print(f"[yellow]Adapter id unknown: {adapter_id}[/]")
-                return
-            adapters = list_loras(engine)
+    if action == "apply":
+        if not lora_path:
+            console.print("[red]--path is required for apply[/]")
+            raise typer.Exit(1)
+        body = {"model": model, "lora_path": lora_path, "scale": scale, "name": name}
+        info = _server_request("POST", host, port, "/api/lora/apply", body)
+        console.print(f"[green]Applied[/] adapter id=[cyan]{info['adapter_id']}[/]")
+        return
+    if action == "remove":
+        if not adapter_id:
+            console.print("[red]--id is required for remove[/]")
+            raise typer.Exit(1)
+        body = {"model": model, "adapter_id": adapter_id}
+        _server_request("POST", host, port, "/api/lora/remove", body)
+        console.print("[green]Removed[/]")
+        return
 
-        if not adapters:
-            console.print("[dim]No adapters active.[/]")
-            return
-        table = Table(title="Active LoRA adapters", show_lines=False)
-        table.add_column("id", style="cyan")
-        table.add_column("name")
-        table.add_column("path", style="dim")
-        table.add_column("scale", justify="right")
-        for a in adapters:
-            table.add_row(a.adapter_id, a.name or "-", a.path, f"{a.scale:.2f}")
-        console.print(table)
-
-    asyncio.run(_run())
+    path = f"/api/lora/{model}" if model else "/api/lora"
+    adapters = _server_request("GET", host, port, path)["adapters"]
+    if not adapters:
+        console.print("[dim]No adapters active.[/]")
+        return
+    table = Table(title="Active LoRA adapters", show_lines=False)
+    table.add_column("id", style="cyan")
+    table.add_column("name")
+    table.add_column("path", style="dim")
+    table.add_column("scale", justify="right")
+    for a in adapters:
+        table.add_row(a["adapter_id"], a.get("name") or "-", a["path"], f"{a['scale']:.2f}")
+    console.print(table)
 
 
 @app.command(name="pull-smart", help=t("commands.pull-smart.description"))
@@ -3055,12 +3079,16 @@ def snapshot_cmd(
     action: str = typer.Argument(help=t("commands.snapshot.args.action")),
     model: str = typer.Argument(default="", help=t("commands.snapshot.args.model")),
     name: str = typer.Option("", "--name", help=t("commands.snapshot.options.name")),
-):
-    """KV cache snapshot save/restore.
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("options.server_port")),
+) -> None:
+    """KV cache snapshot save/restore, on the running server's model.
 
     Save a "warm" KV cache after loading a long system prompt or
     few-shot context, then restore it on the next server start to
-    skip the prefill.
+    skip the prefill. It used to load a model of its own in this CLI
+    process — an empty cache, saved with tokens=0 — and restore into a
+    model that exited with it (local audit A35).
 
     Examples::
 
@@ -3069,21 +3097,11 @@ def snapshot_cmd(
         hfl snapshot load qwen-coder-7b --name warm-1
         hfl snapshot delete --name warm-1
     """
-    import asyncio
-
     from rich.table import Table
-
-    from hfl.engine.snapshot import (
-        delete_snapshot,
-        list_snapshots,
-        load_snapshot,
-        save_snapshot,
-    )
 
     if action not in {"save", "load", "list", "delete"}:
         console.print("[red]Action must be one of: save, load, list, delete[/]")
         raise typer.Exit(1)
-
     if action in {"save", "load"} and not model:
         console.print("[red]Model is required for save/load[/]")
         raise typer.Exit(1)
@@ -3091,59 +3109,32 @@ def snapshot_cmd(
         console.print("[red]--name is required[/]")
         raise typer.Exit(1)
 
-    async def _run() -> None:
-        if action == "list":
-            entries = list_snapshots()
-            if not entries:
-                console.print("[dim]No snapshots saved.[/]")
-                return
-            table = Table(title="KV cache snapshots", show_lines=False)
-            table.add_column("name", style="cyan")
-            table.add_column("model")
-            table.add_column("tokens", justify="right")
-            table.add_column("bytes", justify="right")
-            for e in entries:
-                table.add_row(e.name, e.model, str(e.tokens), f"{e.bytes:,}")
-            console.print(table)
+    if action == "list":
+        entries = _server_request("GET", host, port, "/api/snapshot")["snapshots"]
+        if not entries:
+            console.print("[dim]No snapshots saved.[/]")
             return
+        table = Table(title="KV cache snapshots", show_lines=False)
+        table.add_column("name", style="cyan")
+        table.add_column("model")
+        table.add_column("tokens", justify="right")
+        table.add_column("bytes", justify="right")
+        for e in entries:
+            table.add_row(e["name"], e["model"], str(e["tokens"]), f"{e['bytes']:,}")
+        console.print(table)
+        return
+    if action == "delete":
+        _server_request("DELETE", host, port, f"/api/snapshot/{name}")
+        console.print(f"[green]Deleted[/] snapshot {name!r}")
+        return
 
-        if action == "delete":
-            ok = delete_snapshot(name)
-            if ok:
-                console.print(f"[green]Deleted[/] snapshot {name!r}")
-            else:
-                console.print(f"[yellow]No snapshot named {name!r}[/]")
-                raise typer.Exit(1)
-            return
-
-        # save / load require a loaded engine.
-        from hfl.api.model_loader import load_llm
-
-        try:
-            engine, _ = await load_llm(model)
-        except FileNotFoundError as exc:
-            console.print(f"[red]Model not found:[/] {exc}")
-            raise typer.Exit(1) from exc
-        if engine is None:
-            console.print("[red]Engine not available[/]")
-            raise typer.Exit(1)
-
-        if action == "save":
-            try:
-                meta = save_snapshot(engine, name=name, model_name=model)
-            except (ValueError, RuntimeError) as exc:
-                console.print(f"[red]{exc}[/]")
-                raise typer.Exit(1) from exc
-            console.print(f"[green]Saved[/] {name!r} — tokens={meta.tokens} bytes={meta.bytes:,}")
-        else:  # load
-            try:
-                meta = load_snapshot(engine, name=name, model_name=model)
-            except (ValueError, FileNotFoundError, RuntimeError) as exc:
-                console.print(f"[red]{exc}[/]")
-                raise typer.Exit(1) from exc
-            console.print(f"[green]Restored[/] {name!r} — tokens={meta.tokens}")
-
-    asyncio.run(_run())
+    meta = _server_request(
+        "POST", host, port, f"/api/snapshot/{action}", {"model": model, "name": name}
+    )
+    if action == "save":
+        console.print(f"[green]Saved[/] {name!r} — tokens={meta['tokens']} bytes={meta['bytes']:,}")
+    else:
+        console.print(f"[green]Restored[/] {name!r} — tokens={meta['tokens']}")
 
 
 @app.command(name="compliance-dashboard", help=t("commands.compliance-dashboard.description"))
