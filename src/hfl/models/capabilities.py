@@ -154,6 +154,17 @@ def _matches_any(haystack: str, needles: Iterable[str]) -> bool:
     return any(needle.lower() in hay for needle in needles)
 
 
+def _is_hybrid_qwen3(corpus: str) -> bool:
+    """Qwen3 reasons (``<think>``) unless switched off — Qwen3-0.6B, -8B,
+    -30B-A3B... — so it is a thinking model; only "qwen3-thinking" was
+    recognised. Not the 2507 Instruct line (no reasoning), the coders, or the
+    embedding/reranker models."""
+    text = corpus.lower()
+    if "qwen3" not in text:
+        return False
+    return not any(k in text for k in ("instruct-2507", "coder", "embedding", "reranker"))
+
+
 def _search_corpus(manifest: "ModelManifest") -> str:
     """Concatenation of identity fields we match capabilities against.
 
@@ -263,7 +274,7 @@ def detect_capabilities(manifest: "ModelManifest") -> list[str]:
         caps.append("vision")
 
     # Thinking / chain-of-thought
-    if _matches_any(corpus, _THINKING_FAMILIES):
+    if _matches_any(corpus, _THINKING_FAMILIES) or _is_hybrid_qwen3(corpus):
         caps.append("thinking")
 
     # Deterministic order: completion/embedding first (one of them),

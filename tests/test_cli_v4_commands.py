@@ -231,3 +231,16 @@ class TestDraftRecommendCli:
         monkeypatch.setattr("hfl.hub.draft_picker.pick_draft_for", lambda *a, **kw: None)
         result = runner.invoke(app, ["draft-recommend", "anthropic/notamodel"])
         assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("command", ["verify", "bench"])
+def test_a_missing_model_is_a_message_not_a_traceback(runner, temp_config, command):
+    """load_llm raises ModelNotFoundError; only FileNotFoundError was caught
+    (local audit A2, A39)."""
+    from hfl.models.registry import reset_registry
+
+    reset_registry()
+    result = runner.invoke(app, [command, "no-such-model"])
+    assert result.exit_code == 1
+    assert "no-such-model" in result.stdout
+    assert result.exception is None or isinstance(result.exception, SystemExit)

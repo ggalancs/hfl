@@ -69,6 +69,18 @@ async def _unload_tts() -> None:
     await get_state().set_tts_engine(None, None)
 
 
+def _registered_name(model: str) -> str:
+    """``model``'s registry name (an alias or repo id resolved); as given
+    when the registry does not know it."""
+    try:
+        from hfl.core.container import get_registry
+
+        manifest = get_registry().get(model)
+    except Exception:
+        return model
+    return manifest.name if manifest is not None else model
+
+
 @router.post(
     "/api/stop",
     tags=["Ollama"],
@@ -99,6 +111,11 @@ async def stop_model(
 
     require_owner(request, "stop")
     state = get_state()
+    if req.model:
+        # An alias ("chat") or repo id names the model its registry entry
+        # does; resident models are keyed by that name. `hfl stop chat`
+        # answered "not currently loaded" (local audit A37).
+        req.model = _registered_name(req.model)
 
     # Clear any keep-alive deadlines for the target model so /api/ps
     # doesn't keep showing an expires_at after the unload task has run.

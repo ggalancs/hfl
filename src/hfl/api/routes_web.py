@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from hfl.tools.web_fetch import WebFetchError, fetch
-from hfl.tools.web_search import WebSearchError, search
+from hfl.tools.web_search import WebSearchError, WebSearchUpstreamError, search
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ async def api_web_search(req: WebSearchRequest) -> dict:
     """
     try:
         return await search(req.query, req.max_results)
+    except WebSearchUpstreamError as exc:  # the service's refusal, not the caller's fault
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except WebSearchError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:

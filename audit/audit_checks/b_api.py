@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 import tomllib
-from local_audit import QUESTION, Audit, Parts, check, expect
+from local_audit import QUESTION, Audit, Parts, Uncheckable, check, expect
 
 REPO = Path(__file__).resolve().parents[2]
 USER = [{"role": "user", "content": QUESTION}]
@@ -721,11 +721,14 @@ def web_search(a: Audit) -> str:
     out = _c(a).post(
         "/api/web_search", json={"query": "hugging face transformers", "max_results": 3}
     )
+    if out.status_code == 502 and "refused" in out.text:
+        # DuckDuckGo's anti-bot check turned this machine away, and the route
+        # said so: the search itself could not be seen from here.
+        raise Uncheckable(f"DuckDuckGo refused this machine; the route said so: {out.text[:120]}")
     results = out.json().get("results") if out.status_code == 200 else None
     expect(
         results,
-        f"{out.status_code} {out.text[:120]} — an empty list with 200, not an error "
-        "(DuckDuckGo answered 202, its bot challenge, when fetched directly)",
+        f"{out.status_code} {out.text[:120]} — neither results nor a clear refusal",
     )
     return f"{len(results)} results (DuckDuckGo)"
 

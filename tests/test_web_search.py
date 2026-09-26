@@ -144,6 +144,40 @@ class TestDuckDuckGoBackend:
         with pytest.raises(ws.WebSearchError):
             await backend.search("q", max_results=5)
 
+    @pytest.mark.parametrize(
+        ("status", "body"),
+        [
+            (202, "<html>please wait</html>"),  # what DDG answered the audit
+            (200, '<form id="challenge-form"><div class="anomaly-modal"></div></form>'),
+        ],
+    )
+    async def test_a_refusal_is_an_error_not_no_results(self, monkeypatch, status, body):
+        """DuckDuckGo's anti-bot answer parsed as zero results: 200 with an
+        empty list (local audit B38). It is an upstream error now."""
+        transport = httpx.MockTransport(_make_handler(status, body))
+        original = httpx.AsyncClient
+
+        def _factory(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(ws.httpx, "AsyncClient", _factory)
+        with pytest.raises(ws.WebSearchUpstreamError, match="refused"):
+            await ws.DuckDuckGoBackend().search("q", max_results=5)
+
+    async def test_the_route_answers_a_refusal_502(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from hfl.api import routes_web
+        from hfl.api.server import app
+
+        async def refused(query, max_results):
+            raise ws.WebSearchUpstreamError("DuckDuckGo refused the search")
+
+        monkeypatch.setattr(routes_web, "search", refused)
+        response = TestClient(app).post("/api/web_search", json={"query": "x"})
+        assert response.status_code == 502 and "refused" in response.text
+
 
 # ----------------------------------------------------------------------
 # Tavily / Brave / SerpAPI

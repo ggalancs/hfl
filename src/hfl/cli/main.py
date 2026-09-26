@@ -890,6 +890,36 @@ def _configured_port(port: int | None) -> int:
     return config.port
 
 
+# Shown first, in this order; any other declared extra follows. ``dev`` and
+# ``build`` are for working on HFL itself, not for using it.
+_EXTRA_ORDER = [
+    "llama", "vulkan", "rocm", "transformers", "vllm", "mlx", "convert", "tts", "coqui",
+    "stt", "imagegen", "audio", "mcp", "otel", "tray", "all",
+]  # fmt: skip
+_DEVELOPER_EXTRAS = {"dev", "build"}
+
+
+def _declared_extras() -> tuple[list[str], dict[str, list[str]]]:
+    """The extras the installed hfl declares (``Provides-Extra``), in display
+    order, and each one's requirements (``Requires-Dist`` with its marker)."""
+    import importlib.metadata as metadata
+    import re
+
+    try:
+        declared = metadata.metadata("hfl").get_all("Provides-Extra") or []
+        requires = metadata.requires("hfl") or []
+    except metadata.PackageNotFoundError:
+        declared, requires = list(_EXTRA_ORDER), []
+    packages: dict[str, list[str]] = {}
+    for requirement in requires:
+        spec, _, marker = requirement.partition(";")
+        for extra in re.findall(r"extra\s*==\s*['\"]([\w.-]+)['\"]", marker):
+            packages.setdefault(extra, []).append(spec.strip())
+    shown = [e for e in declared if e not in _DEVELOPER_EXTRAS]
+    order = [e for e in _EXTRA_ORDER if e in shown] + sorted(set(shown) - set(_EXTRA_ORDER))
+    return order, packages
+
+
 def escape_markup(text: str) -> str:
     from rich.markup import escape
 
@@ -2447,14 +2477,21 @@ def compliance_report(
     from datetime import datetime
     from pathlib import Path as PathClass
 
+    from hfl import __version__
     from hfl.models.registry import get_registry
+
+    # Any other format wrote nothing yet said "Report saved" and exited 0
+    # (local audit A5: --format pdf).
+    if format not in ("json", "markdown"):
+        console.print(f"[red]Unknown format {format!r}:[/] use json or markdown")
+        raise typer.Exit(2)
 
     registry = get_registry()
     models = registry.list_all()
 
     report: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(),
-        "hfl_version": "0.1.0",
+        "hfl_version": __version__,
         "total_models": len(models),
         "models": [],
     }
@@ -2522,17 +2559,10 @@ def help_command(
         )
         console.print()
 
-        extra_order = [
-            "llama",
-            "transformers",
-            "vllm",
-            "convert",
-            "tts",
-            "coqui",
-            "audio",
-            "tray",
-            "all",
-        ]
+        # Every extra the installed package declares, and its packages as
+        # declared: a list kept by hand here missed seven (local audit A13)
+        # and quoted pins long since changed.
+        extra_order, extra_packages = _declared_extras()
 
         table = Table(show_header=True, border_style="dim")
         table.add_column(t("table.name"), style="cyan", min_width=14)
@@ -2542,7 +2572,7 @@ def help_command(
 
         for extra_name in extra_order:
             info = t(f"help.extras.{extra_name}.summary")
-            install_cmd = t(f"help.extras.{extra_name}.install")
+            install_cmd = f"pip install 'hfl[{extra_name}]'"
             check_module = t(f"help.extras.{extra_name}.check_module")
 
             # Check if installed
@@ -2568,8 +2598,8 @@ def help_command(
         # Detail each extra
         for extra_name in extra_order:
             desc = t(f"help.extras.{extra_name}.description")
-            packages = t(f"help.extras.{extra_name}.packages")
-            install_cmd = t(f"help.extras.{extra_name}.install")
+            packages = ", ".join(extra_packages.get(extra_name, [])) or "—"
+            install_cmd = f"pip install 'hfl[{extra_name}]'"
 
             detail = Text()
             detail.append(f"{desc}\n\n")
@@ -2945,12 +2975,16 @@ def verify_cmd(
 
     from hfl.api.model_loader import load_llm
     from hfl.engine.verifier import verify_model
+    from hfl.exceptions import ModelNotFoundError
 
     async def _run() -> None:
         try:
             engine, manifest = await load_llm(model)
-        except FileNotFoundError as exc:
-            console.print(f"[red]Model not found:[/] {exc}")
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            # load_llm raises ModelNotFoundError; only FileNotFoundError was
+            # caught, so a missing model was a traceback (local audit A2/A39).
+            console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+            console.print(t("errors.use_list_to_see"))
             raise typer.Exit(1) from exc
         if engine is None:
             console.print("[red]Engine not available[/]")
@@ -3006,6 +3040,7 @@ def bench_cmd(
 
     from hfl.api.model_loader import load_llm
     from hfl.engine.benchmark import run_benchmark_stream
+    from hfl.exceptions import ModelNotFoundError
 
     try:
         lengths = tuple(int(v.strip()) for v in prompt_lengths.split(",") if v.strip())
@@ -3016,8 +3051,11 @@ def bench_cmd(
     async def _run() -> None:
         try:
             engine, _ = await load_llm(model)
-        except FileNotFoundError as exc:
-            console.print(f"[red]Model not found:[/] {exc}")
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            # load_llm raises ModelNotFoundError; only FileNotFoundError was
+            # caught, so a missing model was a traceback (local audit A2/A39).
+            console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+            console.print(t("errors.use_list_to_see"))
             raise typer.Exit(1) from exc
         if engine is None:
             console.print("[red]Engine not available[/]")

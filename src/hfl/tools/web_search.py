@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "WebSearchBackend",
     "WebSearchError",
+    "WebSearchUpstreamError",
     "DuckDuckGoBackend",
     "TavilyBackend",
     "BraveBackend",
@@ -57,6 +58,11 @@ class WebSearchError(RuntimeError):
     Message is safe to surface to the client (no stack-trace info),
     matching the CodeQL policy applied in Phase 7.
     """
+
+
+class WebSearchUpstreamError(WebSearchError):
+    """The search service answered, but with no results page: a refusal,
+    an anti-bot check, an outage. Not the caller's fault (a 502)."""
 
 
 # ----------------------------------------------------------------------
@@ -84,6 +90,8 @@ class WebSearchBackend(ABC):
 
 
 _DDG_ENDPOINT = "https://html.duckduckgo.com/html/"
+# Markers of DuckDuckGo's anti-bot page (the "anomaly" challenge).
+_DDG_CHALLENGE_RE = re.compile(r"anomaly-modal|challenge-form|/anomaly\.js", re.IGNORECASE)
 
 # DDG wraps each result in a div.result with a .result__title > a,
 # .result__url, and .result__snippet. The markup is stable enough
@@ -127,7 +135,16 @@ class DuckDuckGoBackend(WebSearchBackend):
                 body = resp.text
         except httpx.HTTPError as exc:
             logger.warning("DuckDuckGo search failed: %s", exc)
-            raise WebSearchError("web search backend unreachable") from exc
+            raise WebSearchUpstreamError("web search backend unreachable") from exc
+        # DuckDuckGo answers a client it takes for a bot with HTTP 202 and a
+        # challenge page — not an error to raise_for_status — which parsed
+        # as no results: an empty list with 200 (local audit B38).
+        if resp.status_code != 200 or _DDG_CHALLENGE_RE.search(body):
+            raise WebSearchUpstreamError(
+                f"DuckDuckGo refused the search (HTTP {resp.status_code}, its anti-bot "
+                "check). Try again later, or set HFL_WEB_SEARCH_BACKEND to tavily, brave "
+                "or serpapi with its API key."
+            )
 
         results: list[dict[str, str]] = []
         for match in _DDG_RESULT_RE.finditer(body):

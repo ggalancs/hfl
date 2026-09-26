@@ -55,6 +55,22 @@ class TestStopLLMByName:
         assert state._current_model is None
         assert state._llm_lock is original  # lock object unchanged
 
+    def test_stop_by_alias(self, client, sample_manifest):
+        """`hfl stop chat` said "not currently loaded" for a loaded model
+        whose alias is chat (local audit A37): the name was never resolved."""
+        from hfl.models.registry import get_registry
+
+        sample_manifest.alias = "chat"
+        get_registry().add(sample_manifest)
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        state.engine = engine
+        state.current_model = sample_manifest
+
+        body = client.post("/api/stop", json={"model": "chat"}).json()
+        assert body == {"status": "stopped", "model": sample_manifest.name}
+        engine.unload.assert_called_once()
+
     def test_stop_named_nonresident_is_noop(self, client, sample_manifest):
         """A model name that isn't loaded just reports not_loaded."""
         state = get_state()

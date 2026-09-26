@@ -445,73 +445,97 @@
         "name": "llama",
         "summary": "llama.cpp backend for GGUF models",
         "description": "Provides the llama.cpp inference engine for running GGUF-quantized models.\nRequires a C++ compiler (gcc/clang/MSVC) and CMake for compilation.",
-        "install": "pip install hfl[llama]",
-        "packages": "llama-cpp-python>=0.3.0",
         "check_module": "llama_cpp"
       },
       "transformers": {
         "name": "transformers",
         "summary": "PyTorch + HuggingFace Transformers backend",
         "description": "Provides the Transformers inference engine for running safetensors models.\nIncludes PyTorch (~2GB), Accelerate for GPU offloading, and SentencePiece tokenizer.",
-        "install": "pip install hfl[transformers]",
-        "packages": "transformers>=4.47.0, torch>=2.5.0, accelerate>=1.2.0, sentencepiece>=0.2.0",
         "check_module": "transformers"
       },
       "vllm": {
         "name": "vllm",
         "summary": "vLLM high-throughput inference engine",
         "description": "Provides the vLLM engine for high-throughput serving with PagedAttention.\nOnly available on Linux with NVIDIA CUDA GPUs.",
-        "install": "pip install hfl[vllm]",
-        "packages": "vllm>=0.6.0",
         "check_module": "vllm"
       },
       "convert": {
         "name": "convert",
         "summary": "GGUF model conversion support",
         "description": "Enables converting safetensors models to GGUF format with quantization.\nRequired for 'hfl pull' when downloading non-GGUF models.",
-        "install": "pip install hfl[convert]",
-        "packages": "gguf>=0.10.0",
         "check_module": "gguf"
       },
       "tts": {
         "name": "tts",
         "summary": "Text-to-speech with Bark (via Transformers)",
         "description": "Enables text-to-speech synthesis using the Bark model via Transformers.\nIncludes PyTorch, torchaudio for audio processing, and soundfile for WAV output.",
-        "install": "pip install hfl[tts]",
-        "packages": "transformers>=4.47.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
         "check_module": "torchaudio"
       },
       "coqui": {
         "name": "coqui",
         "summary": "Coqui TTS engine (multi-voice, multi-language)",
         "description": "Enables text-to-speech with Coqui TTS for high-quality multi-speaker synthesis.\nSupports multiple languages and voice cloning.",
-        "install": "pip install hfl[coqui]",
-        "packages": "coqui-tts>=0.24.0, torch>=2.5.0, torchaudio>=2.2.0, soundfile>=0.12.1",
         "check_module": "TTS"
       },
       "audio": {
         "name": "audio",
         "summary": "Audio playback support (for 'hfl speak')",
         "description": "Enables direct audio playback from the terminal.\nUsed by 'hfl speak' to play synthesized audio without saving to a file.",
-        "install": "pip install hfl[audio]",
-        "packages": "sounddevice>=0.4.6, soundfile>=0.12.1",
         "check_module": "sounddevice"
       },
       "tray": {
         "name": "tray",
         "summary": "System tray icon for GUI server management",
         "description": "Adds a system tray icon to start/stop the server from any OS.\nUsed with 'hfl serve --tray'. Works on macOS, Windows, and Linux.",
-        "install": "pip install hfl[tray]",
-        "packages": "pystray>=0.19.0, Pillow>=10.0.0",
         "check_module": "pystray"
       },
       "all": {
         "name": "all",
         "summary": "Install everything",
         "description": "Installs all optional dependencies at once.\nConvenient for development or if you want full functionality.",
-        "install": "pip install hfl[all]",
-        "packages": "All of the above",
         "check_module": null
+      },
+      "vulkan": {
+        "name": "vulkan",
+        "summary": "llama.cpp with a Vulkan GPU backend (AMD, Intel, NVIDIA)",
+        "description": "The llama.cpp backend built for Vulkan GPUs. Build it with CMAKE_ARGS=\"-DGGML_VULKAN=ON\" and the Vulkan headers installed.",
+        "check_module": "llama_cpp"
+      },
+      "rocm": {
+        "name": "rocm",
+        "summary": "llama.cpp on AMD GPUs through ROCm",
+        "description": "The llama.cpp backend built for AMD's ROCm/HIP. Needs a ROCm host; build with CMAKE_ARGS=\"-DGGML_HIPBLAS=ON\".",
+        "check_module": "llama_cpp"
+      },
+      "mlx": {
+        "name": "mlx",
+        "summary": "Apple Silicon native backend (MLX)",
+        "description": "Serves safetensors models natively on Apple Silicon through mlx-lm, typically faster than llama.cpp there. Installs nothing elsewhere.",
+        "check_module": "mlx_lm"
+      },
+      "stt": {
+        "name": "stt",
+        "summary": "Speech-to-text with Whisper",
+        "description": "Transcription through faster-whisper: /api/transcribe and /v1/audio/transcriptions.",
+        "check_module": "faster_whisper"
+      },
+      "imagegen": {
+        "name": "imagegen",
+        "summary": "Image generation with diffusers",
+        "description": "Text-to-image pipelines through diffusers: /api/images/generate and /v1/images/generations.",
+        "check_module": "diffusers"
+      },
+      "mcp": {
+        "name": "mcp",
+        "summary": "Model Context Protocol client and server",
+        "description": "Connect MCP servers as tools (hfl mcp connect, HFL_MCP_AUTOLOAD) and serve HFL's own tools over MCP (hfl mcp serve).",
+        "check_module": "mcp"
+      },
+      "otel": {
+        "name": "otel",
+        "summary": "OpenTelemetry tracing",
+        "description": "Exports a span per inference to an OTLP collector when HFL_OTEL_ENABLED=true.",
+        "check_module": "opentelemetry.sdk"
       }
     }
   },

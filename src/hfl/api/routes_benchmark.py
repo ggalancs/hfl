@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from hfl.api.model_loader import load_llm
+from hfl.exceptions import ModelNotFoundError
 from hfl.logging_config import log_internal_failure
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ async def _stream_events(model: str, req: BenchmarkRequest) -> AsyncIterator[str
 
     try:
         engine, _ = await load_llm(model)
-    except FileNotFoundError:
+    except (ModelNotFoundError, FileNotFoundError):  # load_llm raises the former
         # This endpoint has no owner guard, so the caller may be a remote
         # *user*: name the model they asked for, never the resolver's
         # message — that one spells out where on disk we looked.
@@ -88,15 +89,22 @@ async def api_benchmark(
         req = BenchmarkRequest()
 
     if not req.stream:
+        # The figures are in the "summary" events; the last event ("done")
+        # carries none, and it was all this answer returned (local audit B3).
         last: dict[str, Any] = {"status": "starting"}
+        summaries: list[dict[str, Any]] = []
         async for line in _stream_events(model, req):
             try:
                 last = json.loads(line.strip())
             except (json.JSONDecodeError, ValueError):
                 continue
+            if last.get("status") == "summary":
+                summaries.append({k: v for k, v in last.items() if k != "status"})
         if last.get("status") == "failed":
-            raise HTTPException(status_code=400, detail=last.get("error", "unknown"))
-        return JSONResponse(content=last)
+            error = str(last.get("error", "unknown"))
+            status = 404 if error.startswith("model not found") else 400
+            raise HTTPException(status_code=status, detail=error)
+        return JSONResponse(content={**last, "summaries": summaries})
 
     return StreamingResponse(
         _stream_events(model, req),

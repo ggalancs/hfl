@@ -184,7 +184,9 @@ class TestComplianceReport:
         assert output_file.exists()
 
         report = json.loads(output_file.read_text())
-        assert report["hfl_version"] == "0.1.0"
+        from hfl import __version__
+
+        assert report["hfl_version"] == __version__  # it said "0.1.0" whatever ran
         assert report["total_models"] == 2
         assert len(report["models"]) == 2
 
@@ -259,3 +261,19 @@ class TestComplianceReport:
         report = json.loads(output_file.read_text())
         assert report["total_models"] == 0
         assert report["models"] == []
+
+
+def test_compliance_report_refuses_an_unknown_format(tmp_path):
+    """--format pdf wrote nothing, yet said "Report saved" and exited 0
+    (local audit A5)."""
+    from typer.testing import CliRunner
+
+    from hfl.cli.main import app
+
+    target = tmp_path / "report.pdf"
+    result = CliRunner().invoke(
+        app, ["compliance-report", "--output", str(target), "--format", "pdf"]
+    )
+    assert result.exit_code == 2
+    assert "json or markdown" in result.stdout
+    assert not target.exists()

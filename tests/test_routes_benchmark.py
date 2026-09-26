@@ -127,17 +127,23 @@ class TestBenchmarkNonStream:
         )
         assert response.status_code == 200
         body = response.json()
-        # The last event of the stream is "done" — the route surfaces
-        # it as the JSON body.
+        # The last event of the stream is "done"; the figures come with it:
+        # "done" alone was all this answer carried (local audit B3).
         assert body["status"] == "done"
+        assert len(body["summaries"]) == 1
+        assert body["summaries"][0]["prompt_length"] == 16
+        assert "ttft_p50_ms" in body["summaries"][0]
 
 
 class TestBenchmarkFailureSurfaces:
-    def test_unknown_model_returns_400_or_404(self, client, monkeypatch):
+    def test_unknown_model_returns_404(self, client, monkeypatch):
+        """What load_llm really raises is ModelNotFoundError; the route
+        caught only FileNotFoundError (the mock this test used to raise)."""
         from hfl.api import routes_benchmark as module
+        from hfl.exceptions import ModelNotFoundError
 
         async def _missing(name):
-            raise FileNotFoundError(f"model not found: {name}")
+            raise ModelNotFoundError(name)
 
         monkeypatch.setattr(module, "load_llm", _missing)
 
@@ -145,9 +151,24 @@ class TestBenchmarkFailureSurfaces:
             "/api/benchmark/does-not-exist",
             json={"runs_per_length": 1, "prompt_lengths": [16], "stream": False},
         )
-        # FileNotFoundError surfaces in the failure event, which the
-        # non-stream path reraises as 400.
-        assert response.status_code in (400, 404)
+        assert response.status_code == 404
+
+    def test_unknown_model_streams_a_failure_event(self, client, monkeypatch):
+        """Streaming, a ModelNotFoundError escaped the generator and cut the
+        response instead of ending it with a failure event."""
+        from hfl.api import routes_benchmark as module
+        from hfl.exceptions import ModelNotFoundError
+
+        async def _missing(name):
+            raise ModelNotFoundError(name)
+
+        monkeypatch.setattr(module, "load_llm", _missing)
+        response = client.post(
+            "/api/benchmark/does-not-exist",
+            json={"runs_per_length": 1, "prompt_lengths": [16], "stream": True},
+        )
+        events = _parse_ndjson(response.text)
+        assert events[-1] == {"status": "failed", "error": "model not found: does-not-exist"}
 
     def test_unknown_model_event_names_the_model_not_the_resolver(self, client, monkeypatch):
         """``/api/benchmark`` carries no owner guard, so the caller may be
