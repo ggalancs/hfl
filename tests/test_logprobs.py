@@ -33,25 +33,25 @@ def _install(manifest, *, result: GenerationResult):
 
 
 class TestConverter:
-    def test_default_is_zero(self):
+    def test_default_is_off(self):
         cfg = ollama_to_generation_config(None)
-        assert cfg.logprobs == 0
+        assert cfg.logprobs is None
 
     def test_positive_value_accepted(self):
         cfg = ollama_to_generation_config({"logprobs": 5})
         assert cfg.logprobs == 5
 
-    def test_negative_clamped_to_zero(self):
+    def test_negative_is_off(self):
         cfg = ollama_to_generation_config({"logprobs": -3})
-        assert cfg.logprobs == 0
+        assert cfg.logprobs is None
 
     def test_above_20_clamped(self):
         cfg = ollama_to_generation_config({"logprobs": 9999})
         assert cfg.logprobs == 20
 
-    def test_non_numeric_becomes_zero(self):
+    def test_non_numeric_is_off(self):
         cfg = ollama_to_generation_config({"logprobs": "blah"})
-        assert cfg.logprobs == 0
+        assert cfg.logprobs is None
 
 
 class TestGenerationResultField:

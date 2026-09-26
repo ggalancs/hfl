@@ -10,6 +10,7 @@ separately via monkeypatched ``platform.system()`` / ``machine()``.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from types import ModuleType
 
@@ -66,6 +67,8 @@ def fake_mlx(monkeypatch):
         return []
 
     sample_utils.make_sampler = _make_sampler  # type: ignore[attr-defined]
+    sample_utils.apply_top_k = lambda logprobs, k: logprobs  # type: ignore[attr-defined]
+    sample_utils.apply_top_p = lambda logprobs, p: logprobs  # type: ignore[attr-defined]
     sample_utils.make_logits_processors = _make_logits_processors  # type: ignore[attr-defined]
     fake.sample_utils = sample_utils  # type: ignore[attr-defined]
 
@@ -182,32 +185,28 @@ class TestMLXSeedAndStop:
     """#20: MLX must honour the request seed (reproducibility, parity with
     vLLM/diffusers) and stop sequences (which mlx-lm has no native support for)."""
 
-    def _seat_mlx_core(self, monkeypatch):
-        """Seat a fake ``mlx.core`` whose ``random.seed`` records calls."""
-        import types
+    @pytest.mark.skipif(importlib.util.find_spec("mlx") is None, reason="needs mlx")
+    def test_each_request_draws_from_a_key_of_its_own(self):
+        """``mx.random.seed`` did nothing through the server: mlx-lm's
+        compiled sampler reads the RNG state of the thread that imported it,
+        and requests run on worker threads — every request at temperature
+        1.2 got the same answer, and a seed was not reproducible. The
+        sampler draws from a key of its own: the global RNG, seeded or not
+        in between, changes nothing. (Not driven from extra threads here:
+        MLX streams made on them left later GPU work in the process hung.)"""
+        import mlx.core as mx
 
-        seeds: list[int] = []
-        core = ModuleType("mlx.core")
-        core.random = types.SimpleNamespace(seed=lambda s: seeds.append(s))  # type: ignore[attr-defined]
-        mx = ModuleType("mlx")
-        mx.core = core  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "mlx", mx)
-        monkeypatch.setitem(sys.modules, "mlx.core", core)
-        return seeds
+        logprobs = mx.log(mx.ones((1, 50)) / 50)  # uniform: any draw as likely
 
-    def test_seed_applied_when_requested(self, fake_mlx, monkeypatch):
-        seeds = self._seat_mlx_core(monkeypatch)
-        engine = mlx_engine.MLXEngine()
-        engine.load("/fake/model")
-        engine.generate("hi", GenerationConfig(seed=123))
-        assert seeds == [123]
+        def draws(seed: int) -> list[int]:
+            sampler = mlx_engine.MLXEngine._keyed_sampler(
+                GenerationConfig(seed=seed, temperature=1.0, top_k=0, top_p=1.0)
+            )
+            mx.random.seed(0)  # what used to be the lever: no effect now
+            return [sampler(logprobs).item() for _ in range(8)]
 
-    def test_seed_not_applied_when_negative(self, fake_mlx, monkeypatch):
-        seeds = self._seat_mlx_core(monkeypatch)
-        engine = mlx_engine.MLXEngine()
-        engine.load("/fake/model")
-        engine.generate("hi", GenerationConfig(seed=-1))
-        assert seeds == []
+        assert draws(123) == draws(123)
+        assert draws(-1) != draws(-1)
 
     def test_stop_truncates_generate(self, fake_mlx):
         engine = mlx_engine.MLXEngine()

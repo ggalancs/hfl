@@ -201,7 +201,6 @@ class MLXEngine(InferenceEngine):
             cache, rest = make_prompt_cache(self._model), tokens
         self.last_prompt_tokens_reused = len(tokens) - len(rest)
 
-        self._maybe_seed(cfg)
         key: list[int] | None = list(tokens)
         store_it = False
         try:
@@ -343,11 +342,7 @@ class MLXEngine(InferenceEngine):
             make_sampler,
         )
 
-        sampler = make_sampler(
-            temp=cfg.temperature,
-            top_p=cfg.top_p if cfg.top_p else 0.0,
-            top_k=cfg.top_k if cfg.top_k else 0,
-        )
+        sampler = make_sampler(temp=0.0) if cfg.temperature <= 0 else self._keyed_sampler(cfg)
         logits_processors = make_logits_processors(
             repetition_penalty=cfg.repeat_penalty if cfg.repeat_penalty != 1.0 else None,
         )
@@ -358,17 +353,38 @@ class MLXEngine(InferenceEngine):
         }
 
     @staticmethod
-    def _maybe_seed(cfg: GenerationConfig) -> None:
-        """Seed mlx's global RNG for reproducible output when a concrete seed
-        is requested (parity with the vLLM / diffusers backends — ENG-10/11).
-        mlx-lm has no per-call seed argument, so we seed the global RNG."""
-        if cfg.seed is not None and cfg.seed >= 0:
-            try:
-                import mlx.core as mx
+    def _keyed_sampler(cfg: GenerationConfig) -> Any:
+        """mlx-lm's top-k / top-p / temperature sampling, drawing from a key
+        of this request's own: the seed asked for (reproducible output), else
+        one from the OS.
 
-                mx.random.seed(int(cfg.seed))
-            except Exception:  # pragma: no cover - mlx optional / API drift
-                logger.debug("mlx seed failed", exc_info=True)
+        Not ``mx.random.seed``: mlx-lm compiles its sampler over the RNG state
+        of the thread that imported it, and each request runs on a worker
+        thread, so seeding did nothing — every request at temperature 1.2
+        got the same answer, and a seed did not make one reproducible
+        (measured through the server)."""
+        import os
+
+        seed = cfg.seed if cfg.seed is not None and cfg.seed >= 0 else None
+        if seed is None:
+            seed = int.from_bytes(os.urandom(4), "little")
+        state: dict[str, Any] = {"key": None}
+        top_k, top_p, temp = cfg.top_k or 0, cfg.top_p or 0.0, cfg.temperature
+
+        def sample(logprobs: Any) -> Any:
+            import mlx.core as mx  # at the first draw: mlx itself is optional
+            from mlx_lm.sample_utils import apply_top_k, apply_top_p
+
+            if state["key"] is None:
+                state["key"] = mx.random.key(int(seed))
+            if 0 < top_p < 1:
+                logprobs = apply_top_p(logprobs, top_p)
+            if top_k > 0:
+                logprobs = apply_top_k(logprobs, top_k)
+            state["key"], draw = mx.random.split(state["key"])
+            return mx.random.categorical(logprobs * (1 / temp), key=draw)
+
+        return sample
 
     @staticmethod
     def _stop_strings(cfg: GenerationConfig) -> list[str]:
@@ -395,7 +411,6 @@ class MLXEngine(InferenceEngine):
         from mlx_lm import generate
 
         start_ns = time.monotonic_ns()
-        self._maybe_seed(cfg)
         kwargs = self._build_sampling(cfg)
         try:
             text = generate(
@@ -444,6 +459,8 @@ class MLXEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
+        if cfg.logprobs is not None:
+            return self._generate_logprobs(prompt, cfg)
         if self._prompt_store is not None:
             return self._generate_cached(prompt, cfg)
         text, n_prompt, n_gen, total_ns = self._run_generate(prompt, cfg)
@@ -460,6 +477,76 @@ class MLXEngine(InferenceEngine):
             load_duration=0,
             prompt_eval_duration=int(total_ns * n_prompt / max(1, n_prompt + n_gen)),
             eval_duration=int(total_ns * n_gen / max(1, n_prompt + n_gen)),
+        )
+
+    def _generate_logprobs(self, prompt: str, cfg: GenerationConfig) -> GenerationResult:
+        """``generate`` with each token's log-probability and its
+        ``cfg.logprobs`` best alternatives — mlx-lm gives the distribution
+        each token was drawn from with every step."""
+        import numpy as np
+
+        start_ns = time.monotonic_ns()
+        if self._prompt_store is not None:
+            responses = self._cached_responses(prompt, cfg)
+        else:
+            from mlx_lm import stream_generate
+
+            responses = stream_generate(
+                self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg)
+            )
+        top = max(0, min(20, int(cfg.logprobs or 0)))
+        eos = set(getattr(self._tokenizer, "eos_token_ids", None) or [])
+        stops = self._stop_strings(cfg)
+
+        def piece(token: int) -> dict:
+            text = self._tokenizer.decode([token])
+            return {"token": text, "bytes": list(text.encode("utf-8"))}
+
+        text, entries, last, finish = "", [], None, "length"
+        try:
+            for response in responses:
+                last = response
+                token = getattr(response, "token", None)
+                if token is None or int(token) in eos:
+                    finish = "stop"
+                    continue
+                # In the model's dtype (bf16: a probability of 1.0001);
+                # normalised again in float64.
+                logprobs = np.array(response.logprobs, dtype=np.float64).reshape(-1)
+                peak = logprobs.max()
+                logprobs -= peak + np.log(np.exp(logprobs - peak).sum())
+                best = list(np.argpartition(-logprobs, top)[:top]) if top else []
+                best.sort(key=lambda i: -logprobs[i])
+                entries.append(
+                    {
+                        **piece(int(token)),
+                        "logprob": float(logprobs[int(token)]),
+                        "top_logprobs": [
+                            {**piece(int(i)), "logprob": float(logprobs[i])} for i in best
+                        ],
+                    }
+                )
+                text += response.text
+                if stops and self._earliest_stop(text, stops) is not None:
+                    text = text[: self._earliest_stop(text, stops)]
+                    finish = "stop"
+                    break
+                if getattr(response, "finish_reason", None) == "stop":
+                    finish = "stop"
+        finally:
+            close = getattr(responses, "close", None)
+            if callable(close):
+                close()
+        total_ns = time.monotonic_ns() - start_ns
+        n_prompt = int(getattr(last, "prompt_tokens", 0) or 0)
+        return GenerationResult(
+            text=text,
+            tokens_generated=len(entries),
+            tokens_prompt=n_prompt,
+            tokens_per_second=len(entries) / (total_ns / 1e9) if total_ns else 0,
+            stop_reason=finish,
+            total_duration=total_ns,
+            logprobs=entries,
         )
 
     def _generate_cached(self, prompt: str, cfg: GenerationConfig) -> GenerationResult:
@@ -573,7 +660,6 @@ class MLXEngine(InferenceEngine):
         else:
             from mlx_lm import stream_generate
 
-            self._maybe_seed(cfg)
             kwargs = self._build_sampling(cfg)
             gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
 

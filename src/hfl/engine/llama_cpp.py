@@ -520,6 +520,7 @@ def _install_template_formatters(model: Any) -> tuple[list[Any], bool]:
 
     class _Formatter(llama_chat_format.Jinja2ChatFormatter):
         template_vars: dict[str, Any] = {}
+        hfl_name = ""  # the name llama-cpp-python registers its handler under
 
         def __call__(self, **kwargs: Any) -> Any:
             return super().__call__(**{**self.template_vars, **kwargs})
@@ -2052,20 +2053,109 @@ class LlamaCppEngine(InferenceEngine):
         with self._native:
             if self._model is None:
                 raise RuntimeError("no model loaded")
-            named = {getattr(f, "hfl_name", ""): f for f in self._formatters}
-            default = named.get("chat_template.default")
-            if default is None:
-                raise NotImplementedError("this model has no chat template in its GGUF")
-            msgs, tools, _ = self._tool_messages(messages, tools)
-            cfg = config or GenerationConfig()
-            default.template_vars = reasoning_template_vars(cfg.reasoning)
-            rendered = default(messages=msgs, tools=tools) if tools else default(messages=msgs)
-            tokens = self._model.tokenize(
-                rendered.prompt.encode("utf-8"),
-                add_bos=not rendered.added_special,
-                special=True,
-            )
+            tokens, _, _ = self._template_prompt(messages, config or GenerationConfig(), tools)
             return len(tokens)
+
+    def _template_prompt(
+        self, messages: list[ChatMessage], cfg: GenerationConfig, tools: list[dict] | None
+    ) -> tuple[list[int], list[dict] | None, bool]:
+        """The prompt tokens ``chat`` feeds the model, rendered by the GGUF
+        template's formatter as llama-cpp-python's handler renders it, and
+        the tools and markers ``_tool_messages`` settled on."""
+        named = {getattr(f, "hfl_name", ""): f for f in self._formatters}
+        default = named.get("chat_template.default")
+        if default is None:
+            raise NotImplementedError("this model has no chat template in its GGUF")
+        msgs, tools, markers = self._tool_messages(messages, tools)
+        default.template_vars = reasoning_template_vars(cfg.reasoning)
+        rendered = default(messages=msgs, tools=tools) if tools else default(messages=msgs)
+        tokens = self._model.tokenize(
+            rendered.prompt.encode("utf-8"),
+            add_bos=not rendered.added_special,
+            special=True,
+        )
+        return list(tokens), tools, markers
+
+    def _sample_with_logprobs(
+        self, tokens: list[int], cfg: GenerationConfig, penalty: float, special: bool
+    ) -> tuple[str, list[dict], int, str]:
+        """Generate from ``tokens`` with each token's log-probability and its
+        ``cfg.logprobs`` best alternatives: ``(text, entries, n, finish)``.
+
+        llama-cpp-python gives logprobs only to a model opened with
+        ``logits_all`` — the logits of every position of the context, about
+        5 GB for an 8k context and a 152k vocabulary — and without it
+        ``/api/generate`` with ``logprobs`` answered 500. Here a logits
+        processor keeps one row, the distribution the next token is drawn
+        from (before sampling reshapes it), and the generator says which
+        token was drawn.
+        """
+        import numpy as np
+        from llama_cpp import LogitsProcessorList
+        from llama_cpp import llama_cpp as _lcpp
+
+        model = self._model
+        n_vocab = model.n_vocab()
+        seen: dict[str, Any] = {}
+
+        def capture(input_ids: Any, logits: Any) -> Any:
+            if len(logits) != n_vocab:  # not the full, id-ordered row
+                raise NotImplementedError("logprobs: unexpected logits layout")
+            seen["row"] = np.array(logits, dtype=np.float64)
+            return logits
+
+        if cfg.seed >= 0:
+            model.set_seed(cfg.seed)
+        top = max(0, min(20, int(cfg.logprobs or 0)))
+        stops = [stop for stop in (cfg.stop or []) if stop]
+        vocab = model._model.vocab
+        out: list[int] = []
+        entries: list[dict] = []
+        text = b""
+        finish = "length"
+
+        def piece(token: int) -> tuple[bytes, dict]:
+            raw = model.detokenize([token], prev_tokens=out, special=special)
+            return raw, {"token": raw.decode("utf-8", errors="replace"), "bytes": list(raw)}
+
+        steps = model.generate(
+            tokens,
+            top_k=cfg.top_k,
+            top_p=cfg.top_p,
+            temp=cfg.temperature,
+            repeat_penalty=penalty,
+            logits_processor=LogitsProcessorList([capture]),
+        )
+        try:
+            for token in steps:
+                row = seen.pop("row")
+                if _lcpp.llama_vocab_is_eog(vocab, token):
+                    finish = "stop"
+                    break
+                peak = row.max()
+                logprobs = row - (peak + np.log(np.exp(row - peak).sum()))
+                raw, entry = piece(token)
+                entry["logprob"] = float(logprobs[token])
+                best: list[int] = []
+                if top:
+                    best = list(np.argpartition(-logprobs, top)[:top])
+                    best.sort(key=lambda i: -logprobs[i])
+                entry["top_logprobs"] = [
+                    {**piece(int(i))[1], "logprob": float(logprobs[i])} for i in best
+                ]
+                entries.append(entry)
+                out.append(token)
+                text += raw
+                decoded = text.decode("utf-8", errors="replace")
+                cuts = [decoded.find(stop) for stop in stops if stop in decoded]
+                if cuts:
+                    text, finish = decoded[: min(cuts)].encode("utf-8"), "stop"
+                    break
+                if cfg.max_tokens and len(out) >= cfg.max_tokens:
+                    break
+        finally:
+            steps.close()
+        return text.decode("utf-8", errors="replace"), entries, len(out), finish
 
     def _remove_lora(self, adapter_id: str) -> None:
         """Take an applied adapter off the model."""
@@ -2137,9 +2227,25 @@ class LlamaCppEngine(InferenceEngine):
                 {"Prompt": prompt, "System": "", "Messages": []},
             )
 
-        # Phase 12 P1 — V2 row 7. llama-cpp's ``__call__`` accepts
-        # ``logprobs`` directly; passing 0 keeps them off (library
-        # default).
+        if cfg.logprobs is not None:
+            start_ns = time.monotonic_ns()
+            add_bos = bool(getattr(self, "_tokenizer_add_bos", True))
+            encoded = effective_prompt.encode("utf-8")
+            prompt_tokens = list(self._model.tokenize(encoded, add_bos=add_bos, special=True))
+            text, entries, n_gen, finish = self._sample_with_logprobs(
+                prompt_tokens, cfg, cfg.repeat_penalty, special=False
+            )
+            total_ns = time.monotonic_ns() - start_ns
+            return GenerationResult(
+                text=text,
+                tokens_generated=n_gen,
+                tokens_prompt=len(prompt_tokens),
+                tokens_per_second=n_gen / (total_ns / 1e9) if total_ns else 0,
+                stop_reason=finish,
+                total_duration=total_ns,
+                logprobs=entries,
+            )
+
         call_kwargs: dict = {
             "max_tokens": cfg.max_tokens,
             "temperature": cfg.temperature,
@@ -2149,9 +2255,6 @@ class LlamaCppEngine(InferenceEngine):
             "stop": cfg.stop,
             "seed": cfg.seed if cfg.seed >= 0 else None,
         }
-        if cfg.logprobs and cfg.logprobs > 0:
-            call_kwargs["logprobs"] = cfg.logprobs
-
         # llama.cpp's perf counters accumulate per context; zero them so the
         # prompt-eval / eval split below describes THIS call.
         _perf_reset(self._model)
@@ -2164,37 +2267,6 @@ class LlamaCppEngine(InferenceEngine):
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
         n_prompt = usage.get("prompt_tokens", 0)
-
-        # Phase 12 P1 — V2 row 7. Normalise llama-cpp's OpenAI-style
-        # logprobs block into a token-major list so routes don't have
-        # to re-traverse. Shape:
-        #   [{"token": str, "logprob": float,
-        #     "top_logprobs": [{"token", "logprob"}, ...]}, ...]
-        logprobs_list: list[dict] | None = None
-        raw_lp = output["choices"][0].get("logprobs") if cfg.logprobs else None
-        if raw_lp:
-            tokens = raw_lp.get("tokens", []) or []
-            token_lps = raw_lp.get("token_logprobs", []) or []
-            top_lps = raw_lp.get("top_logprobs", []) or []
-            logprobs_list = []
-            for i, token in enumerate(tokens):
-                lp_val = token_lps[i] if i < len(token_lps) else None
-                alternatives_raw = top_lps[i] if i < len(top_lps) else {}
-                alternatives = (
-                    [
-                        {"token": alt_tok, "logprob": alt_lp}
-                        for alt_tok, alt_lp in (alternatives_raw or {}).items()
-                    ]
-                    if isinstance(alternatives_raw, dict)
-                    else []
-                )
-                logprobs_list.append(
-                    {
-                        "token": token,
-                        "logprob": lp_val,
-                        "top_logprobs": alternatives,
-                    }
-                )
 
         # Guard the division: two monotonic_ns() reads can be equal on a fast
         # completion / low-resolution clock, making elapsed == 0. The argument is
@@ -2240,7 +2312,6 @@ class LlamaCppEngine(InferenceEngine):
             prompt_eval_duration=prompt_eval_ns,
             eval_duration=eval_ns,
             context_tokens=context_tokens,
-            logprobs=logprobs_list,
         )
 
     def generate_stream(
@@ -2374,6 +2445,24 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
 
         penalty = repeat_penalty_for(cfg, messages, tools)
+        if cfg.logprobs is not None:
+            if cfg.response_format is not None:
+                raise NotImplementedError("logprobs together with a response format")
+            start_ns = time.monotonic_ns()
+            prompt, tools, markers = self._template_prompt(messages, cfg, tools)
+            text, entries, n_gen, finish = self._sample_with_logprobs(
+                prompt, cfg, penalty, special=markers
+            )
+            total_ns = time.monotonic_ns() - start_ns
+            return GenerationResult(
+                text=text,
+                tokens_generated=n_gen,
+                tokens_prompt=len(prompt),
+                tokens_per_second=n_gen / (total_ns / 1e9) if total_ns else 0,
+                stop_reason=finish,
+                total_duration=total_ns,
+                logprobs=entries,
+            )
         msgs, tools, markers = self._tool_messages(messages, tools)
         # Set on every request, so one never inherits the last one's.
         for formatter in self._formatters:

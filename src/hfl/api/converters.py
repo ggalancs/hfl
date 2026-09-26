@@ -104,6 +104,8 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
     except (TypeError, ValueError):
         logprobs_val = 0
     logprobs_val = max(0, min(20, logprobs_val))
+    # Ollama's ``options.logprobs: N``: N alternatives; absent or 0, none.
+    wanted = logprobs_val or None
     return GenerationConfig(
         temperature=temperature,
         top_p=top_p,
@@ -117,7 +119,7 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
         # legacy ``context`` array on the non-streaming /api/generate
         # response. Default off — most clients use /api/chat instead.
         keep_context=bool(opts.get("keep_context", False)),
-        logprobs=logprobs_val,
+        logprobs=wanted,
     )
 
 

@@ -160,6 +160,30 @@ def _canonical_tool_calls(calls: list[dict[str, Any]] | None) -> list[dict] | No
     return canonical
 
 
+def _logprob_entries(raw: Any, top: int) -> list[dict] | None:
+    """llama-server's per-token logprobs as HFL's entries (OpenAI's shape,
+    without its token ids), dropping the end-of-generation token it lists
+    last — OpenAI never shows one — and alternatives beyond ``top``."""
+    if not isinstance(raw, list):
+        return None
+
+    def entry(item: dict) -> dict:
+        return {
+            "token": item.get("token", ""),
+            "logprob": float(item.get("logprob", 0.0)),
+            "bytes": item.get("bytes") or [],
+        }
+
+    entries = [
+        {**entry(item), "top_logprobs": [entry(a) for a in (item.get("top_logprobs") or [])[:top]]}
+        for item in raw
+        if isinstance(item, dict)
+    ]
+    while entries and not entries[-1]["token"] and not entries[-1]["bytes"]:
+        entries.pop()
+    return entries
+
+
 def _as_marker(call: dict) -> str:
     """A structured call written back as the ``<tool_call>`` text HFL's
     parsers read, for the streaming path that only carries text."""
@@ -453,6 +477,11 @@ class LlamaServerEngine(InferenceEngine):
             body["chat_template_kwargs"] = template_vars
         if tools:
             body["tools"] = tools
+        if cfg.logprobs is not None:
+            body["logprobs"] = True
+            # At 0 it sends none at all, not even the drawn token's: ask for
+            # one alternative and keep none (``_logprob_entries``).
+            body["top_logprobs"] = max(1, cfg.logprobs)
         response_format = _response_format(cfg.response_format)
         if response_format is not None:
             body["response_format"] = response_format
@@ -473,13 +502,17 @@ class LlamaServerEngine(InferenceEngine):
         data = response.json()
         choice = data["choices"][0]
         message = choice.get("message") or {}
-        return self._result(
+        result = self._result(
             self._answer(message.get("content") or "", cfg),
             data,
             started,
             choice.get("finish_reason"),
             _canonical_tool_calls(message.get("tool_calls")),
         )
+        if cfg.logprobs is not None:
+            content = (choice.get("logprobs") or {}).get("content")
+            result.logprobs = _logprob_entries(content, cfg.logprobs)
+        return result
 
     def chat_stream(
         self,
@@ -533,7 +566,10 @@ class LlamaServerEngine(InferenceEngine):
         return counted.feed(_stream())
 
     def _completion_body(self, prompt: str, cfg: GenerationConfig) -> dict[str, Any]:
-        return {"prompt": prompt, "n_predict": cfg.max_tokens, **_sampling(cfg)}
+        body = {"prompt": prompt, "n_predict": cfg.max_tokens, **_sampling(cfg)}
+        if cfg.logprobs is not None:
+            body["n_probs"] = max(1, cfg.logprobs)  # the drawn token is one of them
+        return body
 
     def generate(self, prompt: str, config: GenerationConfig | None = None) -> GenerationResult:
         cfg = config or GenerationConfig()
@@ -542,7 +578,10 @@ class LlamaServerEngine(InferenceEngine):
         response.raise_for_status()
         data = response.json()
         stop = "length" if data.get("stopped_limit") else "stop"
-        return self._result(data.get("content") or "", data, started, stop, None)
+        result = self._result(data.get("content") or "", data, started, stop, None)
+        if cfg.logprobs is not None:
+            result.logprobs = _logprob_entries(data.get("completion_probabilities"), cfg.logprobs)
+        return result
 
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:
         cfg = config or GenerationConfig()

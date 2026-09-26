@@ -19,6 +19,7 @@ from hfl.engine.base import (
     InferenceEngine,
     held,
     reasoning_template_vars,
+    refuse_logprobs,
 )
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,7 @@ class TransformersEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
+        refuse_logprobs(config, "Transformers")
         with self._native:  # see ``hfl.engine.base.held``
             return self._generate(prompt, config)
 

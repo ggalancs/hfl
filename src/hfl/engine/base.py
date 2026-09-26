@@ -107,11 +107,11 @@ class GenerationConfig:
     # because keeping token arrays in memory costs RAM and most
     # clients now use /api/chat with role-tagged messages instead.
     keep_context: bool = False
-    # Return per-token log probabilities (Phase 12 P1 — V2 row 7).
-    # ``0`` (default) disables; 1-20 requests that many top alternative
-    # tokens per position alongside the sampled one. Engines without
-    # logprob support silently ignore the knob.
-    logprobs: int = 0
+    # Per-token log probabilities: ``None`` (default) for none; ``0`` for
+    # the drawn token's only; 1-20 for that many best alternatives too.
+    # An engine that cannot give them raises ``NotImplementedError`` rather
+    # than answer without them.
+    logprobs: int | None = None
     # Speculative decoding (Phase 15 P2 — V2 row 11). Path or
     # registry name of a smaller "draft" model. Empty / None
     # disables speculation (the default). Engines that don't expose
@@ -247,6 +247,13 @@ def stream_counts(stream: object) -> tuple[int | None, int | None]:
         value if isinstance(value, int) and not isinstance(value, bool) else None
         for value in counts
     )
+
+
+def refuse_logprobs(config: "GenerationConfig | None", backend: str) -> None:
+    """For a backend that cannot give per-token logprobs: an error when they
+    are asked for, rather than an answer without them."""
+    if config is not None and config.logprobs is not None:
+        raise NotImplementedError(f"the {backend} backend cannot return logprobs")
 
 
 class InferenceEngine(ABC):

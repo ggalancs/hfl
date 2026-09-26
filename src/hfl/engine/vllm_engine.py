@@ -29,6 +29,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    refuse_logprobs,
 )
 from hfl.engine.prompt_builder import PromptBuilder, PromptFormat
 
@@ -155,6 +156,7 @@ class VLLMEngine(InferenceEngine):
         """Generate text completion."""
         if not self._engine:
             raise RuntimeError("Model not loaded")
+        refuse_logprobs(config, "vLLM")
 
         sampling_params = self._build_sampling_params(config)
 

@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import ollama_to_generation_config
@@ -384,6 +384,8 @@ async def api_generate(
         )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
+    except NotImplementedError as exc:  # e.g. logprobs on a backend without them
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
     # pre-0.5.1). Clients keying off these fields now see the
     # engine's actual measurements.
@@ -693,6 +695,8 @@ async def api_chat(
             )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
+    except NotImplementedError as exc:  # e.g. logprobs on a backend without them
+        return JSONResponse(status_code=400, content={"error": str(exc)})
 
     # With ``think``, the reasoning goes in ``message.thinking`` — all of it
     # when the token cap cut it short (it used to be lost then).
@@ -719,6 +723,10 @@ async def api_chat(
         "eval_count": result.tokens_generated,
         "eval_duration": result.eval_duration,
     }
+    # As /api/generate does: ``options.logprobs`` reached the engine and
+    # its answer, and /api/chat never sent them back.
+    if getattr(result, "logprobs", None) is not None:
+        envelope["logprobs"] = result.logprobs
     # Phase 10 P1: replay-ready agent-loop trace for consumers that
     # want to inspect each tool invocation the server dispatched on
     # their behalf.

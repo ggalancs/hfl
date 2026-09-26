@@ -7,7 +7,7 @@ These schemas match the OpenAI API specification for drop-in compatibility.
 
 from typing import Literal, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ----------------------------------------------------------------------
 # Vision / multimodal content parts (Phase 4, P0-6)
@@ -246,6 +246,19 @@ class ChatCompletionRequest(BaseModel):
         None,
         description="OpenAI tool_choice hint; accepted for compatibility.",
     )
+    logprobs: bool = Field(
+        False, description="Return each output token's log-probability (not with stream)"
+    )
+    top_logprobs: int | None = Field(
+        None, ge=0, le=20, description="With logprobs: that many best alternatives per token"
+    )
+    n: int = Field(1, ge=1, le=16, description="How many answers to generate (not with stream)")
+
+    @model_validator(mode="after")
+    def top_logprobs_needs_logprobs(self) -> "ChatCompletionRequest":
+        if self.top_logprobs is not None and not self.logprobs:
+            raise ValueError("top_logprobs requires logprobs to be true")
+        return self
 
     @field_validator("messages")
     @classmethod

@@ -184,6 +184,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HFL's home: the split Qwen2.5-7B answered, the imported Qwen2.5-VL read
   the image, Qwen2.5-0.5B-Instruct as an MLX 4-bit build and as the Hub has
   it both answered on MLX, and every file was still there after `hfl rm`.
+- **Per-token logprobs and `n` answers on `/v1/chat/completions`.**
+  `logprobs` / `top_logprobs` (up to 20 alternatives) and `n` (up to 16),
+  as OpenAI's API has them, on the default GGUF backend, llama-server and
+  MLX; a backend that cannot give logprobs (Transformers, vLLM) answers
+  400 instead of answering without them, and with `stream` both are
+  refused for now rather than ignored. On the default backend they cost
+  one row of logits per token, not llama-cpp-python's `logits_all` (about
+  5 GB for an 8k context): its values equal the library's own to four
+  decimals on the same model, and llama-server's for the same prompt.
+  Checked with the official `openai` SDK on the three backends.
 - **`previous_response_id` on `/v1/responses`.** A client can send only
   its new input and name the response it follows, as OpenAI's API allows:
   HFL supplies the conversation before it (without that response's
@@ -370,6 +380,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on it (loading and embedding share one lock, which a timed-out call keeps
   until its thread leaves the model), and shutdown unloads it. Checked for
   real: one embedding server alive across switches, none once HFL stopped.
+- **`/api/generate` with `logprobs` answered 500** on the default backend
+  (llama-cpp-python gives them only to a model opened with `logits_all`),
+  and **`/api/chat` never returned them**. Both return each token's
+  log-probability and its best alternatives now.
+- **MLX sampled the same answer over and over.** Through the server, every
+  request at temperature 1.2 got the same reply, and a `seed` did not make
+  one reproducible: mlx-lm's compiled sampler reads the RNG state of the
+  thread that imported it, requests run on worker threads, so seeding them
+  did nothing. Each request now draws from a key of its own — its seed,
+  or one from the OS. Checked through the server: four different answers
+  to `n=4`, the same one twice for the same seed.
 - **Pulling a model again dropped its alias.** The new entry replaced the
   old one without it, so every client that used the alias stopped finding
   the model. An alias is kept unless another is given.

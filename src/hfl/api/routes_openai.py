@@ -13,7 +13,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
 
 from fastapi import APIRouter
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import openai_to_generation_config
@@ -203,6 +203,20 @@ async def chat_completions(
 
         gen_config.response_format = normalize_openai_response_format(req.response_format)
 
+    if req.stream and (req.logprobs or req.n > 1):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "logprobs and n > 1 are not supported with stream yet",
+                    "type": "invalid_request_error",
+                    "param": "logprobs" if req.logprobs else "n",
+                }
+            },
+        )
+    if req.logprobs:
+        gen_config.logprobs = req.top_logprobs or 0
+
     if req.stream:
         return await prepare_stream_response(
             lambda slot: _stream_chat(
@@ -215,17 +229,58 @@ async def chat_completions(
     # Run sync engine call in thread pool with timeout, serialized by
     # the inference dispatcher (spec §5.3). ``tools`` is forwarded as a
     # kwarg so the model's tool-aware chat template is applied.
-    try:
-        result = await run_dispatched(
-            state.engine.chat,
-            messages,
-            gen_config,
-            tools=tools,
-            operation="chat_completion",
-        )
-    except (QueueFullError, QueueTimeoutError) as exc:
-        return queue_response_from_error(exc, path="/v1/chat/completions")
+    # ``n`` answers, one after another (the model is shared); a seed, when
+    # given, is moved on for each so they can differ.
+    results = []
+    for index in range(req.n):
+        if index and gen_config.seed >= 0:
+            gen_config.seed += 1
+        try:
+            results.append(
+                await run_dispatched(
+                    state.engine.chat,
+                    messages,
+                    gen_config,
+                    tools=tools,
+                    operation="chat_completion",
+                )
+            )
+        except (QueueFullError, QueueTimeoutError) as exc:
+            return queue_response_from_error(exc, path="/v1/chat/completions")
+        except NotImplementedError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": str(exc), "type": "invalid_request_error"}},
+            )
+    choices = [
+        _choice(index, result, req, tools, tools_disabled, gen_config)
+        for index, result in enumerate(results)
+    ]
+    first = results[0]
+    generated = sum(result.tokens_generated for result in results)
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": req.model,
+        "choices": choices,
+        "usage": {
+            "prompt_tokens": first.tokens_prompt,
+            "completion_tokens": generated,
+            "total_tokens": first.tokens_prompt + generated,
+        },
+    }
 
+
+def _choice(
+    index: int,
+    result: Any,
+    req: ChatCompletionRequest,
+    tools: list[dict] | None,
+    tools_disabled: bool,
+    gen_config: GenerationConfig,
+) -> dict[str, Any]:
+    """One answer as an OpenAI ``choice``."""
     # Shared decision (see chat_core): prefer engine tool_calls, else parse
     # markers; "none" disables both. When a tool call is present, content is
     # null and finish_reason flips to ``tool_calls`` so OpenAI-SDK agent loops
@@ -251,25 +306,10 @@ async def chat_completions(
         # Never inside the answer; beside it, as DeepSeek, vLLM and
         # llama-server send it.
         message["reasoning_content"] = resolved.reasoning
-
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": req.model,
-        "choices": [
-            {
-                "index": 0,
-                "message": message,
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": result.tokens_prompt,
-            "completion_tokens": result.tokens_generated,
-            "total_tokens": result.tokens_prompt + result.tokens_generated,
-        },
-    }
+    choice: dict[str, Any] = {"index": index, "message": message, "finish_reason": finish_reason}
+    if req.logprobs:
+        choice["logprobs"] = {"content": getattr(result, "logprobs", None) or []}
+    return choice
 
 
 def _include_usage(req: Any) -> bool:
