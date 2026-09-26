@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import platform
+import threading
 import time
 from typing import Any, Generator, Iterator, cast
 
@@ -26,6 +27,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    held,
     reasoning_template_vars,
     repeat_penalty_for,
 )
@@ -71,6 +73,8 @@ class MLXEngine(InferenceEngine):
         # disabled or when the installed mlx-lm predates it. None means the
         # engine runs exactly the pre-cache code paths.
         self._prompt_store: Any = None
+        # Held by the thread inside the model (``hfl.engine.base.held``).
+        self._native = threading.Lock()
         #: Prompt tokens the last request took from the cache instead of
         #: evaluating. Diagnostic only — the proof lives in the timings.
         self.last_prompt_tokens_reused: int = 0
@@ -96,6 +100,10 @@ class MLXEngine(InferenceEngine):
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
 
     def unload(self) -> None:
+        with self._native:
+            self._unload()
+
+    def _unload(self) -> None:
         self._model = None
         self._tokenizer = None
         self._model_path = None
@@ -425,6 +433,14 @@ class MLXEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
+        with self._native:  # see ``hfl.engine.base.held``
+            return self._generate(prompt, config)
+
+    def _generate(
+        self,
+        prompt: str,
+        config: GenerationConfig | None = None,
+    ) -> GenerationResult:
         cfg = config or GenerationConfig()
         if not self.is_loaded:
             raise RuntimeError("MLX engine is not loaded")
@@ -565,7 +581,7 @@ class MLXEngine(InferenceEngine):
                     counted.prompt_tokens = reused + int(response.prompt_tokens or 0)
                     counted.completion_tokens = int(response.generation_tokens or 0)
 
-        return counted.feed(_stream())
+        return counted.feed(held(self._native, _stream()))
 
     def _stream_until_stop(
         self, gen: Iterator[Any], stops: list[str], _piece: Any

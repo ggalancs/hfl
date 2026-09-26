@@ -552,3 +552,13 @@ class TestToolsAndReasoning:
         assert kwargs["enable_thinking"] is False
         _, kwargs = self._render(fake_mlx, "{{ tools | tojson }}")
         assert "enable_thinking" not in kwargs  # not asked: the model's default
+
+
+def test_mlx_holds_the_model_while_a_stream_is_read(fake_cache):
+    """The same rule as the GGUF engine (``hfl.engine.base.held``)."""
+    engine = _loaded()
+    stream = engine.generate_stream("hello", GenerationConfig(max_tokens=3))
+    next(iter(stream))
+    assert engine._native.locked()
+    stream.close()
+    assert not engine._native.locked()

@@ -243,8 +243,30 @@ class TestEngine:
         stream = engine.chat_stream([ChatMessage(role="user", content="w?")], tools=WEATHER)
         next(iter(stream))
         assert engine._model.detokenize([1]) == b"<tool_call>"  # on while streaming
+        stream.close()  # what the server does with a stream a client dropped
         engine.chat([ChatMessage(role="user", content="hi")])  # the next request
         assert seen["special"] == b""
+
+    def test_a_dropped_stream_holds_the_model_until_it_is_closed(self):
+        """A client dropped a stream while its worker was still inside the
+        model; the next request ran on the same context at once —
+        ``llama_decode returned -3``, then a Metal segfault (measured under
+        Claude Code). The next request must wait for the stream to close."""
+        import threading
+
+        engine, _ = self._engine()
+        stream = engine.chat_stream([ChatMessage(role="user", content="w?")])
+        next(iter(stream))  # the worker is "inside the model"
+        done = threading.Event()
+        other = threading.Thread(
+            target=lambda: (engine.chat([ChatMessage(role="user", content="hi")]), done.set())
+        )
+        other.start()
+        assert not done.wait(0.3)  # waits: the model is busy
+        stream.close()
+        assert done.wait(5)  # and runs once the stream is closed
+        other.join(5)
+        assert not engine._native.locked()
 
     def test_a_finished_stream_turns_them_off(self):
         engine, _ = self._engine()

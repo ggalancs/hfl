@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, cast
@@ -23,6 +24,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    held,
     reasoning_template_vars,
     repeat_penalty_for,
 )
@@ -1579,6 +1581,10 @@ class LlamaCppEngine(InferenceEngine):
         # Whether the template takes a system message (Mistral's does not:
         # HFL folds system text into the first user turn).
         self._template_takes_system: bool = True
+        # Held by whichever thread is inside llama.cpp for this model (see
+        # ``_holding``). A plain Lock, not an RLock: a stream may be closed
+        # on a different thread than the one that started it.
+        self._native = threading.Lock()
         # LoRA adapters on the context, in the order applied: (adapter id,
         # path, scale, llama.cpp handle). See ``apply_lora``.
         self._loras: list[tuple[str, str, float, Any]] = []
@@ -1984,6 +1990,10 @@ class LlamaCppEngine(InferenceEngine):
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
 
+    def _holding(self, chunks: Iterator[str]) -> Iterator[str]:
+        """``chunks`` read with the model held (``hfl.engine.base.held``)."""
+        return held(self._native, chunks)
+
     # ------------------------------------------------------------------ LoRA
 
     def _set_loras(self) -> None:
@@ -2001,6 +2011,10 @@ class LlamaCppEngine(InferenceEngine):
         self._model.reset()
 
     def apply_lora(self, path: str, scale: float, adapter_id: str | None = None) -> None:
+        with self._native:
+            self._apply_lora(path, scale, adapter_id)
+
+    def _apply_lora(self, path: str, scale: float, adapter_id: str | None = None) -> None:
         """Apply a LoRA adapter to the loaded model, on top of any already
         applied (``POST /api/lora/apply``, and a Modelfile's ADAPTER lines at
         load). llama-cpp-python has no API for it; llama.cpp's own has."""
@@ -2022,6 +2036,10 @@ class LlamaCppEngine(InferenceEngine):
             raise
 
     def remove_lora(self, adapter_id: str) -> None:
+        with self._native:
+            self._remove_lora(adapter_id)
+
+    def _remove_lora(self, adapter_id: str) -> None:
         """Take an applied adapter off the model."""
         found = next((entry for entry in self._loras if entry[0] == adapter_id), None)
         if found is None:
@@ -2033,6 +2051,10 @@ class LlamaCppEngine(InferenceEngine):
         _lcpp.llama_adapter_lora_free(found[3])
 
     def unload(self) -> None:
+        with self._native:
+            self._unload()
+
+    def _unload(self) -> None:
         if self._model:
             model_name = self.model_name
             self._loras = []  # llama.cpp frees them with the model
@@ -2054,6 +2076,14 @@ class LlamaCppEngine(InferenceEngine):
             logger.debug("Model unloaded: %s", model_name)
 
     def generate(
+        self,
+        prompt: str,
+        config: GenerationConfig | None = None,
+    ) -> GenerationResult:
+        with self._native:
+            return self._generate(prompt, config)
+
+    def _generate(
         self,
         prompt: str,
         config: GenerationConfig | None = None,
@@ -2217,7 +2247,7 @@ class LlamaCppEngine(InferenceEngine):
                     yield text
             _count(counted, model, first, finish)
 
-        return counted.feed(_chunks())
+        return counted.feed(self._holding(_chunks()))
 
     def _build_stop_list(
         self, caller_stop: list[str] | None, tools: list[dict] | None
@@ -2299,6 +2329,15 @@ class LlamaCppEngine(InferenceEngine):
         return out
 
     def chat(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> GenerationResult:
+        with self._native:
+            return self._chat(messages, config, tools)
+
+    def _chat(
         self,
         messages: list[ChatMessage],
         config: GenerationConfig | None = None,
@@ -2497,10 +2536,13 @@ class LlamaCppEngine(InferenceEngine):
 
         if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             harmony = self._architecture == "gpt-oss"
-            return counted.feed(_filter_gemma4_stream(_raw_chunks(), harmony=harmony))
+            # Held outermost, so closing the stream releases it at once.
+            return counted.feed(
+                self._holding(_filter_gemma4_stream(_raw_chunks(), harmony=harmony))
+            )
         # ``expose_reasoning=True`` (Phase 5 P1-1) → let the raw
         # chunks through so the caller sees the reasoning channel.
-        return counted.feed(_raw_chunks())
+        return counted.feed(self._holding(_raw_chunks()))
 
     @property
     def model_name(self) -> str:

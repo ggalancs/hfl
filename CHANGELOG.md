@@ -144,6 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level (`Reasoning: low`) and up to `high`; DeepSeek-R1 always reasons. Not
   asking leaves each model's default.
 
+- **Coding agents checked for real: `scripts/agent_check.py`.** Starts HFL
+  with a model and has Claude Code (through `hfl launch`) and Codex fix a
+  planted bug, each in a fresh folder, judged by running the code, not by
+  the agent's word; it also flags leaked markup and a server that went
+  down. With Qwen3-Coder-30B-A3B: both fixed it, clean answers, server up.
+  Its first runs found the two problems under Fixed below (a crash, a stray
+  marker).
 - **`hfl import <file or folder>`: a GGUF you already have, where it is.**
   For models downloaded by LM Studio, llama.cpp or by hand: registered in
   place, with no copy and no server running (a Modelfile's `FROM` over the
@@ -203,6 +210,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A client that stopped a reply could crash the server.** When a stream
+  was dropped mid-reply (Claude Code does; so do Open WebUI's and HFL's own
+  Stop buttons), its place in the queue was released while the worker was
+  still inside the model — a long prompt's prefill cannot be interrupted —
+  and the next request ran on the same model at the same time:
+  `llama_decode returned -3`, and under Claude Code a Metal segfault that
+  took the whole server down (reproduced: two decodes at once, the next
+  request failing). The default GGUF, MLX and Transformers engines now
+  hold their model from the first token until a stream is closed, taken by
+  the thread doing the work; the next request waits for it instead (about
+  3 s in the reproduction, then 200). Claude Code and Codex then both
+  finished a real task through HFL with the server up throughout.
+- **A stray `<tool_call>` ended answers**: Qwen3-Coder closed its final
+  message to both Claude Code and Codex with a bare opening marker, shown as
+  text. A marker with nothing after it is dropped.
 - **Mistral, Phi-4-mini, SmolLM3 and Qwen2.5 never called a tool on the
   default GGUF backend** (0 of 6 checks each; 6 of 6 on llama-server),
   found by the compatibility table. HFL decided what a template does with

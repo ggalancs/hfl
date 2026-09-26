@@ -243,3 +243,13 @@ def test_a_call_in_doubled_braces():
     model copies it (found by the compatibility matrix)."""
     text = '<tool_call>\n{{"name": "get_weather", "arguments": {"city": "Paris"}}}\n</tool_call>'
     assert dispatch(text, "qwen2.5-7b-instruct", WEATHER) == ("", [PARIS])
+
+
+def test_a_call_opened_and_never_written_is_not_text():
+    """Qwen3-Coder ended its answer to Claude Code and Codex with a bare
+    ``<tool_call>`` (both sessions, measured)."""
+    text = "I've fixed the bug in calc.py.\n<tool_call>"
+    assert dispatch(text, "qwen3-coder", WEATHER) == ("I've fixed the bug in calc.py.", [])
+    # Only at the very end: a marker followed by a call is still a call.
+    call = '<tool_call>\n{"name": "get_weather", "arguments": {"city": "Paris"}}\n</tool_call>'
+    assert dispatch(call, "qwen3-coder", WEATHER)[1] == [PARIS]

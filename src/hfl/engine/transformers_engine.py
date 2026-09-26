@@ -8,6 +8,7 @@ Supports dynamic quantization via bitsandbytes.
 """
 
 import logging
+import threading
 import time
 from typing import Any, Iterator, cast
 
@@ -16,6 +17,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    held,
     reasoning_template_vars,
 )
 
@@ -29,6 +31,8 @@ class TransformersEngine(InferenceEngine):
         self._model: Any = None
         self._tokenizer: Any = None
         self._model_id = ""
+        # Held by the thread inside the model (``hfl.engine.base.held``).
+        self._native = threading.Lock()
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -106,6 +110,10 @@ class TransformersEngine(InferenceEngine):
             raise
 
     def unload(self) -> None:
+        with self._native:
+            self._unload()
+
+    def _unload(self) -> None:
         if self._model:
             del self._model
             del self._tokenizer
@@ -198,6 +206,14 @@ class TransformersEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
+        with self._native:  # see ``hfl.engine.base.held``
+            return self._generate(prompt, config)
+
+    def _generate(
+        self,
+        prompt: str,
+        config: GenerationConfig | None = None,
+    ) -> GenerationResult:
         import torch
 
         cfg = config or GenerationConfig()
@@ -233,6 +249,13 @@ class TransformersEngine(InferenceEngine):
         )
 
     def generate_stream(
+        self,
+        prompt: str,
+        config: GenerationConfig | None = None,
+    ) -> Iterator[str]:
+        return held(self._native, self._generate_stream(prompt, config))
+
+    def _generate_stream(
         self,
         prompt: str,
         config: GenerationConfig | None = None,

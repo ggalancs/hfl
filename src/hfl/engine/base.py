@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterator
@@ -119,6 +120,23 @@ class GenerationConfig:
     # Whether the client set ``repeat_penalty`` itself (the OpenAI and
     # Anthropic APIs have no such parameter). See ``repeat_penalty_for``.
     repeat_penalty_chosen: bool = False
+
+
+def held(lock: "threading.Lock", chunks: Iterator[str]) -> Iterator[str]:
+    """``chunks`` read with ``lock`` held, from the first item until the
+    stream is exhausted or closed — by the thread doing the native work.
+
+    For engines that keep one model instance (llama.cpp, MLX,
+    Transformers): the dispatcher's slot alone was not enough. When a client
+    drops a stream the slot is released while the worker thread may still
+    be inside the model (a long prefill cannot be interrupted), and the next
+    request then ran on the same model at the same time — ``llama_decode
+    returned -3`` and a Metal segfault under Claude Code (measured). The
+    lock must be a plain ``Lock``: a stream can be closed on a different
+    thread than the one that started it, which an ``RLock`` forbids.
+    """
+    with lock:
+        yield from chunks
 
 
 def reasoning_template_vars(reasoning: str | None) -> dict[str, Any]:

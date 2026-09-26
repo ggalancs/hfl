@@ -90,6 +90,9 @@ _QWEN_TOOL_CALL_RE = re.compile(
 )
 
 
+_DANGLING_CALL_RE = re.compile(r"\s*<tool_call>\s*$")
+
+
 def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
     """Parse qwen-family ``<tool_call>...</tool_call>`` markers.
 
@@ -129,6 +132,10 @@ def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
 
     cleaned = _QWEN_TOOL_CALL_RE.sub(_sub, text)
     cleaned = _QWEN_XML_FUNCTION_RE.sub(_sub_xml, cleaned)
+    # A call opened and never written: Qwen3-Coder ended its last answer to
+    # Claude Code and Codex with a bare ``<tool_call>`` (measured). Nothing
+    # follows it, so it is no text of the answer's.
+    cleaned = _DANGLING_CALL_RE.sub("", cleaned)
     return _strip_thinking(cleaned).strip(), calls
 
 
@@ -693,7 +700,7 @@ def _answer_text(text: str) -> str:
     reply's ``final`` channel, or the text without ``<think>`` blocks."""
     if "<|channel|>" in text:
         return parse_harmony(text)[0]
-    return _strip_thinking(text).strip()
+    return _DANGLING_CALL_RE.sub("", _strip_thinking(text)).strip()
 
 
 def dispatch(
