@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from hfl.engine.base import AudioEngine, InferenceEngine
     from hfl.engine.dispatcher import InferenceDispatcher
+    from hfl.engine.embedding_engine import EmbeddingEngine
     from hfl.engine.residency import AdmissionPlan, ResidentView
     from hfl.models.manifest import ModelManifest
 
@@ -144,6 +145,9 @@ class ServerState:
     # deadline is renewed every time the model is used and when its last
     # request ends — a model in continuous use never expires between turns.
     _keep_alive_durations: dict[str, "timedelta | None"] = field(default_factory=dict)
+    # The embedding model in use, one at a time (``routes_embed``).
+    _embed_engine: "EmbeddingEngine | None" = None
+    _embed_model_name: str | None = None
 
     # ------------------------------------------------------------------
     # Request-facing view
@@ -960,6 +964,15 @@ class ServerState:
         """
         await self.set_llm_engine(None, None)
         await self.set_tts_engine(None, None)
+        # The embedding engine too (a llama-server process for Homebrew's
+        # HFL): left to its process guard, it outlived the server by seconds.
+        embed = self._embed_engine
+        if embed is not None:
+            self._embed_engine = None
+            try:
+                await asyncio.to_thread(embed.unload)
+            except Exception:  # pragma: no cover — best effort at shutdown
+                logger.debug("embedding engine unload failed", exc_info=True)
 
 
 def _measure_safely(manifest: "ModelManifest | None", engine: "InferenceEngine") -> int:

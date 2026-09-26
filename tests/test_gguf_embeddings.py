@@ -170,3 +170,66 @@ def test_without_llama_cpp_python_llama_server_embeds(tmp_path, monkeypatch):
     assert isinstance(routes_embed._select_embedding_backend(model), LlamaServerEmbeddingEngine)
     monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: object())
     assert isinstance(routes_embed._select_embedding_backend(model), LlamaCppEmbeddingEngine)
+
+
+class TestOneEmbeddingModelAtATime:
+    """Asking for another embedding model left the first one loaded (a
+    llama-server process running) until HFL exited; unloading it is only
+    safe with nothing running on it, so loading and embedding share a lock
+    that a timed-out call keeps until its thread leaves the engine."""
+
+    def test_another_model_unloads_the_first(self, temp_config, monkeypatch, tmp_path):
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from hfl.api import routes_embed
+        from hfl.api.state import get_state, reset_state
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import get_registry
+
+        reset_state()
+        for name in ("a", "b"):
+            model = _gguf(tmp_path / f"{name}.gguf", [("general.architecture", 8, "nomic-bert")])
+            get_registry().add(ModelManifest(name, f"org/{name}", str(model), "gguf"))
+        made = []
+        monkeypatch.setattr(
+            routes_embed,
+            "_select_embedding_backend",
+            lambda path: made.append(MagicMock(is_loaded=True)) or made[-1],
+        )
+        asyncio.run(routes_embed._embed_on("a", lambda engine: "one"))
+        asyncio.run(routes_embed._embed_on("a", lambda engine: "again"))  # reused
+        asyncio.run(routes_embed._embed_on("b", lambda engine: "two"))
+        assert len(made) == 2
+        assert made[0].unload.called and not made[1].unload.called
+        assert get_state()._embed_model_name == "b"
+        asyncio.run(get_state().cleanup())  # the server shutting down
+        assert made[1].unload.called and get_state()._embed_engine is None
+        reset_state()
+
+    def test_a_timed_out_call_keeps_the_lock_until_it_leaves(self, monkeypatch):
+        import asyncio
+        import threading
+
+        from hfl.api import routes_embed
+        from hfl.config import config
+
+        async def _load(model):
+            return object()
+
+        monkeypatch.setattr(routes_embed, "_load_embedding_model", _load)
+        monkeypatch.setattr(config, "generation_timeout", 0.05)
+        leave = threading.Event()
+
+        async def scenario():
+            with pytest.raises(asyncio.TimeoutError):
+                await routes_embed._embed_on("m", lambda engine: leave.wait(5))
+            locked_after_timeout = routes_embed._embed_lock.locked()
+            leave.set()
+            for _ in range(100):
+                if not routes_embed._embed_lock.locked():
+                    break
+                await asyncio.sleep(0.01)
+            return locked_after_timeout, routes_embed._embed_lock.locked()
+
+        assert asyncio.run(scenario()) == (True, False)

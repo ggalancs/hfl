@@ -60,16 +60,44 @@ router = APIRouter(tags=["Embeddings"])
 _embed_lock = asyncio.Lock()
 
 
-async def _run_embed(call: "Any") -> Any:
-    """Run a zero-arg ``engine.embed(...)`` thunk under the embed lock, off the
-    event loop, bounded by the configured generation timeout."""
+async def _embed_on(model_name: str, call: "Any") -> tuple[Any, int]:
+    """Load (or reuse) ``model_name``'s engine and run ``call(engine)`` on it,
+    off the event loop and bounded by the generation timeout: the result and
+    the nanoseconds spent loading.
+
+    Both under the embed lock: a request for another model unloads this
+    engine (it used to be left loaded — a llama-server process kept running
+    — until HFL exited), so no call may still be on it. A call that times out
+    keeps the lock until its thread really leaves the engine.
+    """
     from hfl.config import config as _hfl_config
 
-    async with _embed_lock:
-        return await asyncio.wait_for(
-            asyncio.to_thread(call),
-            timeout=_hfl_config.generation_timeout,
-        )
+    await _embed_lock.acquire()
+    held = True
+    try:
+        load_start = time.monotonic_ns()
+        engine = await _load_embedding_model(model_name)
+        load_ns = time.monotonic_ns() - load_start
+        worker = asyncio.ensure_future(asyncio.to_thread(call, engine))
+        try:
+            result = await asyncio.wait_for(
+                asyncio.shield(worker), timeout=_hfl_config.generation_timeout
+            )
+        except BaseException:
+            if not worker.done():
+
+                def _release(done: "asyncio.Future[Any]") -> None:
+                    if not done.cancelled():
+                        done.exception()  # retrieved: the caller already failed
+                    _embed_lock.release()
+
+                worker.add_done_callback(_release)
+                held = False
+            raise
+        return result, load_ns
+    finally:
+        if held:
+            _embed_lock.release()
 
 
 # ----------------------------------------------------------------------
@@ -244,12 +272,17 @@ async def _load_embedding_model(model_name: str) -> Any:
     # engine, reuse it. HFL doesn't yet have a dedicated embed slot
     # so we piggyback on state.engine when it happens to be an
     # embedding engine.
-    existing = getattr(state, "_embed_engine", None)
-    existing_name = getattr(state, "_embed_model_name", None)
+    existing = state._embed_engine
+    existing_name = state._embed_model_name
     if existing is not None and existing_name == model_name:
         if not existing.is_loaded:
             raise ModelNotReadyError(model_name)
         return existing
+    if existing is not None:
+        # Another model's engine: one at a time, so it goes (the caller
+        # holds the embed lock, so nothing is running on it).
+        state._embed_engine = state._embed_model_name = None
+        await asyncio.to_thread(existing.unload)
 
     manifest = get_registry().get(model_name)
     if manifest is None:
@@ -263,8 +296,8 @@ async def _load_embedding_model(model_name: str) -> Any:
     engine = _select_embedding_backend(model_path)
     await asyncio.to_thread(engine.load, manifest.local_path)
     # Stash on state so the next call reuses.
-    state._embed_engine = engine  # type: ignore[attr-defined]
-    state._embed_model_name = model_name  # type: ignore[attr-defined]
+    state._embed_engine = engine
+    state._embed_model_name = model_name
     return engine
 
 
@@ -315,20 +348,17 @@ async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
     start = time.monotonic_ns()
     apply_keep_alive(req.model, req.keep_alive)
 
-    load_start = time.monotonic_ns()
-    engine = await _load_embedding_model(req.model)
-    load_duration = time.monotonic_ns() - load_start
-
     inputs = req.input if isinstance(req.input, list) else [req.input]
 
     try:
-        result = await _run_embed(
-            lambda: engine.embed(
+        result, load_duration = await _embed_on(
+            req.model,
+            lambda engine: engine.embed(
                 inputs,
                 truncate=req.truncate,
                 dimensions=req.dimensions,
                 pooling=req.pooling,
-            )
+            ),
         )
     except ValueError as exc:
         # The backend cannot pool the way the caller asked. Its own sentence
@@ -380,8 +410,7 @@ async def ollama_embeddings_legacy(
     """
     add_deprecation_headers(response, alternative="/api/embed")
     apply_keep_alive(req.model, req.keep_alive)
-    engine = await _load_embedding_model(req.model)
-    result = await _run_embed(lambda: engine.embed([req.prompt]))
+    result, _ = await _embed_on(req.model, lambda engine: engine.embed([req.prompt]))
     return {"embedding": result.embeddings[0]}
 
 
@@ -408,10 +437,10 @@ async def openai_embeddings(req: OpenAIEmbeddingsRequest) -> dict[str, Any]:
     the official SDK (or ``langchain_openai.OpenAIEmbeddings``) work
     without patching.
     """
-    engine = await _load_embedding_model(req.model)
     inputs = _normalize_input(req.input)
-    result = await _run_embed(
-        lambda: engine.embed(inputs, truncate=True, dimensions=req.dimensions)
+    result, _ = await _embed_on(
+        req.model,
+        lambda engine: engine.embed(inputs, truncate=True, dimensions=req.dimensions),
     )
 
     if req.encoding_format == "base64":

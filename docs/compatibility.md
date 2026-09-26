@@ -70,13 +70,17 @@ to a real model, not a claim. ✓ passed, ✗ failed (the reason is in the
 
 | | Evidence |
 |---|---|
-| macOS, Apple Silicon (M3 Max) | This table; `scripts/agent_check.py` (Claude Code and Codex); benchmarks |
-| Linux, CPU | The test suite (CI, manual) |
-| Windows | Builds and installers are published; `windows-tests.yml` runs the suite there — manual, **not run yet** |
+| macOS, Apple Silicon (M3 Max) | This table; `scripts/agent_check.py` (Claude Code and Codex); benchmarks; `scripts/platform_check.py` passes with llama-cpp-python and without it (llama-server, as Homebrew installs) |
+| Linux, CPU (x86_64, arm64) | The test suite (CI, manual). `platform-check.yml` runs `scripts/platform_check.py` there — manual, **not run yet** |
+| Windows | Builds and installers are published; `windows-tests.yml` runs the suite and `platform-check.yml` the real check — manual, **not run yet** |
 | Linux / Windows with NVIDIA (CUDA) | **Not verified**: no NVIDIA machine was available |
 
-To add a row: run `python scripts/compat_matrix.py` and
-`python scripts/agent_check.py --model <a coding model>` on that machine
+`scripts/platform_check.py` is HFL as a user gets it, end to end: in a
+fresh home it pulls two small Apache-2.0 models, serves them and checks an
+answer over the Ollama, OpenAI (streamed) and Anthropic APIs, unit-length
+embeddings, `hfl outdated` and `hfl rm` — a few minutes, about 500 MB.
+To add a row: run it, and `python scripts/compat_matrix.py` and
+`python scripts/agent_check.py --model <a coding model>`, on that machine
 and publish what they print.
 
 Re-run it with `python scripts/compat_matrix.py` (about 45 minutes and

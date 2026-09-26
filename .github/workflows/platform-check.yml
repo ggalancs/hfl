@@ -1,0 +1,41 @@
+name: Platform check (real models)
+
+# Manual only, like every workflow here: the owner starts it from the
+# Actions tab (it costs Actions minutes). Where the test suite checks code,
+# this checks HFL as a user gets it on each OS and CPU: pip install with
+# llama.cpp, pull two small Apache-2.0 models, serve them and get answers
+# over the Ollama, OpenAI and Anthropic APIs, embeddings, `hfl outdated`
+# and `hfl rm` (scripts/platform_check.py; the same script passes on
+# macOS arm64 locally). CPU only: no runner here has a GPU.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # llama-cpp-python's own CPU wheels (Linux x86_64 and aarch64,
+      # Windows amd64): --only-binary fails in seconds if one is missing,
+      # instead of compiling llama.cpp for twenty minutes.
+      - name: Install HFL with llama.cpp
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -e ".[llama]"
+
+      - name: Check it for real
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/platform_check.py

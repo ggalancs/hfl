@@ -320,6 +320,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hfl_model_unloads_total`) and every token; with `HFL_OTEL_ENABLED`, a
   streamed reply is an `inference.stream` span, checked with a local OTLP
   collector receiving it.
+- **Asking for another embedding model left the first one loaded** — for
+  an HFL without llama-cpp-python, its llama-server process kept running —
+  until HFL exited, and the server's shutdown did not unload the embedding
+  model either. One is loaded at a time now, swapped with nothing running
+  on it (loading and embedding share one lock, which a timed-out call keeps
+  until its thread leaves the model), and shutdown unloads it. Checked for
+  real: one embedding server alive across switches, none once HFL stopped.
 - **Pulling a model again dropped its alias.** The new entry replaced the
   old one without it, so every client that used the alias stopped finding
   the model. An alias is kept unless another is given.
@@ -421,6 +428,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.156.1 fixing a bug through a local Qwen3-Coder.
 
 ### Internal
+
+- **HFL checked on a platform for real: `scripts/platform_check.py`**, and
+  a manual workflow (`platform-check.yml`) that runs it on Linux x86_64,
+  Linux arm64 and Windows with llama.cpp's own CPU wheels. It passes on
+  macOS arm64 with llama-cpp-python and without it; the workflow has not
+  run yet.
 
 - **Code that did nothing, removed.** The event listeners meant to feed
   the metrics (nothing emitted their events; the metrics are recorded where

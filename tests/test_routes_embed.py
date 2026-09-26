@@ -298,18 +298,23 @@ class TestEmbedSerialization:
     embedding engine (the LlamaCpp embed engine wraps one non-reentrant model)."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_embeds_are_serialized(self):
+    async def test_concurrent_embeds_are_serialized(self, monkeypatch):
         import asyncio as _aio
         import threading
         import time as _time
 
         from hfl.api import routes_embed
 
+        async def _load(model):
+            return object()
+
+        monkeypatch.setattr(routes_embed, "_load_embedding_model", _load)
+
         active = 0
         max_active = 0
         guard = threading.Lock()  # thunks run in worker threads via to_thread
 
-        def _call():
+        def _call(engine):
             nonlocal active, max_active
             with guard:
                 active += 1
@@ -319,7 +324,7 @@ class TestEmbedSerialization:
                 active -= 1
             return "ok"
 
-        results = await _aio.gather(*[routes_embed._run_embed(_call) for _ in range(8)])
-        assert results == ["ok"] * 8
+        results = await _aio.gather(*[routes_embed._embed_on("m", _call) for _ in range(8)])
+        assert [result for result, _ in results] == ["ok"] * 8
         # The embed lock must have serialized all 8 calls.
         assert max_active == 1, f"embeds ran with max concurrency {max_active}"
