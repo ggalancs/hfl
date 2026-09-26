@@ -337,7 +337,10 @@ class TestSelection:
         folder.mkdir()
         (folder / "config.json").write_text("{}")
         (folder / "model.safetensors").write_bytes(b"\0" * 16)
-        assert not isinstance(select_engine(folder), LlamaServerEngine)
+        # Safetensors keep their own backend (whichever this host has).
+        monkeypatch.setattr("hfl.engine.selector._mlx_preferred", lambda: False)
+        monkeypatch.setattr("hfl.engine.selector._get_transformers_engine", lambda: "transformers")
+        assert select_engine(folder) == "transformers"
 
 
 class TestFallback:

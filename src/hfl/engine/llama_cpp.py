@@ -58,6 +58,13 @@ def _suppress_stderr():
     with contextlib.suppress(Exception):
         sys.stderr.flush()
     saved_fd = os.dup(stderr_fd)
+    # HFL's own logging writes to fd 2 as well: silencing the fd silenced it
+    # too — the load's INFO and WARNING lines (and those of any request that
+    # logged meanwhile, from another thread) vanished. Point those handlers
+    # at the real stderr for the duration; only the C library goes quiet.
+    handlers = _stream_handlers_on(stderr_fd)
+    kept = os.fdopen(os.dup(saved_fd), "w", buffering=1) if handlers else None
+    previous = [(h, h.setStream(kept)) for h in handlers] if kept else []
     try:
         # Redirect stderr to /dev/null
         devnull = os.open(os.devnull, os.O_WRONLY)
@@ -68,6 +75,28 @@ def _suppress_stderr():
         # Restore stderr
         os.dup2(saved_fd, stderr_fd)
         os.close(saved_fd)
+        for handler, stream in previous:
+            handler.setStream(stream)
+        if kept is not None:
+            kept.close()
+
+
+def _stream_handlers_on(fd: int) -> list[logging.StreamHandler]:
+    """Every logging handler, on any logger, whose stream writes to ``fd``."""
+    loggers: list[logging.Logger] = [logging.getLogger()]
+    registered = logging.Logger.manager.loggerDict.values()
+    loggers += [item for item in registered if isinstance(item, logging.Logger)]
+    found: list[logging.StreamHandler] = []
+    for each in loggers:
+        for handler in each.handlers:
+            if not isinstance(handler, logging.StreamHandler) or handler in found:
+                continue
+            try:
+                if handler.stream.fileno() == fd:
+                    found.append(handler)
+            except Exception:  # a stream without a descriptor: not on fd 2
+                continue
+    return found
 
 
 @contextmanager

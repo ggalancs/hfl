@@ -475,37 +475,25 @@ def _entry(a: Audit, name: str) -> dict:
 def e10(a: Audit) -> str:
     part = Parts()
     repo = "HuggingFaceTB/SmolLM2-135M-Instruct"
+    out = a.cli("pull", repo, "-q", "Q4_K_M", "--format", "gguf", timeout=3600)
+    text = out.stdout + out.stderr
+    tail = " ".join(text.split())[-200:]
 
-    def honours_format() -> None:
-        out = a.cli(
-            "pull", repo, "-q", "Q4_K_M", "--format", "gguf", "--alias", "smolg", timeout=3600
-        )
-        entry = _entry(a, "smolg")
-        expect(
-            entry.get("format") == "gguf",
-            f"--format gguf ignored: kept {entry.get('format')} "
-            f"({(out.stdout + out.stderr).strip().splitlines()[-4][:90]})",
-        )
+    def honours_format() -> None:  # on Apple Silicon MLX used to keep safetensors
+        expect("Converting to GGUF" in text, f"--format gguf ignored: {tail}")
 
-    def converts_without_mlx() -> None:
-        out = a.cli(
-            "pull",
-            repo,
-            "-q",
-            "Q4_K_M",
-            "--format",
-            "gguf",
-            "--alias",
-            "smolg",
-            env={"HFL_DISABLE_MLX": "1"},
-            timeout=3600,
-        )
-        text = out.stdout + out.stderr
-        expect("Traceback" not in text and "Errno" not in text, f"crashed: {text.strip()[-160:]}")
-        expect(_entry(a, "smolg").get("format") == "gguf", text.strip()[-200:])
+    def fails_cleanly_or_converts() -> None:
+        expect("Traceback" not in text, f"traceback: {tail}")
+        if shutil.which("cmake") is None:
+            expect(out.returncode != 0 and "cmake is not installed" in text, tail)
+            raise Uncheckable("the conversion needs cmake, not installed here (said so clearly)")
+        data = json.loads((a.home / "models.json").read_text())
+        models = data if isinstance(data, list) else data.get("models", [])
+        converted = [m for m in models if m.get("repo_id") == repo and m.get("format") == "gguf"]
+        expect(out.returncode == 0 and converted, tail)
 
     part("--format gguf honoured", honours_format)
-    part("converts with MLX off", converts_without_mlx)
+    part("converts, or says what it lacks", fails_cleanly_or_converts)
     return part.verdict()
 
 

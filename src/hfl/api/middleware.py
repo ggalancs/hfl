@@ -169,17 +169,24 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
             return response
 
         content_length = request.headers.get("content-length")
+        declared: int | None = None
         if content_length is not None:
             try:
-                if int(content_length) > self.max_bytes:
-                    return self._too_large_response()
-                # A valid Content-Length within budget is authoritative — a body
-                # cannot be both Content-Length-framed and chunked.
-                response = await call_next(request)
-                return response
+                declared = int(content_length)
             except ValueError:
                 # Malformed Content-Length — fall through to streamed enforcement.
-                pass
+                declared = None
+        if declared is not None:
+            if declared > self.max_bytes:
+                return self._too_large_response()
+            # A valid Content-Length within budget is authoritative — a body
+            # cannot be both Content-Length-framed and chunked. Outside the
+            # ``try`` above: a ValueError raised by the route itself must
+            # reach the error handlers, not be taken for a malformed header
+            # (it was, and re-reading the consumed body then raised "Stream
+            # consumed", which hid the real error from the log and the client).
+            response = await call_next(request)
+            return response
 
         # No valid Content-Length: a chunked / streaming body sets none, so the
         # header check above would let it through unbounded — exactly the

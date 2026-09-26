@@ -281,10 +281,12 @@ def pull(
                             "``chat_template.jinja`` manually."
                         )
                 # Keep as safetensors — no GGUF conversion.
-            elif _mlx_preferred():
+            elif _mlx_preferred() and format != "gguf":
                 # Apple Silicon with mlx-lm available. Safetensors LLMs
                 # are served by MLX directly; skipping the GGUF detour
-                # saves both time and disk.
+                # saves both time and disk. An explicit ``--format gguf``
+                # is still honoured: it used to be ignored here, and so
+                # was ``-q``.
                 console.print(
                     "[cyan]Apple Silicon + MLX available — "
                     "keeping safetensors for the MLX backend.[/]"
@@ -292,10 +294,13 @@ def pull(
                 # Keep as safetensors — no GGUF conversion.
             else:
                 # LLM model on a platform without MLX - attempt GGUF conversion
+                import subprocess
+
                 from hfl.converter.gguf_converter import (
                     GGUFConverter,
                     check_model_convertibility,
                 )
+                from hfl.exceptions import ConversionError
 
                 is_convertible, reason = check_model_convertibility(local_path)
 
@@ -310,7 +315,19 @@ def pull(
                 converter = GGUFConverter()
                 output_name = resolved.repo_id.replace("/", "--")
                 output_path = local_path.parent / output_name
-                final_path = converter.convert(local_path, output_path, quantize)
+                try:
+                    final_path = converter.convert(local_path, output_path, quantize)
+                except (ConversionError, subprocess.CalledProcessError) as exc:
+                    # A missing build tool or a failed build step: say which,
+                    # not a traceback. The download itself is kept.
+                    reason = (
+                        (exc.details or exc.message)
+                        if isinstance(exc, ConversionError)
+                        else str(exc)
+                    )
+                    console.print(f"\n[red]{t('errors.conversion_failed')}:[/] {reason}")
+                    console.print(f"[dim]{t('errors.model_downloaded_but')}[/]")
+                    raise typer.Exit(1) from exc
 
     # 4. Register
     size = sum(

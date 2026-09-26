@@ -377,21 +377,20 @@ class TestEngineSelector:
         result = _has_cuda()
         assert isinstance(result, bool)
 
-    def test_select_fallback_to_llama_cpp(self, temp_dir, mock_llama_cpp_module):
-        """Fallback to llama.cpp when neither CUDA nor MLX is available."""
-        from hfl.engine.llama_cpp import LlamaCppEngine
-        from hfl.engine.selector import select_engine
+    def test_safetensors_never_fall_back_to_llama_cpp(self, temp_dir, mock_llama_cpp_module):
+        """Neither CUDA nor MLX, and no Transformers: a clear error, not
+        llama.cpp — it reads GGUF only and failed at load."""
+        from hfl.engine.selector import MissingDependencyError, select_engine
 
-        # Create safetensors file
         (temp_dir / "model.safetensors").write_bytes(b"ST")
 
         with (
             patch("hfl.engine.selector._has_cuda", return_value=False),
             patch("hfl.engine.selector._mlx_preferred", return_value=False),
+            patch("importlib.util.find_spec", return_value=None),
         ):
-            engine = select_engine(temp_dir)
-
-            assert isinstance(engine, LlamaCppEngine)
+            with pytest.raises(MissingDependencyError, match="llama.cpp reads GGUF only"):
+                select_engine(temp_dir)
 
 
 class TestMissingDependencyErrors:

@@ -209,23 +209,24 @@ class TestMLXAutoSelection:
         assert result is mock_llama
         mock_get_llama.assert_called_once()
 
-    @patch("hfl.engine.selector._get_llama_cpp_engine")
+    @patch("hfl.engine.selector._get_transformers_engine")
     @patch("hfl.engine.selector._get_mlx_engine")
     @patch("hfl.engine.selector._has_cuda", return_value=False)
     @patch("hfl.engine.selector._mlx_preferred", return_value=True)
     @patch("hfl.engine.selector.detect_format")
     def test_falls_through_when_mlx_import_fails(
-        self, mock_detect, _mlx_pref, _cuda, mock_get_mlx, mock_get_llama
+        self, mock_detect, _mlx_pref, _cuda, mock_get_mlx, mock_get_trans
     ):
-        """If _get_mlx_engine raises MissingDependencyError, fall through to llama-cpp."""
+        """If _get_mlx_engine raises MissingDependencyError, safetensors go to
+        Transformers — never llama.cpp, which reads GGUF only."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
         mock_get_mlx.side_effect = MissingDependencyError("mlx-lm not available")
-        mock_llama = MagicMock()
-        mock_get_llama.return_value = mock_llama
+        mock_trans = MagicMock()
+        mock_get_trans.return_value = mock_trans
 
         result = select_engine(Path("/model"))
 
-        assert result is mock_llama
+        assert result is mock_trans
 
     def test_mlx_preferred_respects_disable_env(self, monkeypatch):
         """HFL_DISABLE_MLX forces _mlx_preferred() to False even when SDK is available."""
@@ -316,26 +317,33 @@ class TestSelectEngine:
     @patch("hfl.engine.selector._get_transformers_engine")
     @patch("hfl.engine.selector._has_cuda")
     @patch("hfl.engine.selector.detect_format")
-    def test_fallback_to_llama_when_transformers_fails(
+    def test_no_transformers_for_safetensors_says_what_to_do(
         self, mock_detect, mock_cuda, mock_get_trans, mock_get_llama, _mlx
     ):
-        """select_engine falls back to llama-cpp when transformers fails."""
+        """Safetensors without Transformers: a clear error naming both ways
+        out — not llama.cpp, which failed at load with "Model path is not a
+        file" (audit D12), and whose error reached the client as a 500."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
         mock_cuda.return_value = True
         mock_get_trans.side_effect = MissingDependencyError("Not installed")
-        mock_llama = MagicMock()
-        mock_get_llama.return_value = mock_llama
 
-        result = select_engine(Path("/model"))
+        with pytest.raises(MissingDependencyError) as caught:
+            select_engine(Path("/model"))
 
-        assert result is mock_llama
+        assert "hfl[transformers]" in str(caught.value)
+        assert "--format gguf" in str(caught.value)
+        assert caught.value.status_code == 501
+        mock_get_llama.assert_not_called()
 
     @patch("hfl.engine.selector._mlx_preferred", return_value=False)
-    @patch("hfl.engine.selector._get_llama_cpp_engine")
+    @patch("hfl.engine.selector._get_transformers_engine")
     @patch("hfl.engine.selector._has_cuda")
     @patch("hfl.engine.selector.detect_format")
-    def test_fallback_to_llama_without_cuda(self, mock_detect, mock_cuda, mock_get, _mlx):
-        """select_engine uses llama-cpp without CUDA."""
+    def test_safetensors_without_cuda_use_transformers(
+        self, mock_detect, mock_cuda, mock_get, _mlx
+    ):
+        """Without CUDA (and without MLX) safetensors still go to Transformers,
+        which runs on MPS or CPU."""
         mock_detect.return_value = ModelFormat.SAFETENSORS
         mock_cuda.return_value = False
         mock_engine = MagicMock()

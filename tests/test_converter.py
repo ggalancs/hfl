@@ -338,7 +338,11 @@ class TestGGUFConverter:
 
         converter = GGUFConverter()
 
-        with patch("subprocess.run") as mock_run:
+        # git and cmake present whatever this host has: ensure_tools checks.
+        with (
+            patch("subprocess.run") as mock_run,
+            patch("hfl.converter.gguf_converter.shutil.which", lambda t: f"/usr/bin/{t}"),
+        ):
             mock_run.return_value = MagicMock(returncode=0)
 
             with pytest.raises(Exception):
@@ -489,7 +493,10 @@ class TestGGUFConverter:
             return MagicMock(returncode=0, stdout="abc123")
 
         with patch("hfl.converter.gguf_converter.subprocess.run", side_effect=capture_run):
-            with patch("hfl.converter.gguf_converter.shutil.which", return_value=None):  # No CUDA
+            with patch(  # no CUDA; git and cmake present whatever this host has
+                "hfl.converter.gguf_converter.shutil.which",
+                side_effect=lambda t: None if t == "nvcc" else f"/usr/bin/{t}",
+            ):
                 try:
                     converter.ensure_tools()
                 except Exception:

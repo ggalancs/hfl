@@ -447,6 +447,24 @@ class TestRequestBodyLimitMiddleware:
         assert response.status_code == 200
         assert response.json()["ok"] is True
 
+    def test_a_route_valueerror_is_not_taken_for_a_bad_content_length(self):
+        """A ValueError raised by the route reached the ``except ValueError``
+        meant for a malformed Content-Length; the middleware then re-read the
+        consumed body and raised "Stream consumed", which replaced the real
+        error in the log (audit: a safetensors model sent to llama.cpp)."""
+        from hfl.api.middleware import RequestBodyLimitMiddleware
+
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=1024)
+
+        @app.post("/boom")
+        def boom(payload: dict) -> dict:
+            raise ValueError("the route's own error")
+
+        client = TestClient(app, raise_server_exceptions=True)
+        with pytest.raises(ValueError, match="the route's own error"):
+            client.post("/boom", json={"x": 1})
+
     def test_excluded_prefix_skips_limit(self):
         """#17: /api/transcribe carries large audio with its own 100 MB cap; the
         global text-oriented limit must not 413 it."""

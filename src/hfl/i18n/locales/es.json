@@ -337,6 +337,7 @@
     "use_list_to_see": "Usa 'hfl list' para ver los modelos disponibles.",
     "missing_dependency": "Dependencia faltante",
     "cannot_convert_gguf": "No se puede convertir a GGUF",
+    "conversion_failed": "La conversión a GGUF ha fallado",
     "model_downloaded_but": "El modelo se ha descargado pero no se puede ejecutar con llama.cpp.",
     "consider_searching_gguf": "Considera buscar una versión GGUF del modelo:",
     "search_min_chars": "La búsqueda debe tener al menos 3 caracteres.",

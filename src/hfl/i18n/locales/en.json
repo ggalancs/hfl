@@ -337,6 +337,7 @@
     "use_list_to_see": "Use 'hfl list' to see available models.",
     "missing_dependency": "Missing dependency",
     "cannot_convert_gguf": "Cannot convert to GGUF",
+    "conversion_failed": "GGUF conversion failed",
     "model_downloaded_but": "The model has been downloaded but cannot be run with llama.cpp.",
     "consider_searching_gguf": "Consider searching for a GGUF version of the model:",
     "search_min_chars": "Search must have at least 3 characters.",

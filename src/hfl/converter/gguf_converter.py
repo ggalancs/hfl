@@ -40,6 +40,7 @@ from pathlib import Path
 from rich.console import Console
 
 from hfl.config import config
+from hfl.exceptions import ToolNotFoundError
 
 console = Console()
 
@@ -422,6 +423,18 @@ class GGUFConverter:
         if self.convert_script.exists() and self.quantize_bin.exists():
             return
 
+        # Building llama.cpp's converter needs git and cmake (and a C++
+        # compiler, which cmake reports itself). Check first: a missing tool
+        # used to surface as a FileNotFoundError traceback mid-build.
+        build_hint = (
+            "Install it (macOS: `brew install cmake git`; Debian/Ubuntu: "
+            "`apt install cmake git build-essential`), or pull a GGUF build "
+            "of the model instead: `hfl search <name> --gguf`."
+        )
+        for tool in ("git", "cmake"):
+            if shutil.which(tool) is None:
+                raise ToolNotFoundError(tool, build_hint)
+
         console.print("[yellow]Installing conversion tools (llama.cpp)...[/]")
 
         if not self.llama_cpp_dir.exists():
@@ -467,6 +480,20 @@ class GGUFConverter:
         # Install Python dependencies for the conversion script
         requirements_file = self.llama_cpp_dir / "requirements.txt"
         if requirements_file.exists():
+            # A uv-made venv has no pip: say so instead of a traceback.
+            has_pip = (
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "--version"], capture_output=True
+                ).returncode
+                == 0
+            )
+            if not has_pip:
+                raise ToolNotFoundError(
+                    "pip",
+                    "llama.cpp's converter needs its Python requirements installed "
+                    f"into this environment: `uv pip install -r {requirements_file}` "
+                    "(or add pip to it), then pull again.",
+                )
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
                 check=True,

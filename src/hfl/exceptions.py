@@ -92,11 +92,14 @@ class ConversionError(HFLError):
 class ToolNotFoundError(ConversionError):
     """Conversion tool not found."""
 
-    def __init__(self, tool_name: str):
+    def __init__(self, tool_name: str, hint: str | None = None):
+        # It used to promise the tool "will be installed automatically on the
+        # next attempt": nothing installs cmake or git, so the next attempt
+        # failed the same way. Say what is missing and how to get it.
         super().__init__(
-            "N/A",
-            "N/A",
-            f"Tool not found: {tool_name}. It will be installed automatically on the next attempt.",
+            "safetensors",
+            "GGUF",
+            f"{tool_name} is not installed. " + (hint or f"Install {tool_name} and try again."),
         )
         self.tool_name = tool_name
 

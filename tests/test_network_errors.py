@@ -199,7 +199,10 @@ class TestGitOperationErrors:
 
         converter = GGUFConverter()
 
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch("hfl.converter.gguf_converter.shutil.which", lambda t: f"/usr/bin/{t}"),
+        ):
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=60)
 
             with pytest.raises(subprocess.TimeoutExpired):

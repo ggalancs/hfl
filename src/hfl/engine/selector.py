@@ -21,6 +21,7 @@ Decision logic for TTS:
   3. Auto-detect based on config.json
 """
 
+import importlib.util
 import logging
 import os
 import platform
@@ -30,12 +31,19 @@ from typing import cast
 
 from hfl.converter.formats import ModelFormat, ModelType, detect_format, detect_model_type
 from hfl.engine.base import AudioEngine, InferenceEngine
+from hfl.exceptions import EngineError
 
 logger = logging.getLogger(__name__)
 
 
-class MissingDependencyError(Exception):
-    """Error when an optional dependency is missing."""
+class MissingDependencyError(EngineError):
+    """Error when an optional dependency is missing.
+
+    An :class:`HFLError`, so the API answers it with its message (501: this
+    install does not implement what the request needs) rather than an opaque
+    500."""
+
+    status_code = 501
 
 
 def _get_llama_cpp_engine() -> InferenceEngine:
@@ -246,20 +254,35 @@ def select_engine(
         except MissingDependencyError:
             pass  # Fall through to the legacy decision tree.
 
-    # For safetensors, check GPU
-    if _has_cuda():
+    if fmt in (ModelFormat.SAFETENSORS, ModelFormat.PYTORCH):
+        # llama.cpp reads GGUF files only: sending these weights there failed
+        # at load with "Model path is not a file". Transformers serves them
+        # on CUDA, MPS or CPU; without it, say what would serve the model.
         try:
             return _get_transformers_engine()
         except MissingDependencyError:
-            pass  # Fallback to llama.cpp
+            raise MissingDependencyError(
+                f"{model_path.name} is in {fmt.value} format, which this install "
+                "cannot serve: llama.cpp reads GGUF only.\n\n"
+                "Either install the Transformers backend:\n"
+                "  pip install 'hfl[transformers]'\n"
+                "or pull a GGUF build of the model:\n"
+                "  hfl pull <repo> --format gguf"
+            ) from None
 
-    # Fallback: llama.cpp (will need prior conversion)
+    # Unknown layout: llama.cpp, whose loader says what it cannot read.
     return _get_llama_cpp_engine()
 
 
 def _get_transformers_engine() -> InferenceEngine:
     """Lazy import of TransformersEngine."""
     try:
+        # The engine module imports its libraries lazily, at load: without
+        # this check an install lacking them got an engine that failed later,
+        # opaquely, instead of this message now.
+        for package in ("transformers", "torch"):
+            if importlib.util.find_spec(package) is None:
+                raise ImportError(package)
         from hfl.engine.transformers_engine import TransformersEngine
 
         return cast(InferenceEngine, TransformersEngine())
