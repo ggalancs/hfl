@@ -69,6 +69,10 @@ def _extra(a: Audit, extra: str) -> str:
     if not modules:  # [mlx]'s marker installs nothing off Apple Silicon
         raise Uncheckable("MLX exists only on macOS with Apple Silicon")
     code = "; ".join(f"import {m}" for m in modules)
+    if extra == "coqui":
+        # As HFL imports it: coqui-tts needs the helper HFL's coqui engine
+        # supplies under transformers 5 (a bare `import TTS` fails there).
+        code = "from hfl.engine.coqui_engine import _transformers5_compat as c; c(); " + code
     imported = subprocess.run(
         [str(venv / "bin" / "python"), "-c", code], capture_output=True, text=True, timeout=300
     )

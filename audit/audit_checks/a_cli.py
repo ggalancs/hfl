@@ -19,13 +19,13 @@ REPO = Path(__file__).resolve().parents[2]
 # Pulled first: every other check uses these models.
 @check("A24", "hfl pull")
 def pull(a: Audit) -> str:
-    done = []
-    for alias, repo, quant, fmt in MODELS:
-        out = a.ok("pull", repo, "-q", quant, "--alias", alias, "--format", fmt, timeout=1800)
-        expect("Model ready" in out, f"{repo}: {out[-300:]}")
-        done.append(alias)
+    # The shared MODELS are pulled before any check (``prepare``): pull one
+    # they do not include, so this runs the whole download for real.
+    repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"  # Apache-2.0
+    out = a.ok("pull", repo, "-q", "Q8_0", "--alias", "chat8", timeout=1800)
+    expect("Model ready" in out, f"{repo}: {out[-300:]}")
     missing = a.fails_cleanly("pull", "hfl-audit/this-repo-does-not-exist-9f2c", timeout=120)
-    return f"pulled {', '.join(done)}; a missing repo: {missing.strip().splitlines()[-1][:80]}"
+    return f"pulled {repo} Q8_0; a missing repo: {missing.strip().splitlines()[-1][:80]}"
 
 
 @check("A17", "hfl list")

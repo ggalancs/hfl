@@ -237,7 +237,10 @@ class Audit:
     def shared(self) -> str:
         """One server for the checks that do not need one of their own."""
         if self._shared is None:
-            manager = self.server()
+            # Without the rate limit: section B sends more than its default 60
+            # requests a minute, and the checks after the 60th got 429s. The
+            # limit itself is checked on servers of its own (D42-D44).
+            manager = self.server(env={"HFL_RATE_LIMIT_ENABLED": "false"})
             self._shared = (manager, manager.__enter__())
         self.port = int(self._shared[1].rsplit(":", 1)[1])
         return self._shared[1]
