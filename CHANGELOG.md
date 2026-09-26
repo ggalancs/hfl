@@ -454,6 +454,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **No image is published without being run first.** `docker.yml` now
+  builds each architecture's image, runs `scripts/image_check.py` on it —
+  its default command answering from the host, `HFL_API_KEY` enforced,
+  llama.cpp loading, `scripts/platform_check.py` inside — and only then
+  pushes and signs it. Run on the published 0.21.0 image, the check fails
+  all four; on the fixed one it passes.
+
 - **HFL checked on a platform for real: `scripts/platform_check.py`**, and
   a manual workflow (`platform-check.yml`) that runs it on Linux x86_64,
   Linux arm64 and Windows with llama.cpp's own CPU wheels. It passes on

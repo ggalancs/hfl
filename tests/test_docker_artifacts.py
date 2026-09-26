@@ -131,6 +131,20 @@ class TestDockerWorkflow:
         jobs = set(self.cfg["jobs"].keys())
         assert {"build-amd64", "build-arm64", "manifest"} <= jobs
 
+    def test_each_image_is_checked_before_it_is_pushed(self):
+        """The 0.21.0 image went out unable to start or to load llama.cpp:
+        each architecture's image is now run as a user would (default
+        command, API key, llama.cpp, platform_check.py) before any push."""
+        for job in ("build-amd64", "build-arm64"):
+            steps = self.cfg["jobs"][job]["steps"]
+            runs = [step.get("run", "") for step in steps]
+            check = next((i for i, run in enumerate(runs) if "scripts/image_check.py" in run), None)
+            assert check is not None, f"{job} pushes an image it never ran"
+            pushes = [
+                i for i, step in enumerate(steps) if (step.get("with") or {}).get("push") is True
+            ]
+            assert pushes and all(check < i for i in pushes), job
+
     def test_amd64_runs_on_standard_runner(self):
         assert self.cfg["jobs"]["build-amd64"]["runs-on"] == "ubuntu-latest"
 
