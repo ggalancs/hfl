@@ -325,7 +325,7 @@ curl http://localhost:11434/api/chat -d '{"model": "llama70b",
   "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-**Anthropic** — `/v1/messages`
+**Anthropic** — `/v1/messages`, `/v1/messages/count_tokens`
 
 ```bash
 curl http://localhost:11434/v1/messages -H "Content-Type: application/json" \

@@ -72,7 +72,12 @@ class H(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/tokenize":
             bos = [1] if body.get("add_special") and ADDS_BOS else []
-            return self._send(200, {"tokens": bos + [64]})
+            return self._send(200, {"tokens": bos + [64] * max(1, len(body["content"].split()))})
+        if self.path == "/apply-template":  # one word per message, and per tool
+            words = ["<m>"] * len(body["messages"]) + ["<t>"] * len(body.get("tools") or [])
+            kwargs = body.get("chat_template_kwargs") or {}
+            words += ["<nothink>"] if kwargs.get("enable_thinking") is False else []
+            return self._send(200, {"prompt": " ".join(words)})
         with open(os.environ["FAKE_ARGV_OUT"] + ".body", "w") as out:  # the last request
             json.dump(body, out)
         usage = {"prompt_tokens": 7, "completion_tokens": 2}
@@ -730,3 +735,14 @@ def test_the_reasoning_switch_reaches_llama_server_s_template(engine, fake_serve
     assert _last_body(fake_server)["chat_template_kwargs"]["enable_thinking"] is False
     engine.chat([ChatMessage(role="user", content="hi")])
     assert "chat_template_kwargs" not in _last_body(fake_server)
+
+
+def test_counting_a_prompt_renders_and_tokenizes_it_as_chat_would(engine, fake_server):
+    """``count_prompt_tokens`` asks llama-server's own template and
+    tokenizer, with the body ``chat`` would send (checked for real:
+    /v1/messages/count_tokens equals the reply's input_tokens)."""
+    tool = {"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}
+    two = [ChatMessage(role="user", content="a"), ChatMessage(role="user", content="b")]
+    assert engine.count_prompt_tokens(two) == 2
+    assert engine.count_prompt_tokens(two, tools=[tool]) == 3
+    assert engine.count_prompt_tokens(two, GenerationConfig(reasoning="off")) == 3

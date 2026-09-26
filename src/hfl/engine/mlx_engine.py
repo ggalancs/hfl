@@ -520,6 +520,19 @@ class MLXEngine(InferenceEngine):
         prompt = self._messages_to_prompt(messages, tools, cfg.reasoning)
         return self.generate(prompt, cfg)
 
+    def count_prompt_tokens(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The prompt ``chat`` renders, tokenized as generation does."""
+        if self._tokenizer is None:
+            raise RuntimeError("no model loaded")
+        cfg = config or GenerationConfig()
+        prompt = self._messages_to_prompt(messages, tools, cfg.reasoning)
+        return len(self._tokenizer.encode(prompt))
+
     @staticmethod
     def _chat_config(
         config: GenerationConfig | None, messages: list[ChatMessage], tools: list[dict] | None

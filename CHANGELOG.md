@@ -184,6 +184,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HFL's home: the split Qwen2.5-7B answered, the imported Qwen2.5-VL read
   the image, Qwen2.5-0.5B-Instruct as an MLX 4-bit build and as the Hub has
   it both answered on MLX, and every file was still there after `hfl rm`.
+- **`/v1/messages/count_tokens`**, Anthropic's: the tokens a request
+  would cost, counted as the model's backend renders and tokenizes the
+  prompt (its template, tools and thinking switch), with nothing
+  generated. Checked with the official `anthropic` SDK on the default GGUF
+  backend, llama-server and MLX: equal to the `input_tokens` of the same
+  `/v1/messages` request, with and without system prompt, tools and
+  thinking. A backend that cannot count exactly answers 501, not a guess.
 - **`hfl outdated`: which models have a newer version on the Hub.** Nothing
   is downloaded: the commit each model was pulled at is compared with the
   Hub's and, when it moved, the model's own files by their blob ids — a

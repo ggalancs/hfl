@@ -230,6 +230,51 @@ def _stop_reason_to_anthropic(stop_reason: str) -> str:
 
 
 @router.post(
+    "/v1/messages/count_tokens",
+    response_model=None,
+    tags=["Anthropic"],
+    summary="Count a message's input tokens",
+    responses={
+        404: {"description": "Model not found"},
+        501: {"description": "The model's backend cannot count exactly"},
+    },
+)
+async def count_message_tokens(req: AnthropicMessagesRequest) -> dict[str, Any] | Response:
+    """Anthropic-compatible ``POST /v1/messages/count_tokens``: the tokens
+    ``/v1/messages`` would feed the model for this request — its template,
+    tools and thinking switch applied — with nothing generated.
+    """
+    model_name = req.resolve_model_name()
+    await _ensure_model_loaded(model_name)
+    state = _get_state()
+    if state.engine is None:
+        return service_unavailable(
+            f"Model '{model_name}' failed to load", path="/v1/messages/count_tokens"
+        )
+    tools = _anthropic_tools_to_payload(req)  # none for tool_choice "none", as there
+    try:
+        count = await run_dispatched(
+            state.engine.count_prompt_tokens,
+            _request_to_messages(req),
+            anthropic_to_generation_config(req),
+            tools,
+            operation="count_tokens",
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc, path="/v1/messages/count_tokens")
+    except NotImplementedError:
+        error = {
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": "This model's backend cannot count a prompt's tokens exactly.",
+            },
+        }
+        return Response(content=json.dumps(error), status_code=501, media_type="application/json")
+    return {"input_tokens": int(count)}
+
+
+@router.post(
     "/v1/messages",
     response_model=None,
     tags=["Anthropic"],

@@ -605,6 +605,29 @@ class LlamaServerEngine(InferenceEngine):
 
     # ----------------------------------------------------------------- LoRA
 
+    def count_prompt_tokens(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The prompt ``chat`` sends, rendered by llama-server's own template
+        (``/apply-template``, the same body) and tokenized as its chat
+        endpoint does (special tokens parsed and added)."""
+        body = self._chat_body(messages, config or GenerationConfig(), tools)
+        request = {k: body[k] for k in ("messages", "tools", "chat_template_kwargs") if k in body}
+        rendered = self._http().post("/apply-template", json=request, timeout=60)
+        if rendered.status_code == 404:
+            raise NotImplementedError("this llama-server has no /apply-template")
+        rendered.raise_for_status()
+        tokens = self._http().post(
+            "/tokenize",
+            json={"content": rendered.json()["prompt"], "add_special": True, "parse_special": True},
+            timeout=60,
+        )
+        tokens.raise_for_status()
+        return len(tokens.json()["tokens"])
+
     # llama-server reads adapter files only when it starts, so changing them
     # starts it again with the new set: the model loads again (seconds for a
     # small one), and nothing may be decoding meanwhile — the route drains

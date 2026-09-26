@@ -540,6 +540,7 @@ def _install_template_formatters(model: Any) -> tuple[list[Any], bool]:
         formatter.template_vars = {}
         # The names llama-cpp-python registers them under.
         name = "chat_template.default" if key == "tokenizer.chat_template" else key[10:]
+        formatter.hfl_name = name
         model._chat_handlers[name] = formatter.to_chat_handler()
         formatters.append(formatter)
     return formatters, added_bos
@@ -2038,6 +2039,33 @@ class LlamaCppEngine(InferenceEngine):
     def remove_lora(self, adapter_id: str) -> None:
         with self._native:
             self._remove_lora(adapter_id)
+
+    def count_prompt_tokens(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The prompt ``chat`` sends, counted as llama-cpp-python's chat
+        handler does: the template's formatter renders it, and it is
+        tokenized with special tokens, BOS unless the template wrote it."""
+        with self._native:
+            if self._model is None:
+                raise RuntimeError("no model loaded")
+            named = {getattr(f, "hfl_name", ""): f for f in self._formatters}
+            default = named.get("chat_template.default")
+            if default is None:
+                raise NotImplementedError("this model has no chat template in its GGUF")
+            msgs, tools, _ = self._tool_messages(messages, tools)
+            cfg = config or GenerationConfig()
+            default.template_vars = reasoning_template_vars(cfg.reasoning)
+            rendered = default(messages=msgs, tools=tools) if tools else default(messages=msgs)
+            tokens = self._model.tokenize(
+                rendered.prompt.encode("utf-8"),
+                add_bos=not rendered.added_special,
+                special=True,
+            )
+            return len(tokens)
 
     def _remove_lora(self, adapter_id: str) -> None:
         """Take an applied adapter off the model."""

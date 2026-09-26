@@ -337,6 +337,21 @@ class InferenceEngine(ABC):
         """
         return 0
 
+    def count_prompt_tokens(
+        self,
+        messages: list["ChatMessage"],
+        config: "GenerationConfig | None" = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The tokens ``chat(messages, config, tools)`` would feed the model:
+        the prompt as this engine renders it (template, tools, reasoning
+        switch) and tokenizes it, with nothing generated.
+
+        Raises ``NotImplementedError`` where that cannot be known exactly —
+        a count that is only close would be a wrong answer.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot count a prompt's tokens")
+
     @property
     def supports_concurrent_inference(self) -> bool:
         """Whether two inferences may run against this engine at once.

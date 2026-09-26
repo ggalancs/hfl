@@ -356,6 +356,19 @@ class TransformersEngine(InferenceEngine):
         prompt = self._build_prompt(messages, tools=tools, reasoning=reasoning)
         return self.generate_stream(prompt, config)
 
+    def count_prompt_tokens(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The prompt ``chat`` renders, tokenized as generation does."""
+        if self._tokenizer is None:
+            raise RuntimeError("no model loaded")
+        reasoning = config.reasoning if config is not None else None
+        prompt = self._build_prompt(messages, tools=tools, reasoning=reasoning)
+        return len(self._tokenizer(prompt)["input_ids"])
+
     @property
     def model_name(self) -> str:
         return self._model_id
