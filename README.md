@@ -160,6 +160,7 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: pinn
 
 hfl list                                # what is on this machine
 hfl inspect llama70b                    # details and license
+hfl outdated                            # newer versions on the Hub? (downloads nothing)
 hfl rm llama70b
 
 hfl import ~/.lmstudio/models/lmstudio-community/Qwen3-8B-GGUF   # a GGUF you already have

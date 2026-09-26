@@ -184,6 +184,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HFL's home: the split Qwen2.5-7B answered, the imported Qwen2.5-VL read
   the image, Qwen2.5-0.5B-Instruct as an MLX 4-bit build and as the Hub has
   it both answered on MLX, and every file was still there after `hfl rm`.
+- **`hfl outdated`: which models have a newer version on the Hub.** Nothing
+  is downloaded: the commit each model was pulled at is compared with the
+  Hub's and, when it moved, the model's own files by their blob ids — a
+  README edit is not an update. Says which `hfl pull` fetches the new
+  files (the entry is replaced, its alias kept). Imported models, models
+  pinned to a commit and models pulled before HFL recorded commits are
+  named as such (no re-download suggested for those: it could be tens of GB
+  for nothing). With no network every model says "could not check" and why
+  — never "up to date" — and the command exits 1; once the Hub is found
+  unreachable the rest are not tried, so a dead network costs one timeout.
+  Checked for real with nomic-embed-text-v1.5 recorded at old commits of
+  its repo, and offline (unresolvable host, blackholed host).
 - **A compatibility table checked for real: `docs/compatibility.md`.**
   `scripts/compat_matrix.py` pulls a list of models and, on each backend
   that can run them, checks a plain answer, tool calling (a call and then
@@ -298,6 +310,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt with garbage. HFL now starts such a template with BOS when the
   vocabulary wants one (on llama-server by restarting it once with a copy
   of the template, kept under `~/.hfl/templates/`).
+- **Pulling a model again dropped its alias.** The new entry replaced the
+  old one without it, so every client that used the alias stopped finding
+  the model. An alias is kept unless another is given.
 - **A reasoning model's thinking came back as its answer on three APIs.**
   Measured with Qwen3-14B: `/v1/messages` (streamed and not), a streamed
   `/v1/chat/completions` and `/v1/responses` sent the whole `<think>` block

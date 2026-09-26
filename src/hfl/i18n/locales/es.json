@@ -565,5 +565,26 @@
     "cancelled": "No se ha descargado nada.",
     "not_interactive": "No descargo sin confirmación. Para tomar el primero: {command}",
     "option_yes": "Si el modelo es un nombre corto que buscar, toma la primera coincidencia sin preguntar"
+  },
+  "outdated": {
+    "title": "Modelos y el Hub",
+    "model": "Modelo",
+    "status": "Estado",
+    "update_with": "Actualizar con",
+    "none": "No hay modelos locales.",
+    "current": "al día",
+    "files_current": "al día (cambió el repo, no los ficheros de este modelo)",
+    "update": "más nuevo en el Hub: {files}",
+    "gone": "renombrado o retirado del Hub: {files}",
+    "pinned": "fijado a un commit",
+    "local": "importado, no viene del Hub",
+    "unrecorded": "desconocido: descargado antes de que HFL guardara el commit",
+    "unchecked": "no se pudo comprobar: {why}",
+    "some_unchecked": "{count} modelo(s) sin comprobar: no es lo mismo que al día.",
+    "update_repo": "más nuevo en el Hub (convertido aquí: sus ficheros no se pueden comparar)",
+    "why_gated": "restringido en el Hub; define HF_TOKEN de una cuenta con acceso",
+    "why_not_found": "no está en el Hub (borrado, renombrado o privado)",
+    "why_no_revision": "su rama o etiqueta ya no está en el Hub",
+    "why_unreachable": "no se pudo contactar con el Hub ({error})"
   }
 }

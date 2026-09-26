@@ -162,6 +162,7 @@ hfl pull meta-llama/Llama-3.3-70B-Instruct@a1b2c3d          # reproducible: revi
 
 hfl list                                # lo que hay en esta máquina
 hfl inspect llama70b                    # detalles y licencia
+hfl outdated                            # ¿versiones nuevas en el Hub? (no descarga nada)
 hfl rm llama70b
 
 hfl import ~/.lmstudio/models/lmstudio-community/Qwen3-8B-GGUF   # un GGUF que ya tienes

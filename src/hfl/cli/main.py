@@ -351,6 +351,11 @@ def pull(
     )
 
     registry = ModelRegistry()
+    previous = registry.get(manifest.name)
+    if not alias and previous is not None and previous.name == manifest.name:
+        # Pulled again (an update): the entry is replaced, its alias is not
+        # lost — clients that use it would stop finding the model.
+        manifest.alias = alias = previous.alias
     registry.add(manifest)
 
     # Show result with alias if defined
@@ -1350,6 +1355,57 @@ def import_model(
         console.print(f'{t("messages.use_command")}: hfl tts {alias or final} "..."')
     else:
         console.print(t("import.use", name=alias or final))
+
+
+@app.command(name="outdated")
+def outdated(
+    model: str | None = typer.Argument(None, help="One model to check (default: all)"),
+) -> None:
+    """Which pulled models have a newer version on the Hub — nothing is downloaded.
+
+    Compares the commit each model was pulled at with the Hub's, and when it
+    moved, the model's own files (so a README edit is not an update). Says
+    which ``hfl pull`` fetches the new files. Exits 1 when some model could
+    not be checked (no network, a gated repo without a token...).
+    """
+    from huggingface_hub import HfApi
+    from rich.table import Table
+
+    from hfl.config import config
+    from hfl.hub.outdated import check_all
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    if model:
+        found = registry.get(model)
+        if found is None:
+            console.print(f"[red]{t('errors.model_not_found')}:[/] {escape_markup(model)}")
+            raise typer.Exit(1)
+        manifests = [found]
+    else:
+        manifests = registry.list_all()
+    if not manifests:
+        console.print(t("outdated.none"))
+        return
+    api = HfApi()
+    table = Table(title=t("outdated.title"))
+    table.add_column(t("outdated.model"))
+    table.add_column(t("outdated.status"))
+    table.add_column(t("outdated.update_with"))
+    unchecked = 0
+    for manifest, result in zip(manifests, check_all(manifests, api, config.models_dir)):
+        why = t(f"outdated.why_{result.detail}", error=result.error) if result.detail else ""
+        status = t(f"outdated.{result.status}", files=", ".join(result.changed), why=why)
+        unchecked += result.status == "unchecked"
+        table.add_row(
+            escape_markup(manifest.alias or manifest.name),
+            escape_markup(status),
+            escape_markup(result.command or ""),
+        )
+    console.print(table)
+    if unchecked:
+        console.print(f"[yellow]{t('outdated.some_unchecked', count=unchecked)}[/]")
+        raise typer.Exit(1)
 
 
 @app.command(name="stop")

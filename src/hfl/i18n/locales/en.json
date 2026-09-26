@@ -565,5 +565,26 @@
     "cancelled": "Nothing downloaded.",
     "not_interactive": "Not downloading without confirmation. To take the first one: {command}",
     "option_yes": "If the model is a short name to look up, take the first match without asking"
+  },
+  "outdated": {
+    "title": "Models and the Hub",
+    "model": "Model",
+    "status": "Status",
+    "update_with": "Update with",
+    "none": "No local models.",
+    "current": "up to date",
+    "files_current": "up to date (the repo changed, not this model's files)",
+    "update": "newer on the Hub: {files}",
+    "gone": "renamed or removed on the Hub: {files}",
+    "pinned": "pinned to a commit",
+    "local": "imported, not from the Hub",
+    "unrecorded": "unknown: pulled before HFL recorded commits",
+    "unchecked": "could not check: {why}",
+    "some_unchecked": "{count} model(s) could not be checked: not the same as up to date.",
+    "update_repo": "newer on the Hub (converted here: its files cannot be compared)",
+    "why_gated": "gated on the Hub; set HF_TOKEN for an account with access",
+    "why_not_found": "not found on the Hub (deleted, renamed or private)",
+    "why_no_revision": "its branch or tag is no longer on the Hub",
+    "why_unreachable": "the Hub could not be reached ({error})"
   }
 }
