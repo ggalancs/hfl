@@ -117,7 +117,7 @@ def start_server(
     cmd = [
         sys.executable,
         "-c",
-        "from hfl.cli.main import app; app()",
+        "from hfl.cli.main import cli_main; cli_main()",
         "serve",
         "--host",
         "127.0.0.1",

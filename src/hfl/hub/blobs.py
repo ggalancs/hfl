@@ -43,6 +43,7 @@ from hfl.config import config
 __all__ = [
     "InvalidBlobDigestError",
     "DigestMismatchError",
+    "BlobTooLargeError",
     "blob_dir",
     "blob_path",
     "blob_exists",
@@ -65,6 +66,15 @@ class InvalidBlobDigestError(ValueError):
     The ``/api/blobs`` route maps this to HTTP 400. Only canonical
     ``sha256:<64 hex chars>`` (with or without the ``sha256:`` prefix)
     is accepted; any other shape triggers this error.
+    """
+
+
+class BlobTooLargeError(ValueError):
+    """Raised when an upload exceeds ``HFL_MAX_BLOB_BYTES``.
+
+    The blob route maps this to HTTP 413. It used to be raised as an
+    ``InvalidBlobDigestError`` and so answered 400, as if the digest were
+    malformed (local audit D23).
     """
 
 
@@ -159,7 +169,7 @@ async def write_blob_stream(
         async for chunk in chunks:
             received += len(chunk)
             if chunk_limit is not None and received > chunk_limit:
-                raise InvalidBlobDigestError(
+                raise BlobTooLargeError(
                     f"blob exceeds configured per-request limit ({chunk_limit} bytes)"
                 )
         return final.stat().st_size
@@ -180,7 +190,7 @@ async def write_blob_stream(
                 continue
             total += len(chunk)
             if chunk_limit is not None and total > chunk_limit:
-                raise InvalidBlobDigestError(
+                raise BlobTooLargeError(
                     f"blob exceeds configured per-request limit ({chunk_limit} bytes)"
                 )
             hasher.update(chunk)

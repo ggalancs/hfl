@@ -48,7 +48,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "hfl"
 
 # Reached without an import edge. These are not findings.
 REACHED_OTHERWISE: dict[str, str] = {
-    "cli.main": "console_scripts entry point: hfl = hfl.cli.main:app (pyproject.toml).",
+    "cli.main": "console_scripts entry point: hfl = hfl.cli.main:cli_main (pyproject.toml).",
     "engine._child_guard": (
         "run as `python -m hfl.engine._child_guard` by engine.llama_server, which "
         "starts llama-server through it; never imported."

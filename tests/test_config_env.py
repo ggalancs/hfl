@@ -5,6 +5,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from hfl.config import HFLConfig, SLOConfig
 
 
@@ -187,6 +189,58 @@ class TestEnvConfig:
         ):
             cfg = HFLConfig()
             assert cfg.queue_max_inflight == 2
+
+    def test_kv_cache_type_falls_back_to_the_ollama_var(self):
+        """Documented as OLLAMA_KV_CACHE_TYPE's fallback, never read before
+        (local audit D53)."""
+        with patch.dict(os.environ, {"OLLAMA_KV_CACHE_TYPE": "q8_0"}, clear=True):
+            assert HFLConfig().kv_cache_type == "q8_0"
+        with patch.dict(
+            os.environ, {"OLLAMA_KV_CACHE_TYPE": "q8_0", "HFL_KV_CACHE_TYPE": "q4_0"}, clear=True
+        ):
+            assert HFLConfig().kv_cache_type == "q4_0"
+        with patch.dict(os.environ, {}, clear=True):
+            assert HFLConfig().kv_cache_type == "f16"
+
+    @pytest.mark.parametrize(
+        ("name", "field"),
+        [
+            ("HFL_PORT", "port"),
+            ("OLLAMA_PORT", "port"),
+            ("HFL_GENERATION_TIMEOUT", "generation_timeout"),
+            ("HFL_MAX_BLOB_BYTES", "max_blob_bytes"),
+            ("OLLAMA_NUM_PARALLEL", "queue_max_inflight"),
+            ("HFL_MEMORY_BUDGET", "memory_budget_percent"),
+            ("HFL_MAX_LOADED_MODELS", "max_loaded_models"),
+        ],
+    )
+    def test_an_unreadable_number_names_its_variable(self, name, field):
+        """``HFL_PORT=abc`` crashed every command with a bare ValueError, and
+        the lenient parsers ran a default instead of the typo (local audit)."""
+        from hfl.exceptions import InvalidConfigError
+
+        with patch.dict(os.environ, {name: "abc"}, clear=True):
+            with pytest.raises(InvalidConfigError) as caught:
+                HFLConfig()
+        assert caught.value.key == name and caught.value.value == "abc"
+
+    def test_an_empty_number_counts_as_unset(self):
+        with patch.dict(os.environ, {"HFL_PORT": "", "HFL_GENERATION_TIMEOUT": " "}, clear=True):
+            cfg = HFLConfig()
+        assert cfg.port == 11434 and cfg.generation_timeout == 600.0
+
+    def test_every_documented_ollama_fallback_is_read(self):
+        """docs/env-vars.md names an OLLAMA_* fallback for many HFL_* knobs;
+        each one must be read somewhere, or the docs promise what the code
+        ignores (OLLAMA_KV_CACHE_TYPE was)."""
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        documented = set(re.findall(r"`(OLLAMA_[A-Z_]+)`", (root / "docs/env-vars.md").read_text()))
+        source = "\n".join(p.read_text() for p in (root / "src/hfl").rglob("*.py"))
+        assert documented
+        assert sorted(v for v in documented if f'"{v}"' not in source) == []
 
     def test_max_queue_alias_picks_up_ollama_var(self):
         with patch.dict(

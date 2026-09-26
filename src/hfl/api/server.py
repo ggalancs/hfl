@@ -313,6 +313,26 @@ async def _keep_alive_reaper() -> None:
             logging.getLogger(__name__).exception("keep_alive reaper failed")
 
 
+async def _autoload_mcp() -> list[str]:
+    """Connect the MCP servers ``HFL_MCP_AUTOLOAD`` names, at start.
+
+    ``autoload_servers`` existed, and was documented as this variable's
+    reader, but nothing called it: the variable did nothing (local audit
+    D27). A broken entry must never keep ``hfl serve`` from coming up, so any
+    failure is logged and the server starts without MCP."""
+    if not os.environ.get("HFL_MCP_AUTOLOAD"):
+        return []
+    try:
+        from hfl.mcp.client import autoload_servers
+
+        connected = await autoload_servers()
+    except Exception:
+        logger.exception("HFL_MCP_AUTOLOAD: MCP servers not connected")
+        return []
+    logger.info("MCP servers connected at start: %s", ", ".join(connected) or "none")
+    return connected
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Server lifecycle."""
@@ -324,12 +344,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     configure_tracing()
 
+    mcp_servers = await _autoload_mcp()
     reaper = asyncio.create_task(_keep_alive_reaper())
 
     yield
     reaper.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await reaper
+    if mcp_servers:
+        from hfl.mcp.client import get_client
+
+        with contextlib.suppress(Exception):
+            await get_client().disconnect_all()
     # Cleanup on shutdown
     await get_state().cleanup()
     # Close HTTP clients

@@ -477,7 +477,27 @@ def mcp(a: Audit) -> str:
             (listed.stdout + listed.stderr)[-200:],
         )
 
+    def exposes_only_the_capabilities_asked() -> None:
+        session = [
+            request,
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ]
+        proc = subprocess.run(
+            [a.hfl, "mcp", "serve", "--capabilities", "web_fetch"],
+            input="\n".join(json.dumps(r) for r in session) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=a.env,
+        )
+        replies = [json.loads(x) for x in proc.stdout.splitlines() if x.startswith("{")]
+        listed = next((r for r in replies if r.get("id") == 2), {})
+        names = [t["name"] for t in listed.get("result", {}).get("tools", [])]
+        expect(names == ["web_fetch"], f"tools listed: {names} {proc.stderr[-160:]}")
+
     part("serve over stdio answers initialize", serves)
+    part("--capabilities limits the tools", exposes_only_the_capabilities_asked)
     part("list", lists)
     part("unknown action refused", lambda: a.fails_cleanly("mcp", "not-an-action"))
     return part.verdict()

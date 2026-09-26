@@ -291,7 +291,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("bench_results.json"))
     args = parser.parse_args()
 
-    hfl = [sys.executable, "-c", "from hfl.cli.main import app; app()"]
+    hfl = [sys.executable, "-c", "from hfl.cli.main import cli_main; cli_main()"]
     subprocess.run([*hfl, "pull", args.reference], check=True, stdin=subprocess.DEVNULL)
     from hfl.hub.resolver import parse_model_spec
     from hfl.models.registry import ModelRegistry

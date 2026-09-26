@@ -2,10 +2,14 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """Central configuration for hfl."""
 
-import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
+
+from hfl.exceptions import InvalidConfigError
+
+Num = TypeVar("Num", int, float)
 
 
 def _parse_ollama_host_env() -> tuple[str | None, int | None]:
@@ -44,25 +48,51 @@ def _parse_ollama_host_env() -> tuple[str | None, int | None]:
     return raw, None
 
 
-def _parse_percent(raw: str | None, default: float) -> float:
-    """``"85"`` or ``"85%"`` -> 85.0; anything unreadable -> ``default``."""
+def _env_number(kind: type[Num], default: Num | None, *names: str) -> Num | None:
+    """The first of ``names`` that is set, as ``kind`` (int or float).
+
+    A value that is not a number stops with an error naming the variable.
+    These used to be bare ``int(...)``/``float(...)`` calls, so
+    ``HFL_PORT=abc`` crashed every command with a ValueError traceback, and
+    the two lenient parsers swapped in a default with a warning logged before
+    logging was configured — a typo silently ran another setting (local
+    audit). An empty value counts as unset.
+    """
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            continue
+        try:
+            return kind(raw.strip())
+        except ValueError:
+            what = "a whole number" if kind is int else "a number"
+            raise InvalidConfigError(name, raw, [what]) from None
+    return default
+
+
+def _env_int(default: int, *names: str) -> int:
+    value = _env_number(int, default, *names)
+    return default if value is None else int(value)
+
+
+def _env_float(default: float, *names: str) -> float:
+    value = _env_number(float, default, *names)
+    return float(default if value is None else value)
+
+
+def _parse_percent(name: str, default: float) -> float:
+    """``"85"`` or ``"85%"`` -> 85.0; anything else stops with an error."""
+    raw = os.environ.get(name)
     if raw is None or not raw.strip():
         return default
     try:
         return float(raw.strip().rstrip("%").strip())
     except ValueError:
-        logging.getLogger(__name__).warning("Invalid percentage %r; using %s", raw, default)
-        return default
+        raise InvalidConfigError(name, raw, ["a percentage, e.g. 85 or 85%"]) from None
 
 
-def _parse_nonnegative_int(raw: str | None, default: int) -> int:
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return max(0, int(raw.strip()))
-    except ValueError:
-        logging.getLogger(__name__).warning("Invalid integer %r; using %d", raw, default)
-        return default
+def _parse_nonnegative_int(default: int, *names: str) -> int:
+    return max(0, _env_int(default, *names))
 
 
 def _parse_cors_origins_env() -> list[str] | None:
@@ -193,11 +223,10 @@ class HFLConfig:
     #   3. ``OLLAMA_PORT`` (some Ollama deployments split host/port)
     #   4. Default ``11434``
     port: int = field(
-        default_factory=lambda: int(
-            os.environ.get("HFL_PORT")
-            or (str(_parse_ollama_host_env()[1]) if _parse_ollama_host_env()[1] else "")
-            or os.environ.get("OLLAMA_PORT")
-            or "11434"
+        default_factory=lambda: (
+            _env_number(int, None, "HFL_PORT")
+            or _parse_ollama_host_env()[1]
+            or _env_int(11434, "OLLAMA_PORT")
         )
     )
 
@@ -224,11 +253,9 @@ class HFLConfig:
         default_factory=lambda: os.environ.get("HFL_RATE_LIMIT_ENABLED", "true").lower() == "true"
     )
     rate_limit_requests: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_REQUESTS", "60"))
+        default_factory=lambda: _env_int(60, "HFL_RATE_LIMIT_REQUESTS")
     )
-    rate_limit_window: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_RATE_LIMIT_WINDOW", "60"))
-    )
+    rate_limit_window: int = field(default_factory=lambda: _env_int(60, "HFL_RATE_LIMIT_WINDOW"))
 
     # Security — the native agent loop dispatches MCP tool calls on the
     # server's behalf. The operator picks which MCP servers exist
@@ -274,9 +301,7 @@ class HFLConfig:
     )
 
     # LLM Inference (0 = auto-detect from model's GGUF metadata)
-    default_ctx_size: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_DEFAULT_CTX_SIZE", "0"))
-    )
+    default_ctx_size: int = field(default_factory=lambda: _env_int(0, "HFL_DEFAULT_CTX_SIZE"))
     default_n_gpu_layers: int = -1  # -1 = all layers to GPU
     default_threads: int = 0  # 0 = auto-detect
 
@@ -286,7 +311,13 @@ class HFLConfig:
     # ``OLLAMA_KV_CACHE_TYPE``. One of: ``"f16"`` (default, no
     # quantisation), ``"q8_0"`` (half VRAM, negligible quality
     # loss), ``"q4_0"`` (quarter VRAM, visible on small models).
-    kv_cache_type: str = field(default_factory=lambda: os.environ.get("HFL_KV_CACHE_TYPE", "f16"))
+    # ``OLLAMA_KV_CACHE_TYPE`` was documented as the fallback and never read
+    # (local audit D53).
+    kv_cache_type: str = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_KV_CACHE_TYPE") or os.environ.get("OLLAMA_KV_CACHE_TYPE") or "f16"
+        )
+    )
 
     # Default keep-alive duration applied to /api/chat and /api/generate
     # requests that did *not* set ``keep_alive`` themselves. Matches
@@ -314,14 +345,10 @@ class HFLConfig:
     # ``model_load_timeout`` bounds a cold load; a 44 GiB GGUF that is not
     # in the page cache can take minutes on slow storage.
     model_load_timeout: float = field(
-        default_factory=lambda: float(
-            os.environ.get("HFL_MODEL_LOAD_TIMEOUT")
-            or os.environ.get("OLLAMA_LOAD_TIMEOUT")
-            or "300"
-        )
+        default_factory=lambda: _env_float(300, "HFL_MODEL_LOAD_TIMEOUT", "OLLAMA_LOAD_TIMEOUT")
     )
     generation_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_GENERATION_TIMEOUT", "600"))
+        default_factory=lambda: _env_float(600, "HFL_GENERATION_TIMEOUT")
     )
 
     # Maximum request body size (bytes) — prevents DoS by oversized prompts.
@@ -329,7 +356,7 @@ class HFLConfig:
     # (a 128k-token prompt at ~4 chars/token is ~512 KB) while rejecting
     # obvious abuse. Override with HFL_MAX_REQUEST_BYTES=0 to disable.
     max_request_bytes: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_MAX_REQUEST_BYTES", str(10 * 1024 * 1024)))
+        default_factory=lambda: _env_int(10 * 1024 * 1024, "HFL_MAX_REQUEST_BYTES")
     )
 
     # SEC-2: optional per-request cap on streamed blob uploads (/api/blobs/),
@@ -337,9 +364,7 @@ class HFLConfig:
     # multi-GB. 0 (default) = unlimited (unchanged behaviour); operators that
     # expose the server off loopback can set HFL_MAX_BLOB_BYTES to bound a
     # disk-fill upload.
-    max_blob_bytes: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_MAX_BLOB_BYTES", "0"))
-    )
+    max_blob_bytes: int = field(default_factory=lambda: _env_int(0, "HFL_MAX_BLOB_BYTES"))
 
     # Inference dispatcher (spec §5.3 — concurrency / queueing).
     # Llama.cpp and transformers-GPU share a single non-reentrant model
@@ -358,25 +383,19 @@ class HFLConfig:
     #      install whose env vars are already set)
     #   4. Default ``1`` — preserves V1 behaviour (single-flight).
     queue_max_inflight: int = field(
-        default_factory=lambda: int(
-            os.environ.get("HFL_QUEUE_MAX_INFLIGHT")
-            or os.environ.get("HFL_NUM_PARALLEL")
-            or os.environ.get("OLLAMA_NUM_PARALLEL")
-            or "1"
+        default_factory=lambda: _env_int(
+            1, "HFL_QUEUE_MAX_INFLIGHT", "HFL_NUM_PARALLEL", "OLLAMA_NUM_PARALLEL"
         )
     )
     # Max queue depth, with the same Ollama-fallback chain as the
     # in-flight cap.
     queue_max_size: int = field(
-        default_factory=lambda: int(
-            os.environ.get("HFL_QUEUE_MAX_SIZE")
-            or os.environ.get("HFL_MAX_QUEUE")
-            or os.environ.get("OLLAMA_MAX_QUEUE")
-            or "16"
+        default_factory=lambda: _env_int(
+            16, "HFL_QUEUE_MAX_SIZE", "HFL_MAX_QUEUE", "OLLAMA_MAX_QUEUE"
         )
     )
     queue_acquire_timeout_seconds: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_QUEUE_ACQUIRE_TIMEOUT", "60"))
+        default_factory=lambda: _env_float(60, "HFL_QUEUE_ACQUIRE_TIMEOUT")
     )
 
     # Retry settings
@@ -390,23 +409,22 @@ class HFLConfig:
     # them here lets operators tune streaming backpressure without a
     # code change.
     stream_queue_put_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_PUT_TIMEOUT", "60"))
+        default_factory=lambda: _env_float(60, "HFL_STREAM_QUEUE_PUT_TIMEOUT")
     )
     stream_queue_get_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_STREAM_QUEUE_GET_TIMEOUT", "30"))
+        default_factory=lambda: _env_float(30, "HFL_STREAM_QUEUE_GET_TIMEOUT")
     )
     # Memory residency. HFL keeps as many models loaded as fit; this is the
     # share of TOTAL RAM the machine may have in use after a load (other
     # programs included). Accepts "85" or "85%". See hfl.engine.residency.
     memory_budget_percent: float = field(
-        default_factory=lambda: _parse_percent(os.environ.get("HFL_MEMORY_BUDGET"), 85.0)
+        default_factory=lambda: _parse_percent("HFL_MEMORY_BUDGET", 85.0)
     )
     # Optional ceiling on the NUMBER of resident models, for operators who
     # come from Ollama. 0 (the default) means memory alone decides.
     max_loaded_models: int = field(
         default_factory=lambda: _parse_nonnegative_int(
-            os.environ.get("HFL_MAX_LOADED_MODELS") or os.environ.get("OLLAMA_MAX_LOADED_MODELS"),
-            0,
+            0, "HFL_MAX_LOADED_MODELS", "OLLAMA_MAX_LOADED_MODELS"
         )
     )
     # MLX prompt cache: the KV of recent prompts, kept so a follow-up turn
@@ -414,18 +432,18 @@ class HFLConfig:
     # Silicon the cache shares unified memory with the model weights — an
     # unbounded cache is a slow way to OOM a large model. 0 disables it.
     mlx_prompt_cache_bytes: int = field(
-        default_factory=lambda: int(os.environ.get("HFL_MLX_PROMPT_CACHE_BYTES", str(2 * 1024**3)))
+        default_factory=lambda: _env_int(2 * 1024**3, "HFL_MLX_PROMPT_CACHE_BYTES")
     )
     # vLLM-specific: time allowed for the error sentinel to reach the
     # consumer when the worker thread failed. Shorter than the regular
     # put timeout because a dying stream shouldn't wait for
     # backpressure relief.
     vllm_error_put_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_VLLM_ERROR_PUT_TIMEOUT", "10"))
+        default_factory=lambda: _env_float(10, "HFL_VLLM_ERROR_PUT_TIMEOUT")
     )
     # vLLM worker-thread join timeout during shutdown.
     vllm_shutdown_join_timeout: float = field(
-        default_factory=lambda: float(os.environ.get("HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT", "5"))
+        default_factory=lambda: _env_float(5, "HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT")
     )
 
     # Service Level Objectives (SLOs)

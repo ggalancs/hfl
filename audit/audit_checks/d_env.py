@@ -377,13 +377,12 @@ def d26(a: Audit) -> str:
 @probe("D27", "HFL_MCP_AUTOLOAD")
 def d27(a: Audit) -> str:
     config = a.scratch / "mcp.json"
-    config.write_text(
-        json.dumps({"servers": [{"id": "self", "target": f"stdio://{a.hfl} mcp serve"}]})
-    )
+    target = f"stdio://{a.hfl} mcp serve"
+    config.write_text(json.dumps({"servers": [{"id": "self", "target": target}]}))
     with a.server(env={"HFL_MCP_AUTOLOAD": str(config)}):
         log = _log(a)
-    expect("mcp" in log.lower(), "nothing about MCP in the serve log; " + log[-200:])
-    return "read at start"
+    expect("MCP servers connected at start: self" in log, "not connected at start; " + log[-200:])
+    return "the listed MCP server (hfl's own, over stdio) connected at start"
 
 
 @probe("D28", "HFL_MEMORY_BUDGET")
@@ -617,39 +616,6 @@ def d46(a: Audit) -> str:
 @probe("D47", "HFL_STREAM_QUEUE_PUT_TIMEOUT")
 def d47(a: Audit) -> str:
     raise Uncheckable("internal stream timeout: needs a stalled client to observe")
-
-
-@probe("D48", "HFL_TOOLS")
-def d48(a: Audit) -> str:
-    import subprocess
-
-    request = [
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "audit", "version": "1"},
-            },
-        },
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-    ]
-    out = subprocess.run(
-        [a.hfl, "mcp", "serve"],
-        input="\n".join(json.dumps(r) for r in request) + "\n",
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env={**a.env, "HFL_TOOLS": "web_fetch"},
-    )
-    expect(
-        "web_fetch" in out.stdout and "web_search" not in out.stdout,
-        (out.stdout + out.stderr)[-300:],
-    )
-    return "only the listed tool exposed"
 
 
 @probe("D49", "HFL_VLLM_ERROR_PUT_TIMEOUT")

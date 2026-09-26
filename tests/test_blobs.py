@@ -15,6 +15,7 @@ import hashlib
 import pytest
 
 from hfl.hub.blobs import (
+    BlobTooLargeError,
     DigestMismatchError,
     InvalidBlobDigestError,
     blob_dir,
@@ -153,7 +154,7 @@ class TestWriteBlobStream:
     async def test_chunk_limit_rejects_oversize(self, temp_config):
         data = b"x" * 1024
         digest = _sha256(data)
-        with pytest.raises(InvalidBlobDigestError):
+        with pytest.raises(BlobTooLargeError):
             await write_blob_stream(
                 digest,
                 _aiter([data]),

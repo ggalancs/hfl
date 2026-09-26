@@ -82,7 +82,7 @@ class TestPostBlob:
         data = b"this body is well over eight bytes"
         digest = _sha256(data)
         resp = client.post(f"/api/blobs/sha256:{digest}", content=data)
-        assert resp.status_code == 400
+        assert resp.status_code == 413  # too large, not a bad digest (audit D23)
         assert "limit" in resp.text.lower()
         assert not blob_exists(digest)
 

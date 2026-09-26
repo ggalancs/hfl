@@ -34,6 +34,52 @@ class TestServeCommand:
             assert call_kwargs["port"] == 11434
             assert call_kwargs["api_key"] is None
 
+    def test_serve_takes_the_configured_port(self, monkeypatch):
+        """HFL_PORT / OLLAMA_HOST's port / OLLAMA_PORT reach ``serve``: the
+        option defaulted to a fixed 11434, so none of them applied (local
+        audit D38). ``config.port`` is where they resolve."""
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "port", 18123)
+        with patch("hfl.api.server.start_server") as mock_start:
+            assert runner.invoke(app, ["serve"]).exit_code == 0
+            assert mock_start.call_args[1]["port"] == 18123
+        with patch("hfl.api.server.start_server") as mock_start:
+            assert runner.invoke(app, ["serve", "--port", "9000"]).exit_code == 0
+            assert mock_start.call_args[1]["port"] == 9000
+
+    @pytest.mark.parametrize(
+        ("command", "path"), [(["stop", "m"], "/api/stop"), (["ps"], "/api/ps")]
+    )
+    def test_client_commands_reach_the_configured_port(self, monkeypatch, command, path):
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "port", 18123)
+        urls: list[str] = []
+
+        def record(url, *a, **k):
+            urls.append(url)
+            raise RuntimeError("stop here")
+
+        monkeypatch.setattr("httpx.post", record)
+        monkeypatch.setattr("httpx.get", record)
+        runner.invoke(app, command)
+        assert urls and urls[0].endswith(f":18123{path}"), urls
+
+    def test_an_unreadable_setting_is_one_line_not_a_traceback(self, monkeypatch, capsys):
+        from hfl.cli import main
+        from hfl.exceptions import InvalidConfigError
+
+        def bad() -> None:
+            raise InvalidConfigError("HFL_PORT", "abc", ["a whole number"])
+
+        monkeypatch.setattr(main, "app", bad)
+        with pytest.raises(SystemExit) as caught:
+            main.cli_main()
+        assert caught.value.code == 2
+        err = capsys.readouterr().err
+        assert "HFL_PORT" in err and "abc" in err and "Traceback" not in err
+
     def test_serve_with_api_key(self):
         """Test serve command with API key."""
         with patch("hfl.api.server.start_server") as mock_start:

@@ -544,7 +544,7 @@ def launch(
     tool: str = typer.Argument(..., help=t("commands.launch.args.tool")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.launch.options.model")),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("commands.launch.options.host")),
-    port: int = typer.Option(11434, "--port", "-p", help=t("commands.launch.options.port")),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("commands.launch.options.port")),
     api_key: str = typer.Option(None, "--api-key", help=t("commands.launch.options.api_key")),
     print_only: bool = typer.Option(False, "--print", help=t("commands.launch.options.print")),
     parallel: int = typer.Option(0, "--parallel", help=t("commands.launch.options.parallel")),
@@ -555,6 +555,7 @@ def launch(
     from hfl.config import config
     from hfl.models.registry import ModelRegistry
 
+    port = _configured_port(port)
     if not model:
         console.print(f"[red]{escape_markup(t('commands.launch.messages.model_required'))}[/]")
         raise typer.Exit(2)
@@ -862,6 +863,18 @@ def _from_short_name(name: str, registry_cls: Any, *, assume_yes: bool) -> Any:
     return local
 
 
+def _configured_port(port: int | None) -> int:
+    """``--port`` when given, else the configured port: ``HFL_PORT``, the
+    port in ``OLLAMA_HOST``, ``OLLAMA_PORT``, then 11434. The option used to
+    default to a fixed 11434, so none of those ever applied (local audit
+    D38) — not to ``serve``, nor to the commands that talk to it."""
+    if port is not None:
+        return port
+    from hfl.config import config
+
+    return config.port
+
+
 def escape_markup(text: str) -> str:
     from rich.markup import escape
 
@@ -1010,7 +1023,7 @@ def _is_public_bind(host: str) -> bool:
 @app.command()
 def serve(
     host: str | None = typer.Option(None, "--host", help=t("commands.serve.options.host")),
-    port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
     # Also from HFL_API_KEY — better than the flag, which every local user
     # can read in ``ps``; docker-compose passed it and nothing read it.
@@ -1044,6 +1057,7 @@ def serve(
     from hfl.api.state import get_state
     from hfl.logging_config import configure_logging
 
+    port = _configured_port(port)
     # Initialize structured logging
     configure_logging(level=log_level, json_format=json_logs)
 
@@ -1450,7 +1464,7 @@ def outdated(
 def stop(
     model: str = typer.Argument(None, help="Model name to unload. Omit to unload all."),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
-    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("options.server_port")),
 ) -> None:
     """Unload a model without restarting the server (Ollama-compatible).
 
@@ -1460,6 +1474,7 @@ def stop(
     """
     import httpx
 
+    port = _configured_port(port)
     url = f"http://{host}:{port}/api/stop"
     body: dict = {}
     if model:
@@ -1563,7 +1578,7 @@ def ps(
     host: str = typer.Option(
         "127.0.0.1", "--host", "-H", help="Host where the HFL server is running"
     ),
-    port: int = typer.Option(11434, "--port", "-p", help="Port where the HFL server is running"),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("options.server_port")),
 ) -> None:
     """List models currently loaded in memory (Ollama-compatible).
 
@@ -1574,6 +1589,7 @@ def ps(
     import httpx
     from rich.table import Table
 
+    port = _configured_port(port)
     url = f"http://{host}:{port}/api/ps"
     try:
         response = httpx.get(url, timeout=5.0)
@@ -2026,7 +2042,7 @@ def create(
         readable=True,
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="HFL server host"),
-    port: int = typer.Option(11434, "--port", "-p", help="HFL server port"),
+    port: int | None = typer.Option(None, "--port", "-p", help=t("options.server_port")),
 ) -> None:
     """Create a new model from a Modelfile (Ollama-compatible).
 
@@ -2037,6 +2053,7 @@ def create(
     import httpx
 
     body = modelfile.read_text()
+    port = _configured_port(port)
     url = f"http://{host}:{port}/api/create"
     payload: dict[str, Any] = {
         "model": model,
@@ -3245,5 +3262,17 @@ def sessions_rm(
     console.print(f"[green]{t('messages.session_deleted', name=name)}[/]")
 
 
+def cli_main() -> None:
+    """The ``hfl`` command. An unreadable setting (``HFL_PORT=abc``) is a
+    one-line message naming the variable, not a traceback."""
+    from hfl.exceptions import InvalidConfigError
+
+    try:
+        app()
+    except InvalidConfigError as exc:
+        typer.echo(f"hfl: {exc.details}", err=True)
+        raise SystemExit(2) from None
+
+
 if __name__ == "__main__":
-    app()
+    cli_main()

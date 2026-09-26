@@ -34,7 +34,7 @@
       "description": "Inicia el servidor API (compatible con OpenAI + Ollama).",
       "options": {
         "host": "Dirección del host",
-        "port": "Número de puerto",
+        "port": "Puerto (por defecto: HFL_PORT, el puerto de OLLAMA_HOST, OLLAMA_PORT o 11434)",
         "model": "Pre-cargar un modelo al iniciar",
         "api_key": "Clave API para autenticación (recomendado para exposición en red)",
         "sandbox": "Endurecimiento del proceso al arrancar: none (por defecto), seccomp (Linux), macos. También HFL_SANDBOX.",
@@ -236,7 +236,7 @@
       "options": {
         "model": "Nombre local, alias o referencia del Hub (org/modelo[:CUANT])",
         "host": "Host del servidor HFL",
-        "port": "Puerto del servidor HFL",
+        "port": "Puerto del servidor HFL (por defecto: HFL_PORT, el puerto de OLLAMA_HOST, OLLAMA_PORT o 11434)",
         "api_key": "Clave de API, si el servidor la pide",
         "print": "Muestra la configuración para tu shell en vez de lanzar nada",
         "parallel": "Atender N peticiones a la vez, si esto arranca el servidor (los agentes envían varias)"
@@ -531,6 +531,9 @@
     "no_tokenizer": "{path} tiene los pesos del modelo pero no su tokenizador (tokenizer.json o tokenizer.model): no se podría ejecutar.",
     "bad_config": "No se puede leer {path}/config.json.",
     "unsupported": "{path} es un modelo de tipo {kind}, que HFL no ejecuta."
+  },
+  "options": {
+    "server_port": "Puerto del servidor HFL (por defecto: HFL_PORT, el puerto de OLLAMA_HOST, OLLAMA_PORT o 11434)"
   },
   "ui": {
     "model": "Modelo",

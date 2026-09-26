@@ -370,7 +370,7 @@
       <text x="205" y="48" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">CLI (typer + rich)</text>
       <text x="60" y="75" fill="#8b949e" font-size="11">pull  run  serve  list  search</text>
       <text x="60" y="95" fill="#8b949e" font-size="11">rm  inspect  alias  login  logout  version</text>
-      <text x="60" y="115" fill="#3a2f1a" font-size="10">cli/main.py — Punto de entrada: hfl.cli.main:app</text>
+      <text x="60" y="115" fill="#3a2f1a" font-size="10">cli/main.py — Punto de entrada: hfl.cli.main:cli_main</text>
 
       <!-- API Layer -->
       <rect x="420" y="20" width="350" height="120" rx="12" fill="#1a2332" stroke="#30363d"/>
@@ -563,7 +563,7 @@
   <h2>6. Módulo cli — Interfaz de Línea de Comandos</h2>
   <div class="card">
     <p><strong>Archivo:</strong> <code>src/hfl/cli/main.py</code> (~2.350 líneas)</p>
-    <p><strong>Framework:</strong> Typer + Rich. Entry point registrado en pyproject.toml como <code>hfl = "hfl.cli.main:app"</code></p>
+    <p><strong>Framework:</strong> Typer + Rich. Entry point registrado en pyproject.toml como <code>hfl = "hfl.cli.main:cli_main"</code></p>
   </div>
 
   <table>
@@ -1891,7 +1891,7 @@ pytest -k "not slow" -v               <span class="comment"># Excluir tests lent
   <div class="grid-2">
     <div class="card">
       <h4>Build System: Hatchling</h4>
-      <p>Configurado en <code>pyproject.toml</code>. Packages source en <code>src/hfl</code>. Entry point: <code>hfl = "hfl.cli.main:app"</code>. Instalación con <code>pip install .</code> o <code>pip install .[all]</code> para todas las dependencias opcionales.</p>
+      <p>Configurado en <code>pyproject.toml</code>. Packages source en <code>src/hfl</code>. Entry point: <code>hfl = "hfl.cli.main:cli_main"</code>. Instalación con <code>pip install .</code> o <code>pip install .[all]</code> para todas las dependencias opcionales.</p>
     </div>
     <div class="card">
       <h4>PyInstaller (hfl.spec)</h4>

@@ -97,6 +97,13 @@ class TestStaticPyprojectPins:
             f"[{extra_name}] transformers pin must cap before the next major: {pin!r}"
         )
 
+    def test_mcp_capped_below_the_2x_api(self):
+        """The 2.x SDK dropped the Server decorators hfl.mcp.server uses; an
+        uncapped pin let a clean install take 2.2 and `hfl mcp serve` died
+        at start (local audit A21)."""
+        pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["mcp"], "mcp")
+        assert "<2" in pin.replace(" ", ""), f"mcp must stay below 2.0: {pin!r}"
+
     def test_llama_cpp_python_pin_supports_gemma4(self):
         """The ``[llama]`` extra must require a llama-cpp-python build
         that recognises the ``gemma4`` GGUF architecture.

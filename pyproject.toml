@@ -149,8 +149,12 @@ tray = [
     "Pillow>=12.3.0",
 ]
 
-# Model Context Protocol client/server (Phase 9+)
-mcp = ["mcp>=1.0.0"]
+# Model Context Protocol client/server (Phase 9+). Capped at the next major:
+# the 2.x SDK removed the low-level Server's list_tools()/call_tool()
+# decorators that hfl.mcp.server wires its tools with, and an uncapped range
+# let a clean install pull 2.2 — `hfl mcp serve` then died at start with
+# "'Server' object has no attribute 'list_tools'" (local audit A21).
+mcp = ["mcp>=1.0.0,<2.0"]
 
 # Apple Silicon native backend (Phase 13+ — V2 row 14).
 # 0.31.2+ is required for the ``gemma4`` architecture; the same
@@ -197,7 +201,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0", "pytest-cov>=4.0"
 build = ["pyinstaller>=6.0"]
 
 [project.scripts]
-hfl = "hfl.cli.main:app"
+hfl = "hfl.cli.main:cli_main"
 
 [project.urls]
 Homepage = "https://ggalancs.github.io/hfl/"

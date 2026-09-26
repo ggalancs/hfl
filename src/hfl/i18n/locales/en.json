@@ -34,7 +34,7 @@
       "description": "Start the API server (OpenAI + Ollama compatible).",
       "options": {
         "host": "Host address to bind",
-        "port": "Port number",
+        "port": "Port (default: HFL_PORT, the port in OLLAMA_HOST, OLLAMA_PORT, else 11434)",
         "model": "Pre-load a model at startup",
         "api_key": "API key for authentication (recommended for network exposure)",
         "sandbox": "Process hardening at startup: none (default), seccomp (Linux), macos. Also HFL_SANDBOX.",
@@ -236,7 +236,7 @@
       "options": {
         "model": "Local model name, alias or Hub reference (org/model[:QUANT])",
         "host": "HFL server host",
-        "port": "HFL server port",
+        "port": "HFL server port (default: HFL_PORT, the port in OLLAMA_HOST, OLLAMA_PORT, else 11434)",
         "api_key": "API key, if the server requires one",
         "print": "Print the settings for your shell instead of launching",
         "parallel": "Serve N requests at once, if this starts the server (coding agents send several)"
@@ -531,6 +531,9 @@
     "no_tokenizer": "{path} has model weights but no tokenizer (tokenizer.json or tokenizer.model): it could not be run.",
     "bad_config": "{path}/config.json cannot be read.",
     "unsupported": "{path} is a {kind} model, which HFL does not run."
+  },
+  "options": {
+    "server_port": "HFL server port (default: HFL_PORT, the port in OLLAMA_HOST, OLLAMA_PORT, else 11434)"
   },
   "ui": {
     "model": "Model",
