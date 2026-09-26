@@ -320,6 +320,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hfl_model_unloads_total`) and every token; with `HFL_OTEL_ENABLED`, a
   streamed reply is an `inference.stream` span, checked with a local OTLP
   collector receiving it.
+- **The Docker image could not run a GGUF model.** The published 0.21.0
+  image (amd64 and arm64) failed to load llama.cpp: `libllama.so` needs
+  `libgomp.so.1`, which the slim runtime stage lacked. And the image built
+  llama.cpp for the build machine's CPU — an image could stop with
+  "illegal instruction" on another, and on arm64 under Docker Desktop the
+  build failed outright (gcc 12, fp16 intrinsics). llama-cpp-python now
+  comes from its project's generic CPU wheels (nothing compiled; the build
+  fails fast if a wheel is missing) and the runtime has OpenMP. Checked:
+  `scripts/platform_check.py` passes in the image on arm64 and on x86_64.
 - **Asking for another embedding model left the first one loaded** — for
   an HFL without llama-cpp-python, its llama-server process kept running —
   until HFL exited, and the server's shutdown did not unload the embedding

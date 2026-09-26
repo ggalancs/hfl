@@ -50,9 +50,19 @@ COPY src ./src
 
 # Build a venv then install HFL into it. Using a venv (not the system
 # site-packages) keeps the runtime copy simple.
+#
+# llama-cpp-python comes from its project's own CPU wheels, never built
+# here: built here, llama.cpp targets the build machine's CPU features
+# (GGML_NATIVE), so an image could stop with "illegal instruction" on
+# another CPU — and on arm64 under Docker Desktop the build itself failed
+# (gcc 12, fp16 intrinsics: "target specific option mismatch"). The wheels
+# are generic; --only-binary fails fast if one is missing.
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip wheel \
- && /opt/venv/bin/pip install ".[${HFL_EXTRAS}]"
+ && /opt/venv/bin/pip install \
+        --only-binary=llama-cpp-python \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+        ".[${HFL_EXTRAS}]"
 
 # --------------------------------------------------------------------
 # Stage 2: runtime
@@ -75,6 +85,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libgomp1 \
         tini \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 1000 hfl \

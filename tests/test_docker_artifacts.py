@@ -48,7 +48,19 @@ class TestDockerfile:
 
     def test_extras_are_parameterised(self):
         assert "ARG HFL_EXTRAS" in self.text
-        assert 'pip install ".[${HFL_EXTRAS}]"' in self.text
+        assert '".[${HFL_EXTRAS}]"' in self.text
+
+    def test_llama_cpp_comes_from_its_generic_wheels(self):
+        """Built in the image, llama.cpp targets the build machine's CPU
+        (and on arm64 under Docker Desktop the build failed outright)."""
+        assert "--only-binary=llama-cpp-python" in self.text
+        assert "https://abetlen.github.io/llama-cpp-python/whl/cpu" in self.text
+
+    def test_the_runtime_has_openmp(self):
+        """The published 0.21.0 image could not load llama.cpp at all:
+        libllama.so needs libgomp.so.1, which the slim runtime lacked."""
+        runtime = self.text.split("AS runtime", 1)[1]
+        assert "libgomp1" in runtime
 
     def test_pinned_python_version(self):
         assert "ARG PYTHON_VERSION=3.12" in self.text

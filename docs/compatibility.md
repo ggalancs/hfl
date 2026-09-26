@@ -71,7 +71,7 @@ to a real model, not a claim. ✓ passed, ✗ failed (the reason is in the
 | | Evidence |
 |---|---|
 | macOS, Apple Silicon (M3 Max) | This table; `scripts/agent_check.py` (Claude Code and Codex); benchmarks; `scripts/platform_check.py` passes with llama-cpp-python and without it (llama-server, as Homebrew installs) |
-| Linux, CPU (x86_64, arm64) | The test suite (CI, manual). `platform-check.yml` runs `scripts/platform_check.py` there — manual, **not run yet** |
+| Linux, CPU (x86_64, arm64) | The test suite (CI, manual). `scripts/platform_check.py` passes in the Docker image (Debian bookworm, Python 3.12) on arm64 and on x86_64 (emulated), 2026-09-26; `platform-check.yml` runs it on real Linux runners — manual, **not run yet** |
 | Windows | Builds and installers are published; `windows-tests.yml` runs the suite and `platform-check.yml` the real check — manual, **not run yet** |
 | Linux / Windows with NVIDIA (CUDA) | **Not verified**: no NVIDIA machine was available |
 
