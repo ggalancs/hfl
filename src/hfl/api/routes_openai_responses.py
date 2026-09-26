@@ -38,7 +38,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from hfl.api.chat_core import resolve_chat_output
 from hfl.api.helpers import prepare_stream_response, run_dispatched
+from hfl.api.thinking import ThinkingSplitter
 from hfl.engine.base import ChatMessage, GenerationConfig
 
 if TYPE_CHECKING:
@@ -212,16 +214,18 @@ def _chat_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | No
 def _resolve_thinking(reasoning: dict[str, Any] | None) -> str | None:
     """Map ``reasoning.effort`` to the engine's ``thinking_level``.
 
-    OpenAI accepts ``"low"``/``"medium"``/``"high"``. We keep the
-    same vocabulary so the existing ``GenerationConfig.thinking_level``
-    grammar applies unchanged.
+    ``"low"``/``"medium"``/``"high"`` as they are; ``"none"`` turns
+    reasoning off and ``"minimal"`` is the lowest level, as for chat
+    completions' ``reasoning_effort`` (``none`` used to be ignored, so a
+    thinking model could not be told to stop thinking).
     """
     if not reasoning:
         return None
     effort = reasoning.get("effort")
-    if isinstance(effort, str) and effort.lower() in {"low", "medium", "high"}:
-        return effort.lower()
-    return None
+    if not isinstance(effort, str):
+        return None
+    level = {"none": "off", "minimal": "low"}.get(effort.lower(), effort.lower())
+    return level if level in {"off", "low", "medium", "high"} else None
 
 
 def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
@@ -391,55 +395,130 @@ async def _stream_response(
         tool_aware = bool(tools)
         accumulated: list[str] = []
         msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        rs_id = f"rs_{uuid.uuid4().hex[:24]}"
+        # Reasoning goes in its own ``reasoning`` item, before the message,
+        # never as answer text; items open as their text arrives, and each
+        # takes the next output_index.
+        splitter = ThinkingSplitter()
+        show_reasoning = cfg.reasoning != "off"
+        items: dict[str, Any] = {"next": 0, "open": "", "reasoning": [], "answer": []}
+        index_of: dict[str, int] = {}
+        output: list[dict[str, Any]] = []
 
-        def message_opened() -> str:
-            return event(
-                "response.output_item.added",
-                output_index=0,
-                item=_message_item(msg_id, "", status="in_progress"),
-            ) + event(
-                "response.content_part.added",
-                item_id=msg_id,
-                output_index=0,
-                content_index=0,
-                part={"type": "output_text", "text": "", "annotations": []},
+        def summary(text: str) -> dict[str, Any]:
+            return {"type": "summary_text", "text": text}
+
+        def reasoning_item(text: str | None) -> dict[str, Any]:
+            return {"type": "reasoning", "id": rs_id, "summary": [summary(text)] if text else []}
+
+        def opened(kind: str) -> str:
+            out = closed()
+            index_of[kind] = items["next"]
+            items["next"] += 1
+            items["open"] = kind
+            at = index_of[kind]
+            if kind == "reasoning":
+                return (
+                    out
+                    + event(
+                        "response.output_item.added", output_index=at, item=reasoning_item(None)
+                    )
+                    + event(
+                        "response.reasoning_summary_part.added",
+                        item_id=rs_id,
+                        output_index=at,
+                        summary_index=0,
+                        part=summary(""),
+                    )
+                )
+            return (
+                out
+                + event(
+                    "response.output_item.added",
+                    output_index=at,
+                    item=_message_item(msg_id, "", status="in_progress"),
+                )
+                + event(
+                    "response.content_part.added",
+                    item_id=msg_id,
+                    output_index=at,
+                    content_index=0,
+                    part={"type": "output_text", "text": "", "annotations": []},
+                )
             )
 
-        def message_closed(text: str) -> str:
+        def closed() -> str:
+            kind, items["open"] = items["open"], ""
+            if not kind:
+                return ""
+            at = index_of[kind]
+            if kind == "reasoning":
+                text = "".join(items["reasoning"])
+                output.append(reasoning_item(text))
+                return (
+                    event(
+                        "response.reasoning_summary_text.done",
+                        item_id=rs_id,
+                        output_index=at,
+                        summary_index=0,
+                        text=text,
+                    )
+                    + event(
+                        "response.reasoning_summary_part.done",
+                        item_id=rs_id,
+                        output_index=at,
+                        summary_index=0,
+                        part=summary(text),
+                    )
+                    + event("response.output_item.done", output_index=at, item=reasoning_item(text))
+                )
+            text = "".join(items["answer"])
+            output.append(_message_item(msg_id, text))
             part = {"type": "output_text", "text": text, "annotations": []}
             return (
                 event(
                     "response.output_text.done",
                     item_id=msg_id,
-                    output_index=0,
+                    output_index=at,
                     content_index=0,
                     text=text,
                 )
                 + event(
                     "response.content_part.done",
                     item_id=msg_id,
-                    output_index=0,
+                    output_index=at,
                     content_index=0,
                     part=part,
                 )
                 + event(
-                    "response.output_item.done", output_index=0, item=_message_item(msg_id, text)
+                    "response.output_item.done", output_index=at, item=_message_item(msg_id, text)
                 )
             )
 
-        def text_delta(token: str) -> str:
-            return event(
+        def written(kind: str, text: str) -> str:
+            if not text:
+                return ""
+            out = "" if items["open"] == kind else opened(kind)
+            items[kind].append(text)
+            if kind == "reasoning":
+                return out + event(
+                    "response.reasoning_summary_text.delta",
+                    item_id=rs_id,
+                    output_index=index_of[kind],
+                    summary_index=0,
+                    delta=text,
+                )
+            return out + event(
                 "response.output_text.delta",
                 item_id=msg_id,
-                output_index=0,
+                output_index=index_of[kind],
                 content_index=0,
-                delta=token,
+                delta=text,
             )
 
-        if not tool_aware:
-            # Agents build the turn from these item events, not from the
-            # list in response.completed: open the message before any text.
-            yield message_opened()
+        def split(answer: str, reasoning: str) -> str:
+            shown = reasoning if show_reasoning else ""
+            return written("reasoning", shown) + written("answer", answer)
 
         def format_item(token: str) -> str:
             accumulated.append(token)
@@ -447,54 +526,43 @@ async def _stream_response(
             # so a raw tool-call marker is never streamed verbatim as text.
             if tool_aware:
                 return ""
-            return text_delta(token)
+            return split(*splitter.feed(token))
 
         def format_done() -> str:
-            raw_text = "".join(accumulated)
-            text = raw_text
-            tool_calls: list[dict[str, Any]] | None = None
             if tool_aware:
-                try:
-                    from hfl.api.tool_parsers import dispatch as parse_tool_calls
-
-                    cleaned, parsed = parse_tool_calls(raw_text, model, tools)
-                    if parsed:
-                        tool_calls = parsed
-                        text = ""
-                    else:
-                        text = cleaned
-                except Exception:  # pragma: no cover — parser bugs must not break the stream
-                    logger.exception("tool-call parser failed for /v1/responses stream")
-            out = ""
-            output: list[dict[str, Any]] = []
-            if tool_calls:
-                for index, item in enumerate(_function_call_items(tool_calls)):
-                    out += event(
-                        "response.output_item.added",
-                        output_index=index,
-                        item={**item, "arguments": "", "status": "in_progress"},
-                    )
-                    out += event(
-                        "response.function_call_arguments.delta",
-                        item_id=item["id"],
-                        output_index=index,
-                        delta=item["arguments"],
-                    )
-                    out += event(
-                        "response.function_call_arguments.done",
-                        item_id=item["id"],
-                        output_index=index,
-                        arguments=item["arguments"],
-                    )
-                    out += event("response.output_item.done", output_index=index, item=item)
-                    output.append(item)
+                resolved = resolve_chat_output("".join(accumulated), model, tools)
+                answer, reasoning = resolved.content, resolved.reasoning or ""
+                tool_calls = resolved.tool_calls
             else:
-                if tool_aware:
-                    out += message_opened()
-                    if text:
-                        out += text_delta(text)
-                out += message_closed(text)
-                output.append(_message_item(msg_id, text))
+                answer, reasoning = splitter.flush()
+                tool_calls = []
+            out = split("" if tool_calls else answer, reasoning)
+            if not tool_calls and "answer" not in index_of:
+                # Every turn without a call has a message, if an empty one.
+                out += opened("answer")
+            out += closed()
+            for item in _function_call_items(tool_calls):
+                index = items["next"]
+                items["next"] += 1
+                out += event(
+                    "response.output_item.added",
+                    output_index=index,
+                    item={**item, "arguments": "", "status": "in_progress"},
+                )
+                out += event(
+                    "response.function_call_arguments.delta",
+                    item_id=item["id"],
+                    output_index=index,
+                    delta=item["arguments"],
+                )
+                out += event(
+                    "response.function_call_arguments.done",
+                    item_id=item["id"],
+                    output_index=index,
+                    arguments=item["arguments"],
+                )
+                out += event("response.output_item.done", output_index=index, item=item)
+                output.append(item)
             from hfl.engine.base import stream_counts
 
             prompt_n, generated = stream_counts(sync_iter)
@@ -605,28 +673,15 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     raw_text = getattr(result, "text", "") or ""
     tokens_input = int(getattr(result, "tokens_prompt", 0) or 0)
     tokens_output = int(getattr(result, "tokens_generated", 0) or 0)
-    reasoning_text = getattr(result, "reasoning_text", None)
     engine_tool_calls = getattr(result, "tool_calls", None)
 
-    # Run the tool-call parser when the engine did not already surface
-    # structured tool_calls. Mirrors the logic in routes_native:_finalize.
-    tool_calls: list[dict[str, Any]] | None = None
-    cleaned_text = raw_text
-    if isinstance(engine_tool_calls, list) and engine_tool_calls:
-        tool_calls = list(engine_tool_calls)
-        cleaned_text = ""
-    else:
-        try:
-            from hfl.api.tool_parsers import dispatch as parse_tool_calls
-
-            cleaned, parsed = parse_tool_calls(raw_text, req.model, tools)
-            if parsed:
-                tool_calls = parsed
-                cleaned_text = ""
-            else:
-                cleaned_text = cleaned
-        except Exception:  # pragma: no cover — parser bugs must not 500
-            logger.exception("tool-call parser failed for /v1/responses")
+    # The shared decision (chat_core): the engine's structured tool_calls,
+    # else markers parsed out of the text; the reasoning taken out of the
+    # answer either way.
+    resolved = resolve_chat_output(raw_text, req.model, tools, engine_tool_calls)
+    tool_calls = list(resolved.tool_calls) or None
+    cleaned_text = resolved.content
+    reasoning_text = resolved.reasoning if cfg.reasoning != "off" else None
 
     return _render_response(
         response_id=response_id,

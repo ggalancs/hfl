@@ -47,7 +47,7 @@ def openai_to_generation_config(
     # Handle stop sequences - can be string or list
     stop = req.stop if isinstance(req.stop, list) else ([req.stop] if req.stop else None)
 
-    return GenerationConfig(
+    config = GenerationConfig(
         temperature=req.temperature,
         top_p=req.top_p,
         max_tokens=req.max_tokens or 2048,
@@ -55,6 +55,10 @@ def openai_to_generation_config(
         seed=req.seed or -1,
         reasoning=_openai_reasoning(getattr(req, "reasoning_effort", None)),
     )
+    # Asked for: the engine keeps the reasoning channel (gpt-oss's would be
+    # filtered out), and the route sends it apart from the answer.
+    config.expose_reasoning = config.reasoning not in (None, "off")
+    return config
 
 
 def _openai_reasoning(effort: str | None) -> str | None:
@@ -155,7 +159,7 @@ def anthropic_to_generation_config(
     Returns:
         GenerationConfig for inference
     """
-    return GenerationConfig(
+    config = GenerationConfig(
         temperature=req.temperature if req.temperature is not None else 0.7,
         top_p=req.top_p if req.top_p is not None else 0.9,
         top_k=req.top_k if req.top_k is not None else 40,
@@ -164,6 +168,8 @@ def anthropic_to_generation_config(
         seed=-1,
         reasoning=_anthropic_reasoning(req.thinking),
     )
+    config.expose_reasoning = config.reasoning not in (None, "off")
+    return config
 
 
 def generation_config_to_ollama(config: GenerationConfig) -> dict[str, Any]:

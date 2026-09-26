@@ -201,3 +201,25 @@ class ThinkingSplitter:
         if rest:
             self._emit(rest, out)
         return "".join(out[False]), "".join(out[True])
+
+
+def split_reasoning(text: str) -> tuple[str, str | None]:
+    """``(answer, reasoning)`` of a finished reply — what the stream splitter
+    gives, for the whole text at once.
+
+    Unlike ``extract_thinking`` it also takes a block the reply never closed
+    (the token cap hit mid-thought: all of it is reasoning, none answer), and
+    a close with no open (the template opened the block in the prompt, as
+    DeepSeek-R1's does: what comes before it is reasoning).
+    """
+    if not text:
+        return text, None
+    opens = [text.find(m) for m in _STREAM_OPEN if m in text]
+    closes = [text.find(m) for m in ("</think>", "</thinking>") if m in text]
+    if closes and (not opens or min(closes) < min(opens)):
+        text = "<think>" + text
+    splitter = ThinkingSplitter()
+    answer, reasoning = splitter.feed(text)
+    rest_answer, rest_reasoning = splitter.flush()
+    answer, reasoning = answer + rest_answer, reasoning + rest_reasoning
+    return answer, reasoning or None

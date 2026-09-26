@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hfl.api.thinking import split_reasoning
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 
 
@@ -28,11 +29,14 @@ class ChatOutput:
 
     ``content`` is the cleaned narration text, or ``""`` when the turn is a
     tool call (spec rule C4). ``tool_calls`` is the canonical list (empty when
-    none — spec rule C7).
+    none — spec rule C7). ``reasoning`` is what the model thought before
+    answering, taken out of ``content`` (``None`` when it showed none); each
+    route decides whether its client sees it.
     """
 
     content: str
     tool_calls: list[dict] = field(default_factory=list)
+    reasoning: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -50,19 +54,24 @@ def resolve_chat_output(
     """Turn raw engine output into a ``ChatOutput``.
 
     - ``tools_disabled`` (the client sent ``tool_choice: "none"``): never scan
-      for markers; the text is returned verbatim. This is required, not just
-      cosmetic — the per-family parser fires on a ``<tool_call>`` marker
-      regardless of the tools list, so suppression has to be explicit.
+      for markers; the answer (its reasoning apart) is returned as the model
+      wrote it. This is required, not just cosmetic — the per-family parser
+      fires on a ``<tool_call>`` marker regardless of the tools list, so
+      suppression has to be explicit.
     - Otherwise prefer the engine's structured ``tool_calls`` when present,
       then fall back to parsing markers out of the text. ``engine_tool_calls``
       is only trusted when it's a real non-empty list (a test ``MagicMock``
       auto-attr must not masquerade as data).
     """
+    answer, reasoning = split_reasoning(raw_text)
     if tools_disabled:
-        return ChatOutput(content=raw_text)
+        return ChatOutput(content=answer, reasoning=reasoning)
     if isinstance(engine_tool_calls, list) and engine_tool_calls:
-        return ChatOutput(content="", tool_calls=engine_tool_calls)
-    cleaned, parsed_calls = parse_tool_calls(raw_text, model_name, tools)
+        return ChatOutput(content="", tool_calls=engine_tool_calls, reasoning=reasoning)
+    # Calls are parsed from the raw text (Harmony's call markers sit among
+    # the channel markers the split drops); the answer from the split one.
+    _, parsed_calls = parse_tool_calls(raw_text, model_name, tools)
     if parsed_calls:
-        return ChatOutput(content="", tool_calls=parsed_calls)
-    return ChatOutput(content=cleaned)
+        return ChatOutput(content="", tool_calls=parsed_calls, reasoning=reasoning)
+    cleaned, _ = parse_tool_calls(answer, model_name, tools)
+    return ChatOutput(content=cleaned, reasoning=reasoning)

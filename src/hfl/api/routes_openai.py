@@ -24,7 +24,7 @@ from hfl.api.helpers import (
     run_dispatched,
 )
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
-from hfl.api.tool_parsers import dispatch as parse_tool_calls
+from hfl.api.thinking import ThinkingSplitter
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
@@ -247,6 +247,10 @@ async def chat_completions(
     else:
         message = {"role": "assistant", "content": resolved.content}
         finish_reason = result.stop_reason
+    if resolved.reasoning and gen_config.reasoning != "off":
+        # Never inside the answer; beside it, as DeepSeek, vLLM and
+        # llama-server send it.
+        message["reasoning_content"] = resolved.reasoning
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -315,6 +319,9 @@ async def _stream_chat(
     tool_aware = bool(tools)
     accumulated: list[str] = []
     emitted = [0]  # API-13: token count → report finish_reason "length" on cap
+    # Reasoning streams apart from the answer, in ``reasoning_content``.
+    splitter = ThinkingSplitter()
+    show_reasoning = config.reasoning != "off"
 
     def _chunk_json(delta: dict, finish_reason: str | None) -> str:
         chunk = {
@@ -335,11 +342,21 @@ async def _stream_chat(
         if tool_aware:
             accumulated.append(token)
             return ""
-        delta: dict[str, str] = {"content": token}
-        if first_chunk:
-            delta["role"] = "assistant"
-            first_chunk = False
-        return _chunk_json(delta, None)
+        return _deltas(*splitter.feed(token))
+
+    def _deltas(answer: str, reasoning: str) -> str:
+        nonlocal first_chunk
+        out = ""
+        for key, text in (("reasoning_content", reasoning if show_reasoning else ""),
+                          ("content", answer)):  # fmt: skip
+            if not text:
+                continue
+            delta: dict[str, str] = {key: text}
+            if first_chunk:
+                delta["role"] = "assistant"
+                first_chunk = False
+            out += _chunk_json(delta, None)
+        return out
 
     stream = state.engine.chat_stream(messages, config, tools)
 
@@ -372,24 +389,32 @@ async def _stream_chat(
         count = generated if generated is not None else emitted[0]
         stop_finish = "length" if (config.max_tokens and count >= config.max_tokens) else "stop"
         if not tool_aware:
-            return _chunk_json({}, stop_finish) + _usage_chunk() + "data: [DONE]\n\n"
+            return (
+                _deltas(*splitter.flush())
+                + _chunk_json({}, stop_finish)
+                + _usage_chunk()
+                + "data: [DONE]\n\n"
+            )
 
-        cleaned, canonical = parse_tool_calls("".join(accumulated), model, tools)
-        if canonical:
-            calls = _to_openai_tool_calls(canonical)
+        resolved = resolve_chat_output("".join(accumulated), model, tools)
+        thought = _deltas("", resolved.reasoning or "")
+        if resolved.has_tool_calls:
+            calls = _to_openai_tool_calls(resolved.tool_calls)
             delta = {
                 "role": "assistant",
                 "tool_calls": [{"index": i, **tc} for i, tc in enumerate(calls)],
             }
             return (
-                _chunk_json(delta, None)
+                thought
+                + _chunk_json(delta, None)
                 + _chunk_json({}, "tool_calls")
                 + _usage_chunk()
                 + "data: [DONE]\n\n"
             )
         # No tool call after all — surface the cleaned text as one delta.
         return (
-            _chunk_json({"role": "assistant", "content": cleaned}, None)
+            thought
+            + _chunk_json({"role": "assistant", "content": resolved.content}, None)
             + _chunk_json({}, stop_finish)
             + _usage_chunk()
             + "data: [DONE]\n\n"

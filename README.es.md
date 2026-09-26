@@ -330,6 +330,13 @@ curl http://localhost:11434/v1/messages -H "Content-Type: application/json" \
        "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
+El razonamiento de un modelo que piensa nunca llega como su respuesta. Cada API
+lo recibe donde ella pone el razonamiento: `message.thinking` en `/api/chat`
+(con `think`), `reasoning_content` en `/v1/chat/completions`, un item
+`reasoning` en `/v1/responses`, un bloque `thinking` en `/v1/messages` (con
+`thinking` activado). `think: false`, `reasoning_effort: "none"` y
+`thinking: {"type": "disabled"}` le dicen al modelo que no piense.
+
 Los modelos se pueden nombrar por su nombre local, un alias o la referencia del
 Hub de la que se descargaron (`hf.co/org/repo:CUANT`). El servidor nunca descarga
 por su cuenta: lo hacen `hfl pull` o `hfl serve --model <referencia>`.

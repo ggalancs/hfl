@@ -28,6 +28,7 @@ from hfl.api.helpers import (
     run_dispatched,
 )
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
+from hfl.api.thinking import ThinkingSplitter
 from hfl.engine.base import ChatMessage, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
@@ -203,6 +204,13 @@ def _to_anthropic_tool_use(canonical: list[dict]) -> list[dict]:
     return blocks
 
 
+def _thinking_block(text: str) -> dict:
+    """A ``thinking`` content block. Anthropic signs its own so they can be
+    sent back; a local model's reasoning has nothing to prove, and what a
+    client sends back is ignored (``_request_to_messages``)."""
+    return {"type": "thinking", "thinking": text, "signature": ""}
+
+
 def _sse(event: str, data: dict) -> str:
     """Serialise one Anthropic SSE event."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
@@ -312,14 +320,16 @@ async def create_message(
         getattr(result, "tool_calls", None),
         tools_disabled=tools_disabled,
     )
+    content_blocks: list[dict] = []
+    if resolved.reasoning and gen_config.expose_reasoning:
+        content_blocks.append(_thinking_block(resolved.reasoning))
     if resolved.has_tool_calls:
-        content_blocks: list[dict] = []
         if resolved.content:
             content_blocks.append({"type": "text", "text": resolved.content})
         content_blocks.extend(_to_anthropic_tool_use(resolved.tool_calls))
         stop_reason = "tool_use"
     else:
-        content_blocks = [{"type": "text", "text": resolved.content}]
+        content_blocks.append({"type": "text", "text": resolved.content})
         stop_reason = _stop_reason_to_anthropic(result.stop_reason)
 
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
@@ -392,20 +402,46 @@ async def _stream_messages(
     yield _sse("message_start", message_start)
     yield _sse("ping", {"type": "ping"})
 
-    # Plain turns open a text block up front and stream into it; tool-aware
-    # turns emit no blocks until the buffered reply is parsed in format_done.
-    if not tool_aware:
-        yield _sse(
-            "content_block_start",
-            {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
-            },
-        )
-
+    # Plain turns stream into blocks opened as their text arrives — the
+    # reasoning's ``thinking`` block (only when the client enabled thinking;
+    # otherwise it is dropped, never sent as text), then the answer's
+    # ``text`` block. Tool-aware turns emit no blocks until the buffered
+    # reply is parsed in format_done.
     output_tokens = 0
     accumulated: list[str] = []
+    splitter = ThinkingSplitter()
+    show_thinking = config.expose_reasoning
+    blocks: dict[str, Any] = {"index": -1, "kind": "", "text": False}  # open block
+
+    def _open(kind: str) -> str:
+        out = _close()
+        blocks["index"] += 1
+        blocks["kind"] = kind
+        blocks["text"] = blocks["text"] or kind == "text"
+        empty = _thinking_block("") if kind == "thinking" else {"type": "text", "text": ""}
+        start = {"type": "content_block_start", "index": blocks["index"], "content_block": empty}
+        return out + _sse("content_block_start", start)
+
+    def _close() -> str:
+        if not blocks["kind"]:
+            return ""
+        blocks["kind"] = ""
+        stop = {"type": "content_block_stop", "index": blocks["index"]}
+        return _sse("content_block_stop", stop)
+
+    def _write(kind: str, text: str) -> str:
+        if not text:
+            return ""
+        out = "" if blocks["kind"] == kind else _open(kind)
+        if kind == "thinking":
+            delta = {"type": "thinking_delta", "thinking": text}
+        else:
+            delta = {"type": "text_delta", "text": text}
+        body = {"type": "content_block_delta", "index": blocks["index"], "delta": delta}
+        return out + _sse("content_block_delta", body)
+
+    def _split(answer: str, reasoning: str) -> str:
+        return _write("thinking", reasoning if show_thinking else "") + _write("text", answer)
 
     def format_delta(token: str) -> str:
         nonlocal output_tokens
@@ -416,12 +452,7 @@ async def _stream_messages(
         if tool_aware:
             accumulated.append(token)
             return ""
-        delta = {
-            "type": "content_block_delta",
-            "index": 0,
-            "delta": {"type": "text_delta", "text": token},
-        }
-        return _sse("content_block_delta", delta)
+        return _split(*splitter.feed(token))
 
     def _text_block(index: int, text: str) -> str:
         return (
@@ -440,6 +471,19 @@ async def _stream_messages(
                     "index": index,
                     "delta": {"type": "text_delta", "text": text},
                 },
+            )
+            + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+        )
+
+    def _thought_block(index: int, text: str) -> str:
+        empty = _thinking_block("")
+        start = {"type": "content_block_start", "index": index, "content_block": empty}
+        delta = {"type": "thinking_delta", "thinking": text}
+        return (
+            _sse("content_block_start", start)
+            + _sse(
+                "content_block_delta",
+                {"type": "content_block_delta", "index": index, "delta": delta},
             )
             + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
         )
@@ -465,8 +509,14 @@ async def _stream_messages(
 
     def format_done() -> str:
         if not tool_aware:
+            rest = _split(*splitter.flush())
+            if not blocks["text"]:
+                # Every reply has a text block, if an empty one (all of it
+                # reasoning, or nothing at all).
+                rest += _open("text")
             return (
-                _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+                rest
+                + _close()
                 + _sse(
                     "message_delta",
                     {
@@ -483,6 +533,9 @@ async def _stream_messages(
         resolved = resolve_chat_output(raw, model, tools, None)
         events: list[str] = []
         index = 0
+        if resolved.reasoning and show_thinking:
+            events.append(_thought_block(index, resolved.reasoning))
+            index += 1
         if resolved.has_tool_calls:
             if resolved.content:
                 events.append(_text_block(index, resolved.content))
@@ -518,7 +571,7 @@ async def _stream_messages(
                 index += 1
             stop_reason = "tool_use"
         else:
-            events.append(_text_block(0, resolved.content))
+            events.append(_text_block(index, resolved.content))
             stop_reason = _plain_stop_reason()
 
         events.append(

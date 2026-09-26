@@ -326,6 +326,13 @@ curl http://localhost:11434/v1/messages -H "Content-Type: application/json" \
        "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
+A reasoning model's thinking never comes back as its answer. Each API gets it
+where it puts reasoning: `message.thinking` on `/api/chat` (with `think`),
+`reasoning_content` on `/v1/chat/completions`, a `reasoning` item on
+`/v1/responses`, a `thinking` block on `/v1/messages` (with `thinking` enabled).
+`think: false`, `reasoning_effort: "none"` and `thinking: {"type": "disabled"}`
+tell the model not to think at all.
+
 Models can be named by their local name, an alias, or the Hub reference they
 were pulled from (`hf.co/org/repo:QUANT`). The server never downloads on its
 own: `hfl pull` or `hfl serve --model <reference>` does.

@@ -263,6 +263,7 @@ def _build_chat_message(
     model_name: str,
     tools: list[dict] | None,
     engine_tool_calls: list[dict] | None,
+    show_thinking: bool = False,
 ) -> dict:
     """Build the canonical assistant message for an Ollama chat response.
 
@@ -275,11 +276,14 @@ def _build_chat_message(
     - ``tool_calls`` is always a list (spec rule C7): empty when none.
     """
     out = resolve_chat_output(raw_text, model_name, tools, engine_tool_calls)
-    return {
+    message = {
         "role": "assistant",
         "content": out.content,
         "tool_calls": out.tool_calls,
     }
+    if show_thinking and out.reasoning:
+        message["thinking"] = out.reasoning
+    return message
 
 
 # --- Endpoints ---
@@ -690,27 +694,15 @@ async def api_chat(
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
 
-    # P1-1: when think=True, capture the reasoning from the RAW
-    # engine text BEFORE the tool parser runs — the per-family
-    # parsers in tool_parsers already strip ``<think>`` / channel
-    # blocks as part of their cleanup, so we'd lose the reasoning if
-    # we extracted it from the post-build message.
-    extracted_thinking: str | None = None
-    raw_for_build = result.text
-    if req.think:
-        from hfl.api.thinking import extract_thinking
-
-        _, extracted_thinking = extract_thinking(result.text)
-
+    # With ``think``, the reasoning goes in ``message.thinking`` — all of it
+    # when the token cap cut it short (it used to be lost then).
     message = _build_chat_message(
-        raw_text=raw_for_build,
+        raw_text=result.text,
         model_name=req.model,
         tools=tools,
         engine_tool_calls=getattr(result, "tool_calls", None),
+        show_thinking=bool(req.think),
     )
-
-    if extracted_thinking:
-        message["thinking"] = extracted_thinking
 
     envelope: dict[str, Any] = {
         "model": req.model,

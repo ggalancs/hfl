@@ -277,6 +277,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt with garbage. HFL now starts such a template with BOS when the
   vocabulary wants one (on llama-server by restarting it once with a copy
   of the template, kept under `~/.hfl/templates/`).
+- **A reasoning model's thinking came back as its answer on three APIs.**
+  Measured with Qwen3-14B: `/v1/messages` (streamed and not), a streamed
+  `/v1/chat/completions` and `/v1/responses` sent the whole `<think>` block
+  as the reply's text; only `/api/chat` kept it apart. Each now sends it
+  where its API puts reasoning — a `thinking` block before the text on
+  `/v1/messages` when `thinking` is enabled (dropped otherwise; one sent
+  back in the history is accepted and ignored), `reasoning_content` on
+  `/v1/chat/completions` (as DeepSeek, vLLM and llama-server send it;
+  none with `reasoning_effort: "none"`), a `reasoning` item before the
+  message on `/v1/responses`, streamed and not. A reply cut by the token
+  cap mid-thought is all reasoning, no answer. Checked with the official
+  `anthropic` and `openai` SDKs, including sending the thinking back.
+- **`reasoning.effort: "none"` on `/v1/responses` was ignored**, so a
+  thinking model could not be told to stop there; `"minimal"` too. They
+  are reasoning off and the lowest level now, as `reasoning_effort` is on
+  `/v1/chat/completions`.
 - **gpt-oss showed its whole chain of thought as the answer** on the
   default GGUF backend and on llama-server: its Harmony `analysis` channel
   reached the reply, markers included. The answer is its `final` channel
