@@ -32,7 +32,7 @@ import json
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -76,6 +76,10 @@ class ResponsesRequest(BaseModel):
     max_output_tokens: int | None = Field(default=None, ge=1, le=128_000)
     stream: bool = Field(default=False)
     metadata: dict[str, Any] | None = Field(default=None)
+    # Continue a stored response's conversation (``response_store``);
+    # ``store: false`` keeps this one from being stored.
+    previous_response_id: str | None = Field(default=None, max_length=128)
+    store: bool = Field(default=True)
 
 
 # --- Helpers ----------------------------------------------------------------
@@ -90,6 +94,7 @@ def _get_state() -> "ServerState":
 def _input_to_messages(
     input_value: str | list[dict[str, Any]],
     instructions: str | None,
+    known_calls: dict[str, str] | None = None,
 ) -> list[ChatMessage]:
     """Translate the Responses ``input`` field into ``ChatMessage[]``.
 
@@ -105,6 +110,8 @@ def _input_to_messages(
       ``developer`` role becomes ``system``; ``reasoning`` items are skipped.
     - ``instructions`` is prepended as a ``system`` message when
       present.
+    - ``known_calls`` names the calls of earlier turns (``call_id`` →
+      function), for results sent after ``previous_response_id``.
     """
     messages: list[ChatMessage] = []
     if instructions:
@@ -118,7 +125,7 @@ def _input_to_messages(
     # earlier tool calls as ``function_call`` and their results as
     # ``function_call_output``. Consecutive calls belong to one assistant
     # turn; ``reasoning`` items carry nothing a local model can use.
-    call_names: dict[str, str] = {}
+    call_names: dict[str, str] = dict(known_calls or {})
     for raw in input_value:
         kind = raw.get("type")
         if kind == "reasoning":
@@ -150,6 +157,46 @@ def _input_to_messages(
             role = "system"  # chat templates know no "developer" role
         messages.append(ChatMessage(role=role, content=_content_text(raw.get("content"))))
     return messages
+
+
+def _assistant_turn(output: list[dict[str, Any]]) -> list[ChatMessage]:
+    """A response's ``output`` items as the assistant turn a later request
+    continues from: its text, and its calls with the ``call_id`` the client
+    will answer with."""
+    turn: list[ChatMessage] = []
+    calls: list[dict[str, Any]] = []
+    for item in output:
+        if item.get("type") == "message":
+            text = _content_text(item.get("content"))
+            turn.append(ChatMessage(role="assistant", content=text))
+        elif item.get("type") == "function_call":
+            function = {"name": str(item.get("name") or ""), "arguments": _arguments(item)}
+            calls.append({"id": item.get("call_id"), "function": function})
+    if calls:
+        turn.append(ChatMessage(role="assistant", content="", tool_calls=calls))
+    return turn
+
+
+def _call_names(history: list[ChatMessage]) -> dict[str, str]:
+    return {
+        str(call.get("id") or ""): str((call.get("function") or {}).get("name") or "")
+        for message in history
+        for call in (message.tool_calls or [])
+    }
+
+
+def _not_found(previous: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "message": f"Previous response with id '{previous}' not found.",
+                "type": "invalid_request_error",
+                "param": "previous_response_id",
+                "code": "previous_response_not_found",
+            }
+        },
+    )
 
 
 def _content_text(content: Any) -> str:
@@ -342,6 +389,9 @@ async def _stream_response(
     cfg: GenerationConfig,
     tools: list[dict[str, Any]] | None,
     slot_cm: Any | None = None,
+    *,
+    extra: dict[str, Any] | None = None,
+    on_done: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> AsyncIterator[str]:
     """SSE stream that re-emits chat tokens as Responses events.
 
@@ -573,6 +623,9 @@ async def _stream_response(
                 prompt_n or 0,
                 generated if generated is not None else len(accumulated),
             )
+            completed.update(extra or {})
+            if on_done is not None:
+                on_done(output)
             return out + event("response.completed", response=completed) + "data: [DONE]\n\n"
 
         if tool_aware:
@@ -630,7 +683,8 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
 
     Bundles input, instructions, tools, reasoning effort and structured
     output into a single endpoint. Internally maps to chat-completion
-    semantics; not stateful.
+    semantics; ``previous_response_id`` continues a response stored in this
+    process (``response_store``).
     """
     from hfl.api.model_loader import load_llm
 
@@ -640,11 +694,29 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     if state.engine is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    messages = _input_to_messages(req.input, req.instructions)
+    from hfl.api.response_store import get_response_store
+
+    store = get_response_store()
+    history: list[ChatMessage] = []
+    if req.previous_response_id:
+        found = store.history(req.previous_response_id)
+        if found is None:
+            return _not_found(req.previous_response_id)
+        history = found
+    # The previous response's ``instructions`` are not carried over (as
+    # OpenAI does): only this request's, before the conversation.
+    system = _input_to_messages([], req.instructions)
+    new = _input_to_messages(req.input, None, _call_names(history))
+    messages = [*system, *history, *new]
     cfg = _build_gen_config(req)
     tools = _chat_tools(req.tools)
 
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
+    extra = {"previous_response_id": req.previous_response_id, "store": req.store}
+
+    def remember(output: list[dict[str, Any]]) -> None:
+        if req.store:
+            store.put(response_id, req.previous_response_id, [*new, *_assistant_turn(output)])
 
     if req.stream:
         # API/CON: hold a dispatcher slot for the whole stream (serialise
@@ -652,7 +724,9 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
         # and drive the engine through stream_with_backpressure so the
         # iterator is closed on disconnect — matching every other dialect.
         return await prepare_stream_response(
-            lambda slot: _stream_response(response_id, req.model, messages, cfg, tools, slot),
+            lambda slot: _stream_response(
+                response_id, req.model, messages, cfg, tools, slot, extra=extra, on_done=remember
+            ),
             media_type="text/event-stream",
             path="/v1/responses",
         )
@@ -683,7 +757,7 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     cleaned_text = resolved.content
     reasoning_text = resolved.reasoning if cfg.reasoning != "off" else None
 
-    return _render_response(
+    rendered = _render_response(
         response_id=response_id,
         model=req.model,
         text=cleaned_text,
@@ -692,3 +766,6 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
         tool_calls=tool_calls,
         reasoning_text=reasoning_text,
     )
+    rendered.update(extra)
+    remember(rendered["output"])
+    return rendered

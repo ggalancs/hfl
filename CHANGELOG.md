@@ -184,6 +184,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HFL's home: the split Qwen2.5-7B answered, the imported Qwen2.5-VL read
   the image, Qwen2.5-0.5B-Instruct as an MLX 4-bit build and as the Hub has
   it both answered on MLX, and every file was still there after `hfl rm`.
+- **`previous_response_id` on `/v1/responses`.** A client can send only
+  its new input and name the response it follows, as OpenAI's API allows:
+  HFL supplies the conversation before it (without that response's
+  `instructions`, as OpenAI does), tool results included — their calls
+  are found by `call_id`. Kept in memory in this process, oldest unused
+  first after 2,048 responses, each keeping only its own turn; `store:
+  false` keeps one out. A conversation that lost a link — evicted, or the
+  server restarted — is `previous_response_not_found`, never continued
+  from part of its history. Checked with the official `openai` SDK:
+  a word given in one turn answered two turns later (streamed and not), a
+  tool result answered from, and the three not-found cases.
 - **`/v1/messages/count_tokens`**, Anthropic's: the tokens a request
   would cost, counted as the model's backend renders and tokenizes the
   prompt (its template, tools and thinking switch), with nothing
