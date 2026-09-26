@@ -169,6 +169,73 @@ def _as_marker(call: dict) -> str:
     )
 
 
+def start_server(
+    base_argv: list[str], model_path: str, log_path: Path, timeout: float
+) -> tuple[subprocess.Popen[bytes], httpx.Client]:
+    """Start llama-server on a fresh port and key and wait until it answers:
+    the process and a client for it. On failure it is stopped before the
+    error propagates."""
+    port, key = _free_port(), secrets.token_urlsafe(24)
+    argv = [*base_argv, "--port", str(port)]
+    with open(log_path, "ab") as log:
+        # The key goes in the environment, not argv: argv is visible to
+        # every local user in ``ps``.
+        # Through the guard: if HFL dies without unloading (SIGKILL, a
+        # crash), the guard stops llama-server instead of leaving it
+        # holding the model in memory.
+        guarded = [
+            sys.executable,
+            "-m",
+            "hfl.engine._child_guard",
+            str(os.getpid()),
+            "--",
+            *argv,
+        ]
+        proc = subprocess.Popen(
+            guarded,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "LLAMA_API_KEY": key},
+        )
+    base = f"http://127.0.0.1:{port}"
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"llama-server exited while loading {Path(model_path).name}; see {log_path}"
+                )
+            try:
+                if httpx.get(f"{base}/health", timeout=2).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"llama-server did not load {model_path} in time")
+            time.sleep(0.25)
+    except BaseException:
+        stop_server(proc)
+        raise
+    client = httpx.Client(
+        base_url=base,
+        headers={"Authorization": f"Bearer {key}"},
+        timeout=httpx.Timeout(None, connect=10.0),
+    )
+    return proc, client
+
+
+def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
+    """Stop a llama-server started by ``start_server`` (SIGTERM, then kill)."""
+    if proc is not None and proc.poll() is None:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
 class LlamaServerEngine(InferenceEngine):
     """One ``llama-server`` child process serving one GGUF model."""
 
@@ -185,6 +252,13 @@ class LlamaServerEngine(InferenceEngine):
         self._template_knows_tools = True
         # The image projector served with the model (None: text only).
         self._projector: Path | None = None
+        # What the process is started with, to start it again with other
+        # LoRA adapters: its argv, the BOS template when one was needed, and
+        # the adapters as (id, path, scale).
+        self._argv: list[str] = []
+        self._template_args: list[str] = []
+        self._loras: list[tuple[str, str, float]] = []
+        self._timeout = 600.0
 
     # ------------------------------------------------------------------ life
 
@@ -218,7 +292,10 @@ class LlamaServerEngine(InferenceEngine):
         slots = _slots()
         from hfl.engine.projector import find_projector
 
-        lora_paths = [str(p) for p in kwargs.get("lora_paths") or []]
+        self._loras = []
+        for adapter in kwargs.get("lora_paths") or []:
+            self._check_adapter_path(str(adapter))
+            self._loras.append((str(adapter), str(adapter), 1.0))
         requested_projector = kwargs.get("clip_model_path")
         self._projector = (
             Path(requested_projector) if requested_projector else find_projector(Path(model_path))
@@ -242,21 +319,22 @@ class LlamaServerEngine(InferenceEngine):
             "--no-slots",
             # A vision model's projector: llama-server then takes images.
             *(["--mmproj", str(self._projector)] if self._projector else []),
-            # A Modelfile's ADAPTER lines: every one, at full scale.
-            *(["--lora", ",".join(lora_paths)] if lora_paths else []),
         ]
         log_dir = config.home_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         self._log_path = log_dir / f"llama-server-{Path(model_path).stem}.log"
         timeout = float(getattr(config, "model_load_timeout", 600) or 600)
-        self._launch(base_argv, model_path, timeout)
+        self._argv, self._template_args, self._timeout = base_argv, [], timeout
+        self._launch([*base_argv, *self._lora_args()], model_path, timeout)
         fixed = self._template_with_bos(config.home_dir / "templates", Path(model_path).stem)
         if fixed is not None:
             # Once more with the template that writes BOS (see
             # ``_template_with_bos``): llama-server reads it only at start.
             logger.info("Chat template does not start with BOS; HFL adds it")
+            self._template_args = ["--chat-template-file", str(fixed)]
             self.unload()
-            self._launch([*base_argv, "--chat-template-file", str(fixed)], model_path, timeout)
+            argv = [*base_argv, *self._template_args, *self._lora_args()]
+            self._launch(argv, model_path, timeout)
         self._read_template()
         if not n_ctx:
             n_ctx = self._reported_ctx()
@@ -269,57 +347,8 @@ class LlamaServerEngine(InferenceEngine):
         )
 
     def _launch(self, base_argv: list[str], model_path: str, timeout: float) -> None:
-        """Start llama-server on a fresh port and key and wait until it
-        answers; on failure it is stopped before the error propagates."""
-        port, key = _free_port(), secrets.token_urlsafe(24)
-        argv = [*base_argv, "--port", str(port)]
         assert self._log_path is not None
-        with open(self._log_path, "ab") as log:
-            # The key goes in the environment, not argv: argv is visible to
-            # every local user in ``ps``.
-            # Through the guard: if HFL dies without unloading (SIGKILL, a
-            # crash), the guard stops llama-server instead of leaving it
-            # holding the model in memory.
-            guarded = [
-                sys.executable,
-                "-m",
-                "hfl.engine._child_guard",
-                str(os.getpid()),
-                "--",
-                *argv,
-            ]
-            self._proc = subprocess.Popen(
-                guarded,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, "LLAMA_API_KEY": key},
-            )
-        base = f"http://127.0.0.1:{port}"
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                if self._proc.poll() is not None:
-                    raise RuntimeError(
-                        f"llama-server exited while loading {Path(model_path).name}; "
-                        f"see {self._log_path}"
-                    )
-                try:
-                    if httpx.get(f"{base}/health", timeout=2).status_code == 200:
-                        break
-                except httpx.HTTPError:
-                    pass
-                if time.monotonic() > deadline:
-                    raise TimeoutError(f"llama-server did not load {model_path} in time")
-                time.sleep(0.25)
-        except BaseException:
-            self._stop()
-            raise
-        self._client = httpx.Client(
-            base_url=base,
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=httpx.Timeout(None, connect=10.0),
-        )
+        self._proc, self._client = start_server(base_argv, model_path, self._log_path, timeout)
 
     def _props(self) -> dict[str, Any]:
         try:
@@ -383,13 +412,7 @@ class LlamaServerEngine(InferenceEngine):
 
     def _stop(self) -> None:
         proc, self._proc = self._proc, None
-        if proc is not None and proc.poll() is None:
-            proc.send_signal(signal.SIGTERM)
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=10)
+        stop_server(proc)
 
     def unload(self) -> None:
         if self._client is not None:
@@ -582,13 +605,54 @@ class LlamaServerEngine(InferenceEngine):
 
     # ----------------------------------------------------------------- LoRA
 
+    # llama-server reads adapter files only when it starts, so changing them
+    # starts it again with the new set: the model loads again (seconds for a
+    # small one), and nothing may be decoding meanwhile — the route drains
+    # every request first (``restarts_for_lora``).
+    restarts_for_lora = True
+
+    @staticmethod
+    def _check_adapter_path(path: str) -> None:
+        if "," in path:
+            # ``--lora-scaled`` lists adapters separated by commas.
+            raise ValueError(f"a LoRA adapter path cannot contain a comma: {path}")
+
+    def _lora_args(self) -> list[str]:
+        if not self._loras:
+            return []
+        return ["--lora-scaled", ",".join(f"{path}:{scale}" for _, path, scale in self._loras)]
+
+    def _relaunch(self) -> None:
+        self.unload()
+        argv = [*self._argv, *self._template_args, *self._lora_args()]
+        self._launch(argv, self._model_path, self._timeout)
+
     def apply_lora(self, path: str, scale: float, adapter_id: str | None = None) -> None:
-        """llama-server loads adapter files only when it starts."""
-        raise RuntimeError(
-            "llama-server loads LoRA adapters only when it starts: declare the adapter "
-            "with ADAPTER in the model's Modelfile (hfl create), or serve the model "
-            "with the default backend to apply it now"
-        )
+        """Serve the model with this adapter too, on top of any applied."""
+        if not self._argv:
+            raise RuntimeError("no model loaded")
+        if not Path(path).is_file():
+            raise FileNotFoundError(path)
+        self._check_adapter_path(path)
+        self._loras.append((adapter_id or path, path, float(scale)))
+        try:
+            self._relaunch()
+        except (RuntimeError, TimeoutError) as exc:
+            # llama-server refused it (another model's adapter, not an
+            # adapter at all): back to serving the model as it was.
+            self._loras.pop()
+            self._relaunch()
+            raise ValueError(
+                f"{Path(path).name} is not a LoRA adapter llama.cpp can load for this model"
+            ) from exc
+
+    def remove_lora(self, adapter_id: str) -> None:
+        """Serve the model without this adapter."""
+        found = next((entry for entry in self._loras if entry[0] == adapter_id), None)
+        if found is None:
+            raise RuntimeError(f"adapter {adapter_id!r} is not applied to this model")
+        self._loras.remove(found)
+        self._relaunch()
 
     # ----------------------------------------------------------- properties
 

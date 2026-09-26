@@ -358,7 +358,14 @@ def pull(
     if alias:
         console.print(f"\n[bold green]{ready_msg}[/]")
         console.print(f"[cyan]{t('messages.alias_label')}:[/] {alias}")
-        console.print(f"[dim]{t('messages.use_command')}:[/] hfl run {alias}")
+        # What the model is for: chat, embeddings over the API, or speech.
+        if detected_type == ModelType.EMBEDDING:
+            hint = t("messages.use_embed", name=alias)
+        elif detected_type == ModelType.TTS:
+            hint = f'hfl tts {alias} "..."'
+        else:
+            hint = f"hfl run {alias}"
+        console.print(f"[dim]{t('messages.use_command')}:[/] {hint}")
     else:
         console.print(f"\n[bold green]{ready_msg}[/]")
 

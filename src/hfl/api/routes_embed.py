@@ -282,6 +282,14 @@ def _select_embedding_backend(model_path: Any) -> Any:
 
     fmt = detect_format(model_path)
     if fmt == ModelFormat.GGUF:
+        import importlib.util
+
+        from hfl.engine.embedding_engine import LlamaServerEmbeddingEngine
+        from hfl.engine.llama_server import binary
+
+        # Without llama-cpp-python (Homebrew's HFL), llama.cpp's own server.
+        if importlib.util.find_spec("llama_cpp") is None and binary() is not None:
+            return LlamaServerEmbeddingEngine()
         return LlamaCppEmbeddingEngine()
     return TransformersEmbeddingEngine()
 

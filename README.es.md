@@ -270,7 +270,7 @@ curl http://localhost:11434/api/tts -H "Content-Type: application/json" \
 <details>
 <summary><b>Más herramientas</b>: LoRA, instantáneas de KV, decodificación especulativa, MCP, subida al Hub</summary>
 
-- `hfl lora apply|remove|list`: cambia adaptadores LoRA en caliente sin recargar el modelo base.
+- `hfl lora apply|remove|list`: cambia adaptadores LoRA en caliente sin recargar el modelo base. Con `--parallel` (llama-server), su proceso arranca de nuevo con el nuevo conjunto, cuando no hay ninguna respuesta en curso.
 - `hfl snapshot save|load|list|delete`: guarda la caché KV en disco para arrancar en caliente.
 - `hfl draft-recommend`: elige un modelo pequeño hermano del Hub para decodificación especulativa.
 - `hfl mcp serve` / `hfl mcp connect`: funciona como servidor Model Context Protocol o usa herramientas MCP.

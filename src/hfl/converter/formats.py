@@ -481,7 +481,10 @@ PIPELINE_TAG_TO_TYPE = {
     "text2text-generation": ModelType.SUMMARIZATION,
     # Embeddings
     "feature-extraction": ModelType.EMBEDDING,
-    "sentence-similarity": ModelType.SENTENCE_SIM,
+    # What the Hub tags most embedding models with (nomic-embed-text, bge,
+    # e5, MiniLM...): a sentence-similarity model is one that embeds
+    # sentences. Read as unsupported, not one of them could be pulled.
+    "sentence-similarity": ModelType.EMBEDDING,
     # Zero-shot
     "zero-shot-classification": ModelType.ZERO_SHOT,
     "zero-shot-image-classification": ModelType.ZERO_SHOT,
@@ -649,14 +652,21 @@ def detect_model_type(model_path: Path) -> ModelType:
     import json
 
     # If it's a file, get the parent directory
+    given = model_path
     if model_path.is_file():
         model_path = model_path.parent
 
     config_path = model_path / "config.json"
     if not config_path.exists():
-        # Check for GGUF files - these are always LLM
-        if any(model_path.glob("*.gguf")):
-            return ModelType.LLM
+        # A GGUF is a chat model unless its header says it embeds.
+        from hfl.converter.gguf_header import is_embedding_gguf
+
+        if given.is_file() and given.suffix.lower() == ".gguf":
+            ggufs = [given]
+        else:
+            ggufs = sorted(p for p in model_path.glob("*.gguf") if "mmproj" not in p.name.lower())
+        if ggufs:
+            return ModelType.EMBEDDING if is_embedding_gguf(ggufs[0]) else ModelType.LLM
         return ModelType.UNKNOWN
 
     try:

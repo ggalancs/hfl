@@ -26,6 +26,32 @@ from hfl.api.model_loader import load_llm
 from hfl.engine.lora import apply_lora, list_loras, remove_lora
 from hfl.security import PathTraversalError, sanitize_path
 
+
+async def _change_adapters(
+    engine: Any, call: Any, *args: Any, operation: str, **kwargs: Any
+) -> Any:
+    """Run an adapter change on ``engine`` with nothing decoding on it.
+
+    Through the model's queue, as a request: changing adapters under a
+    running generation would change the weights mid-reply. An engine that
+    starts its process again to change them (llama-server) needs more: its
+    parallel slots may hold other replies, which a restart would cut, so
+    every request is drained first.
+    """
+    if getattr(engine, "restarts_for_lora", False) is True:
+        import asyncio
+
+        from hfl.core import dispatcher_for
+
+        # The engine's own queue: a concurrent engine's requests are not
+        # in the global one (draining that let a reply be cut — measured).
+        async with dispatcher_for(engine).exclusive():
+            return await asyncio.to_thread(call, engine, *args, **kwargs)
+    from hfl.api.helpers import run_dispatched
+
+    return await run_dispatched(call, engine, *args, operation=operation, **kwargs)
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["HFL Beyond"])
@@ -85,14 +111,10 @@ async def api_lora_apply(req: ApplyLoraRequest, request: Request) -> dict[str, A
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
-    from hfl.api.helpers import run_dispatched
-
     try:
-        # Through the model's queue: changing adapters under a running
-        # generation would change the weights mid-reply.
-        info = await run_dispatched(
-            apply_lora,
+        info = await _change_adapters(
             engine,
+            apply_lora,
             lora_path=safe_lora_path,
             scale=req.scale,
             name=req.name,
@@ -139,10 +161,8 @@ async def api_lora_remove(req: RemoveLoraRequest, request: Request) -> dict[str,
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
 
-    from hfl.api.helpers import run_dispatched
-
     try:
-        ok = await run_dispatched(remove_lora, engine, req.adapter_id, operation="lora_remove")
+        ok = await _change_adapters(engine, remove_lora, req.adapter_id, operation="lora_remove")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

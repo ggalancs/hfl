@@ -97,11 +97,16 @@ def fake_llama_cpp():
         def n_embd(self) -> int:  # Method, not property — matches llama-cpp
             return 4
 
-        def embed(self, text: str, truncate: bool = True) -> list[float]:
+        def embed(self, text: str, normalize: bool = False, truncate: bool = True) -> list[float]:
             # Deterministic: length of text → rotates the vector so
-            # each input produces a unique output.
+            # each input produces a unique output. Unit length only when
+            # asked, as llama-cpp-python's own (its default is not to).
             offset = len(text) % 10
-            return [0.1 + offset, 0.2, 0.3, 0.4]
+            vec = [0.1 + offset, 0.2, 0.3, 0.4]
+            if normalize:
+                norm = sum(x * x for x in vec) ** 0.5
+                vec = [x / norm for x in vec]
+            return vec
 
         def tokenize(self, data: bytes) -> list[int]:
             return [ord(c) for c in data.decode("utf-8", errors="replace")]
@@ -156,9 +161,12 @@ class TestLlamaCppEmbeddingEngine:
         engine.load("/tmp/fake.gguf")
         result = engine.embed(["a", "abcd"])
         assert len(result.embeddings) == 2
-        # Our fake encodes len(text) % 10 in the first component.
-        assert result.embeddings[0][0] == pytest.approx(0.1 + 1)  # len("a") = 1
-        assert result.embeddings[1][0] == pytest.approx(0.1 + 4)  # len("abcd") = 4
+        # Our fake encodes len(text) % 10 in the first component; the
+        # engine asks for unit-length vectors, as Ollama returns them.
+        for vec, length in zip(result.embeddings, (1, 4)):
+            raw = [0.1 + length, 0.2, 0.3, 0.4]
+            norm = sum(x * x for x in raw) ** 0.5
+            assert vec == pytest.approx([x / norm for x in raw])
 
     def test_embed_populates_total_tokens_and_model(self, fake_llama_cpp):
         engine = LlamaCppEmbeddingEngine()
@@ -510,3 +518,12 @@ class TestTransformersEmbeddingEngineFullPath:
         engine.unload()
         assert not engine.is_loaded
         assert engine._model is None
+
+
+def test_llama_cpp_embeds_a_whole_input_in_one_batch(fake_llama_cpp):
+    """llama.cpp's default batch of 512 refused an 846-token input to
+    nomic-embed-text, well within its context (measured)."""
+    engine = LlamaCppEmbeddingEngine()
+    engine.load("/tmp/fake.gguf", n_ctx=2048)
+    kwargs = fake_llama_cpp._instances[-1].kwargs
+    assert (kwargs["n_batch"], kwargs["n_ubatch"]) == (2048, 2048)

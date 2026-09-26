@@ -165,6 +165,11 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
         # embedding models (BGE-M3 supports 8192 tokens). Callers
         # can override via kwargs.
         n_ctx = kwargs.pop("n_ctx", 8192)
+        # An encoder takes a whole input in one batch: with llama.cpp's
+        # default of 512, an 846-token input (well within the context) was
+        # refused, or cut to 512 with ``truncate`` (measured).
+        kwargs.setdefault("n_batch", n_ctx)
+        kwargs.setdefault("n_ubatch", n_ctx)
         self._llm = Llama(
             model_path=model_path,
             embedding=True,
@@ -234,7 +239,9 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
         for text in inputs:
             # llama-cpp returns either a bare list[float] or a list
             # of lists depending on version; normalise to list[float].
-            raw = self._llm.embed(text, truncate=truncate)
+            # normalize: unit length, as Ollama and OpenAI return them
+            # (llama-cpp-python's default is not to: measured norms of 5+).
+            raw = self._llm.embed(text, truncate=truncate, normalize=True)
             if isinstance(raw, list) and raw and isinstance(raw[0], list):
                 vec = raw[0]
             else:
@@ -242,10 +249,9 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
 
             if dimensions is not None and len(vec) > dimensions:
                 vec = vec[:dimensions]
-                # Matryoshka (ENG-5): llama.cpp L2-normalises full
-                # embeddings, so slicing alone yields norm < 1. Re-normalise
-                # the truncated vector to keep it unit-norm for cosine/IP
-                # consumers.
+                # Matryoshka (ENG-5): the full vector is unit-norm, so
+                # slicing alone yields norm < 1. Re-normalise the truncated
+                # vector to keep it unit-norm for cosine/IP consumers.
                 norm = sum(x * x for x in vec) ** 0.5
                 if norm > 0:
                     vec = [x / norm for x in vec]
@@ -265,6 +271,141 @@ class LlamaCppEmbeddingEngine(EmbeddingEngine):
         return EmbeddingResult(
             embeddings=vectors,
             total_tokens=total_tokens,
+            model=self._model_path,
+        )
+
+
+# ----------------------------------------------------------------------
+# llama-server adapter
+# ----------------------------------------------------------------------
+
+
+def _unit(vec: list[float]) -> list[float]:
+    norm = sum(x * x for x in vec) ** 0.5
+    return [x / norm for x in vec] if norm > 0 else vec
+
+
+class LlamaServerEmbeddingEngine(EmbeddingEngine):
+    """GGUF embeddings through a ``llama-server --embeddings`` process, for
+    an HFL without llama-cpp-python — Homebrew's, which serves GGUF chat
+    models through Homebrew's llama.cpp and could not embed with them.
+
+    Same contract as :class:`LlamaCppEmbeddingEngine`: unit-length vectors,
+    the model's own pooling (so only ``pooling="mean"`` is accepted, as
+    there), ``truncate`` and ``dimensions``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._proc: Any | None = None
+        self._client: Any | None = None
+        self._n_embd: int | None = None
+        self._n_ctx = 0
+
+    def load(self, model_path: str, **kwargs: Any) -> None:
+        from pathlib import Path
+
+        from hfl.config import config
+        from hfl.converter.gguf_header import read_fields
+        from hfl.engine.llama_server import binary, start_server
+
+        exe = binary()
+        if exe is None:
+            raise RuntimeError(
+                "GGUF embeddings need llama-cpp-python or llama.cpp's llama-server: "
+                "install one (e.g. `brew install llama.cpp`)"
+            )
+        try:
+            arch = read_fields(model_path, {"general.architecture"}).get("general.architecture")
+            keys = {f"{arch}.context_length", f"{arch}.embedding_length"}
+            fields = read_fields(model_path, keys)
+        except (OSError, ValueError):
+            fields = {}
+        trained = fields.get(f"{arch}.context_length")
+        # 8192 at most, as the llama-cpp-python engine; a whole input is one
+        # batch for an encoder, so the batch is the context.
+        n_ctx = int(kwargs.get("n_ctx") or min(int(trained or 8192), 8192))
+        argv = [
+            exe, "-m", model_path, "--host", "127.0.0.1", "--embeddings",
+            "-c", str(n_ctx), "-b", str(n_ctx), "-ub", str(n_ctx), "-np", "1",
+            "-ngl", "999", "--no-webui", "--no-slots",
+        ]  # fmt: skip
+        log_dir = config.home_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"llama-server-embed-{Path(model_path).stem}.log"
+        timeout = float(getattr(config, "model_load_timeout", 600) or 600)
+        self._proc, self._client = start_server(argv, model_path, log_path, timeout)
+        length = fields.get(f"{arch}.embedding_length")
+        self._n_embd = int(length) if isinstance(length, int) else None
+        self._n_ctx = n_ctx
+        self._model_path = model_path
+        self._loaded = True
+        logger.info("Loaded embedding model %s through llama-server", model_path)
+
+    def unload(self) -> None:
+        from hfl.engine.llama_server import stop_server
+
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+        proc, self._proc = self._proc, None
+        stop_server(proc)
+        self._loaded = False
+        self._model_path = ""
+
+    def _fit(self, text: str, truncate: bool) -> str:
+        """``text`` cut to the context when ``truncate``; else an error."""
+        assert self._client is not None
+        tokens = self._client.post("/tokenize", json={"content": text}).json()["tokens"]
+        limit = self._n_ctx - 2  # room for the encoder's own CLS/SEP
+        if len(tokens) <= limit:
+            return text
+        if not truncate:
+            raise ValueError(f"input of {len(tokens)} tokens exceeds the model's context ({limit})")
+        cut = self._client.post("/detokenize", json={"tokens": tokens[:limit]})
+        return str(cut.json()["content"])
+
+    def embed(
+        self,
+        inputs: list[str],
+        *,
+        truncate: bool = True,
+        dimensions: int | None = None,
+        pooling: str = "mean",
+    ) -> EmbeddingResult:
+        if not self._loaded or self._client is None:
+            raise RuntimeError("Model not loaded")
+        if pooling != "mean":
+            raise ValueError(
+                f"pooling={pooling!r} is not available on the llama.cpp embedding "
+                "backend, which pools internally. Serve this model through the "
+                "transformers backend, or request pooling='mean'."
+            )
+        if not inputs:
+            raise ValueError("inputs must be a non-empty list")
+        if dimensions is not None:
+            if dimensions <= 0:
+                raise ValueError("dimensions must be a positive integer")
+            if self._n_embd and dimensions > self._n_embd:
+                raise ValueError(
+                    f"dimensions ({dimensions}) exceeds model's native size ({self._n_embd})"
+                )
+        texts = [self._fit(text, truncate) for text in inputs]
+        response = self._client.post("/v1/embeddings", json={"input": texts})
+        if response.status_code != 200:
+            raise RuntimeError(f"llama-server could not embed: HTTP {response.status_code}")
+        body = response.json()
+        rows = sorted(body["data"], key=lambda row: row["index"])
+        vectors = []
+        for row in rows:
+            vec = [float(x) for x in row["embedding"]]
+            if dimensions is not None and len(vec) > dimensions:
+                vec = vec[:dimensions]
+            vectors.append(_unit(vec))
+        usage = body.get("usage") or {}
+        return EmbeddingResult(
+            embeddings=vectors,
+            total_tokens=int(usage.get("prompt_tokens") or 0),
             model=self._model_path,
         )
 

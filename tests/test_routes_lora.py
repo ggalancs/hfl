@@ -205,3 +205,46 @@ def test_apply_and_remove_wait_their_turn_in_the_model_queue(
     )
     assert removed.status_code == 200
     assert operations == ["lora_apply", "lora_remove"]
+
+
+@pytest.mark.parametrize("restarts", [True, False])
+def test_an_engine_that_restarts_is_changed_with_nothing_in_flight(
+    client, llm_manifest, adapter_file, monkeypatch, restarts
+):
+    """llama-server starts its process again to change adapters; with
+    parallel slots, a reply still decoding would be cut, so every request
+    is drained first. Other engines go through the queue as a request."""
+    import contextlib
+
+    import hfl.core
+    from hfl.api import helpers
+
+    engine = _wire_engine(llm_manifest)
+    engine.restarts_for_lora = restarts
+    seen: list[str] = []
+
+    class Dispatcher:
+        @contextlib.asynccontextmanager
+        async def exclusive(self):
+            seen.append("drained")
+            yield
+
+    async def queued(call, *args, operation, **kwargs):
+        seen.append("queued")
+        return call(*args, **kwargs)
+
+    # The engine's own dispatcher: llama-server's requests are not in the
+    # global one, and draining that one cut a streamed reply (measured).
+    monkeypatch.setattr(hfl.core, "dispatcher_for", lambda e: Dispatcher() if e is engine else None)
+    monkeypatch.setattr(helpers, "run_dispatched", queued)
+    applied = client.post(
+        "/api/lora/apply", json={"model": llm_manifest.name, "lora_path": adapter_file}
+    )
+    assert applied.status_code == 200
+    removed = client.post(
+        "/api/lora/remove",
+        json={"model": llm_manifest.name, "adapter_id": applied.json()["adapter_id"]},
+    )
+    assert removed.status_code == 200
+    assert seen == (["drained"] * 2 if restarts else ["queued"] * 2)
+    assert engine.apply_lora.called and engine.remove_lora.called

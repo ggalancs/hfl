@@ -61,10 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a random key passed through its environment (never on the command
   line), no web UI and no `/slots`; a small guard stops it if HFL dies
   without unloading (SIGKILL, a crash). Without llama-cpp-python installed,
-  GGUF models fall back to `llama-server` when it is on the PATH. Not
-  supported on this backend: applying a LoRA adapter to a running model
-  (llama-server loads adapter files only when it starts: declare it with
-  `ADAPTER`), KV snapshots. With the default `repeat_penalty` (1.1) its
+  GGUF models fall back to `llama-server` when it is on the PATH, GGUF
+  embedding models too. LoRA adapters are applied to and removed from a
+  running model by starting its llama-server again with the new set (it
+  reads adapter files only at start): the change waits until no reply is
+  in progress on that model, and an adapter it refuses leaves the model as
+  it was. Not supported on this backend: KV snapshots. With the default
+  `repeat_penalty` (1.1) its
   replies can differ from the in-process backend's; with 1.0 they matched.
   Vision verified with Qwen2.5-VL-7B over the Ollama, OpenAI and Anthropic
   APIs, and LoRA with llama.cpp's own test adapter: the same text on both
@@ -126,6 +129,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   called the tool on the default backend. `/api/show` lists `tools` for
   these families.
 
+- **Embedding models from the Hub, usable end to end.** Checked with
+  nomic-embed-text-v1.5, one missing link at a time: `hfl pull` refused it
+  (the Hub tags most embedding models `sentence-similarity`, which HFL read
+  as unsupported — nomic-embed-text, bge, e5, MiniLM alike); every GGUF was
+  taken for a chat model, so `/api/embed` refused it (a GGUF's own header
+  now says whether it embeds, read with no extra dependency); the vectors
+  were not unit length (norms of 5 and more, where Ollama's and OpenAI's
+  are 1); an 846-token input, well within the model's context, was refused
+  (llama.cpp's batch of 512); and an HFL without llama-cpp-python —
+  Homebrew's — could not embed with a GGUF at all: it now runs llama.cpp's
+  `llama-server --embeddings`. Both ways give the same vectors (cosine
+  0.999). After pulling one, `hfl pull` says how to use it (`/api/embed`),
+  not `hfl run`.
 - **LoRA adapters applied to a running model, for real.** `POST
   /api/lora/apply` and `/api/lora/remove` could only answer 503: the
   llama-cpp-python API they called does not exist. They now use llama.cpp's

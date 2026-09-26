@@ -268,6 +268,7 @@
     "model_ready": "Model ready",
     "alias_label": "Alias",
     "use_command": "Use",
+    "use_embed": "POST /api/embed {{\"model\": \"{name}\", \"input\": \"...\"}} (or /v1/embeddings)",
     "loading": "Loading",
     "model_loaded": "Model loaded. Type '/exit' to quit.",
     "session_ended": "Session ended.",

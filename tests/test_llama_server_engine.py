@@ -48,6 +48,8 @@ if "--chat-template-file" in args:
     TEMPLATE = open(args[args.index("--chat-template-file") + 1]).read()
 TOOLS = os.environ.get("FAKE_SUPPORTS_TOOLS", "1") == "1"
 ADDS_BOS = os.environ.get("FAKE_ADDS_BOS", "0") == "1"
+if "--lora-scaled" in args and "bad" in args[args.index("--lora-scaled") + 1]:
+    sys.exit(1)  # as llama-server does with an adapter it cannot load
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -660,6 +662,10 @@ class TestVision:
         assert "--mmproj" not in _launches(fake_server)[0]
 
 
+def _adapters(argv: list[str]) -> str | None:
+    return argv[argv.index("--lora-scaled") + 1] if "--lora-scaled" in argv else None
+
+
 class TestLora:
     def test_a_modelfile_s_adapters_are_loaded_at_start(self, fake_server):
         from hfl.engine.llama_server import LlamaServerEngine
@@ -668,12 +674,55 @@ class TestLora:
         eng = LlamaServerEngine()
         eng.load(str(model), lora_paths=["/h/a.gguf", "/h/b.gguf"])
         eng.unload()
-        argv = _launches(fake_server)[0]
-        assert argv[argv.index("--lora") + 1] == "/h/a.gguf,/h/b.gguf"
+        assert _adapters(_launches(fake_server)[0]) == "/h/a.gguf:1.0,/h/b.gguf:1.0"
 
-    def test_hot_apply_says_how_instead(self, engine):
-        with pytest.raises(RuntimeError, match="ADAPTER in the model's Modelfile"):
-            engine.apply_lora("/h/a.gguf", 1.0, adapter_id="x")
+    def test_applied_and_removed_by_starting_it_again(self, engine, fake_server, tmp_path):
+        first, second = tmp_path / "a.gguf", tmp_path / "b.gguf"
+        first.write_bytes(b"GGUF")
+        second.write_bytes(b"GGUF")
+        engine.apply_lora(str(first), 0.5, adapter_id="x")
+        engine.apply_lora(str(second), 1.0, adapter_id="y")
+        engine.remove_lora("x")
+        launches = _launches(fake_server)
+        assert [_adapters(argv) for argv in launches] == [
+            None,
+            f"{first}:0.5",
+            f"{first}:0.5,{second}:1.0",
+            f"{second}:1.0",
+        ]
+        chat = engine.chat([ChatMessage(role="user", content="hi")])  # served again
+        assert chat.text == "Hello hi"
+        with pytest.raises(RuntimeError, match="not applied"):
+            engine.remove_lora("x")
+
+    def test_an_adapter_it_refuses_leaves_the_model_as_it_was(self, engine, fake_server, tmp_path):
+        bad = tmp_path / "bad.gguf"
+        bad.write_bytes(b"GGUF")
+        with pytest.raises(ValueError, match="not a LoRA adapter"):
+            engine.apply_lora(str(bad), 1.0, adapter_id="b")
+        assert _adapters(_launches(fake_server)[-1]) is None
+        assert engine.chat([ChatMessage(role="user", content="hi")]).text == "Hello hi"
+
+    def test_started_again_with_the_bos_template_it_needed(
+        self, fake_server, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("FAKE_ADDS_BOS", "1")
+        eng = _loaded(fake_server)
+        adapter = tmp_path / "a.gguf"
+        adapter.write_bytes(b"GGUF")
+        eng.apply_lora(str(adapter), 1.0)
+        eng.unload()
+        last = _launches(fake_server)[-1]
+        assert "--chat-template-file" in last and _adapters(last) == f"{adapter}:1.0"
+
+    def test_what_it_refuses_before_starting_anything(self, engine, fake_server, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            engine.apply_lora(str(tmp_path / "missing.gguf"), 1.0)
+        comma = tmp_path / "a,b.gguf"
+        comma.write_bytes(b"GGUF")
+        with pytest.raises(ValueError, match="comma"):
+            engine.apply_lora(str(comma), 1.0)
+        assert len(_launches(fake_server)) == 1
 
 
 def test_the_reasoning_switch_reaches_llama_server_s_template(engine, fake_server):
