@@ -336,6 +336,13 @@ class ModelRegistry:
 
             # Remove existing model with same name (if any)
             if manifest.name in self._by_name:
+                previous = self._by_name[manifest.name]
+                # Pulling a model again (an update, or `hfl pull-smart`
+                # choosing one already here) replaced the entry and dropped
+                # the alias its owner had given it (local audit, D30). A new
+                # alias still wins.
+                if not manifest.alias and previous.alias:
+                    manifest.alias = previous.alias
                 self._models = [m for m in self._models if m.name != manifest.name]
             self._models.append(manifest)
             self._indexes_dirty = True

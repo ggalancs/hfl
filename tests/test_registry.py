@@ -790,3 +790,21 @@ class TestRegistryOptimizations:
         registry.refresh()
         assert len(registry) == 2
         assert "external-model" in registry
+
+
+def test_pulling_again_keeps_the_alias(temp_config):
+    """Re-registering a model (a second pull, or pull-smart choosing one
+    already here) replaced its entry and dropped the owner's alias."""
+    from hfl.models.manifest import ModelManifest
+    from hfl.models.registry import ModelRegistry
+
+    registry = ModelRegistry()
+
+    def entry(alias=None):
+        return ModelManifest(name="m", repo_id="org/m", local_path="/x", format="gguf", alias=alias)
+
+    registry.add(entry(alias="mine"))
+    registry.add(entry())
+    assert registry.get("mine") is not None and registry.get("m").alias == "mine"
+    registry.add(entry(alias="renamed"))
+    assert registry.get("m").alias == "renamed"
