@@ -43,9 +43,10 @@ def _account_generation(result: Any, operation: str) -> None:
     1. ``hfl_tokens_generated_total`` / ``hfl_tokens_input_total`` were
        always ``0``. The counters and their Prometheus export existed, and
        the event listener that feeds them was registered — but the only
-       emitter of ``GENERATION_COMPLETED`` lives in ``EngineObserver``,
-       which is wired to nothing. Recording here, where every non-streaming
-       inference already passes, does not depend on that dormant path.
+       emitter of ``GENERATION_COMPLETED`` lived in ``EngineObserver``,
+       which was wired to nothing (both are gone now). Recording here, where
+       every non-streaming inference passes, and in ``stream_with_backpressure``
+       for streams, depends on no event listener being registered.
     2. Nothing logged tokens, so a request that took 61 s was
        indistinguishable between "generated 550 tokens at 9 tok/s" and
        "spent 32 s reading a 3000-token prompt then generated 264". Those
@@ -259,6 +260,11 @@ async def run_dispatched(
                 },
             ) from None
         except BaseException as exc:
+            if isinstance(exc, Exception):
+                with suppress(Exception):
+                    from hfl.metrics import get_metrics
+
+                    get_metrics().record_error(type(exc).__name__)
             if worker.done() and not isinstance(exc, asyncio.CancelledError):
                 # The worker finished (it raised); release inline, then propagate.
                 await slot_cm.__aexit__(None, None, None)

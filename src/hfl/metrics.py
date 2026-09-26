@@ -277,6 +277,10 @@ class Metrics:
             lines.append("# HELP hfl_model_loads_total Total model loads")
             lines.append("# TYPE hfl_model_loads_total counter")
             lines.append(f"hfl_model_loads_total {self.model_loads}")
+            lines.append("")
+            lines.append("# HELP hfl_model_unloads_total Total model unloads")
+            lines.append("# TYPE hfl_model_unloads_total counter")
+            lines.append(f"hfl_model_unloads_total {self.model_unloads}")
 
             # V6 ν2 — WebSocket cancel telemetry. Total counts every
             # cancel frame; orphans the subset where the producer

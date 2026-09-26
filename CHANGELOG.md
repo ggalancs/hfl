@@ -310,6 +310,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt with garbage. HFL now starts such a template with BOS when the
   vocabulary wants one (on llama-server by restarting it once with a copy
   of the template, kept under `~/.hfl/templates/`).
+- **`/metrics` counted only part of what happened.** Measured on a live
+  server: after a model load, a streamed and a non-streamed reply of 20
+  tokens each and a failed request, `hfl_model_loads_total` was 0,
+  `hfl_tokens_generated_total` 20 and no error was counted. Loads, unloads
+  and errors were fed by events nothing emitted, and streamed replies —
+  every coding agent's — were neither counted nor traced. They are now,
+  where they happen: the same run gives 1 load, 1 unload (newly exported as
+  `hfl_model_unloads_total`) and every token; with `HFL_OTEL_ENABLED`, a
+  streamed reply is an `inference.stream` span, checked with a local OTLP
+  collector receiving it.
 - **Pulling a model again dropped its alias.** The new entry replaced the
   old one without it, so every client that used the alias stopped finding
   the model. An alias is kept unless another is given.
@@ -411,6 +421,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.156.1 fixing a bug through a local Qwen3-Coder.
 
 ### Internal
+
+- **Code that did nothing, removed.** The event listeners meant to feed
+  the metrics (nothing emitted their events; the metrics are recorded where
+  things happen now), and two rate limiters no server ever used — one
+  shared through SQLite (HFL is one process by design), one per model (the
+  per-model queues already bound that) — with the docstring that said the
+  SQLite one was used for distributed deployments.
 
 - **A Windows test job** (`windows-tests.yml`, manual like every workflow):
   the suite had never run on Windows. Tests that need POSIX (the fake

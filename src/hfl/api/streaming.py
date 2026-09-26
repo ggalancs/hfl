@@ -129,7 +129,14 @@ async def stream_with_backpressure(
     # Start producer in thread pool
     producer_task = asyncio.create_task(asyncio.to_thread(producer))
 
+    # The same span a non-streamed inference gets in ``run_dispatched``:
+    # streams (every agent's request) were not traced at all.
+    from hfl.observability.tracing import trace_span
+
+    span_cm = trace_span("inference.stream", attributes={"hfl.operation": "stream"})
+    span_cm.__enter__()
     completed_normally = False
+    chunks = 0
     try:
         while True:
             # Check total timeout
@@ -161,8 +168,10 @@ async def stream_with_backpressure(
                 # Stream completed
                 break
             if isinstance(item, Exception):
+                _record_error(type(item).__name__)
                 raise item
 
+            chunks += 1
             yield format_item(item)
 
         # The producer has delivered its sentinel (the ``None`` that broke the
@@ -171,10 +180,15 @@ async def stream_with_backpressure(
         # raising ``format_done``) would skip the flag and record a spurious
         # orphan.
         completed_normally = True
+        _record_stream_generation(sync_iterator, chunks, time.monotonic() - start_time)
         # Send done message
         yield format_done()
 
+    except StreamTimeoutError:
+        _record_error("StreamTimeoutError")
+        raise
     finally:
+        span_cm.__exit__(None, None, None)
         # Signal the producer to stop; it re-checks the flag at the top of its
         # loop and then closes the generator (running the engine's cooperative
         # cancel).
@@ -192,6 +206,34 @@ async def stream_with_backpressure(
                 await producer_task
             except asyncio.CancelledError:
                 pass
+
+
+def _record_error(error_type: str) -> None:
+    try:
+        from hfl.metrics import get_metrics
+
+        get_metrics().record_error(error_type)
+    except Exception:  # pragma: no cover — metrics must never break a stream
+        logger.debug("failed to record a stream error", exc_info=True)
+
+
+def _record_stream_generation(sync_iterator: Any, chunks: int, seconds: float) -> None:
+    """A finished stream in the generation metrics, as ``run_dispatched``
+    records a non-streamed one (streams used to count nothing: a server
+    serving agents reported almost no tokens). The engine's own counts when
+    it keeps them, else the chunks sent."""
+    try:
+        from hfl.engine.base import stream_counts
+        from hfl.metrics import get_metrics
+
+        prompt_n, generated = stream_counts(sync_iterator)
+        get_metrics().record_generation(
+            duration_ms=seconds * 1000,
+            tokens_in=prompt_n or 0,
+            tokens_out=generated if generated is not None else chunks,
+        )
+    except Exception:  # pragma: no cover — metrics must never break a stream
+        logger.debug("failed to record stream metrics", exc_info=True)
 
 
 async def simple_stream_async(

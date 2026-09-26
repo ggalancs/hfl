@@ -129,11 +129,8 @@ def _create_metrics() -> "Metrics":
 
 
 def _create_rate_limiter() -> "RateLimiter":
-    """Factory for RateLimiter.
-
-    Creates appropriate rate limiter based on config.
-    Uses in-memory by default, SQLite for distributed deployments.
-    """
+    """Factory for RateLimiter: the in-memory one, sized by config (HFL is
+    a single process by design, so the limiter lives in it)."""
     from hfl.api.rate_limit import InMemoryRateLimiter
     from hfl.config import config
 

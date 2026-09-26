@@ -122,7 +122,6 @@ class TestNeverFatal:
             started.append(True)
 
         monkeypatch.setattr("hfl.api.server.start_server", fake_start)
-        monkeypatch.setattr("hfl.core.observability_setup.setup_event_listeners", lambda: None)
 
         result = runner.invoke(app, ["serve", "--sandbox", "seccomp", "--port", "0"])
         assert started, "the server never started"

@@ -1004,14 +1004,10 @@ def serve(
     """Start the API server (OpenAI + Ollama + Anthropic compatible)."""
     from hfl.api.server import start_server
     from hfl.api.state import get_state
-    from hfl.core.observability_setup import setup_event_listeners
     from hfl.logging_config import configure_logging
 
     # Initialize structured logging
     configure_logging(level=log_level, json_format=json_logs)
-
-    # Connect events to metrics
-    setup_event_listeners()
 
     # Process hardening, before anything is served. Restrictions that drop
     # privileges only hold if they are applied before the first request, and

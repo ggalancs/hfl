@@ -248,7 +248,6 @@
 │   ├── <span class="dir">core/</span>                <span class="desc">— SYSTEM CORE</span>
 │   │   ├── <span class="file">__init__.py</span>
 │   │   ├── <span class="file">container.py</span>     <span class="desc">— DI container with thread-safe Singleton</span>
-│   │   ├── <span class="file">observability_setup.py</span> <span class="desc">— Observability event listeners setup</span>
 │   │   └── <span class="file">tracing.py</span>       <span class="desc">— Request tracing with IDs</span>
 │   │
 │   ├── <span class="dir">cli/</span>                 <span class="desc">— COMMAND LINE INTERFACE</span>
@@ -1043,7 +1042,6 @@
 <div class="card"><div class="card-header"><span class="icon">🧵</span><h3>tracing.py</h3></div><p>Request-ID propagation via <code>contextvars</code> (survives asyncio tasks and thread-pool hops). <span class="func">set_request_id()</span> / <span class="func">get_request_id()</span> generate short 8-char hex IDs; <span class="cls">RequestContext</span> and <span class="func">with_request_id</span> scope them; <span class="func">format_log_prefix()</span> renders the <code>[abc123de]</code> log prefix.</p></div>
 <div class="card"><div class="card-header"><span class="icon">💬</span><h3>sessions.py</h3></div><p>Human-readable chat persistence under <code>~/.hfl/sessions/&lt;name&gt;.json</code> (no pickle). <span class="cls">ChatSession</span> holds model, options, messages, system. <span class="func">save_session</span> writes atomically (tmp + replace) and touches <code>updated_at</code>; names are validated against a strict regex (<span class="cls">InvalidSessionNameError</span>) to prevent directory escape; <span class="func">list_sessions</span> skips malformed files, newest first.</p></div>
 <div class="card"><div class="card-header"><span class="icon">🛡️</span><h3>sandbox.py</h3></div><p>Opt-in process hardening for <code>hfl serve</code> via <code>--sandbox</code> / <code>HFL_SANDBOX</code>. <code>seccomp</code> (Linux): <code>PR_SET_NO_NEW_PRIVS</code> + a minimal seccomp-bpf filter blocking <code>ptrace</code>/<code>kexec_*</code>/<code>reboot</code>/<code>unshare</code>/<code>setuid</code>; <code>macos</code>: advisory App-Sandbox hint (real enforcement from the signed DMG entitlement). Fully defensive — any failure logs a WARNING and continues; <span class="func">apply_sandbox</span> returns an inspectable <span class="cls">SandboxResult</span>.</p></div>
-<div class="card"><div class="card-header"><span class="icon">📈</span><h3>observability_setup.py</h3></div><p><span class="func">setup_event_listeners()</span> bridges the event bus to metrics: on <code>MODEL_LOADED</code>/<code>MODEL_UNLOADED</code>/<code>GENERATION_COMPLETED</code>/<code>GENERATION_FAILED</code> it records load duration, generation tokens/latency, and error type. Idempotent (registers once).</p></div>
 </div>
 </section>
 

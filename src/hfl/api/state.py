@@ -372,6 +372,12 @@ class ServerState:
             if pointer[0] is resident.engine:
                 self._engine, self._current_model = pointer
             raise
+        try:
+            from hfl.metrics import get_metrics
+
+            get_metrics().record_model_unload()
+        except Exception:  # pragma: no cover — metrics must never break an unload
+            logger.debug("failed to record a model unload", exc_info=True)
 
     async def evict(self, name: str, reason: str = "requested") -> bool:
         """Unload one resident LLM by name. False when it is not loaded."""

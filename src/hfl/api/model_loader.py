@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -194,10 +195,12 @@ async def load_llm(
         # recently used first) before calling this. Load off the event loop;
         # unload on failure so a half-loaded engine never leaks.
         engine = select_engine(model_path)
+        started = time.monotonic()
         try:
             await asyncio.to_thread(
                 engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx)
             )
+            _record_load(manifest.name, started)
         except Exception:
             if engine.is_loaded:
                 try:
@@ -280,8 +283,10 @@ async def load_tts(model_name: str) -> tuple["AudioEngine", "ModelManifest"]:
 
     # Load model in thread pool
     engine = select_tts_engine(model_path)
+    started = time.monotonic()
     try:
         await asyncio.to_thread(engine.load, manifest.local_path)
+        _record_load(manifest.name, started)
         await state.set_tts_engine(engine, manifest)
         return engine, manifest
     except Exception:
@@ -321,6 +326,17 @@ def load_llm_sync(model_name: str) -> tuple["InferenceEngine", "ModelManifest"]:
     engine.load(manifest.local_path, **load_kwargs_for(manifest, manifest.context_length))
 
     return engine, manifest
+
+
+def _record_load(name: str, started: float) -> None:
+    """A model load in the metrics (``hfl_model_loads_total`` stayed at 0:
+    it was fed by an event nothing emitted)."""
+    try:
+        from hfl.metrics import get_metrics
+
+        get_metrics().record_model_load(name, (time.monotonic() - started) * 1000)
+    except Exception:  # pragma: no cover — metrics must never break a load
+        logger.debug("failed to record a model load", exc_info=True)
 
 
 def load_kwargs_for(manifest: "ModelManifest", n_ctx: int | None) -> dict[str, Any]:
