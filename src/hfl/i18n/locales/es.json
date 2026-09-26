@@ -373,7 +373,9 @@
     "network_exposure": "Exponiendo el servidor a la red. Los prompts enviados a la API serán accesibles desde cualquier dispositivo en la red.",
     "no_api_key": "No se ha establecido clave API. Cualquiera en la red puede acceder a la API.",
     "continue_question": "¿Continuar?",
-    "playback_failed": "No se pudo reproducir el audio"
+    "playback_failed": "No se pudo reproducir el audio",
+    "refuse_unattended_bind": "No se escucha en {host} sin nadie que lo confirme. Define HFL_API_KEY para exigir una clave en cada petición, o HFL_ACCEPT_NETWORK_EXPOSURE=true para exponerlo sin ella.",
+    "container_bind": "Dentro de un contenedor: accesible donde se publique su puerto (docker run -p, ports de compose), sin clave. Define HFL_API_KEY para exigirla."
   },
   "legal": {
     "ai_disclaimer": "Los modelos de IA pueden generar información incorrecta, sesgada o inapropiada. El usuario es responsable del uso que haga de las respuestas generadas."

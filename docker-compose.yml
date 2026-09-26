@@ -22,8 +22,10 @@ services:
     image: ghcr.io/ggalancs/hfl:${HFL_TAG:-latest}
     container_name: hfl
     restart: unless-stopped
+    # Published on this machine only by default: HFL runs without a key
+    # unless HFL_API_KEY is set. HFL_PUBLISH=0.0.0.0 opens it to the network.
     ports:
-      - "${HFL_PORT:-11434}:11434"
+      - "${HFL_PUBLISH:-127.0.0.1}:${HFL_PORT:-11434}:11434"
     environment:
       HFL_HOST: "0.0.0.0"
       HFL_PORT: "11434"

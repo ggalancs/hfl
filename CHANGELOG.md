@@ -320,6 +320,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hfl_model_unloads_total`) and every token; with `HFL_OTEL_ENABLED`, a
   streamed reply is an `inference.stream` span, checked with a local OTLP
   collector receiving it.
+- **The Docker image stopped as soon as it started**, and docker-compose
+  with it: since the 0.19 audit, `hfl serve` refuses to bind a network
+  address with no terminal to confirm on, and in a container there never is
+  one. The audit's intent stays — nothing is exposed unless someone decided
+  it — with two more ways of deciding: an API key (the exposure is
+  authenticated, and someone set the key) and running in a container
+  (Docker, Podman, Kubernetes), where binding `0.0.0.0` reaches only the
+  ports its operator published; HFL then says so and recommends a key.
+  Anywhere else an unattended bind with neither is still refused, and the
+  message now names both ways out. docker-compose publishes on this
+  machine only (`HFL_PUBLISH=0.0.0.0` opens it to the network).
+- **`HFL_API_KEY` did nothing.** docker-compose passed it, commented "to
+  lock the server", and nothing read it: the server ran without a key.
+  `hfl serve` reads it now, as `--api-key` — better than the flag, which
+  every local user can read in `ps`. Checked in the container: 401 without
+  the key or with a wrong one, 200 with it.
 - **The Docker image could not run a GGUF model.** The published 0.21.0
   image (amd64 and arm64) failed to load llama.cpp: `libllama.so` needs
   `libgomp.so.1`, which the slim runtime stage lacked. And the image built

@@ -954,6 +954,23 @@ def _choose_backend(backend: str, parallel: int) -> None:
         console.print(f"[cyan]{escape_markup(t('messages.parallel_on', slots=slots))}[/]")
 
 
+def _in_container() -> bool:
+    """Whether this process runs in a container (Docker, Podman, Kubernetes).
+
+    There, binding ``0.0.0.0`` opens only the container's own network
+    namespace: what reaches the outside is what whoever started it published
+    (``docker run -p``, compose ``ports``, a Service).
+    """
+    import os
+    from pathlib import Path
+
+    return (
+        Path("/.dockerenv").exists()
+        or Path("/run/.containerenv").exists()
+        or bool(os.environ.get("KUBERNETES_SERVICE_HOST"))
+    )
+
+
 def _is_public_bind(host: str) -> bool:
     """Whether binding to ``host`` exposes the server beyond this machine.
 
@@ -978,7 +995,11 @@ def serve(
     host: str | None = typer.Option(None, "--host", help=t("commands.serve.options.host")),
     port: int = typer.Option(11434, "--port", "-p", help=t("commands.serve.options.port")),
     model: str = typer.Option(None, "--model", "-m", help=t("commands.serve.options.model")),
-    api_key: str = typer.Option(None, "--api-key", help=t("commands.serve.options.api_key")),
+    # Also from HFL_API_KEY — better than the flag, which every local user
+    # can read in ``ps``; docker-compose passed it and nothing read it.
+    api_key: str = typer.Option(
+        None, "--api-key", envvar="HFL_API_KEY", help=t("commands.serve.options.api_key")
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -1081,20 +1102,24 @@ def serve(
             console.print(f"[yellow]{t('warnings.no_api_key')}[/]")
         # Without a TTY (systemd, Docker, launchd) ``typer.confirm`` cannot
         # ask anyone — and those are exactly the deployments where an
-        # accidental exposure matters most. Require an explicit opt-in
-        # instead of silently taking the default.
+        # accidental exposure matters most. An unattended start exposes the
+        # server only when someone decided it: the explicit opt-in, an API
+        # key (the exposure is authenticated, and someone set the key), or a
+        # container (where the bind reaches only as far as the ports its
+        # operator published). The container image used to stop here, every
+        # time: nobody can answer a prompt in one.
         if not sys.stdin.isatty():
-            if os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() not in (
+            opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
                 "1",
                 "true",
                 "yes",
                 "on",
-            ):
-                console.print(
-                    f"[red]Refusing to bind {host} without a terminal to confirm on. "
-                    "Set HFL_ACCEPT_NETWORK_EXPOSURE=true to proceed unattended.[/]"
-                )
+            )
+            if not (opted_in or api_key or _in_container()):
+                console.print(f"[red]{t('warnings.refuse_unattended_bind', host=host)}[/]")
                 raise typer.Exit(1)
+            if _in_container() and not (opted_in or api_key):
+                console.print(f"[yellow]{t('warnings.container_bind')}[/]")
         elif not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 

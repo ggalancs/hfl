@@ -373,7 +373,9 @@
     "network_exposure": "Exposing the server to the network. Prompts sent to the API will be accessible from any device on the network.",
     "no_api_key": "No API key set. Anyone on the network can access the API.",
     "continue_question": "Continue?",
-    "playback_failed": "Could not play audio"
+    "playback_failed": "Could not play audio",
+    "refuse_unattended_bind": "Refusing to bind {host} unattended: nobody can confirm the exposure here. Set HFL_API_KEY to require a key on every request, or HFL_ACCEPT_NETWORK_EXPOSURE=true to expose it without one.",
+    "container_bind": "Inside a container: reachable wherever its port is published (docker run -p, compose ports), with no key. Set HFL_API_KEY to require one."
   },
   "legal": {
     "ai_disclaimer": "AI models may generate incorrect, biased, or inappropriate information. The user is responsible for the use they make of the generated responses."

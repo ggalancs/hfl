@@ -14,6 +14,14 @@ runner = CliRunner()
 class TestServeCommand:
     """Tests for serve command."""
 
+    @pytest.fixture(autouse=True)
+    def not_in_a_container(self, monkeypatch):
+        """Where the suite runs must not decide these tests (a CI job may
+        run in a container); the container case is tested on its own."""
+        monkeypatch.setattr("hfl.cli.main._in_container", lambda: False)
+        monkeypatch.delenv("HFL_API_KEY", raising=False)
+        monkeypatch.delenv("HFL_ACCEPT_NETWORK_EXPOSURE", raising=False)
+
     def test_serve_default_options(self):
         """Test serve command with default options."""
         with patch("hfl.api.server.start_server") as mock_start:
@@ -67,6 +75,60 @@ class TestServeCommand:
 
             assert result.exit_code == 1
             mock_start.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "how", [["--api-key", "secret"], "env"], ids=["key flag", "HFL_API_KEY"]
+    )
+    def test_serve_public_bind_with_a_key_needs_no_prompt(self, monkeypatch, how):
+        """An API key makes the exposure authenticated, and someone set it:
+        consent enough for an unattended start."""
+        args = ["serve", "--host", "0.0.0.0"]
+        if how == "env":
+            monkeypatch.setenv("HFL_API_KEY", "secret")
+        else:
+            args += how
+        with patch("hfl.api.server.start_server") as mock_start:
+            result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+        assert mock_start.call_args[1]["api_key"] == "secret"
+
+    def test_serve_in_a_container_binds_and_says_where_it_reaches(self, monkeypatch):
+        """The Docker image stopped here every time: nobody answers a prompt
+        in a container, and there 0.0.0.0 reaches only the published ports."""
+        monkeypatch.setattr("hfl.cli.main._in_container", lambda: True)
+        with patch("hfl.api.server.start_server") as mock_start:
+            result = runner.invoke(app, ["serve", "--host", "0.0.0.0"])
+        assert result.exit_code == 0, result.output
+        mock_start.assert_called_once()
+        assert "HFL_API_KEY" in result.output  # the recommendation
+
+    def test_the_refusal_says_what_would_do(self):
+        with patch("hfl.api.server.start_server"):
+            result = runner.invoke(app, ["serve", "--host", "0.0.0.0"])
+        assert result.exit_code == 1
+        assert "HFL_API_KEY" in result.output
+        assert "HFL_ACCEPT_NETWORK_EXPOSURE" in result.output
+
+
+@pytest.mark.parametrize(
+    ("marker", "env", "expected"),
+    [
+        ("/.dockerenv", {}, True),
+        ("/run/.containerenv", {}, True),
+        (None, {"KUBERNETES_SERVICE_HOST": "10.0.0.1"}, True),
+        (None, {}, False),
+    ],
+)
+def test_in_container(monkeypatch, marker, env, expected):
+    from pathlib import Path
+
+    from hfl.cli.main import _in_container
+
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) == marker)
+    assert _in_container() is expected
 
 
 class TestListCommand:

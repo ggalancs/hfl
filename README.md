@@ -74,7 +74,7 @@ them.
 | How | Command |
 |---|---|
 | **pip** (recommended) | `pip install "hfl[llama,mlx]"` |
-| **Docker** | `docker run -p 11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` |
+| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`) |
 | **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases) |
 | **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
 

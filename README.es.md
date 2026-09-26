@@ -76,7 +76,7 @@ temperatura por conversación, e imágenes para los modelos que pueden verlas.
 | Cómo | Comando |
 |---|---|
 | **pip** (recomendado) | `pip install "hfl[llama,mlx]"` |
-| **Docker** | `docker run -p 11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` |
+| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (solo esta máquina; para abrirlo a la red, publica `-p 11434:11434` con `-e HFL_API_KEY=…`) |
 | **Instaladores** | `.dmg`, `.msi` y binarios independientes en la [página de releases](https://github.com/ggalancs/hfl/releases) |
 | **Desde el código** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
 

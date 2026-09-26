@@ -95,9 +95,11 @@ class TestDockerCompose:
     def test_single_service_named_hfl(self):
         assert list(self.cfg["services"].keys()) == ["hfl"]
 
-    def test_port_mapping_11434(self):
+    def test_port_mapping_11434_on_this_machine_by_default(self):
+        """The server runs without a key unless one is set: the compose
+        file used to publish it on every interface of the host."""
         svc = self.cfg["services"]["hfl"]
-        assert "${HFL_PORT:-11434}:11434" in svc["ports"]
+        assert "${HFL_PUBLISH:-127.0.0.1}:${HFL_PORT:-11434}:11434" in svc["ports"]
 
     def test_persists_home_to_host(self):
         svc = self.cfg["services"]["hfl"]
