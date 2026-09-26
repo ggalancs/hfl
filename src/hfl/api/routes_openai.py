@@ -247,10 +247,13 @@ async def chat_completions(
             )
         except (QueueFullError, QueueTimeoutError) as exc:
             return queue_response_from_error(exc, path="/v1/chat/completions")
-        except NotImplementedError as exc:
+        except NotImplementedError:
+            # A fixed sentence, never the exception's text (py/stack-trace-exposure).
+            from hfl.api.routes_native import UNSUPPORTED
+
             return JSONResponse(
                 status_code=400,
-                content={"error": {"message": str(exc), "type": "invalid_request_error"}},
+                content={"error": {"message": UNSUPPORTED, "type": "invalid_request_error"}},
             )
     choices = [
         _choice(index, result, req, tools, tools_disabled, gen_config)

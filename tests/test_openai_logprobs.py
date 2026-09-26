@@ -86,7 +86,7 @@ class TestOpenAIRoute:
     def test_a_backend_without_logprobs_says_so(self, engine):
         engine.chat.side_effect = NotImplementedError("the vLLM backend cannot return logprobs")
         response = _post(logprobs=True)
-        assert response.status_code == 400 and "vLLM" in response.text
+        assert response.status_code == 400 and "logprobs need" in response.text
 
 
 def test_ollama_chat_returns_them_too(engine):

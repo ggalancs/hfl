@@ -35,6 +35,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+UNSUPPORTED = (
+    "This model's backend cannot do what was asked: logprobs need the default GGUF "
+    "backend, llama-server or MLX, and cannot be combined with a response format."
+)
+
 router = APIRouter(tags=["Ollama API"])
 
 
@@ -384,8 +389,9 @@ async def api_generate(
         )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
-    except NotImplementedError as exc:  # e.g. logprobs on a backend without them
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+    except NotImplementedError:  # e.g. logprobs on a backend without them
+        # A fixed sentence, never the exception's text (py/stack-trace-exposure).
+        return JSONResponse(status_code=400, content={"error": UNSUPPORTED})
     # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
     # pre-0.5.1). Clients keying off these fields now see the
     # engine's actual measurements.
@@ -695,8 +701,9 @@ async def api_chat(
             )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
-    except NotImplementedError as exc:  # e.g. logprobs on a backend without them
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+    except NotImplementedError:  # e.g. logprobs on a backend without them
+        # A fixed sentence, never the exception's text (py/stack-trace-exposure).
+        return JSONResponse(status_code=400, content={"error": UNSUPPORTED})
 
     # With ``think``, the reasoning goes in ``message.thinking`` — all of it
     # when the token cap cut it short (it used to be lost then).
