@@ -15,7 +15,7 @@ alias, then Ollama-equivalent. So a host that already has
 | HFL                     | Ollama alias    | Default       | What it does |
 |-------------------------|-----------------|---------------|--------------|
 | `HFL_HOST`              | `OLLAMA_HOST`*  | `127.0.0.1`   | Interface to bind. `OLLAMA_HOST` accepts `host`, `host:port`, or `:port`. |
-| `HFL_PORT`              | `OLLAMA_PORT`*  | `11434`       | TCP port. Falls back to the port part of `OLLAMA_HOST` when set. |
+| `HFL_PORT`              | `OLLAMA_PORT`*  | `11434`       | TCP port. Falls back to the port part of `OLLAMA_HOST` when set. `hfl serve` listens on it and the commands that talk to a server (`stop`, `ps`, `create`, `lora`, `snapshot`, `launch`) reach it there; `--port` overrides. |
 | `HFL_HOME`              | —               | `~/.hfl`      | Root directory for models, registry, blobs. |
 
 \* `OLLAMA_HOST` may carry the port; `OLLAMA_PORT` is consulted when
@@ -62,6 +62,8 @@ the host string does not.
 | `HFL_KV_CACHE_TYPE`  | `OLLAMA_KV_CACHE_TYPE`  | `f16`   | KV cache dtype: `f16`, `q8_0`, `q4_0`. Halves / quarters VRAM at the cost of accuracy. |
 | `HFL_FLASH_ATTENTION`| `OLLAMA_FLASH_ATTENTION`| (auto)  | Toggle flash-attention fleet-wide (`1`/`0`). Per-load kwarg wins; per-arch safety list still rejects known-unsafe arches. |
 | `HFL_DEFAULT_CTX_SIZE` | —                     | `0`     | Default `n_ctx`. `0` = auto-detect from GGUF metadata. |
+| `HFL_NO_MLX_HINT`    | —                       | (off)   | Truthy (`1`, `true`, `yes`) silences the log line suggesting an MLX build when a GGUF is served through llama.cpp on Apple Silicon. |
+| `HFL_VRAM_OVERRIDE_GIB` | —                    | (probe) | GPU memory, in GiB, to size contexts against instead of probing it (containers, or a probe that reads wrong). A malformed value is ignored with a warning. |
 
 ## Security / CORS / Rate-limit
 
@@ -72,6 +74,9 @@ the host string does not.
 | `HFL_RATE_LIMIT_REQUESTS`    | —                  | `60`                     | Requests per window. |
 | `HFL_RATE_LIMIT_WINDOW`      | —                  | `60`                     | Window size in seconds. |
 | `HFL_MAX_REQUEST_BYTES`      | —                  | `10485760` (10 MiB)      | Cap on request body. `0` disables. |
+| `HFL_MAX_BLOB_BYTES`         | —                  | `0` (no cap)             | Cap on one `/api/blobs` upload (GGUFs for `create`), which the request-body cap exempts. Over it: 413. |
+| `HFL_ALLOW_REMOTE_CODE`      | —                  | `false`                  | Truthy lets Transformers run a model repository's own Python (`trust_remote_code`). Off by default: a request or Modelfile can never turn it on. |
+| `HFL_SANDBOX`                | —                  | `none`                   | Process hardening at `hfl serve` start (as `--sandbox`): `seccomp` (Linux: no new privileges, a filter blocking `ptrace`, `kexec`, `reboot`, `unshare`, `setuid`) or `macos` (an App-Sandbox profile hint; enforcement needs the codesigned app). Never fatal. |
 
 ## Compliance / pull governance
 
@@ -98,7 +103,11 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 |----------------------|--------------------|---------|--------------|
 | `HFL_DEBUG`          | `OLLAMA_DEBUG`     | (off)   | Truthy values force the `hfl` root logger to DEBUG. |
 | `HFL_AUDIT_LOG_PATH` | —                  | (off)   | When set, audit events are appended to that file (with rotation). |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | —         | (off)   | Standard OpenTelemetry env. HFL emits spans when this is set. |
+| `HFL_AUDIT_LOG_MAX_BYTES` | —             | `104857600` (100 MiB) | Size at which the audit log rotates. |
+| `HFL_AUDIT_LOG_BACKUPS` | —               | `5`     | Rotated audit logs kept. |
+| `HFL_OTEL_ENABLED`   | —                  | (off)   | Truthy exports a span per inference over OTLP/HTTP (needs `hfl[otel]`). |
+| `HFL_OTEL_EXPORTER_ENDPOINT` | —          | `http://localhost:4318/v1/traces` | Where the spans go. |
+| `HFL_OTEL_SERVICE_NAME` | —               | `hfl`   | The spans' `service.name`. |
 
 ## Streaming backpressure
 
@@ -110,6 +119,19 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 | `HFL_VLLM_ERROR_PUT_TIMEOUT`       | `10`    | Shorter window for the vLLM error sentinel. |
 | `HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT`   | `5`     | vLLM worker join timeout on shutdown. |
 
+## Tools (MCP, web search)
+
+| HFL                        | Default      | What it does |
+|----------------------------|--------------|--------------|
+| `HFL_MCP_AUTOLOAD`         | (none)       | A JSON file of MCP servers to connect when `hfl serve` starts: `{"servers": [{"id": "fs", "target": "stdio://<command> <args>"}, {"id": "web", "target": "sse://host:port/sse"}]}` (an entry may add `"env"`). A server that fails to connect is logged and skipped; the server starts either way. Their tools reach the model through `/api/chat`. |
+| `HFL_WEB_SEARCH_BACKEND`   | `duckduckgo` | Backend of `/api/web_search`: `duckduckgo` (no key), `tavily`, `brave` or `serpapi`, which read `TAVILY_API_KEY`, `BRAVE_API_KEY`, `SERPAPI_API_KEY`. DuckDuckGo turns away clients it takes for bots; that is a 502 saying so. |
+
+## Interface
+
+| HFL        | Default         | What it does |
+|------------|-----------------|--------------|
+| `HFL_LANG` | (system locale) | Language of the CLI and chat page: `en` or `es` (`es_ES` works too). |
+
 ## Storage / registry
 
 | HFL                            | Default | What it does |
@@ -117,6 +139,10 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 | `HF_TOKEN`                     | (none)  | Standard HuggingFace token. Read once at boot, held in memory only. |
 
 ## Notes
+
+- A value that is not a number where one is expected (`HFL_PORT=abc`,
+  `HFL_GENERATION_TIMEOUT=soon`) stops the command with one line naming the
+  variable and what it takes (exit 2). An empty value counts as unset.
 
 - Variables not listed here may exist in the codebase but are
   considered internal — they are not part of the documented operator

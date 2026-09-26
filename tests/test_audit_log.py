@@ -108,3 +108,15 @@ class TestReconfigure:
         audit.audit_event("model.delete")
         assert (tmp_path / "a.log").exists()
         assert (tmp_path / "b.log").exists()
+
+
+@pytest.mark.parametrize("name", ["HFL_AUDIT_LOG_MAX_BYTES", "HFL_AUDIT_LOG_BACKUPS"])
+def test_an_unreadable_rotation_setting_names_itself(tmp_path, monkeypatch, name):
+    """A bare int() here made ``HFL_AUDIT_LOG_BACKUPS=abc`` a ValueError at
+    start; like every numeric setting it now names the variable."""
+    from hfl.exceptions import InvalidConfigError
+
+    monkeypatch.setenv(name, "abc")
+    with pytest.raises(InvalidConfigError) as caught:
+        audit.configure_audit_log(path=tmp_path / "audit.log")
+    assert caught.value.key == name

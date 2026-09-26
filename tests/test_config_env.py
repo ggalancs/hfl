@@ -242,6 +242,29 @@ class TestEnvConfig:
         assert documented
         assert sorted(v for v in documented if f'"{v}"' not in source) == []
 
+    def test_docs_and_code_name_the_same_variables(self):
+        """Every HFL_* variable the code reads is in docs/env-vars.md, and
+        every variable documented there is read (13 were undocumented, and
+        OTEL_EXPORTER_OTLP_ENDPOINT documented but never read — local audit)."""
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        doc = (root / "docs/env-vars.md").read_text()
+        source = "\n".join(p.read_text() for p in (root / "src/hfl").rglob("*.py"))
+        readers = (
+            r'environ\.get\(\s*"(HFL_[A-Z_]+)"',
+            r'envvar="(HFL_[A-Z_]+)"',
+            r'_env_(?:int|float|number)\([^)]*?"(HFL_[A-Z_]+)"',
+            r'_env_flag\("(HFL_[A-Z_]+)"\)',
+            r'_parse_percent\("(HFL_[A-Z_]+)"',
+        )
+        read = {name for pattern in readers for name in re.findall(pattern, source)}
+        assert len(read) > 40  # the patterns still find the readers
+        assert sorted(n for n in read if f"`{n}`" not in doc) == []
+        documented = set(re.findall(r"`((?:HFL|OLLAMA|OTEL)_[A-Z_]+)`", doc))
+        assert sorted(n for n in documented if f'"{n}"' not in source) == []
+
     def test_max_queue_alias_picks_up_ollama_var(self):
         with patch.dict(
             os.environ,

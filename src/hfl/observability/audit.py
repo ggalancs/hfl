@@ -124,13 +124,16 @@ def configure_audit_log(
             return
 
         _audit_path.parent.mkdir(parents=True, exist_ok=True)
+        from hfl.config import _env_int
+
         handler = logging.handlers.RotatingFileHandler(
             str(_audit_path),
-            maxBytes=max_bytes
-            or int(os.environ.get("HFL_AUDIT_LOG_MAX_BYTES", str(100 * 1024 * 1024))),
+            # _env_int: an unreadable value names its variable instead of a
+            # bare ValueError at start.
+            maxBytes=max_bytes or _env_int(100 * 1024 * 1024, "HFL_AUDIT_LOG_MAX_BYTES"),
             backupCount=backup_count
             if backup_count is not None
-            else int(os.environ.get("HFL_AUDIT_LOG_BACKUPS", "5")),
+            else _env_int(5, "HFL_AUDIT_LOG_BACKUPS"),
             encoding="utf-8",
         )
         # Raw-passthrough formatter: ``audit_event`` already renders
