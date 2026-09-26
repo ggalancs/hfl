@@ -163,12 +163,14 @@ hfl inspect llama70b                    # details and license
 hfl rm llama70b
 
 hfl import ~/.lmstudio/models/lmstudio-community/Qwen3-8B-GGUF   # a GGUF you already have
+hfl import ~/.lmstudio/models/mlx-community/Qwen3-8B-4bit        # or MLX / Hugging Face weights
 ```
 
-`hfl import` registers a GGUF where it is — no copy, no server — for models
-downloaded by LM Studio, llama.cpp or by hand; a split model or a vision
-model's projector beside it are handled. `hfl rm` never deletes a file outside
-HFL's own folder.
+`hfl import` registers a model where it is — no copy, no server — for models
+downloaded by LM Studio, llama.cpp, `huggingface-cli` or by hand: a GGUF (a
+split model or a vision model's projector beside it are handled) or a folder of
+MLX or Hugging Face weights (`config.json` and `.safetensors`). `hfl rm` never
+deletes anything outside HFL's own folder.
 
 ### Find the right model
 

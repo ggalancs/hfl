@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""``hfl import``: serve a GGUF you already have, where it is.
+"""``hfl import``: serve a model you already have, where it is.
 
-A model downloaded by LM Studio, llama.cpp or by hand can be registered
-without copying it into ``~/.hfl`` and without a running server: the
-registry entry points at the file in place. ``hfl rm`` never deletes a file
-outside HFL's models folder, so removing the entry leaves the file alone.
+A model downloaded by LM Studio, llama.cpp, ``huggingface-cli`` or by hand
+can be registered without copying it into ``~/.hfl`` and without a running
+server: the registry entry points at it in place. ``hfl rm`` never deletes
+anything outside HFL's models folder, so removing the entry leaves it alone.
 
-A folder may be given instead of a file when it holds one model: its GGUF,
-or the first part of a split one. Image projectors (``mmproj``) are not
-models; one beside the file is found at load, as for a pulled model.
+Two kinds: a GGUF (a file, or a folder holding one model: its GGUF, or the
+first part of a split one — image projectors, ``mmproj``, are not models;
+one beside the file is found at load, as for a pulled model), and a
+Hugging Face folder (``config.json`` and ``.safetensors`` weights: MLX
+builds as LM Studio keeps them, or a model as the Hub has it), served by the
+backend a pulled one would get.
 """
 
 from __future__ import annotations
@@ -44,6 +47,30 @@ def _is_gguf(path: Path) -> bool:
         return False
 
 
+# What a folder needs to be run: one of these tokenizer files.
+_TOKENIZERS = ("tokenizer.json", "tokenizer.model", "tiktoken.model", "vocab.json")
+
+
+def _hf_folder(path: Path) -> bool:
+    """A Hugging Face model folder: its config and safetensors weights."""
+    return (path / "config.json").is_file() and any(path.glob("*.safetensors"))
+
+
+def choose_model(path: Path) -> tuple[Path, str]:
+    """The model ``path`` names and its format: ``("gguf" | "safetensors")``.
+
+    A folder with ``config.json`` and ``.safetensors`` is the model itself (a
+    weights file inside it names the folder too); anything else is a GGUF.
+    """
+    path = path.expanduser()
+    folder = path.parent if path.is_file() and path.suffix == ".safetensors" else path
+    if folder.is_dir() and _hf_folder(folder):
+        if not any((folder / name).is_file() for name in _TOKENIZERS):
+            raise ImportRefused("import.no_tokenizer", path=str(folder))
+        return folder.resolve(), "safetensors"
+    return choose_gguf(path), "gguf"
+
+
 def choose_gguf(path: Path) -> Path:
     """The model file ``path`` names: itself, or the one model in a folder."""
     path = path.expanduser()
@@ -76,8 +103,9 @@ def choose_gguf(path: Path) -> Path:
 
 
 def default_name(model: Path) -> str:
-    """``Qwen3-8B-Q4_K_M-00001-of-00002.gguf`` → ``qwen3-8b-q4_k_m``."""
-    stem = _SPLIT.sub("", model.stem)
+    """``Qwen3-8B-Q4_K_M-00001-of-00002.gguf`` → ``qwen3-8b-q4_k_m``; a
+    folder → its name (``Qwen2.5-0.5B-Instruct-4bit`` → lower case)."""
+    stem = model.name if model.is_dir() else _SPLIT.sub("", model.stem)
     name = re.sub(r"[^a-z0-9._-]+", "-", stem.lower()).strip("-.")
     return name or "imported-model"
 
@@ -103,4 +131,58 @@ def manifest_for(model: Path, name: str, alias: str | None = None) -> ModelManif
         quantization=_detect_quant(model.name),
         architecture=info.get("architecture"),
         model_type="llm",
+    )
+
+
+def _folder_quantization(config: dict) -> str | None:
+    """What the weights are: ``4bit`` for an MLX quantized build, else the
+    dtype (``BF16``)."""
+    quant = config.get("quantization") or config.get("quantization_config") or {}
+    if isinstance(quant, dict) and isinstance(quant.get("bits"), int):
+        return f"{quant['bits']}bit"
+    dtype = config.get("torch_dtype") or config.get("dtype")
+    names = {"bfloat16": "BF16", "float16": "F16", "float32": "F32"}
+    return names.get(dtype) if isinstance(dtype, str) else None
+
+
+def manifest_for_folder(folder: Path, name: str, alias: str | None = None) -> ModelManifest:
+    """The registry entry for a Hugging Face folder imported in place."""
+    import json
+
+    from hfl.converter.formats import (
+        ModelType,
+        detect_model_type,
+        get_model_type_display_name,
+        is_model_type_supported,
+    )
+
+    try:
+        config = json.loads((folder / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ImportRefused("import.bad_config", path=str(folder)) from exc
+    if not isinstance(config, dict):
+        raise ImportRefused("import.bad_config", path=str(folder))
+    kind = detect_model_type(folder)
+    if kind == ModelType.UNKNOWN:
+        kind = ModelType.LLM  # a config with no telling task: a chat model, as pull takes it
+    if not is_model_type_supported(kind):
+        raise ImportRefused(
+            "import.unsupported", path=str(folder), kind=get_model_type_display_name(kind)
+        )
+    architectures = config.get("architectures")
+    architecture = (
+        architectures[0]
+        if isinstance(architectures, list) and architectures
+        else config.get("model_type")
+    )
+    return ModelManifest(
+        name=name,
+        repo_id=f"local/{name}",
+        local_path=str(folder),
+        format="safetensors",
+        alias=alias,
+        size_bytes=sum(p.stat().st_size for p in folder.glob("*.safetensors")),
+        quantization=_folder_quantization(config),
+        architecture=architecture if isinstance(architecture, str) else None,
+        model_type=kind.value,
     )

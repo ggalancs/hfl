@@ -523,8 +523,11 @@
     "not_gguf": "{path} is not a GGUF file.",
     "no_first_part": "{path} is a later part of a split model and its first part is not beside it.",
     "exists": "A model named {name} already exists; choose another name with --name.",
-    "done": "Imported {name} ({size}) — the file stays where it is: {path}",
-    "use": "Use: hfl run {name}"
+    "done": "Imported {name} ({size}) — it stays where it is: {path}",
+    "use": "Use: hfl run {name}",
+    "no_tokenizer": "{path} has model weights but no tokenizer (tokenizer.json or tokenizer.model): it could not be run.",
+    "bad_config": "{path}/config.json cannot be read.",
+    "unsupported": "{path} is a {kind} model, which HFL does not run."
   },
   "ui": {
     "model": "Model",

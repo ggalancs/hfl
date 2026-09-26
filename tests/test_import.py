@@ -9,6 +9,7 @@ images), and ``hfl rm`` leaving the file in place.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -90,3 +91,97 @@ def test_a_refusal_is_a_message_not_a_traceback(temp_config, tmp_path):
 
     result = CliRunner().invoke(app, ["import", str(tmp_path / "nope.gguf")])
     assert result.exit_code == 1 and "Nothing at" in result.output
+
+
+def _hf_folder(folder: Path, config: dict, tokenizer: bool = True, weights: int = 2) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "config.json").write_text(json.dumps(config))
+    for index in range(weights):
+        (folder / f"model-0000{index + 1}-of-0000{weights}.safetensors").write_bytes(b"\0" * 100)
+    if tokenizer:
+        (folder / "tokenizer.json").write_text("{}")
+    return folder
+
+
+MLX_CONFIG = {
+    "architectures": ["Qwen2ForCausalLM"],
+    "model_type": "qwen2",
+    "quantization": {"group_size": 64, "bits": 4},
+}
+
+HF_CONFIG = {"architectures": ["LlamaForCausalLM"], "torch_dtype": "bfloat16"}
+EMBED_CONFIG = {"architectures": ["BertModel"], "torch_dtype": "float32"}
+
+
+class TestHuggingFaceFolder:
+    """MLX builds as LM Studio keeps them, or a model as the Hub has it.
+    Checked for real: Qwen2.5-0.5B-Instruct, MLX 4-bit and BF16, imported
+    from outside HFL, both answered on MLX; ``hfl rm`` left them in place."""
+
+    def test_the_folder_is_the_model_whichever_is_given(self, tmp_path):
+        from hfl.models.importer import choose_model
+
+        folder = _hf_folder(tmp_path / "Qwen2.5-0.5B-Instruct-4bit", MLX_CONFIG)
+        assert choose_model(folder) == (folder.resolve(), "safetensors")
+        weights = folder / "model-00001-of-00002.safetensors"
+        assert choose_model(weights) == (folder.resolve(), "safetensors")
+        gguf = _gguf(tmp_path / "g" / "m.gguf")
+        assert choose_model(gguf) == (gguf.resolve(), "gguf")
+
+    def test_weights_without_a_tokenizer_are_refused(self, tmp_path):
+        from hfl.models.importer import choose_model
+
+        folder = _hf_folder(tmp_path / "m", MLX_CONFIG, tokenizer=False)
+        with pytest.raises(ImportRefused) as refused:
+            choose_model(folder)
+        assert refused.value.key == "import.no_tokenizer"
+
+    @pytest.mark.parametrize(
+        ("config", "quant", "arch", "kind"),
+        [
+            (MLX_CONFIG, "4bit", "Qwen2ForCausalLM", "llm"),
+            (HF_CONFIG, "BF16", "LlamaForCausalLM", "llm"),
+            (EMBED_CONFIG, "F32", "BertModel", "embedding"),
+            ({"model_type": "qwen2"}, None, "qwen2", "llm"),
+        ],
+    )
+    def test_the_record(self, tmp_path, config, quant, arch, kind):
+        from hfl.models.importer import manifest_for_folder
+
+        folder = _hf_folder(tmp_path / "m", config)
+        manifest = manifest_for_folder(folder, "m", alias="a")
+        assert (manifest.local_path, manifest.format) == (str(folder), "safetensors")
+        assert (manifest.quantization, manifest.architecture, manifest.model_type) == (
+            quant,
+            arch,
+            kind,
+        )
+        assert manifest.size_bytes == 200  # both weight files
+
+    @pytest.mark.parametrize(
+        ("config", "key"),
+        [
+            ({"architectures": ["WhisperForConditionalGeneration"]}, "import.unsupported"),
+            ("not json", "import.bad_config"),
+        ],
+    )
+    def test_what_is_refused(self, tmp_path, config, key):
+        from hfl.models.importer import manifest_for_folder
+
+        folder = _hf_folder(tmp_path / "m", {})
+        raw = config if isinstance(config, str) else json.dumps(config)
+        (folder / "config.json").write_text(raw)
+        with pytest.raises(ImportRefused) as refused:
+            manifest_for_folder(folder, "m")
+        assert refused.value.key == key
+
+    def test_the_command(self, temp_config, tmp_path):
+        from hfl.cli.main import app
+        from hfl.models.registry import ModelRegistry
+
+        folder = _hf_folder(tmp_path / "lmstudio" / "Qwen2.5-0.5B-Instruct-4bit", MLX_CONFIG)
+        result = CliRunner().invoke(app, ["import", str(folder), "--alias", "q"])
+        assert result.exit_code == 0, result.output
+        entry = ModelRegistry().get("qwen2.5-0.5b-instruct-4bit")
+        assert entry is not None and entry.local_path == str(folder.resolve())
+        assert "hfl run q" in result.output
