@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import ollama_to_generation_config
-from hfl.api.errors import service_unavailable
+from hfl.api.errors import service_unavailable, structured_output_unsupported
 from hfl.api.helpers import (
     apply_keep_alive,
     prepare_stream_response,
@@ -308,6 +308,9 @@ async def api_generate(
         from hfl.api.structured_outputs import normalize_ollama_format
 
         gen_config.response_format = normalize_ollama_format(req.format)
+        refused = structured_output_unsupported(state.engine, gen_config, "/api/generate")
+        if refused is not None:
+            return refused
 
     # P1-1 + Phase 10 P1: reasoning channel exposure with level
     # support. ``think=True`` still maps to "medium"; new clients
@@ -571,6 +574,9 @@ async def api_chat(
         from hfl.api.structured_outputs import normalize_ollama_format
 
         gen_config.response_format = normalize_ollama_format(req.format)
+        refused = structured_output_unsupported(state.engine, gen_config, "/api/chat")
+        if refused is not None:
+            return refused
 
     # P1-1 + Phase 10 P1: reasoning channel w/ multi-level support.
     gen_config.thinking_level = _resolve_thinking_level(req.think)

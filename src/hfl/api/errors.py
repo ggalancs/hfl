@@ -459,3 +459,21 @@ def timeout_error(operation: str, timeout_seconds: float) -> HFLHTTPException:
         code="TIMEOUT",
         details={"operation": operation, "timeout_seconds": timeout_seconds},
     )
+
+
+STRUCTURED_OUTPUT_UNSUPPORTED = (
+    "This model's backend cannot constrain its output to a format: a response "
+    "format (JSON, a JSON schema) needs the default GGUF backend or llama-server."
+)
+
+
+def structured_output_unsupported(engine: Any, config: Any, path: str) -> JSONResponse | None:
+    """A 400 when the request asks for a response format its engine cannot
+    enforce (MLX, Transformers used to ignore it and answer prose); ``None``
+    when it can, or nothing was asked. A fixed sentence, in ``path``'s dialect."""
+    if getattr(config, "response_format", None) is None:
+        return None
+    if getattr(engine, "supports_structured_output", False) is True:
+        return None
+    flat = {"error": STRUCTURED_OUTPUT_UNSUPPORTED, "code": "UNSUPPORTED_FORMAT"}
+    return JSONResponse(status_code=400, content=render_envelope(path, 400, flat))

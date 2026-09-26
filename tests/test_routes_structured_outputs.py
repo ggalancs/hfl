@@ -47,9 +47,42 @@ def _mock_llm(sample_manifest):
             stop_reason="stop",
         )
     )
+    engine.supports_structured_output = True  # stands for llama.cpp
     state.engine = engine
     state.current_model = sample_manifest
     return engine
+
+
+class TestABackendThatCannotConstrainRefuses:
+    """MLX and Transformers ignored a response format and answered prose; the
+    request is now refused before any inference, in each API's dialect."""
+
+    @pytest.mark.parametrize(
+        ("path", "body", "shape"),
+        [
+            ("/api/generate", {"prompt": "x", "format": "json", "stream": False}, "flat"),
+            ("/api/chat", {"messages": [{"role": "user", "content": "x"}], "format": "json",
+                           "stream": False}, "flat"),
+            ("/v1/chat/completions", {"messages": [{"role": "user", "content": "x"}],
+                                      "response_format": {"type": "json_object"}}, "openai"),
+        ],
+    )  # fmt: skip
+    def test_refused(self, client, sample_manifest, path, body, shape):
+        engine = _mock_llm(sample_manifest)
+        engine.supports_structured_output = False
+        response = client.post(path, json={"model": sample_manifest.name, **body})
+        assert response.status_code == 400
+        error = response.json()["error"]
+        message = error if shape == "flat" else error["message"]
+        assert "cannot constrain its output" in message
+        engine.chat.assert_not_called()
+        engine.generate.assert_not_called()
+
+    def test_without_a_format_nothing_is_refused(self, client, sample_manifest):
+        engine = _mock_llm(sample_manifest)
+        engine.supports_structured_output = False
+        body = {"model": sample_manifest.name, "prompt": "x", "stream": False}
+        assert client.post("/api/generate", json=body).status_code == 200
 
 
 class TestOllamaGenerateFormat:

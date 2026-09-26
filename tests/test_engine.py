@@ -292,6 +292,48 @@ class TestLlamaCppEngine:
 
             assert tokens == ["Hello", " world", "!"]
 
+    def test_generate_samples_under_the_requested_format(
+        self, mock_llama_cpp_module, temp_gguf_file, monkeypatch
+    ):
+        """format / response_format reached the chat path only; a plain
+        completion ignored it (local audit B14). Both the blocking and the
+        streaming completion now pass a grammar."""
+        import hfl.engine.llama_cpp as llama_mod
+        from hfl.engine.base import GenerationConfig
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        seen: list = []
+        monkeypatch.setattr(llama_mod, "_completion_grammar", lambda rf: seen.append(rf) or "G")
+        mock_model = MagicMock()
+        mock_model.return_value = {
+            "choices": [{"text": "{}", "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        engine = LlamaCppEngine()
+        with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
+            engine.load(str(temp_gguf_file))
+            engine.generate("p", GenerationConfig(response_format="json"))
+            assert mock_model.call_args.kwargs["grammar"] == "G"
+            mock_model.return_value = iter([{"choices": [{"text": "{}"}]}])
+            list(engine.generate_stream("p", GenerationConfig(response_format="json")))
+            assert mock_model.call_args.kwargs["grammar"] == "G"
+        assert seen == ["json", "json"]
+
+    def test_generate_stream_applies_the_template(self, mock_llama_cpp_module, temp_gguf_file):
+        """The streaming completion skipped template_override (a Modelfile
+        TEMPLATE, or a request's): only the blocking one rendered it."""
+        from hfl.engine.base import GenerationConfig
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        mock_model = MagicMock()
+        mock_model.return_value = iter([{"choices": [{"text": "x"}]}])
+        engine = LlamaCppEngine()
+        with patch("hfl.engine.llama_cpp.Llama", return_value=mock_model):
+            engine.load(str(temp_gguf_file))
+            config = GenerationConfig(template_override="<<{{ .Prompt }}>>")
+            list(engine.generate_stream("hi", config))
+        assert mock_model.call_args.args[0] == "<<hi>>"
+
     def test_chat(self, mock_llama_cpp_module, temp_gguf_file):
         """Verifies chat completion."""
         from hfl.engine.base import ChatMessage
@@ -562,3 +604,63 @@ class TestTransformersEngine:
 
         engine._model = MagicMock()
         assert engine.is_loaded
+
+
+def test_completion_grammar_builds_real_grammars():
+    """With llama-cpp-python present, each format compiles. In a subprocess:
+    other tests here leave a mock ``llama_cpp`` in sys.modules."""
+    import subprocess
+    import sys
+
+    code = (
+        "import importlib.util\n"
+        "if importlib.util.find_spec('llama_cpp') is None:\n"
+        "    print('skip'); raise SystemExit\n"
+        "from hfl.engine.llama_cpp import _completion_grammar as g\n"
+        "assert g(None) is None and g('xml') is None\n"
+        "assert g('json') is not None\n"
+        "assert g({'type': 'object', 'properties': {'a': {'type': 'string'}}}) is not None\n"
+        'assert g(\'GBNF:root ::= "yes" | "no"\') is not None\n'
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    if out.stdout.strip() == "skip":
+        pytest.skip("llama-cpp-python not installed")
+    assert out.stdout.strip().endswith("ok"), out.stderr[-500:]
+
+
+def test_cancel_stops_a_completion_and_the_next_one_starts_clean(mock_llama_cpp_module):
+    """``cancel()`` makes the completion's stopping criteria fire; the next
+    generation clears it, so one request's cancel never cuts another's."""
+    import sys
+
+    from hfl.engine.llama_cpp import LlamaCppEngine
+
+    sys.modules["llama_cpp"].StoppingCriteriaList = list  # what it is: a list
+    engine = LlamaCppEngine()
+    stop = engine._stopping()[0]
+    assert stop([], []) is False
+    engine.cancel()
+    assert stop([], []) is True
+    assert engine._stopping()[0]([], []) is False
+
+
+def test_cancel_forces_the_end_of_a_chat(mock_llama_cpp_module):
+    import sys
+
+    import numpy as np
+
+    from hfl.engine.llama_cpp import LlamaCppEngine
+
+    sys.modules["llama_cpp"].LogitsProcessorList = list
+    engine = LlamaCppEngine()
+    engine._model = MagicMock()
+    engine._model.token_eos.return_value = 2
+    process = engine._cancellable_logits({})[0]
+    scores = np.zeros(5)
+    assert process([], scores) is scores  # untouched while running
+    engine.cancel()
+    forced = process([], np.zeros(5))
+    assert int(np.argmax(forced)) == 2 and np.isinf(forced[0])
+    # Under a format grammar it cannot end mid-object: no processor.
+    assert engine._cancellable_logits({"response_format": {"type": "json_object"}}) is None

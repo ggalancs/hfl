@@ -24,6 +24,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    completion_prompt,
     held,
     reasoning_template_vars,
     repeat_penalty_for,
@@ -574,6 +575,47 @@ def _install_template_formatters(model: Any) -> tuple[list[Any], bool]:
         model._chat_handlers[name] = formatter.to_chat_handler()
         formatters.append(formatter)
     return formatters, added_bos
+
+
+def _chat_format_kwargs(response_format: Any) -> dict[str, Any]:
+    """``create_chat_completion`` kwargs for a response format: JSON mode, a
+    schema, or a raw ``GBNF:`` grammar. Shared by the blocking and streaming
+    chat — the stream used to leave them out, so ``/api/chat`` with ``format``
+    and ``stream`` answered unconstrained."""
+    if response_format is None:
+        return {}
+    if response_format == "json":
+        return {"response_format": {"type": "json_object"}}
+    if isinstance(response_format, dict):
+        return {"response_format": {"type": "json_object", "schema": response_format}}
+    if isinstance(response_format, str) and response_format.startswith("GBNF:"):
+        try:
+            from llama_cpp import LlamaGrammar
+
+            return {"grammar": LlamaGrammar.from_string(response_format[len("GBNF:") :])}
+        except ImportError:  # pragma: no cover — optional dep
+            return {}
+    return {}
+
+
+def _completion_grammar(response_format: Any) -> Any:
+    """A request's ``response_format`` as the grammar a plain completion is
+    sampled under. The chat path has always compiled one; ``generate`` did
+    not, so ``/api/generate`` with ``format: "json"`` answered prose around a
+    code block (local audit B14)."""
+    if response_format is None:
+        return None
+    from llama_cpp.llama_grammar import JSON_GBNF, LlamaGrammar
+
+    if response_format == "json":
+        return LlamaGrammar.from_string(JSON_GBNF, verbose=False)
+    if isinstance(response_format, dict):
+        import json
+
+        return LlamaGrammar.from_json_schema(json.dumps(response_format), verbose=False)
+    if isinstance(response_format, str) and response_format.startswith("GBNF:"):
+        return LlamaGrammar.from_string(response_format[len("GBNF:") :], verbose=False)
+    return None
 
 
 def _render_special_tokens(model: Any, on: bool) -> None:
@@ -1595,6 +1637,9 @@ class LlamaCppEngine(InferenceEngine):
         # Held here so ``unload()`` can free its memory alongside
         # the target.
         self._draft_model: Any = None
+        # Set by ``cancel()`` (a request past its time budget); every
+        # generation clears it as it starts and checks it at each token.
+        self._cancel = threading.Event()
         # True when the model was loaded with a CLIP projector and
         # accepts images in ``create_chat_completion`` messages.
         # Phase 4 P0-6.
@@ -2155,8 +2200,12 @@ class LlamaCppEngine(InferenceEngine):
             repeat_penalty=penalty,
             logits_processor=LogitsProcessorList([capture]),
         )
+        self._cancel.clear()
         try:
             for token in steps:
+                if self._cancel.is_set():
+                    finish = "stop"
+                    break
                 row = seen.pop("row")
                 if _lcpp.llama_vocab_is_eog(vocab, token):
                     finish = "stop"
@@ -2222,6 +2271,56 @@ class LlamaCppEngine(InferenceEngine):
             gc.collect()
             logger.debug("Model unloaded: %s", model_name)
 
+    @property
+    def supports_structured_output(self) -> bool:
+        return True  # a GBNF grammar on chat and on plain completions
+
+    def cancel(self) -> None:
+        """Stop the running generation at its next token.
+
+        A request past its time budget got its 504 while the generation went
+        on to ``num_predict`` in its thread, holding the model: the next
+        request waited for all of it (measured: a 504 at 19.5 s under a 1 s
+        budget). The dispatcher calls this on timeout."""
+        self._cancel.set()
+
+    def _stopping(self) -> Any:
+        """A completion's ``stopping_criteria``: stop once cancelled (None
+        where llama-cpp-python is absent, as for a stand-in model)."""
+        self._cancel.clear()
+        try:
+            from llama_cpp import StoppingCriteriaList
+        except ImportError:
+            return None
+        event = self._cancel
+        return StoppingCriteriaList([lambda input_ids, logits: event.is_set()])
+
+    def _cancellable_logits(self, kwargs: dict[str, Any]) -> Any:
+        """A chat's ``logits_processor`` (create_chat_completion takes no
+        stopping criteria): once cancelled, only end-of-generation can be
+        drawn, so the reply ends at the next token. Not under a format
+        grammar, which may forbid ending mid-object — that one runs on."""
+        self._cancel.clear()
+        try:
+            from llama_cpp import LogitsProcessorList
+        except ImportError:
+            return None
+        token_eos = getattr(self._model, "token_eos", None)
+        if "grammar" in kwargs or "response_format" in kwargs or not callable(token_eos):
+            return None
+        event, eos = self._cancel, int(token_eos())
+
+        def stop_on_cancel(input_ids: Any, scores: Any) -> Any:
+            if event.is_set():
+                import numpy as np
+
+                forced = np.full_like(scores, -np.inf)
+                forced[eos] = 0.0
+                return forced
+            return scores
+
+        return LogitsProcessorList([stop_on_cancel])
+
     def generate(
         self,
         prompt: str,
@@ -2247,16 +2346,11 @@ class LlamaCppEngine(InferenceEngine):
         # ``{{ .System }}`` placeholders the old regex handled. The
         # evaluator falls back to the literal template on parse
         # errors so a user's typo never crashes generation.
-        effective_prompt = prompt
-        if cfg.template_override and not cfg.raw:
-            from hfl.converter.go_template import render_go_template
-
-            effective_prompt = render_go_template(
-                cfg.template_override,
-                {"Prompt": prompt, "System": "", "Messages": []},
-            )
+        effective_prompt = completion_prompt(prompt, cfg)
 
         if cfg.logprobs is not None:
+            if cfg.response_format is not None:
+                raise NotImplementedError("logprobs together with a response format")
             start_ns = time.monotonic_ns()
             add_bos = bool(getattr(self, "_tokenizer_add_bos", True))
             encoded = effective_prompt.encode("utf-8")
@@ -2284,6 +2378,10 @@ class LlamaCppEngine(InferenceEngine):
             "stop": cfg.stop,
             "seed": cfg.seed if cfg.seed >= 0 else None,
         }
+        grammar = _completion_grammar(cfg.response_format)
+        if grammar is not None:
+            call_kwargs["grammar"] = grammar
+        call_kwargs["stopping_criteria"] = self._stopping()
         # llama.cpp's perf counters accumulate per context; zero them so the
         # prompt-eval / eval split below describes THIS call.
         _perf_reset(self._model)
@@ -2351,12 +2449,15 @@ class LlamaCppEngine(InferenceEngine):
         cfg = config or GenerationConfig()
         counted = CountedStream()
         model = self._model
+        effective_prompt = completion_prompt(prompt, cfg)
+        grammar = _completion_grammar(cfg.response_format)
+        stopping = self._stopping()
 
         def _chunks() -> Iterator[str]:
             first: int | None = None
             finish: str | None = None
             for chunk in model(
-                prompt,
+                effective_prompt,
                 max_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
                 top_p=cfg.top_p,
@@ -2365,6 +2466,8 @@ class LlamaCppEngine(InferenceEngine):
                 stop=cfg.stop,
                 seed=cfg.seed if cfg.seed >= 0 else None,
                 stream=True,
+                stopping_criteria=stopping,
+                **({"grammar": grammar} if grammar is not None else {}),
             ):
                 if first is None:
                     first = getattr(model, "n_tokens", None)
@@ -2518,24 +2621,8 @@ class LlamaCppEngine(InferenceEngine):
         # ``response_format`` kwarg that create_chat_completion accepts
         # natively (maps to OpenAI's JSON mode for free-form JSON, or
         # to a compiled schema grammar for strict conformance).
-        _rf = cfg.response_format
-        if _rf is not None:
-            if _rf == "json":
-                kwargs["response_format"] = {"type": "json_object"}
-            elif isinstance(_rf, dict):
-                kwargs["response_format"] = {
-                    "type": "json_object",
-                    "schema": _rf,
-                }
-            # ``GBNF:`` raw-grammar passthrough: build LlamaGrammar
-            # directly so advanced users can ship custom grammars.
-            elif isinstance(_rf, str) and _rf.startswith("GBNF:"):
-                try:
-                    from llama_cpp import LlamaGrammar
-
-                    kwargs["grammar"] = LlamaGrammar.from_string(_rf[len("GBNF:") :])
-                except ImportError:  # pragma: no cover — optional dep
-                    pass
+        kwargs.update(_chat_format_kwargs(cfg.response_format))
+        kwargs["logits_processor"] = self._cancellable_logits(kwargs)
 
         # Nanosecond timings (Ollama-parity P1-3). ``monotonic_ns``
         # is the right clock for wall-clock deltas — perf_counter_ns
@@ -2651,6 +2738,8 @@ class LlamaCppEngine(InferenceEngine):
         }
         if tools:
             kwargs["tools"] = tools
+        kwargs.update(_chat_format_kwargs(cfg.response_format))
+        kwargs["logits_processor"] = self._cancellable_logits(kwargs)
 
         try:
             iterator = self._model.create_chat_completion(**kwargs)

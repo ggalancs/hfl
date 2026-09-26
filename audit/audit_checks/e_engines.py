@@ -46,9 +46,33 @@ def _paris(text: str | None) -> bool:
     return "paris" in (text or "").lower()
 
 
-def suite(part: Parts, base: str, model: str, *, logprobs: bool = True) -> None:
-    """The checks every chat engine must pass, over the three APIs."""
+def suite(
+    part: Parts, base: str, model: str, *, logprobs: bool = True, formats: bool = True
+) -> None:
+    """The checks every chat engine must pass, over the three APIs.
+    ``formats``: whether the engine constrains output to a format; one that
+    cannot must refuse a format, never answer prose instead."""
     c = httpx.Client(base_url=base, timeout=600)
+
+    def format_json() -> None:
+        prose = "Name the capital of France."
+        for path, body, text in (
+            ("/api/generate", {"prompt": prose, "format": "json"}, lambda r: r["response"]),
+            ("/api/chat", {"messages": [{"role": "user", "content": prose}], "format": "json"},
+             lambda r: r["message"]["content"]),
+        ):  # fmt: skip
+            payload = {"model": model, "stream": False, "options": {"num_predict": 200}, **body}
+            out = c.post(path, json=payload)
+            if not formats:
+                expect(out.status_code == 400 and "constrain" in out.text, (path, out.status_code))
+                continue
+            expect(out.status_code == 200, (path, out.status_code, out.text[:120]))
+            try:
+                json.loads(text(out.json()))
+            except ValueError:
+                expect(False, f"{path}: not JSON: {text(out.json())[:80]!r}")
+
+    part("format json" if formats else "format refused (cannot constrain)", format_json)
     part(
         "ollama chat",
         lambda: expect(
@@ -91,6 +115,9 @@ def suite(part: Parts, base: str, model: str, *, logprobs: bool = True) -> None:
                 "model": model,
                 "tools": [TOOL],
                 "messages": [{"role": "user", "content": "What's the weather in Paris?"}],
+                # Greedy: a 0.5B model at the default temperature sometimes
+                # garbles the call's JSON, and the check must not be a coin toss.
+                "temperature": 0,
             },
         ).json()
         expect(out["choices"][0]["finish_reason"] == "tool_calls", out["choices"][0]["message"])
@@ -195,7 +222,7 @@ def e3(a: Audit) -> str:
     need_apple_silicon("MLX")
     part = Parts()
     with a.server() as base:
-        suite(part, base, "mlxq")
+        suite(part, base, "mlxq", formats=False)
         log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
         part(
             "served by MLX",
@@ -218,7 +245,7 @@ def e4(a: Audit) -> str:
     )
     expect(out.returncode == 0, (out.stdout + out.stderr)[-300:])
     with a.server("--backend", "transformers") as base:
-        suite(part, base, "hfq", logprobs=False)
+        suite(part, base, "hfq", logprobs=False, formats=False)
     return part.verdict()
 
 

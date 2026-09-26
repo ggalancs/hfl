@@ -360,6 +360,16 @@ class InferenceEngine(ABC):
         raise NotImplementedError(f"{type(self).__name__} cannot count a prompt's tokens")
 
     @property
+    def supports_structured_output(self) -> bool:
+        """Whether a response format (JSON, a JSON schema, a GBNF grammar)
+        constrains this engine's sampling.
+
+        ``False`` by default: MLX and Transformers ignored ``format`` /
+        ``response_format`` silently and answered prose where JSON was asked.
+        A route refuses such a request instead (400, a fixed sentence)."""
+        return False
+
+    @property
     def supports_concurrent_inference(self) -> bool:
         """Whether two inferences may run against this engine at once.
 
@@ -538,3 +548,16 @@ class AudioEngine(ABC):
         """Exit async context manager - automatically unload model."""
         if self.is_loaded:
             await asyncio.to_thread(self.unload)
+
+
+def completion_prompt(prompt: str, cfg: GenerationConfig) -> str:
+    """``prompt`` through the request's (or the Modelfile's) Go template,
+    unless raw — for every engine's plain completion, streaming or not (the
+    llama.cpp stream and llama-server used to skip it)."""
+    if cfg.template_override and not cfg.raw:
+        from hfl.converter.go_template import render_go_template
+
+        return render_go_template(
+            cfg.template_override, {"Prompt": prompt, "System": "", "Messages": []}
+        )
+    return prompt

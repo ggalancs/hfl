@@ -177,6 +177,15 @@ def suggest_parallel(dispatcher: Any, engine: Any) -> None:
     )
 
 
+def _cancel_engine(engine: Any) -> None:
+    """Ask ``engine`` to stop its running generation, if it can: its result
+    will be thrown away, and until it stops it holds the model."""
+    cancel = getattr(engine, "cancel", None)
+    if callable(cancel):
+        with suppress(Exception):
+            cancel()
+
+
 async def run_dispatched(
     func: Callable[..., T],
     *args: Any,
@@ -249,6 +258,7 @@ async def run_dispatched(
         try:
             result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
         except asyncio.TimeoutError:
+            _cancel_engine(engine)
             asyncio.ensure_future(_release_when_worker_exits())
             raise HTTPException(
                 status_code=504,
@@ -270,7 +280,9 @@ async def run_dispatched(
                 await slot_cm.__aexit__(None, None, None)
             else:
                 # Cancelled, or the worker is still running on the shared model:
-                # keep the slot until the worker thread is truly done.
+                # keep the slot until the worker thread is truly done — and
+                # stop it, so that is soon.
+                _cancel_engine(engine)
                 asyncio.ensure_future(_release_when_worker_exits())
             raise
         else:

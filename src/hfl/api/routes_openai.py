@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import openai_to_generation_config
-from hfl.api.errors import service_unavailable
+from hfl.api.errors import service_unavailable, structured_output_unsupported
 from hfl.api.helpers import (
     prepare_stream_response,
     queue_response_from_error,
@@ -222,6 +222,9 @@ async def chat_completions(
         from hfl.api.structured_outputs import normalize_openai_response_format
 
         gen_config.response_format = normalize_openai_response_format(req.response_format)
+        refused = structured_output_unsupported(state.engine, gen_config, "/v1/chat/completions")
+        if refused is not None:
+            return refused
 
     if req.stream and (req.logprobs or req.n > 1):
         return JSONResponse(

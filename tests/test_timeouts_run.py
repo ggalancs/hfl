@@ -187,3 +187,36 @@ def test_the_dormant_module_is_not_silently_revived():
         f"{importers} now import api/timeout.py while hfl.api.helpers still "
         "enforces the same config knob. Pick one enforcer and delete the other."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.slow
+async def test_a_timeout_stops_the_engine_it_ran_on(isolated_dispatcher):
+    """The 504 used to leave the generation running to ``num_predict`` in its
+    thread, holding the model (measured: the next request waited 16 s behind a
+    5 s budget). The dispatcher now cancels the engine, whose generation stops
+    at its next token."""
+    from hfl.api.helpers import run_dispatched
+
+    class Engine:
+        def __init__(self) -> None:
+            self.stop = threading.Event()
+            self.cancels = 0
+
+        def cancel(self) -> None:
+            self.cancels += 1
+            self.stop.set()
+
+        def generate(self) -> str:
+            self.stop.wait(timeout=30.0)  # a generation that only a cancel ends
+            return "cut short"
+
+    engine = Engine()
+    hfl_config.config.generation_timeout = 0.25
+    with pytest.raises(HTTPException):
+        await run_dispatched(engine.generate, operation="probe")
+    assert engine.cancels == 1
+    started = time.perf_counter()
+    # The slot is free as soon as the worker exits: a next call runs at once.
+    assert await run_dispatched(lambda: "next", operation="probe") == "next"
+    assert time.perf_counter() - started < 2.0

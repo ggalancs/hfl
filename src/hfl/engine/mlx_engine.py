@@ -66,6 +66,8 @@ class MLXEngine(InferenceEngine):
 
     def __init__(self) -> None:
         super().__init__()
+        # Set by ``cancel()``; each generation clears it as it starts.
+        self._cancel = threading.Event()
         self._model: Any = None
         self._tokenizer: Any = None
         self._model_path: str | None = None
@@ -408,16 +410,17 @@ class MLXEngine(InferenceEngine):
         return best
 
     def _run_generate(self, prompt: str, cfg: GenerationConfig) -> tuple[str, int, int, int]:
-        from mlx_lm import generate
+        # ``mlx_lm.generate`` is ``stream_generate`` with the text joined; run
+        # the stream here so ``cancel()`` can stop it between tokens.
+        from mlx_lm import stream_generate
 
         start_ns = time.monotonic_ns()
         kwargs = self._build_sampling(cfg)
         try:
-            text = generate(
-                self._model,
-                self._tokenizer,
-                prompt=prompt,
-                **kwargs,
+            steps = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+            text = "".join(
+                response.text if hasattr(response, "text") else str(response)
+                for response in self._cancellable(steps)
             )
         except Exception:
             logger.exception("MLX generate failed")
@@ -494,6 +497,7 @@ class MLXEngine(InferenceEngine):
             responses = stream_generate(
                 self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg)
             )
+        responses = self._cancellable(responses)
         top = max(0, min(20, int(cfg.logprobs or 0)))
         eos = set(getattr(self._tokenizer, "eos_token_ids", None) or [])
         stops = self._stop_strings(cfg)
@@ -556,7 +560,7 @@ class MLXEngine(InferenceEngine):
         text = ""
         last: Any = None
         n_gen = 0
-        responses = self._cached_responses(prompt, cfg)
+        responses = self._cancellable(self._cached_responses(prompt, cfg))
         try:
             for response in responses:
                 last = response
@@ -662,6 +666,7 @@ class MLXEngine(InferenceEngine):
 
             kwargs = self._build_sampling(cfg)
             gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+        gen = self._cancellable(gen)
 
         def _stream() -> Iterator[str]:
             try:
@@ -681,6 +686,26 @@ class MLXEngine(InferenceEngine):
                     counted.completion_tokens = int(response.generation_tokens or 0)
 
         return counted.feed(held(self._native, _stream()))
+
+    def cancel(self) -> None:
+        """Stop the running generation at its next token (the dispatcher
+        calls this when a request runs past its time budget: the generation
+        used to go on to ``num_predict``, holding the model)."""
+        self._cancel.set()
+
+    def _cancellable(self, gen: Iterator[Any]) -> Generator[Any, None, None]:
+        """``gen`` until ``cancel()``; the inner generator is closed either
+        way (the prompt cache stores what was evaluated, as on a stop)."""
+        self._cancel.clear()
+        try:
+            for item in gen:
+                if self._cancel.is_set():
+                    return
+                yield item
+        finally:
+            close = getattr(gen, "close", None)
+            if close is not None:
+                close()
 
     def _stream_until_stop(
         self, gen: Iterator[Any], stops: list[str], _piece: Any

@@ -34,6 +34,8 @@ class TransformersEngine(InferenceEngine):
         self._model_id = ""
         # Held by the thread inside the model (``hfl.engine.base.held``).
         self._native = threading.Lock()
+        # Set by ``cancel()``; each blocking generation clears it as it starts.
+        self._cancel = threading.Event()
 
     def load(self, model_path: str, **kwargs) -> None:
         """
@@ -202,6 +204,10 @@ class TransformersEngine(InferenceEngine):
                 parts.append(f"[TOOL {m.name}] {m.content or ''}")
         return "\n".join(parts)
 
+    def cancel(self) -> None:
+        """Stop the running blocking generation at its next token."""
+        self._cancel.set()
+
     def generate(
         self,
         prompt: str,
@@ -223,6 +229,27 @@ class TransformersEngine(InferenceEngine):
         inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
         prompt_tokens = inputs["input_ids"].shape[1]
 
+        # One stopping criterion does two jobs: it ends the generation once
+        # ``cancel()`` is called (a request past its budget used to run on to
+        # max_new_tokens, holding the model), and its first call — right after
+        # the first token — marks where the prompt's evaluation ended, so the
+        # timings are measured instead of reported as 0.
+        self._cancel.clear()
+        first_token_at: list[float] = []
+        gen_kwargs: dict[str, Any] = {}
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        if isinstance(StoppingCriteria, type):  # a mocked transformers: no-op
+            event = self._cancel
+
+            class _Watch(StoppingCriteria):
+                def __call__(self, input_ids, scores, **kwargs):  # noqa: ANN001
+                    if not first_token_at:
+                        first_token_at.append(time.perf_counter())
+                    return event.is_set()
+
+            gen_kwargs["stopping_criteria"] = StoppingCriteriaList([_Watch()])
+
         t0 = time.perf_counter()
         with torch.no_grad():
             outputs = self._model.generate(
@@ -233,21 +260,27 @@ class TransformersEngine(InferenceEngine):
                 top_k=cfg.top_k,
                 repetition_penalty=cfg.repeat_penalty,
                 do_sample=cfg.temperature > 0,
+                **gen_kwargs,
             )
         elapsed = time.perf_counter() - t0
+        prefill = (first_token_at[0] - t0) if first_token_at else elapsed
 
         # Decode only the new tokens
         new_tokens = outputs[0][prompt_tokens:]
         text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
         n_gen = len(new_tokens)
 
+        decoding = elapsed - prefill
         return GenerationResult(
             text=text,
             tokens_generated=n_gen,
             tokens_prompt=prompt_tokens,
-            tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
+            tokens_per_second=n_gen / decoding if decoding > 0 else 0,
             # generate() returns no reason; all max_new_tokens used = cut.
             stop_reason="length" if cfg.max_tokens and n_gen >= cfg.max_tokens else "stop",
+            total_duration=int(elapsed * 1e9),
+            prompt_eval_duration=int(prefill * 1e9),
+            eval_duration=int(decoding * 1e9),
         )
 
     def generate_stream(

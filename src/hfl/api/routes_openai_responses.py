@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from hfl.api.chat_core import resolve_chat_output
+from hfl.api.errors import structured_output_unsupported
 from hfl.api.helpers import prepare_stream_response, run_dispatched
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.api.thinking import ThinkingSplitter
@@ -717,6 +718,9 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     system = _input_to_messages([], req.instructions)
     new = _input_to_messages(req.input, None, _call_names(history))
     cfg = _build_gen_config(req)
+    refused = structured_output_unsupported(state.engine, cfg, "/v1/responses")
+    if refused is not None:
+        return refused
     # A created model's Modelfile: SYSTEM when there are no instructions,
     # MESSAGE exemplars, PARAMETER defaults for what the request left unset.
     messages = apply_to_chat(

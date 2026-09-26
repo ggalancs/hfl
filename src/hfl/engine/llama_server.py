@@ -45,6 +45,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    completion_prompt,
     reasoning_template_vars,
     repeat_penalty_for,
 )
@@ -566,9 +567,19 @@ class LlamaServerEngine(InferenceEngine):
         return counted.feed(_stream())
 
     def _completion_body(self, prompt: str, cfg: GenerationConfig) -> dict[str, Any]:
-        body = {"prompt": prompt, "n_predict": cfg.max_tokens, **_sampling(cfg)}
+        body = {"prompt": completion_prompt(prompt, cfg), "n_predict": cfg.max_tokens,
+                **_sampling(cfg)}  # fmt: skip
         if cfg.logprobs is not None:
             body["n_probs"] = max(1, cfg.logprobs)  # the drawn token is one of them
+        # A response format constrains the completion too, as on /v1/chat: it
+        # used to reach only the chat body (local audit B14).
+        rf = cfg.response_format
+        if rf == "json":
+            body["json_schema"] = {}  # any JSON value
+        elif isinstance(rf, dict):
+            body["json_schema"] = rf
+        elif isinstance(rf, str) and rf.startswith("GBNF:"):
+            body["grammar"] = rf[len("GBNF:") :]
         return body
 
     def generate(self, prompt: str, config: GenerationConfig | None = None) -> GenerationResult:
@@ -733,6 +744,10 @@ class LlamaServerEngine(InferenceEngine):
     @property
     def supports_concurrent_inference(self) -> bool:
         return True
+
+    @property
+    def supports_structured_output(self) -> bool:
+        return True  # json_schema / grammar on both /v1/chat and /completion
 
     @property
     def parallel_slots(self) -> int:

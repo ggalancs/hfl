@@ -41,14 +41,14 @@ def fake_mlx(monkeypatch):
     def _load(path):  # noqa: ARG001
         return object(), _FakeTokenizer()
 
-    def _generate(_model, _tokenizer, *, prompt, **kwargs):  # noqa: ANN001
-        text = "ECHO:" + prompt
-        generated_texts.append(text)
-        return text
-
+    # As mlx-lm: ``generate`` is ``stream_generate``'s pieces joined — the
+    # engine streams even a blocking generate, so ``cancel()`` can stop it.
     def _stream_generate(_model, _tokenizer, *, prompt, **kwargs):  # noqa: ANN001
-        for chunk in ("ec", "ho", "-", "stream"):
-            yield chunk
+        generated_texts.append("ECHO:" + prompt)
+        yield from ("EC", "HO:", prompt)
+
+    def _generate(_model, _tokenizer, *, prompt, **kwargs):  # noqa: ANN001
+        return "".join(_stream_generate(_model, _tokenizer, prompt=prompt, **kwargs))
 
     fake.load = _load  # type: ignore[attr-defined]
     fake.generate = _generate  # type: ignore[attr-defined]
@@ -173,7 +173,7 @@ class TestMLXEngine:
         engine = mlx_engine.MLXEngine()
         engine.load("/fake/model")
         chunks = list(engine.generate_stream("hi", GenerationConfig()))
-        assert chunks == ["ec", "ho", "-", "stream"]
+        assert chunks == ["EC", "HO:", "hi"]
 
     def test_generate_before_load_raises(self, fake_mlx):
         engine = mlx_engine.MLXEngine()
@@ -284,7 +284,7 @@ def fake_cache(fake_mlx, monkeypatch):
     monkeypatch.setitem(sys.modules, "mlx_lm.models", models_mod)
     monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache_mod)
 
-    def _stream_generate(_model, _tokenizer, *, prompt, prompt_cache, **kwargs):
+    def _stream_generate(_model, _tokenizer, *, prompt, prompt_cache=None, **kwargs):
         calls["stream"].append({"prompt": list(prompt), "cache": prompt_cache})
         if calls.get("explode"):
             raise RuntimeError("metal fault")
@@ -403,8 +403,9 @@ class TestPromptCache:
         monkeypatch.setattr(config, "mlx_prompt_cache_bytes", 0)
         engine = _loaded()
         assert engine._prompt_store is None
-        assert engine.generate("hi").text == "ECHO:hi"
-        assert fake_cache["stream"] == []
+        assert engine.generate("hi").text == "ABC"
+        # Streamed (so it can be cancelled), but with no prompt cache.
+        assert [call["cache"] for call in fake_cache["stream"]] == [None]
 
     def test_an_mlx_lm_without_the_cache_runs_uncached(self, fake_mlx):
         engine = _loaded()
@@ -561,3 +562,24 @@ def test_mlx_holds_the_model_while_a_stream_is_read(fake_cache):
     assert engine._native.locked()
     stream.close()
     assert not engine._native.locked()
+
+
+def test_cancel_stops_the_token_stream_and_closes_it():
+    """``cancel()`` (a request past its budget) ends the generation at the
+    next token and closes mlx-lm's generator; the next one starts clean."""
+    engine = mlx_engine.MLXEngine()
+    closed: list[bool] = []
+
+    def tokens():
+        try:
+            yield from range(100)
+        finally:
+            closed.append(True)
+
+    seen = []
+    for token in engine._cancellable(tokens()):
+        seen.append(token)
+        if token == 2:
+            engine.cancel()
+    assert seen == [0, 1, 2] and closed == [True]
+    assert list(engine._cancellable(iter(range(3)))) == [0, 1, 2]
