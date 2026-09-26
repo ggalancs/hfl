@@ -112,11 +112,11 @@ fi
 # pass satisfies both. Do not narrow it back to ``src/hfl``: that is exactly
 # the gap that let lint.yml fail on a tree this script called green.
 
-blue "=> [lint] ruff check src/ tests/"
-ruff check src/ tests/ || fail_step "ruff check"
+blue "=> [lint] ruff check src/ tests/ audit/"
+ruff check src/ tests/ audit/ || fail_step "ruff check"
 
-blue "=> [lint] ruff format --check src/ tests/"
-ruff format --check src/ tests/ || fail_step "ruff format --check"
+blue "=> [lint] ruff format --check src/ tests/ audit/"
+ruff format --check src/ tests/ audit/ || fail_step "ruff format --check"
 
 # ------------------------------------------------------------------
 # 3. Type check (ci.yml ``type-check`` job — GATING)
