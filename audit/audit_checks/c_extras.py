@@ -44,7 +44,17 @@ def _extra(a: Audit, extra: str) -> str:
         subprocess.run(["uv", "venv", "-q", "--python", "3.12", str(venv)], check=True)
     log = a.work / "logs" / f"extra-{extra}.log"
     done = subprocess.run(
-        ["uv", "pip", "install", "--python", str(venv / "bin" / "python"), f"{wheel}[{extra}]"],
+        # --reinstall-package: a rebuilt wheel keeps its version; install it anyway.
+        [
+            "uv",
+            "pip",
+            "install",
+            "--reinstall-package",
+            "hfl",
+            "--python",
+            str(venv / "bin" / "python"),
+            f"{wheel}[{extra}]",
+        ],
         capture_output=True,
         text=True,
         timeout=3600,

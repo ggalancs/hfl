@@ -471,7 +471,12 @@ def setup(work: Path, python: str) -> None:
         if not (venv / "bin" / "python").exists():
             subprocess.run(["uv", "venv", "-q", "--python", python, str(venv)], check=True)
         python_bin = str(venv / "bin" / "python")
-        subprocess.run(["uv", "pip", "install", "--python", python_bin, spec], check=True)
+        # --reinstall-package: a rebuilt wheel keeps its version number, and
+        # uv would otherwise keep the copy already installed.
+        subprocess.run(
+            ["uv", "pip", "install", "--reinstall-package", "hfl", "--python", python_bin, spec],
+            check=True,
+        )
     print(f"installed {wheel.name} into {work / 'venv'} (+ extras) and {work / 'venv-core'}")
 
 
