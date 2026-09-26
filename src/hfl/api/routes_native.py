@@ -24,6 +24,15 @@ from hfl.api.helpers import (
     run_dispatched,
     unload_after_response,
 )
+from hfl.api.modelfile_defaults import (
+    apply_parameters,
+    apply_to_chat,
+    baked_messages,
+    default_system,
+    default_template,
+    explicit_options,
+    splice_baked,
+)
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
@@ -217,50 +226,10 @@ def _merge_mcp_tools(existing: list[dict] | None) -> list[dict] | None:
     return existing + mcp_payload
 
 
-def _baked_messages(manifest: "Any | None") -> list[ChatMessage]:
-    """Return the manifest's Modelfile ``MESSAGE`` entries as ChatMessages.
-
-    Empty list when the manifest has none (or when ``manifest`` is
-    ``None``, which happens if the engine somehow loaded without a
-    current_model set — should never occur on the happy path but the
-    route stays defensive).
-    """
-    if manifest is None:
-        return []
-    raw = getattr(manifest, "messages", None) or []
-    out: list[ChatMessage] = []
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        role = entry.get("role")
-        content = entry.get("content")
-        if not isinstance(role, str) or not isinstance(content, str):
-            continue
-        out.append(ChatMessage(role=role, content=content))
-    return out
-
-
-def _splice_baked_messages(
-    messages: list[ChatMessage],
-    baked: list[ChatMessage],
-) -> list[ChatMessage]:
-    """Insert ``baked`` messages after any leading system block.
-
-    The contract matches Ollama's Modelfile semantics: MESSAGE entries
-    sit between the system prompt(s) and the live turn. We find the
-    first non-system message and splice the bake-in there; if the
-    caller sent only system messages, they land at the end.
-    """
-    if not baked:
-        return messages
-    split = 0
-    for i, m in enumerate(messages):
-        if m.role != "system":
-            split = i
-            break
-    else:
-        split = len(messages)
-    return messages[:split] + baked + messages[split:]
+# The Modelfile's MESSAGE handling moved to hfl.api.modelfile_defaults, which
+# every API now shares; the old names stay for their callers.
+_baked_messages = baked_messages
+_splice_baked_messages = splice_baked
 
 
 def _build_chat_message(
@@ -355,19 +324,25 @@ async def api_generate(
     # through to ``Llama.__call__`` (no chat formatting) when
     # ``raw=True``. Backends without plug-in templates (vLLM) ignore
     # both flags silently.
-    if req.template is not None:
-        gen_config.template_override = req.template
+    # A created model's Modelfile: TEMPLATE is the default template,
+    # PARAMETER fills the options the request left unset, SYSTEM below.
+    manifest = state.current_model
+    template = default_template(manifest, req.template)
+    if template is not None:
+        gen_config.template_override = template
     if req.raw:
         gen_config.raw = True
+    apply_parameters(manifest, gen_config, explicit_options(req.options))
 
     # OLLAMA_PARITY_PLAN P1-1: system-prompt override. When present,
     # we flow it through the engine as a system-role message so the
     # same /api/generate route can now do single-shot prompting with
     # a custom system prompt, mirroring Ollama's behaviour. Skipped
     # when ``raw=True`` because raw mode intentionally bypasses any
-    # prompt shaping.
-    if req.system and not req.raw:
-        system_preamble = req.system + "\n\n"
+    # prompt shaping. Without one, the Modelfile's SYSTEM.
+    system = default_system(manifest, req.system)
+    if system and not req.raw:
+        system_preamble = system + "\n\n"
         final_prompt = system_preamble + req.prompt
     else:
         final_prompt = req.prompt
@@ -613,15 +588,12 @@ async def api_chat(
 
         messages = [_CM(role="system", content=req.system), *messages]
 
-    # Phase 8 P3-2: Modelfile ``MESSAGE`` baked-in few-shot. If the
-    # resolved manifest carries MESSAGE instructions, prepend them
-    # to the conversation after any system messages so the model
-    # sees the canonical ``user → assistant`` exemplars before the
-    # live turn. No-op when the manifest has no baked messages
-    # (the vast majority of models).
-    baked = _baked_messages(state.current_model)
-    if baked:
-        messages = _splice_baked_messages(messages, baked)
+    # The created model's Modelfile: SYSTEM when the request has none,
+    # MESSAGE exemplars before the live turn, PARAMETER for the options the
+    # request left unset.
+    messages = apply_to_chat(
+        state.current_model, messages, gen_config, explicit_options(req.options)
+    )
 
     if req.stream:
         return await prepare_stream_response(

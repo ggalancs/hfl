@@ -473,8 +473,23 @@ def run(
                 f"[dim]{t('messages.session_resumed', name=session, count=len(messages))}[/]"
             )
 
-    if system and not any(m.role == "system" for m in messages):
-        messages.append(ChatMessage(role="system", content=system))
+    # A created model's Modelfile: SYSTEM unless --system, MESSAGE exemplars
+    # to open a new conversation, PARAMETER for every reply.
+    from hfl.api.modelfile_defaults import (
+        apply_parameters,
+        baked_messages,
+        default_system,
+        splice_baked,
+    )
+    from hfl.engine.base import GenerationConfig
+
+    system_prompt = default_system(manifest, system)
+    if system_prompt and not any(m.role == "system" for m in messages):
+        messages.append(ChatMessage(role="system", content=system_prompt))
+    if all(m.role == "system" for m in messages):
+        messages[:] = splice_baked(messages, baked_messages(manifest))
+    gen_config = GenerationConfig()
+    apply_parameters(manifest, gen_config, ())
 
     def _persist() -> None:
         """Write after every exchange, not once at exit.
@@ -513,7 +528,7 @@ def run(
 
         full_response = []
         try:
-            for token in engine.chat_stream(messages):
+            for token in engine.chat_stream(messages, gen_config):
                 console.print(token, end="", highlight=False, markup=False, style=green_style)
                 full_response.append(token)
         except KeyboardInterrupt:
@@ -1543,7 +1558,10 @@ def show(
         console.print(_format_parameters(manifest))
         return
     if template:
-        console.print(manifest.chat_template or "")
+        from hfl.models.chat_template import model_template
+
+        # markup=False: templates are full of [ ] that Rich would eat.
+        console.print(model_template(manifest), markup=False, highlight=False)
         return
     if license_only:
         console.print(manifest.license_name or manifest.license or "")
@@ -2062,6 +2080,7 @@ def create(
     }
 
     try:
+        status = ""
         with httpx.stream("POST", url, json=payload, timeout=120.0) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -2077,6 +2096,11 @@ def create(
                     raise typer.Exit(1)
                 status = event.get("status", "")
                 console.print(f"[cyan]{status}[/]")
+        # Only "success" means the model exists: a stream that ended before it
+        # (the server failed mid-way) used to exit 0 with nothing created.
+        if status != "success":
+            console.print(f"[red]{t('errors.create_incomplete')}[/]")
+            raise typer.Exit(1)
     except httpx.ConnectError:
         console.print(
             f"[red]Cannot reach HFL server at {url}[/]\n"

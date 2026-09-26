@@ -130,7 +130,7 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
     from hfl.engine.base import ChatMessage, GenerationConfig
 
     try:
-        engine, _ = await load_llm(model_name)
+        engine, manifest = await load_llm(model_name)
     except HFLError as exc:
         # HFL's own errors carry a message we wrote for the caller
         # (ModelNotFoundError, ModelTypeMismatchError, ...).
@@ -168,6 +168,12 @@ async def _drive_chat(ws: WebSocket, frame: dict[str, Any], cancel_event: asynci
             temperature=float(options.get("temperature", 0.7) or 0.7),
             top_p=float(options.get("top_p", 0.9) or 0.9),
         )
+        # A created model's Modelfile (SYSTEM, MESSAGE, PARAMETER defaults).
+        from hfl.api.modelfile_defaults import apply_to_chat
+
+        sent = {"max_tokens": "num_predict", "temperature": "temperature", "top_p": "top_p"}
+        explicit = {name for key, name in sent.items() if options.get(key) is not None}
+        chat_msgs = apply_to_chat(manifest, chat_msgs, cfg, explicit)
 
         await _send(ws, {"type": "ready", "model": model_name})
     except BaseException:

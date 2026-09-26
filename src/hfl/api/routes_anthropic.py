@@ -27,6 +27,7 @@ from hfl.api.helpers import (
     queue_response_from_error,
     run_dispatched,
 )
+from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
 from hfl.api.thinking import ThinkingSplitter
 from hfl.engine.base import ChatMessage, stream_counts
@@ -114,6 +115,29 @@ def _tool_result_text(content: Any) -> str:
                 parts.append(block)
         return "".join(parts)
     return str(content)
+
+
+# Anthropic request fields -> the Modelfile parameters they set.
+ANTHROPIC_OPTIONS = {
+    "temperature": "temperature",
+    "top_p": "top_p",
+    "top_k": "top_k",
+    "max_tokens": "num_predict",
+    "stop_sequences": "stop",
+}
+
+
+def _prepared(
+    req: AnthropicMessagesRequest, manifest: Any
+) -> tuple[list[ChatMessage], "GenerationConfig"]:
+    """The engine messages and config for ``req``, with the created model's
+    Modelfile applied — shared by /v1/messages and its count_tokens, which
+    must count what the model would be fed."""
+    config = anthropic_to_generation_config(req)
+    messages = apply_to_chat(
+        manifest, _request_to_messages(req), config, explicit_fields(req, ANTHROPIC_OPTIONS)
+    )
+    return messages, config
 
 
 def _request_to_messages(req: AnthropicMessagesRequest) -> list[ChatMessage]:
@@ -252,11 +276,12 @@ async def count_message_tokens(req: AnthropicMessagesRequest) -> dict[str, Any] 
             f"Model '{model_name}' failed to load", path="/v1/messages/count_tokens"
         )
     tools = _anthropic_tools_to_payload(req)  # none for tool_choice "none", as there
+    messages, gen_config = _prepared(req, state.current_model)
     try:
         count = await run_dispatched(
             state.engine.count_prompt_tokens,
-            _request_to_messages(req),
-            anthropic_to_generation_config(req),
+            messages,
+            gen_config,
             tools,
             operation="count_tokens",
         )
@@ -303,13 +328,12 @@ async def create_message(
     if state.engine is None:
         return service_unavailable(f"Model '{model_name}' failed to load", path="/v1/messages")
 
-    messages = _request_to_messages(req)
+    messages, gen_config = _prepared(req, state.current_model)
     tools = _anthropic_tools_to_payload(req)
     # ``tool_choice: {"type": "none"}`` is a hard opt-out: tools are not
     # advertised and the marker parser is suppressed, so the reply can never
     # contain a tool_use block (mirrors the OpenAI route).
     tools_disabled = isinstance(req.tool_choice, dict) and req.tool_choice.get("type") == "none"
-    gen_config = anthropic_to_generation_config(req)
 
     if req.stream:
         return await prepare_stream_response(

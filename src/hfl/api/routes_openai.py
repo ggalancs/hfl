@@ -23,6 +23,12 @@ from hfl.api.helpers import (
     queue_response_from_error,
     run_dispatched,
 )
+from hfl.api.modelfile_defaults import (
+    apply_parameters,
+    apply_to_chat,
+    default_system,
+    explicit_fields,
+)
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
 from hfl.api.thinking import ThinkingSplitter
 from hfl.core.container import get_registry
@@ -52,6 +58,16 @@ async def _ensure_model_loaded(model_name: str) -> None:
     from hfl.api.model_loader import load_llm
 
     await load_llm(model_name)
+
+
+# OpenAI request fields -> the Modelfile parameters they set.
+OPENAI_OPTIONS = {
+    "temperature": "temperature",
+    "top_p": "top_p",
+    "max_tokens": "num_predict",
+    "stop": "stop",
+    "seed": "seed",
+}
 
 
 def _to_gen_config(req: Union[ChatCompletionRequest, CompletionRequest]) -> GenerationConfig:
@@ -196,6 +212,10 @@ async def chat_completions(
     # whether tools were forwarded).
     tools_disabled = isinstance(req.tool_choice, str) and req.tool_choice.strip().lower() == "none"
     gen_config = _to_gen_config(req)
+    # A created model's Modelfile (SYSTEM, MESSAGE, PARAMETER defaults).
+    messages = apply_to_chat(
+        state.current_model, messages, gen_config, explicit_fields(req, OPENAI_OPTIONS)
+    )
 
     # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
     if req.response_format is not None:
@@ -526,6 +546,11 @@ async def completions(req: CompletionRequest) -> dict[str, Any] | StreamingRespo
         raise APIValidationError("'prompt' must not be empty")
     prompt = req.prompt if isinstance(req.prompt, str) else req.prompt[0]
     gen_config = _to_gen_config(req)
+    # A created model's Modelfile, as /api/generate applies it.
+    apply_parameters(state.current_model, gen_config, explicit_fields(req, OPENAI_OPTIONS))
+    system = default_system(state.current_model, None)
+    if system:
+        prompt = system + "\n\n" + prompt
 
     if req.stream:
         return await prepare_stream_response(

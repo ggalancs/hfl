@@ -366,4 +366,27 @@ def load_kwargs_for(manifest: "ModelManifest", n_ctx: int | None) -> dict[str, A
                 raise ValueError("adapter path rejected: outside the HFL data dir") from exc
         if safe_adapters:
             load_kwargs["lora_paths"] = safe_adapters
+    draft = getattr(manifest, "draft_model_path", None)
+    if isinstance(draft, str) and draft:
+        load_kwargs["draft_model_path"] = _draft_for(draft)
     return load_kwargs
+
+
+def _draft_for(draft: str) -> str:
+    """A Modelfile DRAFT as the engine takes it: ``prompt-lookup`` as is, a
+    registered model as its file, anything else a path kept inside the HFL
+    data dir (the Modelfile is untrusted, as for ADAPTER)."""
+    if draft == "prompt-lookup":
+        return draft
+    from hfl.core.container import get_registry
+
+    registered = get_registry().get(draft)
+    if registered is not None:
+        return str(registered.local_path)
+    import hfl.config
+    from hfl.security import PathTraversalError, sanitize_path
+
+    try:
+        return str(sanitize_path(hfl.config.config.home_dir, draft))
+    except PathTraversalError as exc:
+        raise ValueError("draft path rejected: outside the HFL data dir") from exc

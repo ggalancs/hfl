@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from hfl.converter.modelfile import render_modelfile
 from hfl.exceptions import ModelNotFoundError
 from hfl.models.capabilities import detect_capabilities
+from hfl.models.chat_template import model_template
 from hfl.models.registry import get_registry
 
 router = APIRouter(tags=["Ollama"])
@@ -150,7 +151,7 @@ async def show_model(req: ShowRequest) -> dict[str, Any]:
     return {
         "modelfile": render_modelfile(manifest),
         "parameters": _format_parameters(manifest),
-        "template": manifest.chat_template or "",
+        "template": model_template(manifest),
         "details": _details(manifest),
         "model_info": _model_info(manifest, req.verbose),
         "capabilities": detect_capabilities(manifest),

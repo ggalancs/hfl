@@ -281,3 +281,63 @@ class TestMessagesPersistence:
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi there"},
         ]
+
+
+class TestCreateWithDraft:
+    """DRAFT reached the manifest as ``draft_model_path``, a field it did not
+    have: the create failed mid-stream and ``hfl create`` exited 0 with
+    nothing created (local audit E11)."""
+
+    def test_draft_is_stored(self, client, temp_config):
+        parent = _make_parent_manifest(temp_config)
+        body = f"FROM {parent.name}\nDRAFT prompt-lookup\n"
+        resp = client.post("/api/create", json={"model": "drafted", "modelfile": body})
+        events = [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
+        assert events[-1] == {"status": "success"}
+        assert get_registry().get("drafted").draft_model_path == "prompt-lookup"
+
+    def test_the_draft_reaches_the_engine_load(self, client, temp_config):
+        from hfl.api.model_loader import load_kwargs_for
+
+        parent = _make_parent_manifest(temp_config)
+        lookup = ModelManifest(
+            name="a", repo_id="a", local_path="x", format="gguf", draft_model_path="prompt-lookup"
+        )
+        assert load_kwargs_for(lookup, 0)["draft_model_path"] == "prompt-lookup"
+        named = ModelManifest(
+            name="b", repo_id="b", local_path="x", format="gguf", draft_model_path=parent.name
+        )
+        assert load_kwargs_for(named, 0)["draft_model_path"] == parent.local_path
+        outside = ModelManifest(
+            name="c", repo_id="c", local_path="x", format="gguf", draft_model_path="/etc/passwd"
+        )
+        with pytest.raises(ValueError, match="outside the HFL data dir"):
+            load_kwargs_for(outside, 0)
+        assert "draft_model_path" not in load_kwargs_for(parent, 0)
+
+
+def test_cli_create_fails_when_the_stream_ends_before_success(monkeypatch, tmp_path):
+    """The server dying mid-way must not read as success."""
+    from contextlib import contextmanager
+
+    from typer.testing import CliRunner
+
+    from hfl.cli.main import app as cli
+
+    class Stream:
+        def raise_for_status(self) -> None:
+            pass
+
+        def iter_lines(self):
+            yield '{"status": "parsing modelfile"}'
+            yield '{"status": "creating model"}'
+
+    @contextmanager
+    def fake_stream(*a, **k):
+        yield Stream()
+
+    monkeypatch.setattr("httpx.stream", fake_stream)
+    modelfile = tmp_path / "Modelfile"
+    modelfile.write_text("FROM x\n")
+    result = CliRunner().invoke(cli, ["create", "m", "-f", str(modelfile)])
+    assert result.exit_code == 1

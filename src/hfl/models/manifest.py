@@ -94,6 +94,11 @@ class ModelManifest:
     messages: list[dict] = field(default_factory=list)
     parent_name: str | None = None
     parent_digest: str | None = None
+    # Modelfile DRAFT: "prompt-lookup", a registered model, or a GGUF path —
+    # speculative decoding at load. The parser produced this key and the
+    # manifest had no field for it, so ``create`` with DRAFT failed mid-way
+    # (local audit E11).
+    draft_model_path: str | None = None
     # Phase 14 — V2 rows 19 / 22.
     env_vars: dict = field(default_factory=dict)
     declared_capabilities: list[str] = field(default_factory=list)

@@ -273,15 +273,22 @@ async def _create_generator(req: CreateRequest) -> AsyncIterator[str]:
     # 3. Build the manifest.
     yield _event("creating model")
     manifest_fields = doc.to_manifest_fields()
-    manifest = ModelManifest(
-        name=req.model,
-        repo_id=parent_name or req.model,
-        local_path=local_path,
-        format="gguf" if local_path.lower().endswith(".gguf") else "unknown",
-        parent_name=parent_name,
-        parent_digest=parent_digest,
-        **manifest_fields,
-    )
+    try:
+        manifest = ModelManifest(
+            name=req.model,
+            repo_id=parent_name or req.model,
+            local_path=local_path,
+            format="gguf" if local_path.lower().endswith(".gguf") else "unknown",
+            parent_name=parent_name,
+            parent_digest=parent_digest,
+            **manifest_fields,
+        )
+    except TypeError:
+        # A Modelfile field the manifest cannot hold: an error event, not a
+        # stream cut short mid-way (which a client read as success).
+        logger.exception("/api/create: manifest rejected the Modelfile's fields")
+        yield _error_event("this Modelfile has an instruction HFL cannot store")
+        return
     # If the Modelfile carries MESSAGE instructions, persist them as
     # dicts (the manifest stores ``messages: list[dict]``; the parser
     # exposes dataclasses for type safety).

@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.helpers import prepare_stream_response, run_dispatched
+from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.api.thinking import ThinkingSplitter
 from hfl.engine.base import ChatMessage, GenerationConfig
 
@@ -273,6 +274,14 @@ def _resolve_thinking(reasoning: dict[str, Any] | None) -> str | None:
         return None
     level = {"none": "off", "minimal": "low"}.get(effort.lower(), effort.lower())
     return level if level in {"off", "low", "medium", "high"} else None
+
+
+# Responses request fields -> the Modelfile parameters they set.
+RESPONSES_OPTIONS = {
+    "temperature": "temperature",
+    "top_p": "top_p",
+    "max_output_tokens": "num_predict",
+}
 
 
 def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
@@ -707,8 +716,12 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     # OpenAI does): only this request's, before the conversation.
     system = _input_to_messages([], req.instructions)
     new = _input_to_messages(req.input, None, _call_names(history))
-    messages = [*system, *history, *new]
     cfg = _build_gen_config(req)
+    # A created model's Modelfile: SYSTEM when there are no instructions,
+    # MESSAGE exemplars, PARAMETER defaults for what the request left unset.
+    messages = apply_to_chat(
+        state.current_model, [*system, *history, *new], cfg, explicit_fields(req, RESPONSES_OPTIONS)
+    )
     tools = _chat_tools(req.tools)
 
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
