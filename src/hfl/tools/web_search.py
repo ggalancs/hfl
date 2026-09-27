@@ -48,6 +48,9 @@ __all__ = [
     "BraveBackend",
     "SerpAPIBackend",
     "get_backend",
+    "backend_chain",
+    "SearXNGBackend",
+    "ExaBackend",
     "search",
 ]
 
@@ -142,8 +145,9 @@ class DuckDuckGoBackend(WebSearchBackend):
         if resp.status_code != 200 or _DDG_CHALLENGE_RE.search(body):
             raise WebSearchUpstreamError(
                 f"DuckDuckGo refused the search (HTTP {resp.status_code}, its anti-bot "
-                "check). Try again later, or set HFL_WEB_SEARCH_BACKEND to tavily, brave "
-                "or serpapi with its API key."
+                "check: it turns away scripted clients). Point HFL_SEARXNG_URL at a "
+                "SearXNG instance (self-hosted, no key), or set EXA_API_KEY, "
+                "TAVILY_API_KEY, BRAVE_API_KEY or SERPAPI_API_KEY."
             )
 
         results: list[dict[str, str]] = []
@@ -199,7 +203,7 @@ class TavilyBackend(WebSearchBackend):
                 data = resp.json()
         except httpx.HTTPError as exc:
             logger.warning("Tavily search failed: %s", exc)
-            raise WebSearchError("web search backend unreachable") from exc
+            raise _classified(exc, "Tavily") from exc
         return [
             {
                 "title": r.get("title", ""),
@@ -235,7 +239,7 @@ class BraveBackend(WebSearchBackend):
                 data = resp.json()
         except httpx.HTTPError as exc:
             logger.warning("Brave search failed: %s", exc)
-            raise WebSearchError("web search backend unreachable") from exc
+            raise _classified(exc, "Brave") from exc
         web = data.get("web", {})
         return [
             {
@@ -276,7 +280,7 @@ class SerpAPIBackend(WebSearchBackend):
                 data = resp.json()
         except httpx.HTTPError as exc:
             logger.warning("SerpAPI search failed: %s", exc)
-            raise WebSearchError("web search backend unreachable") from exc
+            raise _classified(exc, "SerpAPI") from exc
         return [
             {
                 "title": r.get("title", ""),
@@ -292,12 +296,116 @@ class SerpAPIBackend(WebSearchBackend):
 # ----------------------------------------------------------------------
 
 
+def _classified(exc: httpx.HTTPError, service: str) -> WebSearchError:
+    """A rejected key is the caller's to fix (400); anything else — an
+    outage, a refusal, no answer — is the service's (502). All used to be
+    "web search backend unreachable", with 400."""
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if status in (401, 403):
+        return WebSearchError(f"{service} rejected the API key (HTTP {status})")
+    detail = f"HTTP {status}" if status else type(exc).__name__
+    return WebSearchUpstreamError(f"{service} did not answer the search ({detail})")
+
+
+# ----------------------------------------------------------------------
+# SearXNG (self-hosted metasearch, no key)
+# ----------------------------------------------------------------------
+
+
+class SearXNGBackend(WebSearchBackend):
+    """A SearXNG instance, at ``HFL_SEARXNG_URL``: open-source metasearch
+    that one runs oneself — no account, no key, no third party choosing what
+    HFL may search. Its JSON output must be enabled (``search.formats``)."""
+
+    name = "searxng"
+
+    async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
+        base = (os.environ.get("HFL_SEARXNG_URL") or "").rstrip("/")
+        if not base:
+            raise WebSearchError("HFL_SEARXNG_URL not set (the URL of a SearXNG instance)")
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(f"{base}/search", params={"q": query, "format": "json"})
+                if resp.status_code == 403:
+                    raise WebSearchError(
+                        "the SearXNG instance refuses JSON: add json to search.formats "
+                        "in its settings.yml"
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            logger.warning("SearXNG search failed: %s", exc)
+            raise _classified(exc, "SearXNG") from exc
+        except ValueError as exc:  # not JSON: an HTML page, a proxy's error
+            raise WebSearchUpstreamError("SearXNG answered, but not in JSON") from exc
+        return [
+            {
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "content": r.get("content", "") or "",
+            }
+            for r in data.get("results", [])[:max_results]
+        ]
+
+
+# ----------------------------------------------------------------------
+# Exa
+# ----------------------------------------------------------------------
+
+
+class ExaBackend(WebSearchBackend):
+    """https://exa.ai — JSON API, requires ``EXA_API_KEY`` (a free monthly
+    allowance, no card)."""
+
+    name = "exa"
+
+    async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
+        key = os.environ.get("EXA_API_KEY")
+        if not key:
+            raise WebSearchError("EXA_API_KEY not set")
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    "https://api.exa.ai/search",
+                    headers={"x-api-key": key},
+                    json={
+                        "query": query,
+                        "numResults": max_results,
+                        "contents": {"highlights": {"maxCharacters": 400}},
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            logger.warning("Exa search failed: %s", exc)
+            raise _classified(exc, "Exa") from exc
+        return [
+            {
+                "title": r.get("title") or "",
+                "url": r.get("url", ""),
+                "content": " ".join(r.get("highlights") or []) or (r.get("text") or "")[:400],
+            }
+            for r in data.get("results", [])[:max_results]
+        ]
+
+
 _BACKENDS: dict[str, type[WebSearchBackend]] = {
     "duckduckgo": DuckDuckGoBackend,
     "ddg": DuckDuckGoBackend,
     "tavily": TavilyBackend,
     "brave": BraveBackend,
     "serpapi": SerpAPIBackend,
+    "searxng": SearXNGBackend,
+    "exa": ExaBackend,
+}
+
+# What each keyed backend needs before it is worth trying.
+_NEEDS = {
+    "searxng": "HFL_SEARXNG_URL",
+    "tavily": "TAVILY_API_KEY",
+    "exa": "EXA_API_KEY",
+    "brave": "BRAVE_API_KEY",
+    "serpapi": "SERPAPI_API_KEY",
 }
 
 
@@ -315,16 +423,60 @@ def get_backend(name: str | None = None) -> WebSearchBackend:
     return cls()
 
 
+def backend_chain(setting: str | None = None) -> list[WebSearchBackend]:
+    """The backends to try, in order.
+
+    ``HFL_WEB_SEARCH_BACKEND`` names one or a comma-separated list
+    (``searxng,exa,duckduckgo``). Unset, the chain is built from what is
+    configured: a SearXNG instance first (HFL_SEARXNG_URL), then each
+    service whose key is set, and DuckDuckGo last — it needs nothing, but
+    turns away clients it takes for bots (every scripted client, measured:
+    httpx, curl, even its own Instant Answer API), so alone it was a search
+    that did not work.
+    """
+    raw = setting if setting is not None else os.environ.get("HFL_WEB_SEARCH_BACKEND")
+    if raw and raw.strip():
+        names = [n.strip().lower() for n in raw.split(",") if n.strip()]
+    else:
+        names = [n for n, var in _NEEDS.items() if os.environ.get(var)] + ["duckduckgo"]
+    chain: list[WebSearchBackend] = []
+    for name in names:
+        cls = _BACKENDS.get(name)
+        if cls is None:
+            logger.warning("Unknown web search backend %r, skipped", name)
+            continue
+        if cls not in [type(b) for b in chain]:
+            chain.append(cls())
+    return chain or [DuckDuckGoBackend()]
+
+
 async def search(query: str, max_results: int = 5) -> dict[str, Any]:
     """Convenience wrapper used by the route handler.
 
     Bounds ``max_results`` to [1, 10] per the Ollama contract.
     Returns the exact Ollama envelope:
-    ``{"results": [{"title","url","content"}, ...]}``.
+    ``{"results": [{"title","url","content"}, ...]}``, plus the backend
+    that answered. Each backend of the chain is tried in turn; the error, if
+    every one fails, says why each did.
     """
     if not isinstance(query, str) or not query.strip():
         raise WebSearchError("query must be a non-empty string")
     max_results = max(1, min(10, int(max_results)))
-    backend = get_backend()
-    results = await backend.search(query.strip(), max_results)
-    return {"results": results}
+    chain = backend_chain()
+    reasons: list[str] = []
+    only_caller_errors = True
+    for backend in chain:
+        try:
+            results = await backend.search(query.strip(), max_results)
+        except WebSearchUpstreamError as exc:
+            only_caller_errors = False
+            reasons.append(f"{backend.name}: {exc}")
+            continue
+        except WebSearchError as exc:
+            reasons.append(f"{backend.name}: {exc}")
+            continue
+        return {"results": results, "backend": backend.name}
+    message = "; ".join(reasons)
+    if len(chain) == 1:
+        message = reasons[0].split(": ", 1)[1]
+    raise (WebSearchError if only_caller_errors else WebSearchUpstreamError)(message)

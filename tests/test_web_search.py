@@ -267,7 +267,7 @@ class TestSearchWrapper:
                 captured["mr"] = max_results
                 return []
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _FakeBackend())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_FakeBackend()])
         await ws.search("x", max_results=999)
         assert captured["mr"] == 10
 
@@ -281,7 +281,142 @@ class TestSearchWrapper:
             async def search(self, query, max_results):
                 return [{"title": "t", "url": "u", "content": "c"}]
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _FakeBackend())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_FakeBackend()])
         payload = await ws.search("q", 5)
         assert "results" in payload
         assert payload["results"][0]["title"] == "t"
+
+
+# ----------------------------------------------------------------------
+# The chain: what is configured, in order, with fallback
+# ----------------------------------------------------------------------
+
+
+def _mock_transport(monkeypatch, handler):
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+
+    def _factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ws.httpx, "AsyncClient", _factory)
+
+
+class TestChain:
+    @pytest.fixture(autouse=True)
+    def clean_env(self, monkeypatch):
+        for var in (
+            "HFL_WEB_SEARCH_BACKEND",
+            "HFL_SEARXNG_URL",
+            "TAVILY_API_KEY",
+            "EXA_API_KEY",
+            "BRAVE_API_KEY",
+            "SERPAPI_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_nothing_configured_is_duckduckgo_alone(self):
+        assert [b.name for b in ws.backend_chain()] == ["duckduckgo"]
+
+    def test_what_is_configured_comes_first_duckduckgo_last(self, monkeypatch):
+        monkeypatch.setenv("HFL_SEARXNG_URL", "http://localhost:8888")
+        monkeypatch.setenv("EXA_API_KEY", "k")
+        assert [b.name for b in ws.backend_chain()] == ["searxng", "exa", "duckduckgo"]
+
+    def test_an_explicit_list_is_the_order(self, monkeypatch):
+        monkeypatch.setenv("HFL_WEB_SEARCH_BACKEND", "exa, searxng, nope")
+        assert [b.name for b in ws.backend_chain()] == ["exa", "searxng"]
+
+    async def test_a_refusal_falls_through_to_the_next(self, monkeypatch):
+        class Refuses(ws.WebSearchBackend):
+            name = "first"
+
+            async def search(self, query, max_results):
+                raise ws.WebSearchUpstreamError("turned away")
+
+        class Answers(ws.WebSearchBackend):
+            name = "second"
+
+            async def search(self, query, max_results):
+                return [{"title": "t", "url": "u", "content": "c"}]
+
+        monkeypatch.setattr(ws, "backend_chain", lambda: [Refuses(), Answers()])
+        out = await ws.search("q")
+        assert out["backend"] == "second" and out["results"][0]["url"] == "u"
+
+    async def test_when_all_fail_each_reason_is_given(self, monkeypatch):
+        class Refuses(ws.WebSearchBackend):
+            name = "a"
+
+            async def search(self, query, max_results):
+                raise ws.WebSearchUpstreamError("turned away")
+
+        class NoKey(ws.WebSearchBackend):
+            name = "b"
+
+            async def search(self, query, max_results):
+                raise ws.WebSearchError("B_KEY not set")
+
+        monkeypatch.setattr(ws, "backend_chain", lambda: [Refuses(), NoKey()])
+        with pytest.raises(ws.WebSearchUpstreamError) as caught:
+            await ws.search("q")
+        assert "a: turned away" in str(caught.value) and "b: B_KEY not set" in str(caught.value)
+
+
+class TestSearXNG:
+    async def test_reads_its_json(self, monkeypatch):
+        monkeypatch.setenv("HFL_SEARXNG_URL", "http://searx.local/")
+        seen = {}
+
+        def handler(request):
+            seen["url"] = str(request.url)
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"title": "Python", "url": "https://python.org", "content": "The language"}
+                    ]
+                },
+            )
+
+        _mock_transport(monkeypatch, handler)
+        results = await ws.SearXNGBackend().search("python", 5)
+        assert results == [
+            {"title": "Python", "url": "https://python.org", "content": "The language"}
+        ]
+        assert seen["url"].startswith("http://searx.local/search?") and "format=json" in seen["url"]
+
+    async def test_json_switched_off_says_how_to_switch_it_on(self, monkeypatch):
+        monkeypatch.setenv("HFL_SEARXNG_URL", "http://searx.local")
+        _mock_transport(monkeypatch, lambda r: httpx.Response(403, text="Forbidden"))
+        with pytest.raises(ws.WebSearchError, match="search.formats"):
+            await ws.SearXNGBackend().search("python", 5)
+
+
+class TestExa:
+    async def test_reads_highlights(self, monkeypatch):
+        monkeypatch.setenv("EXA_API_KEY", "k")
+        seen = {}
+
+        def handler(request):
+            seen["key"] = request.headers.get("x-api-key")
+            seen["body"] = request.read()
+            return httpx.Response(
+                200,
+                json={
+                    "results": [{"title": "Py", "url": "https://py", "highlights": ["one", "two"]}]
+                },
+            )
+
+        _mock_transport(monkeypatch, handler)
+        results = await ws.ExaBackend().search("python", 3)
+        assert results == [{"title": "Py", "url": "https://py", "content": "one two"}]
+        assert seen["key"] == "k" and b'"numResults":3' in seen["body"].replace(b" ", b"")
+
+    async def test_a_rejected_key_is_the_callers_error(self, monkeypatch):
+        monkeypatch.setenv("EXA_API_KEY", "bad")
+        _mock_transport(monkeypatch, lambda r: httpx.Response(401, json={"error": "unauthorized"}))
+        with pytest.raises(ws.WebSearchError, match="rejected the API key") as caught:
+            await ws.ExaBackend().search("python", 3)
+        assert not isinstance(caught.value, ws.WebSearchUpstreamError)

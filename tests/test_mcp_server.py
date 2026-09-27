@@ -61,7 +61,7 @@ class TestWebSearchHandler:
             async def search(self, q, mr):
                 return [{"title": "T", "url": "U", "content": "C"}]
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _B())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_B()])
         out = await HFL_TOOLS["web_search"].handler({"query": "x"})
         assert out[0]["type"] == "text"
         assert "T" in out[0]["text"]
@@ -79,7 +79,7 @@ class TestWebSearchHandler:
             async def search(self, q, mr):
                 raise ws.WebSearchError("backend down")
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _B())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_B()])
         with pytest.raises(ValueError):
             await HFL_TOOLS["web_search"].handler({"query": "x"})
 

@@ -718,19 +718,31 @@ def web_fetch(a: Audit) -> str:
 
 @check("B38", "POST /api/web_search")
 def web_search(a: Audit) -> str:
-    out = _c(a).post(
-        "/api/web_search", json={"query": "hugging face transformers", "max_results": 3}
-    )
+    """Through a SearXNG instance when the auditor names one
+    (AUDIT_SEARXNG_URL: the audit strips HFL_* from what it runs), else with
+    nothing configured — DuckDuckGo, which turns away scripted clients."""
+    import os
+
+    body = {"query": "hugging face transformers", "max_results": 3}
+    searxng = os.environ.get("AUDIT_SEARXNG_URL")
+    if searxng:
+        with a.server(env={"HFL_SEARXNG_URL": searxng}) as base:
+            out = httpx.post(base + "/api/web_search", json=body, timeout=60)
+        results = out.json().get("results") if out.status_code == 200 else None
+        served_by = out.json().get("backend") if results else None
+        expect(served_by == "searxng", (out.status_code, out.text[:160]))
+        return f"{len(results)} results through SearXNG ({searxng})"
+    out = _c(a).post("/api/web_search", json=body)
     if out.status_code == 502 and "refused" in out.text:
         # DuckDuckGo's anti-bot check turned this machine away, and the route
         # said so: the search itself could not be seen from here.
-        raise Uncheckable(f"DuckDuckGo refused this machine; the route said so: {out.text[:120]}")
+        raise Uncheckable(
+            "nothing configured and DuckDuckGo refused this machine (the route said so); "
+            "set AUDIT_SEARXNG_URL to check a real search"
+        )
     results = out.json().get("results") if out.status_code == 200 else None
-    expect(
-        results,
-        f"{out.status_code} {out.text[:120]} — neither results nor a clear refusal",
-    )
-    return f"{len(results)} results (DuckDuckGo)"
+    expect(results, f"{out.status_code} {out.text[:120]} — neither results nor a clear refusal")
+    return f"{len(results)} results ({out.json().get('backend')})"
 
 
 @check("B41", "GET /health")

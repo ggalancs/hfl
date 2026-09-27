@@ -124,7 +124,13 @@ interactive CLI (`hfl pull`) is unaffected — it always prompts a human.
 | HFL                        | Default      | What it does |
 |----------------------------|--------------|--------------|
 | `HFL_MCP_AUTOLOAD`         | (none)       | A JSON file of MCP servers to connect when `hfl serve` starts: `{"servers": [{"id": "fs", "target": "stdio://<command> <args>"}, {"id": "web", "target": "sse://host:port/sse"}]}` (an entry may add `"env"`). A server that fails to connect is logged and skipped; the server starts either way. Their tools reach the model through `/api/chat`. |
-| `HFL_WEB_SEARCH_BACKEND`   | `duckduckgo` | Backend of `/api/web_search`: `duckduckgo` (no key), `tavily`, `brave` or `serpapi`, which read `TAVILY_API_KEY`, `BRAVE_API_KEY`, `SERPAPI_API_KEY`. DuckDuckGo turns away clients it takes for bots; that is a 502 saying so. |
+| `HFL_WEB_SEARCH_BACKEND`   | (auto)       | Backend(s) of `/api/web_search`, tried in order until one answers: one name or a comma-separated list of `searxng`, `exa`, `tavily`, `brave`, `serpapi`, `duckduckgo`. Unset: every backend that is configured (SearXNG first, then each service whose key is set), with `duckduckgo` last. The answer names the backend that served it. |
+| `HFL_SEARXNG_URL`          | (none)       | URL of a SearXNG instance (open-source metasearch you run yourself: no account, no key). Its JSON output must be on: `search: formats: [html, json]` in its `settings.yml`. E.g. `docker run -p 127.0.0.1:8888:8080 -v ./settings.yml:/etc/searxng/settings.yml:ro searxng/searxng`, then `HFL_SEARXNG_URL=http://127.0.0.1:8888`. |
+| `EXA_API_KEY`, `TAVILY_API_KEY`, `BRAVE_API_KEY`, `SERPAPI_API_KEY` | (none) | Keys of the hosted backends. Exa and Tavily have a monthly free allowance with no card; Brave's needs a card. |
+
+DuckDuckGo needs nothing but turns away clients it takes for bots — every
+scripted client, measured (a browser on the same address gets results) — so on
+its own web search may not work; configure SearXNG or a keyed service.
 
 ## Interface
 

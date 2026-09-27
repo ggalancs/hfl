@@ -36,7 +36,7 @@ class TestWebSearchRoute:
                     {"title": "B", "url": "https://b.example", "content": "Binfo"},
                 ]
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _FakeBackend())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_FakeBackend()])
 
         resp = client.post(
             "/api/web_search",
@@ -63,7 +63,7 @@ class TestWebSearchRoute:
             async def search(self, query, max_results):
                 raise ws.WebSearchError("backend unreachable")
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _BrokenBackend())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_BrokenBackend()])
         resp = client.post("/api/web_search", json={"query": "q"})
         assert resp.status_code == 400
 
@@ -74,7 +74,7 @@ class TestWebSearchRoute:
             async def search(self, query, max_results):
                 raise RuntimeError("leaked details here")
 
-        monkeypatch.setattr(ws, "get_backend", lambda: _ExplodingBackend())
+        monkeypatch.setattr(ws, "backend_chain", lambda: [_ExplodingBackend()])
         resp = client.post("/api/web_search", json={"query": "q"})
         assert resp.status_code == 500
         # Traceback must not leak.

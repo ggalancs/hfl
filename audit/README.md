@@ -19,7 +19,8 @@ without the setting) so a check that cannot fail does not pass.
   Hub; all are Apache-2.0 or MIT, so no license is accepted on your behalf).
 - Optional, each unlocking checks that otherwise report `NO COMPROBABLE AQUÍ`:
   `llama-server` on `PATH` (`brew install llama.cpp`), Docker, Homebrew,
-  a speech synthesiser (macOS `say`,
+  a SearXNG instance in `AUDIT_SEARXNG_URL` (a real web search; with none,
+  DuckDuckGo usually refuses a scripted client), a speech synthesiser (macOS `say`,
   or `espeak-ng`), Apple Silicon (MLX), Linux + NVIDIA (vLLM).
 
 ## Run it
