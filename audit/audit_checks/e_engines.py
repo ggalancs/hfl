@@ -278,7 +278,34 @@ def e4(a: Audit) -> str:
 
 @check("E5", "vLLM")
 def e5(a: Audit) -> str:
-    raise Uncheckable("vLLM needs Linux with an NVIDIA GPU (CUDA); no check written for it yet")
+    """The shared chat suite on vLLM (Linux + NVIDIA), and four requests at
+    once all answered — vLLM batches them. vLLM refuses logprobs and does
+    not constrain formats: both must be refused clearly, not ignored."""
+    import sys
+
+    if not sys.platform.startswith("linux") or shutil.which("nvidia-smi") is None:
+        raise Uncheckable("vLLM needs Linux with an NVIDIA GPU (CUDA)")
+    has_vllm = subprocess.run([a.python, "-c", "import vllm"], capture_output=True, timeout=300)
+    if has_vllm.returncode != 0:
+        raise Uncheckable("vLLM is not installed in the audited venv (pip install 'hfl[vllm]')")
+    part = Parts()
+    with a.server(env={"HFL_LLM_LIBRARY": "vllm"}, ready=600) as base:
+        suite(part, base, "hfq", logprobs=False, formats=False)
+        body = {"model": "hfq", "stream": False, "messages": USER, "options": {"num_predict": 32}}
+        with concurrent.futures.ThreadPoolExecutor(4) as pool:
+            codes = list(
+                pool.map(
+                    lambda _: httpx.post(base + "/api/chat", json=body, timeout=600).status_code,
+                    range(4),
+                )
+            )
+        part("4 at once, all answered", lambda: expect(codes == [200] * 4, codes))
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        part(
+            "served by vLLM",
+            lambda: expect("vllm" in log.read_text(errors="replace").lower(), "no vLLM in log"),
+        )
+    return part.verdict()
 
 
 @check("E6", "embeddings on each engine")
