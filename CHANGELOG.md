@@ -236,6 +236,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Models whose license must be accepted (Llama, Gemma) are listed, not
   accepted. The script's own checks are tested to fail on wrong answers.
 
+- **`hfl train`: LoRA adapters trained on this machine** (Apple Silicon,
+  `[mlx]`). `hfl train <model> --data data.jsonl` checks the data (mlx-lm's
+  chat, completions or text JSONL; a bad row is named by its line), keeps a
+  tenth for validation when there is no `valid.jsonl`, runs `mlx_lm lora` in
+  a process of its own with its progress shown (iteration, loss, tok/s, peak
+  memory) and registers the result as a model: the base with the adapter,
+  its license carried over. Ctrl-C stops it and `--resume` continues from the
+  last saved adapter; `--fuse` merges the adapter into a new model and
+  `--gguf Q4_K_M` also exports that for llama.cpp. `POST /api/train` does the
+  same for the owner, on the host only, with NDJSON progress. Elsewhere it
+  says to train with Unsloth, Axolotl or TRL and bring the adapter with
+  `ADAPTER`. The MLX engine now applies a Modelfile `ADAPTER` (it ignored
+  it). Checked on Qwen2.5-0.5B-Instruct (60 iterations, 9 s, 1.7 GB peak):
+  asked something only the data says, the base model declined and the
+  trained, fused and GGUF models answered it.
+
+- **Structured output on MLX and Transformers.** A response format (JSON, a
+  JSON schema, a GBNF grammar) got a 400 on those backends; with the new
+  `[structured]` extra (llguidance, pulled in by `[mlx]` and `[transformers]`)
+  the format is enforced as a token mask, streamed or not. Checked on both:
+  a schema gives complete, valid JSON; a grammar `"yes" | "no"` gives `yes`.
+
+- **Speculative decoding (`DRAFT`) on llama-server and MLX**, not only the
+  default GGUF backend: a GGUF draft or `prompt-lookup` on llama-server, an
+  MLX draft with the same tokenizer on MLX. Checked: tokens accepted from the
+  draft, output unchanged. No speedup is promised; it depends on the model
+  and the prompt.
+
+- **A Modelfile `TEMPLATE` formats the chat, as in Ollama** — it applied to
+  `/api/generate` only. The Go-template renderer covers what Ollama's chat
+  templates use (variables, `range $i, $m`, `eq`, `len`, `slice`, `printf`,
+  `break`/`continue`…); on all 20 templates Ollama ships it gives the same
+  prompts as Ollama's own code.
+
+- **`/api/show` reports each model's reasoning controls** (`"thinking":
+  {"values", "default"}`, as Ollama 0.34.3), read by rendering its template —
+  Qwen3 thinks unless told not to, Gemma 4 only when told to. `think: "max"`
+  is HFL's highest level.
+
+- **The chat page manages models**: those on this machine (delete), a Hub
+  search, and downloads with a progress bar. Downloading and deleting stay
+  the owner's: the page asks for them only where the owner trusts its
+  address (`HFL_ORIGINS=http://127.0.0.1:11434`) and otherwise says how.
+
+- **`/api/pull` reports real download progress** — the size of what it
+  fetches and the bytes on disk so far; every event said 0 of 0 until the
+  end.
+
+- **Web search that works: SearXNG and Exa**, tried in order
+  (`HFL_WEB_SEARCH_BACKEND` takes a list), DuckDuckGo last. DuckDuckGo turns
+  away every scripted client (measured: httpx, curl, its own Instant Answer
+  API). `docker compose --profile search up -d` runs a SearXNG next to HFL,
+  unpublished, its secret from `.env`.
+
+- **llama-server's prompt cache can survive a reload**
+  (`HFL_PROMPT_CACHE_PERSIST`, off by default; `HFL_PROMPT_CACHE_MAX_GB`):
+  after an unload a long prefix was evaluated again; measured, 1860 prompt
+  tokens then 1.
+
+- **A model one backend cannot load gets another**: MLX → Transformers
+  (distilgpt2), llama-cpp-python → llama-server for an architecture only the
+  newer llama.cpp knows (Spark-X2.5's `spark2_5`).
+
 ### Changed
 
 - **No repetition penalty on a tool turn unless the client sets one.** A
@@ -261,6 +324,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing anywhere else — a GGUF of yours registered in place — loses its
   registry entry and keeps its file (you are told where). Same rule for
   `/api/delete`.
+
+- **Converting safetensors to GGUF needs no compiler.** The first conversion
+  built llama.cpp with git, cmake and a C++ toolchain: a clean install
+  without them (a new user, Docker) could not use HFL's main feature. The
+  converter is fetched (git, or llama.cpp's source archive) and quantizing
+  uses what is there: a `llama-quantize` on the PATH (Homebrew), or
+  llama-cpp-python's own quantizer. Building is the last resort.
+- **An omitted `think` is the model's default**, as in Ollama: a model that
+  reasons by default returns its reasoning in `message.thinking`. HFL hid it,
+  and a reply whose budget went on reasoning came back empty (Qwen3-8B).
+- **Requests from this machine are not rate-limited by default** (a local
+  coding agent reached the 60/min limit); `HFL_RATE_LIMIT_LOCAL=true` limits
+  them too.
+- **`HFL_NUM_PARALLEL=1` gives llama-server one slot**; it meant "the
+  default" and gave 4.
+- **A load failure says why** (`ModelLoadError`, never a path), and a GGUF
+  llama.cpp refuses has its architecture named; it was "Internal server
+  error".
 
 ### Security
 
@@ -491,6 +572,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped, and the `developer` role maps to `system`. Verified with Codex
   0.156.1 fixing a bug through a local Qwen3-Coder.
 
+- **Found by the local audit** (every CLI command, route, extra, variable and
+  engine run for real):
+  - A created model's `SYSTEM`, `PARAMETER` and `TEMPLATE` did nothing at
+    inference; they apply on every API now, with Ollama's precedence. `DRAFT`
+    broke `create` mid-stream while `hfl create` reported success.
+  - `show --template` was empty for every pulled model.
+  - `hfl lora` and `hfl snapshot` changed a model of their own in the CLI
+    process; they act on the running server.
+  - `/api/generate` with `format` answered prose; MLX and Transformers
+    ignored formats (now enforced, see above).
+  - A request past `HFL_GENERATION_TIMEOUT` got its 504 while the generation
+    ran on, holding the model; it is cancelled now on every backend
+    (llama-server and vLLM by request).
+  - Bark failed every synthesis under transformers 5; `[coqui]` installed
+    but did not import.
+  - `hfl mcp serve` died at start (the MCP 2.x SDK); `HFL_MCP_AUTOLOAD`,
+    `HFL_PORT`/`OLLAMA_PORT` for the client commands and
+    `OLLAMA_KV_CACHE_TYPE` did nothing; a non-numeric setting crashed every
+    command.
+  - `hfl stop <alias>` said a loaded model was not loaded; `hfl verify` and
+    `hfl bench` on a missing model printed a traceback; `/api/benchmark`
+    without streaming returned no figures; `hfl help --extras` listed 9 of
+    16 extras; `compliance-report --format pdf` wrote nothing and said it
+    had.
+  - The chat page offered embedding and speech models, and defaulted to one.
+  - Safetensors without MLX or CUDA were sent to llama.cpp (a 500).
+  - Pulling a model again dropped its alias.
+- **A running server did not see a model another process pulled** (or one
+  pulled through its own API) until restart: "Model not found".
+- **Leaving with a model loaded aborted the process**
+  (`GGML_ASSERT([rsets->data count] == 0)`), the tray included on quit.
+- **`hfl help --extras` crashed on a Linux without a display** (it imported
+  pystray to check it was installed).
+- Every variable the code reads is documented, and only those (13 were
+  missing; one documented variable was read by nothing).
+
 ### Internal
 
 - **No image is published without being run first.** `docker.yml` now
@@ -530,6 +647,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opt-in, and five modelfile tests registered fake models in the
   developer's own registry (they showed up in `hfl list`). The whole
   session now runs with `HFL_HOME` in a throwaway directory.
+- **The local audit, runnable from any fork** (`audit/`): every CLI command,
+  API route, install extra, environment variable, engine and install form
+  against a real install, with small Apache-2.0/MIT models; OK / ROTO / NO
+  COMPROBABLE AQUÍ / REQUIERE PERMISO with the evidence. `audit/linux/`
+  runs it in a Linux container, `audit/watchdog.py` bounds a long run, and
+  `audit/sweep.py` pulls the Hub's most downloaded open text models and asks
+  each a question (29 of 30 ran; the 30th is a draft head, not a model).
+- Not fixed, not reproduced: once, a server froze inside safetensors_rust
+  0.8.0 while Transformers loaded a model (a GIL/OnceLock deadlock between
+  its loader threads); not again in about 20,000 loads.
 
 ## [0.21.0] - 2026-09-24
 
