@@ -92,8 +92,23 @@ class TestDockerCompose:
     def setup_method(self):
         self.cfg = yaml.safe_load(_read("docker-compose.yml"))
 
-    def test_single_service_named_hfl(self):
-        assert list(self.cfg["services"].keys()) == ["hfl"]
+    def test_a_plain_up_starts_hfl_alone(self):
+        """Anything else is behind a profile, off unless asked for."""
+        default = [n for n, svc in self.cfg["services"].items() if not svc.get("profiles")]
+        assert default == ["hfl"]
+
+    def test_searxng_is_opt_in_unpublished_and_keyed_from_env(self):
+        """The search profile's SearXNG: reached only by HFL (no ports), its
+        image pinned, and its secret passed only when set — an empty one
+        would start it with no secret; unset, it refuses to start (measured)."""
+        svc = self.cfg["services"]["searxng"]
+        assert svc["profiles"] == ["search"]
+        assert "ports" not in svc
+        assert ":" in svc["image"] and not svc["image"].endswith(":latest")
+        assert svc["environment"] == {"SEARXNG_SECRET": None}
+        settings = yaml.safe_load(_read("docker/searxng/settings.yml"))
+        assert "json" in settings["search"]["formats"]
+        assert "secret_key" not in settings.get("server", {})
 
     def test_port_mapping_11434_on_this_machine_by_default(self):
         """The server runs without a key unless one is set: the compose

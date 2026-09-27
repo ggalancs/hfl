@@ -10,8 +10,6 @@
 # ``docker compose build --build-arg HFL_EXTRAS=all``) to change the
 # extras set baked into the image.
 
-version: "3.9"
-
 services:
   hfl:
     build:
@@ -32,6 +30,14 @@ services:
       HFL_LANG: "${HFL_LANG:-en}"
       # Optional API key — set HFL_API_KEY in .env to lock the server.
       HFL_API_KEY: "${HFL_API_KEY:-}"
+      # Web search (the web_search tool): with the "search" profile below,
+      # set HFL_SEARXNG_URL=http://searxng:8080 in .env. Keys for hosted
+      # search services pass through when set (unset: not passed).
+      HFL_SEARXNG_URL: "${HFL_SEARXNG_URL:-}"
+      EXA_API_KEY:
+      TAVILY_API_KEY:
+      BRAVE_API_KEY:
+      SERPAPI_API_KEY:
     volumes:
       - ./data/hfl:/var/lib/hfl
     healthcheck:
@@ -40,3 +46,23 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  # Optional: a SearXNG instance for HFL's web search, so it works without
+  # any hosted search service (DuckDuckGo turns scripted clients away).
+  #
+  #   echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
+  #   echo "HFL_SEARXNG_URL=http://searxng:8080" >> .env
+  #   docker compose --profile search up -d
+  #
+  # Not published: only HFL reaches it, inside this compose network.
+  # Without SEARXNG_SECRET it refuses to start (it will not run with the
+  # public default key); the variable is passed only when set.
+  searxng:
+    image: searxng/searxng:2026.9.25-12f8b6515
+    container_name: hfl-searxng
+    profiles: ["search"]
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET:
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro

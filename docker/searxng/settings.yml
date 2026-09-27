@@ -1,0 +1,11 @@
+# SearXNG for HFL's web_search tool (docker compose --profile search).
+# The secret comes from SEARXNG_SECRET (.env), never from this file.
+use_default_settings: true
+server:
+  # Reached only by HFL inside the compose network, never published: no
+  # rate limiter needed, and HFL's scripted queries are not bot traffic.
+  limiter: false
+  bind_address: "0.0.0.0"
+search:
+  # HFL reads results as JSON (off by default in SearXNG).
+  formats: [html, json]

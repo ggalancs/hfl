@@ -778,6 +778,22 @@ def web_search(a: Audit) -> str:
     return f"{len(results)} results ({out.json().get('backend')})"
 
 
+@check("B64", "POST /api/web_search through Exa")
+def web_search_exa(a: Audit) -> str:
+    """A real search through Exa when the auditor has a key (EXA_API_KEY in
+    the audit's environment; nothing is sent without one)."""
+    import os
+
+    if not os.environ.get("EXA_API_KEY"):
+        raise Uncheckable("no EXA_API_KEY in this environment (Exa needs an account)")
+    body = {"query": "hugging face transformers", "max_results": 3}
+    with a.server(env={"HFL_WEB_SEARCH_BACKEND": "exa"}) as base:
+        out = httpx.post(base + "/api/web_search", json=body, timeout=60)
+    results = out.json().get("results") if out.status_code == 200 else None
+    expect(results and out.json().get("backend") == "exa", (out.status_code, out.text[:160]))
+    return f"{len(results)} results through Exa"
+
+
 @check("B41", "GET /health")
 def health(a: Audit) -> str:
     out = _c(a).get("/health").json()
