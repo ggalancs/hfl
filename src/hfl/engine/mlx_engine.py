@@ -80,6 +80,10 @@ class MLXEngine(InferenceEngine):
         #: Prompt tokens the last request took from the cache instead of
         #: evaluating. Diagnostic only — the proof lives in the timings.
         self.last_prompt_tokens_reused: int = 0
+        #: (tokens the draft proposed and the model accepted, tokens) of the
+        #: last request — speculative decoding at work, or not.
+        self.last_draft_tokens: tuple[int, int] = (0, 0)
+        self._draft: Any = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -98,8 +102,33 @@ class MLXEngine(InferenceEngine):
         # starred target accepts either arity (we only want the first two).
         self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
-        self._prompt_store = self._new_prompt_store()
+        self._draft = self._load_draft(kwargs.get("draft_model_path"))
+        # The prompt store keeps the target's KV only; speculative decoding
+        # needs the draft's beside it, so with a draft each request starts
+        # from a fresh cache.
+        self._prompt_store = None if self._draft is not None else self._new_prompt_store()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
+
+    def _load_draft(self, spec: Any) -> Any:
+        """A Modelfile DRAFT as mlx-lm's ``draft_model``: an MLX model with
+        the target's tokenizer, or None (and the log says why)."""
+        if not isinstance(spec, str) or not spec:
+            return None
+        if spec == "prompt-lookup":
+            logger.warning("DRAFT prompt-lookup: mlx-lm has no n-gram lookup; ignored")
+            return None
+        from mlx_lm import load
+
+        try:
+            draft, tokenizer, *_ = load(spec)
+        except Exception as exc:
+            logger.warning("DRAFT %s could not be loaded by mlx-lm; ignored: %s", spec, exc)
+            return None
+        if getattr(tokenizer, "vocab_size", None) != getattr(self._tokenizer, "vocab_size", None):
+            logger.warning("DRAFT %s: another tokenizer than the model's; ignored", spec)
+            return None
+        logger.info("MLX speculative decoding with the draft %s", spec)
+        return draft
 
     def unload(self) -> None:
         with self._native:
@@ -109,6 +138,7 @@ class MLXEngine(InferenceEngine):
         self._model = None
         self._tokenizer = None
         self._model_path = None
+        self._draft = None
         # The cached KV belongs to the model being dropped; keeping it would
         # pin memory and could never be matched against another model.
         self._prompt_store = None
@@ -348,11 +378,14 @@ class MLXEngine(InferenceEngine):
         logits_processors = make_logits_processors(
             repetition_penalty=cfg.repeat_penalty if cfg.repeat_penalty != 1.0 else None,
         )
-        return {
+        kwargs: dict[str, Any] = {
             "max_tokens": cfg.max_tokens,
             "sampler": sampler,
             "logits_processors": logits_processors,
         }
+        if self._draft is not None:
+            kwargs["draft_model"] = self._draft
+        return kwargs
 
     @staticmethod
     def _keyed_sampler(cfg: GenerationConfig) -> Any:
@@ -697,12 +730,19 @@ class MLXEngine(InferenceEngine):
         """``gen`` until ``cancel()``; the inner generator is closed either
         way (the prompt cache stores what was evaluated, as on a stop)."""
         self._cancel.clear()
+        drafted = total = 0
         try:
             for item in gen:
                 if self._cancel.is_set():
                     return
+                if getattr(item, "finish_reason", None) is None:  # the last repeats a token
+                    total += 1
+                    drafted += bool(getattr(item, "from_draft", False))
                 yield item
         finally:
+            self.last_draft_tokens = (drafted, total)
+            if self._draft is not None:
+                logger.info("speculative: %d of %d tokens from the draft", drafted, total)
             close = getattr(gen, "close", None)
             if close is not None:
                 close()

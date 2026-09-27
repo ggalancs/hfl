@@ -181,6 +181,18 @@ benchmark with your prompt mix before committing — measured 1.33×
 on Qwen3-14B + Qwen3-0.6B for a structured-JSON prompt, but ~0.7×
 for free-form prose where the draft predictions get rejected.
 
+Each backend takes what it can:
+
+| backend | `DRAFT <model>` | `DRAFT prompt-lookup` |
+|---|---|---|
+| llama.cpp (Python) | a GGUF draft | yes |
+| llama-server | a GGUF draft (`-md`, `--spec-type draft-simple`) | yes, where the build has `--spec-type ngram-simple` |
+| MLX | an MLX model with the same tokenizer | no (ignored, logged) |
+
+A draft a backend cannot use is ignored with a warning in the log, never an
+error. On MLX a draft turns the prompt cache off (it keeps the model's KV
+only), and the log says how many tokens came from the draft.
+
 ---
 
 ## WebSocket chat — `WS /ws/chat`

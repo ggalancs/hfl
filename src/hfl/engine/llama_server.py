@@ -23,6 +23,7 @@ its only client, and HFL's own authentication and limits stay in front.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -75,6 +76,40 @@ def _slots() -> int:
 
     configured = max(1, int(getattr(config, "queue_max_inflight", 1) or 1))
     return configured if getattr(config, "parallel_explicit", False) else DEFAULT_SLOTS
+
+
+@functools.lru_cache(maxsize=4)
+def _help_text(exe: str) -> str:
+    """``exe --help``: what this llama-server build accepts."""
+    try:
+        done = subprocess.run(
+            [exe, "--help"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout + done.stderr
+
+
+def _speculative_args(exe: str, draft: Any, gpu_layers: int) -> list[str]:
+    """A Modelfile DRAFT as llama-server flags: a draft GGUF (``-md``), or
+    ``prompt-lookup`` as its n-gram lookup (``--spec-type ngram-simple``,
+    in builds that have it; older ones would refuse to start)."""
+    if not isinstance(draft, str) or not draft:
+        return []
+    if draft == "prompt-lookup":
+        if "ngram-simple" in _help_text(exe):
+            return ["--spec-type", "ngram-simple"]
+        logger.warning("DRAFT prompt-lookup: this llama-server has no n-gram lookup; ignored")
+        return []
+    if not (draft.endswith(".gguf") and Path(draft).is_file()):
+        logger.warning("DRAFT %s: llama-server takes a GGUF file as its draft; ignored", draft)
+        return []
+    args = ["-md", draft, "-ngld", str(gpu_layers)]
+    # Builds with --spec-type default it to none: the draft is loaded and
+    # never used (measured: same eval time, no acceptance in the log).
+    if "draft-simple" in _help_text(exe):
+        args += ["--spec-type", "draft-simple"]
+    return args
 
 
 def _gpu_layers(requested: Any) -> int:
@@ -345,6 +380,10 @@ class LlamaServerEngine(InferenceEngine):
             "--no-slots",
             # A vision model's projector: llama-server then takes images.
             *(["--mmproj", str(self._projector)] if self._projector else []),
+            # Speculative decoding (Modelfile DRAFT).
+            *_speculative_args(
+                exe, kwargs.get("draft_model_path"), _gpu_layers(kwargs.get("n_gpu_layers"))
+            ),
         ]
         log_dir = config.home_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)

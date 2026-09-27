@@ -9,6 +9,7 @@ import concurrent.futures
 import io
 import json
 import math
+import re
 import shutil
 import subprocess
 import time
@@ -629,3 +630,85 @@ def e11(a: Audit) -> str:
             "prompt-lookup" in log or "speculative" in log.lower(), "created, but no draft at load"
         )
     return "created with DRAFT; the draft used at load"
+
+
+COPY = (
+    "Copy this code exactly, nothing else:\n"
+    "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"
+)
+
+
+def _greedy(base: str, model: str) -> str:
+    reply = httpx.post(
+        base + "/api/chat",
+        json={
+            "model": model,
+            "stream": False,
+            "messages": [{"role": "user", "content": COPY}],
+            "options": {"temperature": 0, "num_predict": 60},
+        },
+        timeout=600,
+    ).json()
+    return str(reply.get("message", {}).get("content", reply))
+
+
+def _create(a: Audit, name: str, modelfile: str) -> None:
+    path = a.scratch / f"{name}.Modelfile"
+    path.write_text(modelfile)
+    done = a.cli("create", name, "-f", str(path), "--port", str(a.port), timeout=300)
+    expect(_entry(a, name), f"{name} not created: {(done.stdout + done.stderr).strip()[-200:]}")
+
+
+@check("E14", "speculative decoding on llama-server (DRAFT)")
+def e14(a: Audit) -> str:
+    """A DRAFT reaches llama-server and is used: its log counts accepted
+    draft tokens (a draft loaded but unused — llama-server's default
+    --spec-type none — shows none), and greedy output is unchanged."""
+    need_llama_server()
+    part = Parts()
+    with a.server(env={"HFL_LLM_LIBRARY": "llama-server"}) as base:
+        _create(a, "srv-draft", "FROM chat\nDRAFT chat\n")
+        _create(a, "srv-lookup", "FROM chat\nDRAFT prompt-lookup\n")
+        plain = _greedy(base, "chat")
+        logs = sorted((a.home / "logs").glob("llama-server-*.log"))
+        expect(logs, "no llama-server log")
+
+        def accepted(model: str) -> None:
+            log = max(logs, key=lambda p: p.stat().st_mtime)
+            start = len(log.read_text(errors="replace"))
+            text = _greedy(base, model)
+            deadline = time.monotonic() + 10  # timings are written as the slot is released
+            while True:
+                new = log.read_text(errors="replace")[start:]
+                found = re.search(r"draft acceptance = [\d.]+ \(\s*(\d+) accepted", new)
+                if found or time.monotonic() > deadline:
+                    break
+                time.sleep(0.5)
+            expect(found and int(found.group(1)) > 0, f"no draft tokens accepted: {new[-300:]}")
+            expect(text == plain, f"output changed: {text[:60]!r} vs {plain[:60]!r}")
+
+        part("a draft model", lambda: accepted("srv-draft"))
+        part("prompt lookup", lambda: accepted("srv-lookup"))
+    for name in ("srv-draft", "srv-lookup"):
+        a.cli("rm", name, "--yes")
+    return part.verdict()
+
+
+@check("E15", "speculative decoding on MLX (DRAFT)")
+def e15(a: Audit) -> str:
+    """An MLX model with an MLX DRAFT (the same model, 4-bit): tokens come
+    from the draft and greedy output is unchanged."""
+    need_apple_silicon("MLX")
+    with a.server() as base:
+        _create(a, "mlx-draft", "FROM hfq\nDRAFT mlxq\n")
+        plain = _greedy(base, "hfq")
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        start = len(log.read_text(errors="replace"))
+        text = _greedy(base, "mlx-draft")
+        new = log.read_text(errors="replace")[start:]
+    a.cli("rm", "mlx-draft", "--yes")
+    found = re.search(r"speculative: (\d+) of (\d+) tokens from the draft", new)
+    expect(found and int(found.group(1)) > 0, f"no tokens from the draft: {new[-300:]}")
+    expect(text == plain, f"output changed: {text[:60]!r} vs {plain[:60]!r}")
+    assert found is not None
+    return f"{found.group(1)} of {found.group(2)} tokens from the draft; output unchanged"
