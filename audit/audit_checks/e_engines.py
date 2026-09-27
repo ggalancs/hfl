@@ -749,7 +749,9 @@ def e14(a: Audit) -> str:
 @check("E15", "speculative decoding on MLX (DRAFT)")
 def e15(a: Audit) -> str:
     """An MLX model with an MLX DRAFT (the same model, 4-bit): tokens come
-    from the draft and greedy output is unchanged."""
+    from the draft, greedy output is unchanged on this prompt (mlx-lm's own
+    speculative decoding can drift from plain greedy on others, format or
+    not — measured), and a JSON schema still holds with the draft on."""
     need_apple_silicon("MLX")
     with a.server() as base:
         _create(a, "mlx-draft", "FROM hfq\nDRAFT mlxq\n")
@@ -758,9 +760,34 @@ def e15(a: Audit) -> str:
         start = len(log.read_text(errors="replace"))
         text = _greedy(base, "mlx-draft")
         new = log.read_text(errors="replace")[start:]
+        schema = {
+            "type": "object",
+            "properties": {"city": {"type": "string"}, "country": {"type": "string"}},
+            "required": ["city", "country"],
+            "additionalProperties": False,
+        }
+        formatted = httpx.post(
+            base + "/api/chat",
+            json={
+                "model": "mlx-draft",
+                "stream": False,
+                "format": schema,
+                "messages": [{"role": "user", "content": "Where is the Eiffel Tower?"}],
+                "options": {"temperature": 0, "num_predict": 200},
+            },
+            timeout=600,
+        ).json()["message"]["content"]
     a.cli("rm", "mlx-draft", "--yes")
+    try:
+        keys = set(json.loads(formatted))
+    except ValueError:
+        keys = set()
+    expect(keys == {"city", "country"}, f"schema with a draft: {formatted[:80]!r}")
     found = re.search(r"speculative: (\d+) of (\d+) tokens from the draft", new)
     expect(found and int(found.group(1)) > 0, f"no tokens from the draft: {new[-300:]}")
     expect(text == plain, f"output changed: {text[:60]!r} vs {plain[:60]!r}")
     assert found is not None
-    return f"{found.group(1)} of {found.group(2)} tokens from the draft; output unchanged"
+    return (
+        f"{found.group(1)} of {found.group(2)} tokens from the draft; output unchanged; "
+        "a schema holds with the draft"
+    )

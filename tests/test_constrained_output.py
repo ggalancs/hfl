@@ -130,7 +130,7 @@ def test_transformers_generate_gets_the_processor() -> None:
     assert len(kwargs["logits_processor"]) == 1
 
 
-def test_mlx_adds_the_processor_and_drops_the_draft() -> None:
+def test_mlx_adds_the_processor_and_keeps_the_draft() -> None:
     pytest.importorskip("llguidance")
     pytest.importorskip("mlx_lm.sample_utils")
     from hfl.engine.base import GenerationConfig
@@ -140,7 +140,7 @@ def test_mlx_adds_the_processor_and_drops_the_draft() -> None:
     engine._draft = "draft"
     plain = engine._build_sampling(GenerationConfig())
     formatted = engine._build_sampling(GenerationConfig(response_format="json"))
-    assert plain["draft_model"] == "draft" and "draft_model" not in formatted
+    assert plain["draft_model"] == formatted["draft_model"] == "draft"
     assert len(formatted["logits_processors"]) == len(plain["logits_processors"]) + 1
 
 
@@ -193,3 +193,39 @@ def test_both_transformers_paths_pass_it_to_generate(monkeypatch) -> None:
     engine.generate("p", cfg)
     list(engine.generate_stream("p", cfg))
     assert [list(k["logits_processor"]) for k in seen] == [["guided"], ["guided"]]
+
+
+def _tokens(tokenizer, text: str) -> list[int]:
+    return tokenizer(text, add_special_tokens=False)["input_ids"]
+
+
+def test_the_guide_follows_a_history_that_rewinds(tokenizer) -> None:
+    """Speculative decoding drafts tokens and rejects some: the guide rolls
+    back to the history it is given, as if it had only ever seen that."""
+    from hfl.engine.constrained import Guide
+
+    n_vocab = len(tokenizer)
+    good = _tokens(tokenizer, '{"city": "Barcelona"')
+    guide = Guide(tokenizer, SCHEMA, [tokenizer.eos_token_id])
+    guide.sync_mask(good[:3], n_vocab)
+    guide.sync_mask(good[:1], n_vocab)  # two drafted tokens rejected
+    rewound = guide.sync_mask(good, n_vocab)
+    fresh = Guide(tokenizer, SCHEMA, [tokenizer.eos_token_id]).sync_mask(good, n_vocab)
+    assert rewound is not None and (rewound == fresh).all()
+
+
+def test_tokens_past_the_end_do_not_break_it(tokenizer) -> None:
+    """A draft model proposes past a closed format: consuming that left
+    llguidance in an error state no rollback could undo, and the mask stopped
+    applying (MLX, text after the closed JSON, measured)."""
+    from hfl.engine.constrained import Guide
+
+    n_vocab = len(tokenizer)
+    eos = tokenizer.eos_token_id
+    done = _tokens(tokenizer, "yes")
+    guide = Guide(tokenizer, 'GBNF:root ::= "yes" | "no"', [eos])
+    past = guide.sync_mask([*done, eos, *_tokens(tokenizer, "no")], n_vocab)
+    assert guide._matcher is not None and not guide._matcher.is_error()
+    back = guide.sync_mask(done, n_vocab)  # the rejection rewinds to "yes"
+    assert back is not None and not guide._matcher.is_error()
+    assert past is not None

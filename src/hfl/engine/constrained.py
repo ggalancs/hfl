@@ -104,22 +104,52 @@ class Guide:
         fill_next_token_bitmask(self._matcher, self._bitmask, 0)
         return np.asarray(self._bitmask)
 
+    def sync_mask(self, generated: list[int], n_vocab: int) -> Any:
+        """The mask after exactly ``generated`` (the tokens drawn so far).
+        Speculative decoding drafts tokens and then rejects some: whatever of
+        the guide's history is no longer in ``generated`` is rolled back
+        before the new tokens are consumed."""
+        if self._matcher is None:
+            self.mask(None, n_vocab)
+            self._seen: list[int] = []
+        common = 0
+        for mine, theirs in zip(self._seen, generated):
+            if mine != theirs:
+                break
+            common += 1
+        if len(self._seen) > common:
+            self._matcher.rollback(len(self._seen) - common)
+        consumed = generated[:common]
+        for token in generated[common:]:
+            # A draft model proposes past the end of the format; consuming
+            # that puts llguidance in an error state it never leaves, and the
+            # rollback that follows the rejection cannot happen: the mask
+            # stopped applying and text followed the closed JSON (measured).
+            if self._matcher.is_stopped():
+                break
+            self._matcher.consume_token(int(token))
+            consumed.append(int(token))
+        self._seen = consumed
+        return self.mask(None, n_vocab)
+
 
 def mlx_processor(tokenizer: Any, response_format: Any) -> Any:
     """An mlx-lm logits processor: ``(tokens, logits) -> logits``. mlx-lm
-    calls it once after the prompt, then once per drawn token (the last in
-    ``tokens``)."""
+    passes the history each time; what came after the first call's is what
+    was drawn — including, with a draft model, tokens it later rejects and
+    trims from the history (the guide rolls them back)."""
     hf = getattr(tokenizer, "_tokenizer", tokenizer)
     eos = [int(t) for t in getattr(tokenizer, "eos_token_ids", []) or []]
     guide = Guide(hf, response_format, eos)
-    started = [False]
+    base: list[int] = []
 
     def process(tokens: Any, logits: Any) -> Any:
         from llguidance.mlx import apply_token_bitmask
 
-        last = int(tokens[-1].item()) if started[0] else None
-        started[0] = True
-        mask = guide.mask(last, int(logits.shape[-1]))
+        history = [int(t) for t in tokens.tolist()]
+        if not base:
+            base.append(len(history))
+        mask = guide.sync_mask(history[base[0] :], int(logits.shape[-1]))
         return logits if mask is None else apply_token_bitmask(logits, mask)
 
     return process

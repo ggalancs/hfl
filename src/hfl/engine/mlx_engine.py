@@ -412,9 +412,7 @@ class MLXEngine(InferenceEngine):
             "sampler": sampler,
             "logits_processors": logits_processors,
         }
-        # Not with a response format: a drafted token the mask would forbid
-        # is rolled back by mlx-lm, which the guide cannot follow.
-        if self._draft is not None and cfg.response_format is None:
+        if self._draft is not None:
             kwargs["draft_model"] = self._draft
         return kwargs
 
