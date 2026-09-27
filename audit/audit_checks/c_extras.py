@@ -49,10 +49,13 @@ def _extra(a: Audit, extra: str) -> str:
     wheel = a.wheel()
     venv = a.work / "extras" / extra
     installed = venv / ".audit-installed"
-    if not installed.exists():
-        # New, or an install that never finished (a full disk left [coqui]
-        # with half a torch: "module 'torch' has no attribute 'Tensor'"
-        # on every later run): start this venv again.
+    stamp = f"{wheel}:{wheel.stat().st_mtime_ns}" if wheel.exists() else str(wheel)
+    if not installed.exists() or installed.read_text() != stamp:
+        # A clean venv for each wheel: one reused kept what an earlier wheel
+        # asked for and this one does not ([mlx] still had llguidance on
+        # Linux after its marker was fixed), and an install that never
+        # finished left [coqui] with half a torch ("module 'torch' has no
+        # attribute 'Tensor'"). uv links from its cache: cheap to redo.
         subprocess.run(["uv", "venv", "-q", "--clear", "--python", "3.12", str(venv)], check=True)
     log = a.work / "logs" / f"extra-{extra}.log"
     done = subprocess.run(
@@ -73,7 +76,7 @@ def _extra(a: Audit, extra: str) -> str:
     )
     log.write_text(done.stdout + done.stderr)
     if done.returncode == 0:
-        installed.write_text("")
+        installed.write_text(stamp)
     if done.returncode != 0:
         tail = " ".join((done.stdout + done.stderr).split())[-300:]
         if extra in LINUX_CUDA:
@@ -81,7 +84,10 @@ def _extra(a: Audit, extra: str) -> str:
         expect(False, f"pip install hfl[{extra}] failed: {tail}")
     linux = sys.platform.startswith("linux")
     modules = [
-        m for m in MODULES[extra] if (APPLE_SILICON or m != "mlx_lm") and (linux or m != "vllm")
+        m
+        for m in MODULES[extra]
+        # [mlx] installs nothing off Apple Silicon, its llguidance included.
+        if (APPLE_SILICON or (m != "mlx_lm" and extra != "mlx")) and (linux or m != "vllm")
     ]
     if not modules:  # a platform marker installs nothing here
         why = "vLLM is a Linux backend" if extra == "vllm" else "MLX is macOS on Apple Silicon only"
