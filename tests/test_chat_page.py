@@ -67,7 +67,10 @@ def test_a_browser_gets_the_page(client, path, headers):
     assert response.headers["content-type"].startswith("text/html")
     assert "<title>HFL</title>" in response.text
     page = _Page.of(response.text)
-    assert "__" not in page.outside_script  # every placeholder filled
+    # Every placeholder filled. Matched by shape (``__NONCE__``,
+    # ``__T_model__``): a bare "__" also turned up inside the random CSP
+    # nonce now and then, and failed this test by chance.
+    assert re.findall(r"__(?:[A-Z]+|T_[a-z_]+)__", page.outside_script) == []
 
 
 def test_the_policy_allows_only_its_own_script_and_this_server(client):
