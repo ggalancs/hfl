@@ -8,7 +8,9 @@ Icon is generated programmatically with Pillow (no asset files needed).
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import sys
 from typing import TYPE_CHECKING, Any
 
 from hfl import __version__
@@ -139,12 +141,42 @@ def _schedule_icon_update(icon: Any, controller: TrayServerController) -> None:
     t.start()
 
 
+def _stop_on_macos_quit(controller: TrayServerController) -> Any:
+    """Stop the server when macOS quits the app (Cmd+Q, the Dock, logging
+    out). That quit is AppKit's ``terminate:``, which ends the process from C
+    without running Python's exit handlers: with a model still loaded, ggml
+    aborted as it freed Metal (``GGML_ASSERT([rsets->data count] == 0)``,
+    crash of 2026-08-27, reproduced). Returns the observer, to keep it alive;
+    None where AppKit is not there."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import AppKit
+        import Foundation
+    except ImportError:
+        return None
+
+    def _stop(_notification: Any) -> None:
+        with contextlib.suppress(Exception):
+            controller.stop()
+        with contextlib.suppress(Exception):
+            from hfl.engine.llama_cpp import unload_all
+
+            unload_all()
+
+    center = Foundation.NSNotificationCenter.defaultCenter()
+    return center.addObserverForName_object_queue_usingBlock_(
+        AppKit.NSApplicationWillTerminateNotification, None, None, _stop
+    )
+
+
 class HFLTrayIcon:
     """Cross-platform system tray icon for HFL."""
 
     def __init__(self, controller: TrayServerController):
         self._controller = controller
         self._icon: Any = None
+        self._terminate_observer: Any = None
 
     def run(self) -> None:
         """Run the tray icon (blocks the calling thread).
@@ -161,6 +193,7 @@ class HFLTrayIcon:
         )
 
         logger.info("Starting tray icon")
+        self._terminate_observer = _stop_on_macos_quit(self._controller)
         self._icon.run()
 
     def stop(self) -> None:

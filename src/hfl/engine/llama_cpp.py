@@ -7,6 +7,7 @@ This is the main backend for GGUF models.
 Supports CPU, CUDA, Metal, and Vulkan.
 """
 
+import atexit
 import contextlib
 import functools
 import logging
@@ -15,6 +16,7 @@ import re
 import sys
 import threading
 import time
+import weakref
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, cast
 
@@ -47,6 +49,22 @@ else:
         Llama = None
 
 logger = logging.getLogger(__name__)
+
+# Every engine holding a model. At interpreter exit ggml frees its Metal
+# device and asserts no buffer is still in use: a process leaving with a
+# model loaded aborted (GGML_ASSERT([rsets->data count] == 0), exit 134) —
+# the tray quitting did, measured. Unloading them first makes exit clean.
+_LIVE: "weakref.WeakSet[LlamaCppEngine]" = weakref.WeakSet()
+
+
+def unload_all() -> None:
+    """Unload every llama.cpp model this process holds (at exit)."""
+    for engine in list(_LIVE):
+        with contextlib.suppress(Exception):
+            engine.unload()
+
+
+atexit.register(unload_all)
 
 
 @contextmanager
@@ -1998,6 +2016,7 @@ class LlamaCppEngine(InferenceEngine):
                 # Track the draft so ``unload`` releases its memory too.
                 self._draft_model = draft_llama
             self._model_path = model_path
+            _LIVE.add(self)
             self._architecture = architecture
             # ``n_ctx`` may still be 0 here when the caller left it to
             # llama-cpp-python's own metadata default — read back what
