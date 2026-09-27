@@ -90,6 +90,10 @@ class GenerationConfig:
     # which only decides what the reply shows, this reaches the prompt —
     # see ``reasoning_template_vars``.
     reasoning: str | None = None
+    # Whether ``reasoning`` came from a bare ``think: true``/``false`` (an
+    # Ollama boolean) rather than a named level: a Modelfile TEMPLATE then
+    # sees an empty ``.ThinkLevel``, as Ollama gives it.
+    reasoning_from_bool: bool = False
     # Per-request chat-template override (OLLAMA_PARITY_PLAN P2-3).
     # When set, the engine uses this Jinja template in place of the
     # model's default for this request only. Ignored by engines that

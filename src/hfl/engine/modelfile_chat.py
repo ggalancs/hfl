@@ -165,13 +165,15 @@ def render_chat(
     messages: list[ChatMessage],
     tools: list[dict] | None = None,
     reasoning: str | None = None,
+    from_bool: bool = False,
 ) -> str:
     """The prompt ``template`` makes of this conversation (GoTemplateError
-    when it cannot be rendered)."""
+    when it cannot be rendered). ``from_bool``: the client sent ``think`` as
+    a boolean, which names no level (Ollama's ``.ThinkLevel`` is empty)."""
     think = reasoning is not None and reasoning != "off"
     thinking = {
         "Think": think,
-        "ThinkLevel": reasoning if think else "",
+        "ThinkLevel": reasoning if think and not from_bool else "",
         "IsThinkSet": reasoning is not None,
     }
     system, collated = _collate(messages)
@@ -220,7 +222,9 @@ def templated_prompt(
         logger.info("Modelfile TEMPLATE not applied: a message carries images")
         return None
     try:
-        prompt = render_chat(template, messages, tools, config.reasoning)
+        prompt = render_chat(
+            template, messages, tools, config.reasoning, config.reasoning_from_bool
+        )
     except GoTemplateError as exc:
         logger.warning("Modelfile TEMPLATE not applied, the model's own is used: %s", exc)
         return None

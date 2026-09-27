@@ -5,8 +5,7 @@
 It used to apply to ``/api/generate`` only. The expected prompts below were
 produced by Ollama v0.34.3's own ``template`` package from these templates
 and conversations; the same comparison over all 20 templates Ollama ships,
-six conversations and four ``think`` values gave 504/504 identical prompts
-(``think: true`` aside: HFL passes ``ThinkLevel`` "medium", Ollama "")."""
+six conversations and four ``think`` values gave 504/504 identical prompts."""
 
 from __future__ import annotations
 
@@ -245,3 +244,54 @@ def test_a_created_models_template_reaches_the_chat() -> None:
     apply_to_chat(SimpleNamespace(chat_template=LEGACY), [_m("user", "hi")], go, ())
     apply_to_chat(SimpleNamespace(chat_template="{% if x %}{% endif %}"), [], jinja, ())
     assert go.modelfile_template == LEGACY and jinja.modelfile_template is None
+
+
+THINKY = (
+    "{{- if .IsThinkSet }}[set:{{ .Think }}:{{ .ThinkLevel }}]{{ end }}"
+    "{{ range .Messages }}<{{ .Role }}>{{ .Content }}{{ end }}<assistant>"
+)
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "from_bool", "ollama"),
+    [
+        ("medium", True, "[set:true:]<user>hi<assistant>"),  # think: true names no level
+        ("off", True, "[set:false:]<user>hi<assistant>"),
+        ("high", False, "[set:true:high]<user>hi<assistant>"),
+        (None, False, "<user>hi<assistant>"),
+    ],
+)
+def test_the_thinking_fields_as_ollama_gives_them(reasoning, from_bool, ollama) -> None:
+    assert render_chat(THINKY, [_m("user", "hi")], None, reasoning, from_bool) == ollama
+
+
+def test_the_native_route_says_when_think_was_a_boolean(temp_config) -> None:
+    from unittest.mock import MagicMock
+
+    from fastapi.testclient import TestClient
+
+    from hfl.api.server import app
+    from hfl.api.state import get_state, reset_state
+    from hfl.models.manifest import ModelManifest
+
+    reset_state()
+    engine = MagicMock(is_loaded=True)
+    engine.chat = MagicMock(
+        return_value=GenerationResult(text="ok", tokens_generated=1, tokens_prompt=1)
+    )
+    state = get_state()
+    state.engine = engine
+    state.current_model = ModelManifest(name="m", repo_id="o/m", local_path="/m", format="gguf")
+    client = TestClient(app)
+    seen = []
+    for think in (True, "high"):
+        body = {
+            "model": "m",
+            "stream": False,
+            "think": think,
+            "messages": [{"role": "user", "content": "q"}],
+        }
+        client.post("/api/chat", json=body)
+        seen.append(engine.chat.call_args[0][1].reasoning_from_bool)
+    assert seen == [True, False]
+    reset_state()
