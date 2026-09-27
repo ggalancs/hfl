@@ -893,8 +893,8 @@ def _configured_port(port: int | None) -> int:
 # Shown first, in this order; any other declared extra follows. ``dev`` and
 # ``build`` are for working on HFL itself, not for using it.
 _EXTRA_ORDER = [
-    "llama", "vulkan", "rocm", "transformers", "vllm", "mlx", "convert", "tts", "coqui",
-    "stt", "imagegen", "audio", "mcp", "otel", "tray", "all",
+    "llama", "vulkan", "rocm", "transformers", "vllm", "mlx", "structured", "convert", "tts",
+    "coqui", "stt", "imagegen", "audio", "mcp", "otel", "tray", "all",
 ]  # fmt: skip
 _DEVELOPER_EXTRAS = {"dev", "build"}
 
@@ -916,7 +916,9 @@ def _declared_extras() -> tuple[list[str], dict[str, list[str]]]:
         for extra in re.findall(r"extra\s*==\s*['\"]([\w.-]+)['\"]", marker):
             packages.setdefault(extra, []).append(spec.strip())
     shown = [e for e in declared if e not in _DEVELOPER_EXTRAS]
-    order = [e for e in _EXTRA_ORDER if e in shown] + sorted(set(shown) - set(_EXTRA_ORDER))
+    known = [e for e in _EXTRA_ORDER if e in shown and e != "all"]
+    # One this list does not know yet still comes before ``all``, the last.
+    order = known + sorted(set(shown) - set(_EXTRA_ORDER)) + (["all"] if "all" in shown else [])
     return order, packages
 
 

@@ -531,6 +531,12 @@
         "description": "Connect MCP servers as tools (hfl mcp connect, HFL_MCP_AUTOLOAD) and serve HFL's own tools over MCP (hfl mcp serve).",
         "check_module": "mcp"
       },
+      "structured": {
+        "name": "structured",
+        "summary": "Structured output on MLX and Transformers",
+        "description": "A response format (JSON, a JSON schema, a GBNF grammar) on the MLX and Transformers backends: llguidance masks the tokens the format does not allow. Included in [mlx] and [transformers].",
+        "check_module": "llguidance"
+      },
       "otel": {
         "name": "otel",
         "summary": "OpenTelemetry tracing",

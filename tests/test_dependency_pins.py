@@ -104,6 +104,16 @@ class TestStaticPyprojectPins:
         pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["mcp"], "mcp")
         assert "<2" in pin.replace(" ", ""), f"mcp must stay below 2.0: {pin!r}"
 
+    def test_structured_output_comes_with_its_backends(self):
+        """llguidance is capped below its next major, and [mlx] and
+        [transformers] bring it: without it those backends refuse a response
+        format (plan 0.22 P1-8)."""
+        extras = _load_pyproject()["project"]["optional-dependencies"]
+        pin = _find_pin(extras["structured"], "llguidance")
+        assert "<2" in pin.replace(" ", ""), pin
+        for backend in ("mlx", "transformers"):
+            assert any(dep.startswith("hfl[structured]") for dep in extras[backend]), backend
+
     def test_coqui_brings_its_codec(self):
         """From torch 2.9 coqui-tts refuses to import without torchcodec,
         which its [codec] extra installs (local audit C5)."""

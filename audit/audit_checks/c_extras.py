@@ -22,19 +22,25 @@ MODULES = {
     "imagegen": ["diffusers", "torch"],
     "llama": ["llama_cpp"],
     "mcp": ["mcp"],
-    "mlx": ["mlx_lm"],
+    "mlx": ["mlx_lm", "llguidance"],
     "otel": ["opentelemetry.sdk"],
     "rocm": ["llama_cpp"],
     "stt": ["faster_whisper"],
-    "transformers": ["transformers", "torch", "accelerate"],
+    "transformers": ["transformers", "torch", "accelerate", "llguidance"],
     "tray": ["pystray", "PIL"],
     "tts": ["transformers", "torchaudio", "soundfile"],
     "vllm": ["vllm"],
     "vulkan": ["llama_cpp"],
+    "structured": ["llguidance"],
 }
 LINUX_CUDA = {"vllm"}
+# Extras added after the audit was first run: numbered after the others, so
+# the existing checks keep their ids.
+LATER = ("structured",)
 # Each extra's check id, as the loop at the bottom numbers them.
-EXTRA_ID = {name: f"C{index}" for index, name in enumerate(sorted(MODULES), 1)}
+EXTRA_ID = {
+    name: f"C{index}" for index, name in enumerate([*sorted(set(MODULES) - set(LATER)), *LATER], 1)
+}
 
 
 def _extra(a: Audit, extra: str) -> str:

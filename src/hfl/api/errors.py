@@ -463,7 +463,8 @@ def timeout_error(operation: str, timeout_seconds: float) -> HFLHTTPException:
 
 STRUCTURED_OUTPUT_UNSUPPORTED = (
     "This model's backend cannot constrain its output to a format: a response "
-    "format (JSON, a JSON schema) needs the default GGUF backend or llama-server."
+    "format (JSON, a JSON schema) needs the GGUF backends, or MLX / Transformers "
+    "with the [structured] extra (pip install 'hfl[structured]')."
 )
 
 

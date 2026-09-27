@@ -77,6 +77,27 @@ def suite(
                 json.loads(text(out.json()))
             except ValueError:
                 expect(False, f"{path}: not JSON: {text(out.json())[:80]!r}")
+        if not formats:
+            return
+        schema = {
+            "type": "object",
+            "properties": {"capital": {"type": "string"}, "country": {"type": "string"}},
+            "required": ["capital", "country"],
+            "additionalProperties": False,
+        }
+        body = {
+            "model": model,
+            "stream": False,
+            "messages": [{"role": "user", "content": prose}],
+            "format": schema,
+            "options": {"num_predict": 200, "temperature": 0},
+        }
+        answer = c.post("/api/chat", json=body).json()["message"]["content"]
+        try:
+            keys = set(json.loads(answer))
+        except ValueError:
+            keys = set()
+        expect(keys == {"capital", "country"}, f"schema not followed: {answer[:80]!r}")
 
     part("format json" if formats else "format refused (cannot constrain)", format_json)
     part(
@@ -228,7 +249,7 @@ def e3(a: Audit) -> str:
     need_apple_silicon("MLX")
     part = Parts()
     with a.server() as base:
-        suite(part, base, "mlxq", formats=False)
+        suite(part, base, "mlxq")
         log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
         part(
             "served by MLX",
@@ -251,7 +272,7 @@ def e4(a: Audit) -> str:
     )
     expect(out.returncode == 0, (out.stdout + out.stderr)[-300:])
     with a.server("--backend", "transformers") as base:
-        suite(part, base, "hfq", logprobs=False, formats=False)
+        suite(part, base, "hfq", logprobs=False)
     return part.verdict()
 
 

@@ -208,6 +208,25 @@ class TransformersEngine(InferenceEngine):
         """Stop the running blocking generation at its next token."""
         self._cancel.set()
 
+    @property
+    def supports_structured_output(self) -> bool:
+        from hfl.engine.constrained import available
+
+        return available()  # with the [structured] extra
+
+    def _constraint(self, cfg: GenerationConfig) -> dict[str, Any]:
+        """``generate`` kwargs that hold the output to the request's format."""
+        if cfg.response_format is None:
+            return {}
+        from transformers import LogitsProcessorList
+
+        from hfl.engine.constrained import torch_processor
+
+        eos = getattr(getattr(self._model, "generation_config", None), "eos_token_id", None)
+        eos_ids = [eos] if isinstance(eos, int) else list(eos or [])
+        processor = torch_processor(self._tokenizer, cfg.response_format, eos_ids)
+        return {"logits_processor": LogitsProcessorList([processor])}
+
     def generate(
         self,
         prompt: str,
@@ -250,6 +269,7 @@ class TransformersEngine(InferenceEngine):
 
             gen_kwargs["stopping_criteria"] = StoppingCriteriaList([_Watch()])
 
+        gen_kwargs.update(self._constraint(cfg))
         t0 = time.perf_counter()
         with torch.no_grad():
             outputs = self._model.generate(
@@ -336,6 +356,7 @@ class TransformersEngine(InferenceEngine):
                     return cancel.is_set()
 
             gen_kwargs["stopping_criteria"] = StoppingCriteriaList([_Cancelled()])
+        gen_kwargs.update(self._constraint(cfg))
 
         # ENG-8: a bare Thread never propagates the worker's exception, so an
         # OOM / shape / CUDA failure mid-generation used to be swallowed and

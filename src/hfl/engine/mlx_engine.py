@@ -378,14 +378,29 @@ class MLXEngine(InferenceEngine):
         logits_processors = make_logits_processors(
             repetition_penalty=cfg.repeat_penalty if cfg.repeat_penalty != 1.0 else None,
         )
+        if cfg.response_format is not None:
+            from hfl.engine.constrained import mlx_processor
+
+            logits_processors = [
+                *logits_processors,
+                mlx_processor(self._tokenizer, cfg.response_format),
+            ]
         kwargs: dict[str, Any] = {
             "max_tokens": cfg.max_tokens,
             "sampler": sampler,
             "logits_processors": logits_processors,
         }
-        if self._draft is not None:
+        # Not with a response format: a drafted token the mask would forbid
+        # is rolled back by mlx-lm, which the guide cannot follow.
+        if self._draft is not None and cfg.response_format is None:
             kwargs["draft_model"] = self._draft
         return kwargs
+
+    @property
+    def supports_structured_output(self) -> bool:
+        from hfl.engine.constrained import available
+
+        return available()  # with the [structured] extra
 
     @staticmethod
     def _keyed_sampler(cfg: GenerationConfig) -> Any:
