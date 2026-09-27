@@ -43,6 +43,7 @@ ADMIN_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/snapshot/load", {"model": "m", "name": "probe"}),
     ("DELETE", "/api/snapshot/probe", None),
     ("POST", "/api/batch", {"model": "m", "requests": [{"prompt": "hi"}]}),
+    ("POST", "/api/train", {"model": "m", "data": "/tmp/d.jsonl"}),
 ]
 
 

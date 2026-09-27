@@ -637,5 +637,16 @@
     "why_not_found": "no está en el Hub (borrado, renombrado o privado)",
     "why_no_revision": "su rama o etiqueta ya no está en el Hub",
     "why_unreachable": "no se pudo contactar con el Hub ({error})"
+  },
+  "train": {
+    "description": "Entrena un adaptador LoRA sobre un modelo local (Apple Silicon, mlx-lm)",
+    "data": "Datos: {train} filas para entrenar, {valid} para validar ({format})",
+    "progress": "iteración {iteration}/{iters} · pérdida {loss} · {extra}",
+    "exists": "{name} ya existe: elige otro --name, o sigue su entrenamiento con --resume",
+    "stopped": "Detenido. Se conserva el adaptador guardado hasta ahora: `hfl train {model} --data {data} --name {name} --resume` continúa.",
+    "done": "Entrenado: {name} (el adaptador en {adapter}). Para hablar con él: hfl run {name}",
+    "fusing": "Fusionando el adaptador en un modelo nuevo…",
+    "fused": "Modelo fusionado: {name}",
+    "gguf": "Modelo GGUF: {name}"
   }
 }

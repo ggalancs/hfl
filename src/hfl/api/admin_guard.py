@@ -114,6 +114,7 @@ _AUDIT_EVENT_FOR: dict[str, str] = {
     "snapshot save": "snapshot.save",
     "snapshot load": "snapshot.load",
     "snapshot delete": "snapshot.delete",
+    "train": "model.train",
 }
 
 

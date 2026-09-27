@@ -19,6 +19,7 @@ import logging
 import platform
 import threading
 import time
+from pathlib import Path
 from typing import Any, Generator, Iterator, cast
 
 from hfl.engine.base import (
@@ -100,7 +101,11 @@ class MLXEngine(InferenceEngine):
         # ``load`` returns ``(model, tokenizer)`` by default and
         # ``(model, tokenizer, config)`` when ``return_config=True``; the
         # starred target accepts either arity (we only want the first two).
-        self._model, self._tokenizer, *_ = load(model_path)
+        adapter = self._adapter(kwargs.get("lora_paths"))
+        if adapter:
+            self._model, self._tokenizer, *_ = load(model_path, adapter_path=adapter)
+        else:
+            self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
         self._draft = self._load_draft(kwargs.get("draft_model_path"))
         # The prompt store keeps the target's KV only; speculative decoding
@@ -108,6 +113,23 @@ class MLXEngine(InferenceEngine):
         # from a fresh cache.
         self._prompt_store = None if self._draft is not None else self._new_prompt_store()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
+
+    @staticmethod
+    def _adapter(paths: Any) -> str | None:
+        """A Modelfile ADAPTER as mlx-lm takes it: one folder with its
+        ``adapter_config.json`` (what ``hfl train`` / ``mlx_lm lora`` write).
+        A GGUF adapter is llama.cpp's; mlx-lm cannot apply it."""
+        if not paths:
+            return None
+        if len(paths) > 1:
+            raise ValueError("MLX applies one LoRA adapter per model; this one lists several")
+        folder = Path(paths[0])
+        if not (folder / "adapter_config.json").is_file():
+            raise ValueError(
+                f"{folder.name}: not an MLX adapter (a folder with adapter_config.json); "
+                "a GGUF adapter needs the llama.cpp backend"
+            )
+        return str(folder)
 
     def _load_draft(self, spec: Any) -> Any:
         """A Modelfile DRAFT as mlx-lm's ``draft_model``: an MLX model with

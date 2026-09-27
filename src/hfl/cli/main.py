@@ -2145,6 +2145,118 @@ def create(
         raise typer.Exit(1) from exc
 
 
+@app.command(name="train", help=t("train.description"))
+def train(
+    model: str = typer.Argument(help="The model to train on (safetensors or MLX)"),
+    data: Path = typer.Option(
+        ..., "--data", "-d", help="A JSONL file, or a folder with train.jsonl (valid.jsonl)"
+    ),
+    name: str | None = typer.Option(None, "--name", "-n", help="The trained model's name"),
+    iters: int = typer.Option(600, "--iters", min=1),
+    batch_size: int = typer.Option(4, "--batch-size", min=1),
+    num_layers: int = typer.Option(16, "--num-layers", help="Layers to adapt (-1: all)"),
+    learning_rate: float = typer.Option(1e-5, "--learning-rate"),
+    max_seq_length: int = typer.Option(2048, "--max-seq-length", min=16),
+    save_every: int = typer.Option(100, "--save-every", min=1),
+    resume: bool = typer.Option(False, "--resume", help="Continue from the saved adapter"),
+    fuse: bool = typer.Option(False, "--fuse", help="Also merge the adapter into a new model"),
+    gguf: str | None = typer.Option(
+        None, "--gguf", help="Also export the merged model as GGUF at this quantization"
+    ),
+) -> None:
+    """Train a LoRA adapter with mlx-lm and register the result as a model.
+
+    The data is JSONL in one of mlx-lm's formats: {"messages": [...]},
+    {"prompt": ..., "completion": ...} or {"text": ...}. Without a
+    valid.jsonl a tenth of the rows validates. Runs in a process of its own;
+    Ctrl-C stops it and --resume continues from the last saved adapter.
+    """
+    from rich.markup import escape
+
+    from hfl.config import config as hfl_config
+    from hfl.core.container import get_registry
+    from hfl.training import mlx_lora as trainer
+
+    why_not = trainer.available()
+    if why_not:
+        console.print(f"[yellow]{escape(why_not)}[/]")
+        raise typer.Exit(1)
+    base = get_registry().get(model)
+    if base is None:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {escape(model)}")
+        raise typer.Exit(1)
+    target = name or f"{base.name}-lora"
+    try:
+        trainer.check_name(target)
+        problem = trainer.trainable(base)
+        if problem:
+            raise trainer.TrainingError(problem)
+        if get_registry().get(target) is not None and not resume:
+            raise trainer.TrainingError(t("train.exists", name=target))
+        home = Path(hfl_config.home_dir)
+        prepared = trainer.prepare_data(data, home / "training" / target / "data")
+    except trainer.TrainingError as exc:
+        console.print(f"[red]{escape(str(exc))}[/]")
+        raise typer.Exit(1) from None
+    console.print(
+        t("train.data", train=prepared.train, valid=prepared.valid, format=prepared.format)
+    )
+    options = trainer.Options(
+        iters=iters,
+        batch_size=batch_size,
+        num_layers=num_layers,
+        learning_rate=learning_rate,
+        max_seq_length=max_seq_length,
+        save_every=save_every,
+        resume=resume,
+    )
+    adapter = home / "adapters" / target
+    log = home / "logs" / f"train-{target}.log"
+    last: dict[str, Any] = {}
+
+    def show(event: dict[str, Any]) -> None:
+        last.update(event)
+        extra = " · ".join(
+            part
+            for part in (
+                f"val {last['val_loss']:.3f}" if "val_loss" in last else "",
+                f"{last['tokens_per_sec']:.0f} tok/s" if "tokens_per_sec" in last else "",
+                f"{last['peak_memory_gb']:.1f} GB" if "peak_memory_gb" in last else "",
+            )
+            if part
+        )
+        loss = f"{last['train_loss']:.3f}" if "train_loss" in last else "–"
+        console.print(
+            t("train.progress", iteration=event["iteration"], iters=iters, loss=loss, extra=extra)
+        )
+
+    try:
+        trainer.run(trainer.command(str(base.local_path), prepared, adapter, options), log, show)
+    except KeyboardInterrupt:
+        console.print(
+            f"[yellow]{escape(t('train.stopped', model=model, data=data, name=target))}[/]"
+        )
+        raise typer.Exit(130) from None
+    except trainer.TrainingError as exc:
+        console.print(f"[red]{escape(str(exc))}[/] [dim]({log})[/]")
+        raise typer.Exit(1) from None
+    trainer.register(base, target, adapter)
+    console.print(f"[green]{escape(t('train.done', name=target, adapter=adapter))}[/]")
+    if fuse or gguf:
+        console.print(t("train.fusing"))
+        folder = home / "models" / f"{target}-fused"
+        try:
+            trainer.fuse(base, adapter, folder, log, dequantize=bool(gguf))
+            trainer.register_fused(base, f"{target}-fused", folder)
+            console.print(f"[green]{escape(t('train.fused', name=f'{target}-fused'))}[/]")
+            if gguf:
+                trainer.to_gguf(base, f"{target}-gguf", folder, gguf.upper())
+                console.print(f"[green]{escape(t('train.gguf', name=f'{target}-gguf'))}[/]")
+        except Exception as exc:  # the trained adapter stands either way
+            console.print(f"[red]{escape(str(exc))}[/] [dim]({log})[/]")
+            raise typer.Exit(1) from None
+
+
 @app.command(name="mcp")
 def mcp(
     action: str = typer.Argument(help="connect | disconnect | list | serve"),

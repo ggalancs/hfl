@@ -77,6 +77,7 @@ AUDIT_EVENTS = frozenset(
         "snapshot.save",
         "snapshot.load",
         "snapshot.delete",
+        "model.train",
     }
 )
 

@@ -637,5 +637,16 @@
     "why_not_found": "not found on the Hub (deleted, renamed or private)",
     "why_no_revision": "its branch or tag is no longer on the Hub",
     "why_unreachable": "the Hub could not be reached ({error})"
+  },
+  "train": {
+    "description": "Train a LoRA adapter on a local model (Apple Silicon, mlx-lm)",
+    "data": "Data: {train} rows to train on, {valid} to validate ({format})",
+    "progress": "iteration {iteration}/{iters} · loss {loss} · {extra}",
+    "exists": "{name} already exists: pick another --name, or --resume its training",
+    "stopped": "Stopped. The adapter saved so far is kept: `hfl train {model} --data {data} --name {name} --resume` continues.",
+    "done": "Trained: {name} (the adapter in {adapter}). Chat with it: hfl run {name}",
+    "fusing": "Fusing the adapter into a new model…",
+    "fused": "Fused model: {name}",
+    "gguf": "GGUF model: {name}"
   }
 }

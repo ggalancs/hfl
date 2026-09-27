@@ -72,6 +72,7 @@ from hfl.api.routes_show import router as show_router
 from hfl.api.routes_smart_pull import router as smart_pull_router
 from hfl.api.routes_snapshot import router as snapshot_router
 from hfl.api.routes_stop import router as stop_router
+from hfl.api.routes_train import router as train_router
 from hfl.api.routes_transcribe import router as transcribe_router
 from hfl.api.routes_tts import router as tts_router
 from hfl.api.routes_ui import router as ui_router
@@ -502,6 +503,7 @@ app.include_router(ws_router)
 app.include_router(snapshot_router)
 app.include_router(lora_router)
 app.include_router(draft_router)
+app.include_router(train_router)
 app.include_router(show_router)
 app.include_router(stop_router)
 app.include_router(transcribe_router)
