@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -95,6 +96,10 @@ class GenerationConfig:
     # don't expose a pluggable template (vLLM). ``None`` means "use
     # the model's default template".
     template_override: str | None = None
+    # A created model's Modelfile TEMPLATE (Go syntax) for chat: the
+    # conversation is rendered with it and completed as plain text, as
+    # Ollama does (``hfl.engine.modelfile_chat``). ``None``: the model's own.
+    modelfile_template: str | None = None
     # Raw prompt mode (OLLAMA_PARITY_PLAN P2-3, Ollama ``raw=true``).
     # When True the engine forwards the prompt to the model verbatim,
     # bypassing the chat template and the BOS token. Meant for
@@ -258,6 +263,18 @@ def refuse_logprobs(config: "GenerationConfig | None", backend: str) -> None:
 
 class InferenceEngine(ABC):
     """Interface that all backends must implement."""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Every engine's ``chat`` / ``chat_stream`` honours a Modelfile
+        TEMPLATE the same way: rendered here, completed with ``generate``.
+        Done once for all backends (and any added later) rather than in
+        each."""
+        super().__init_subclass__(**kwargs)
+        for name, completion in (("chat", "generate"), ("chat_stream", "generate_stream")):
+            method = cls.__dict__.get(name)
+            if method is None or getattr(method, "_modelfile_template", False):
+                continue
+            setattr(cls, name, _through_modelfile_template(method, completion))
 
     @abstractmethod
     def load(self, model_path: str, **kwargs) -> None:
@@ -548,6 +565,26 @@ class AudioEngine(ABC):
         """Exit async context manager - automatically unload model."""
         if self.is_loaded:
             await asyncio.to_thread(self.unload)
+
+
+def _through_modelfile_template(method: Any, completion: str) -> Any:
+    @functools.wraps(method)
+    def chat(
+        self: "InferenceEngine", messages: list[ChatMessage], *args: Any, **kwargs: Any
+    ) -> Any:
+        # The call is passed on exactly as made: not every engine takes tools.
+        config = args[0] if args else kwargs.get("config")
+        if isinstance(config, GenerationConfig) and config.modelfile_template:
+            from hfl.engine.modelfile_chat import templated_prompt
+
+            tools = args[1] if len(args) > 1 else kwargs.get("tools")
+            templated = templated_prompt(messages, config, tools)
+            if templated is not None:
+                return getattr(self, completion)(*templated)
+        return method(self, messages, *args, **kwargs)
+
+    chat._modelfile_template = True  # type: ignore[attr-defined]
+    return chat
 
 
 def completion_prompt(prompt: str, cfg: GenerationConfig) -> str:

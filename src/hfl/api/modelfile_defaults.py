@@ -12,6 +12,8 @@ with Ollama's precedence:
 - SYSTEM is the default system prompt: used when the request has none.
 - MESSAGE entries sit between the system prompt and the conversation.
 - PARAMETER values are defaults: an option the request sets wins.
+- TEMPLATE formats the chat (``hfl.engine.modelfile_chat``), not only
+  ``/api/generate``.
 
 Each route says which options its request set explicitly (``explicit``), in
 Modelfile names; everything else is filled from the Modelfile.
@@ -19,10 +21,14 @@ Modelfile names; everything else is filled from the Modelfile.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.modelfile_chat import is_go_template
+
+logger = logging.getLogger(__name__)
 
 # Modelfile PARAMETER name -> GenerationConfig attribute. ``num_ctx`` is not
 # here: it sizes the context at load (the manifest's ``context_length``).
@@ -114,6 +120,14 @@ def apply_to_chat(
     if manifest is None:
         return messages
     apply_parameters(manifest, config, explicit)
+    template = _field(manifest, "chat_template", str)
+    if template and is_go_template(template):
+        config.modelfile_template = template  # the engine renders it
+    elif template:
+        logger.warning(
+            "%s: its TEMPLATE is not Go syntax; chat uses the model's own",
+            getattr(manifest, "name", "?"),
+        )
     system = _field(manifest, "system", str)
     if system and not any(m.role == "system" for m in messages):
         messages = [ChatMessage(role="system", content=system), *messages]

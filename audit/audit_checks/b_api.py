@@ -514,6 +514,38 @@ def create(a: Audit) -> str:
 
     part("its system applies", system_applied)
     c.request("DELETE", "/api/delete", json={"model": "b-french"})
+
+    # A TEMPLATE formats the chat too: this one ignores the conversation and
+    # leaves the model mid-sentence, so only a template that applied answers
+    # "Paris"; the base model, asked the same, does not (the control).
+    template = (
+        "{{ range .Messages }}{{ end }}Q: What is the capital of France?\n"
+        "A: The capital of France is"
+    )
+    made = c.post(
+        "/api/create",
+        json={"model": "b-template", "from": "chat", "template": template, "stream": False},
+    )
+    part("created with a template", lambda: expect(made.status_code == 200, made.text[:200]))
+    ask = [{"role": "user", "content": "Reply with the single word OK."}]
+    opts = {"temperature": 0, "num_predict": 8}
+
+    def answer(model: str, path: str) -> str:
+        if path == "/api/chat":
+            body = {"model": model, "stream": False, "messages": ask, "options": opts}
+            return str(c.post(path, json=body).json()["message"]["content"])
+        body = {"model": model, "messages": ask, "temperature": 0, "max_tokens": 8}
+        return str(c.post(path, json=body).json()["choices"][0]["message"]["content"])
+
+    def template_applied() -> None:
+        for path in ("/api/chat", "/v1/chat/completions"):
+            got = answer("b-template", path)
+            expect("paris" in got.lower(), f"{path}: TEMPLATE not applied: {got[:80]}")
+        control = answer("chat", "/api/chat")
+        expect("paris" not in control.lower(), f"control answered Paris too: {control[:80]}")
+
+    part("its template applies to chat (control: the base model)", template_applied)
+    c.request("DELETE", "/api/delete", json={"model": "b-template"})
     bad = c.post("/api/create", json={"model": "b-bad", "from": "nope", "stream": False})
     part("missing base refused", lambda: expect(bad.status_code in (400, 404), bad.status_code))
     return part.verdict()
