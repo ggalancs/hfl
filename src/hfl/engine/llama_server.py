@@ -39,6 +39,7 @@ from typing import Any
 
 import httpx
 
+from hfl.engine import cancel
 from hfl.engine.base import (
     ChatMessage,
     CountedStream,
@@ -496,11 +497,13 @@ class LlamaServerEngine(InferenceEngine):
     ) -> GenerationResult:
         cfg = config or GenerationConfig()
         started = time.monotonic_ns()
-        response = self._http().post(
-            "/v1/chat/completions", json=self._chat_body(messages, cfg, tools)
-        )
-        response.raise_for_status()
-        data = response.json()
+        body = self._chat_body(messages, cfg, tools)
+        if cancel.current() is not None:
+            data = self._streamed_chat(body)
+        else:
+            response = self._http().post("/v1/chat/completions", json=body)
+            response.raise_for_status()
+            data = response.json()
         choice = data["choices"][0]
         message = choice.get("message") or {}
         result = self._result(
@@ -585,9 +588,13 @@ class LlamaServerEngine(InferenceEngine):
     def generate(self, prompt: str, config: GenerationConfig | None = None) -> GenerationResult:
         cfg = config or GenerationConfig()
         started = time.monotonic_ns()
-        response = self._http().post("/completion", json=self._completion_body(prompt, cfg))
-        response.raise_for_status()
-        data = response.json()
+        body = self._completion_body(prompt, cfg)
+        if cancel.current() is not None:
+            data = self._streamed_completion(body)
+        else:
+            response = self._http().post("/completion", json=body)
+            response.raise_for_status()
+            data = response.json()
         stop = "length" if data.get("stopped_limit") else "stop"
         result = self._result(data.get("content") or "", data, started, stop, None)
         if cfg.logprobs is not None:
@@ -614,6 +621,80 @@ class LlamaServerEngine(InferenceEngine):
                         yield text
 
         return counted.feed(_stream())
+
+    # A dispatched request (run_dispatched gives it a cancellation signal) is
+    # sent streamed and reassembled into the one-piece answer: between two
+    # events the signal can be checked, and leaving the stream closes the
+    # connection, which makes llama-server cancel the task ("stop: cancel
+    # task"). A blocking request could be neither checked nor interrupted:
+    # past its budget it ran to the end holding a slot (measured: closing the
+    # client from another thread left the calling thread hung).
+
+    def _events(self, path: str, body: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        """The server-sent events of ``path`` streamed, until done or cancelled."""
+        with self._http().stream("POST", path, json={**body, "stream": True}) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if cancel.cancelled():
+                    raise cancel.GenerationCancelled("request cancelled")
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                yield json.loads(line[6:])
+
+    def _streamed_chat(self, body: dict[str, Any]) -> dict[str, Any]:
+        """/v1/chat/completions streamed, reassembled as its blocking answer."""
+        body = {**body, "stream_options": {"include_usage": True}}
+        content: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        logprobs: list[dict[str, Any]] = []
+        data: dict[str, Any] = {}
+        finish = None
+        for event in self._events("/v1/chat/completions", body):
+            for key in ("usage", "timings"):
+                if event.get(key):
+                    data[key] = event[key]
+            for choice in event.get("choices") or []:
+                delta = choice.get("delta") or {}
+                content.append(delta.get("content") or "")
+                reasoning.append(delta.get("reasoning_content") or "")
+                for call in delta.get("tool_calls") or []:
+                    merged = calls.setdefault(
+                        int(call.get("index", len(calls))),
+                        {"type": "function", "function": {"name": "", "arguments": ""}},
+                    )
+                    if call.get("id"):
+                        merged["id"] = call["id"]
+                    function = call.get("function") or {}
+                    merged["function"]["name"] += function.get("name") or ""
+                    merged["function"]["arguments"] += function.get("arguments") or ""
+                logprobs.extend((choice.get("logprobs") or {}).get("content") or [])
+                finish = choice.get("finish_reason") or finish
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+        if any(reasoning):
+            message["reasoning_content"] = "".join(reasoning)
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        choice_out: dict[str, Any] = {"message": message, "finish_reason": finish}
+        if logprobs:
+            choice_out["logprobs"] = {"content": logprobs}
+        return {**data, "choices": [choice_out]}
+
+    def _streamed_completion(self, body: dict[str, Any]) -> dict[str, Any]:
+        """/completion streamed, reassembled as its blocking answer."""
+        content: list[str] = []
+        probabilities: list[dict[str, Any]] = []
+        data: dict[str, Any] = {}
+        for event in self._events("/completion", body):
+            content.append(event.get("content") or "")
+            probabilities.extend(event.get("completion_probabilities") or [])
+            if event.get("stop"):
+                data = {
+                    k: v
+                    for k, v in event.items()
+                    if k not in ("content", "completion_probabilities")
+                }
+        return {**data, "content": "".join(content), "completion_probabilities": probabilities}
 
     @property
     def _harmony(self) -> bool:

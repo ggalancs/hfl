@@ -336,6 +336,51 @@ def e7(a: Audit) -> str:
     return part.verdict()
 
 
+@check("E13", "a timed-out generation stops")
+def e13(a: Audit) -> str:
+    """Past HFL_GENERATION_TIMEOUT the client gets a 504; the generation
+    must stop too, not run on to num_predict holding the model (it did,
+    measured: the next request waited 16 s behind a 5 s budget)."""
+    part = Parts()
+    # A completion that keeps counting: a chat reply may stop by itself.
+    long = {
+        "model": "chat",
+        "stream": False,
+        "raw": True,
+        "prompt": "Count from 1 to 3000, one number per line:\n1\n2\n3\n",
+        "options": {"num_predict": 6000, "temperature": 0},
+    }
+    short = {"model": "chat", "stream": False, "messages": USER, "options": {"num_predict": 4}}
+    env = {"HFL_GENERATION_TIMEOUT": "4"}
+
+    def in_process() -> None:
+        with a.server(env=env) as base:
+            httpx.post(base + "/api/chat", json=short, timeout=300)  # load first
+            first = httpx.post(base + "/api/generate", json=long, timeout=300).status_code
+            started = time.monotonic()
+            httpx.post(base + "/api/chat", json=short, timeout=300)
+            waited = time.monotonic() - started
+        expect(first == 504 and waited < 2.0, f"504? {first}; next request waited {waited:.1f}s")
+
+    def llama_server() -> None:
+        need_llama_server()
+        log = a.home / "logs" / "llama-server-qwen2.5-0.5b-instruct-q4_k_m.log"
+        before = log.read_text(errors="replace").count("cancel task") if log.exists() else 0
+        with a.server("--backend", "llama-server", env=env) as base:
+            httpx.post(base + "/api/chat", json=short, timeout=300)
+            first = httpx.post(base + "/api/generate", json=long, timeout=300).status_code
+            time.sleep(1)
+        after = log.read_text(errors="replace").count("cancel task") if log.exists() else 0
+        expect(
+            first == 504 and after > before,
+            f"504? {first}; llama-server cancelled: {after - before}",
+        )
+
+    part("llama.cpp: the next request is not kept waiting", in_process)
+    part("llama-server: the task is cancelled (its log says so)", llama_server)
+    return part.verdict()
+
+
 COQUI_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"  # Apache-2.0, as its hifigan vocoder
 
 

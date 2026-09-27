@@ -669,3 +669,42 @@ class TestVLLMEngineLifecycle:
         assert engine._prompt_format == PromptFormat.LLAMA3
 
         engine.unload()
+
+
+def test_a_cancelled_request_is_aborted_in_vllm():
+    """A request past its budget used to decode on to max_tokens; its signal
+    now aborts it in vLLM at the next token. (vLLM needs Linux + CUDA: this
+    drives the engine with a stand-in AsyncLLMEngine.)"""
+    import asyncio
+    import threading
+    import types
+
+    from hfl.engine import cancel
+    from hfl.engine.vllm_engine import VLLMEngine
+
+    aborted: list[str] = []
+
+    class Endless:
+        async def generate(self, prompt, params, request_id):
+            # Ends on its own after ~3 s, so a broken cancel fails this test
+            # instead of hanging the suite.
+            for n in range(1, 300):
+                await asyncio.sleep(0.01)
+                yield types.SimpleNamespace(
+                    outputs=[types.SimpleNamespace(text="x" * n, token_ids=[0] * n)]
+                )
+
+        async def abort(self, request_id):
+            aborted.append(request_id)
+
+    engine = VLLMEngine()
+    engine._engine = Endless()
+    engine._is_async = True
+    signal = threading.Event()
+    threading.Timer(0.2, signal.set).start()
+    try:
+        with cancel.scope(signal), pytest.raises(cancel.GenerationCancelled):
+            engine._generate_async("p", None)
+        assert len(aborted) == 1
+    finally:
+        engine.unload()

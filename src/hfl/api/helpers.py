@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from contextlib import AbstractAsyncContextManager, suppress
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar
@@ -239,7 +240,14 @@ async def run_dispatched(
     )
     span_cm.__enter__()
 
-    worker = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    # This request's own cancellation signal, seen by the worker thread
+    # (to_thread copies the context): engines serving several requests at
+    # once stop the right one.
+    from hfl.engine import cancel as _cancel
+
+    signal = threading.Event()
+    with _cancel.scope(signal):
+        worker = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
 
     async def _release_when_worker_exits() -> None:
         # CON: a sync engine call run via ``asyncio.to_thread`` CANNOT be
@@ -258,6 +266,7 @@ async def run_dispatched(
         try:
             result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
         except asyncio.TimeoutError:
+            signal.set()
             _cancel_engine(engine)
             asyncio.ensure_future(_release_when_worker_exits())
             raise HTTPException(
@@ -282,6 +291,7 @@ async def run_dispatched(
                 # Cancelled, or the worker is still running on the shared model:
                 # keep the slot until the worker thread is truly done — and
                 # stop it, so that is soon.
+                signal.set()
                 _cancel_engine(engine)
                 asyncio.ensure_future(_release_when_worker_exits())
             raise

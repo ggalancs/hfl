@@ -24,6 +24,7 @@ from queue import Empty, Queue
 from typing import Any, Iterator, cast
 
 from hfl.config import config as _hfl_config
+from hfl.engine import cancel
 from hfl.engine.base import (
     ChatMessage,
     GenerationConfig,
@@ -167,10 +168,20 @@ class VLLMEngine(InferenceEngine):
     def _generate_async(self, prompt: str, sampling_params) -> GenerationResult:
         """Generate using AsyncLLMEngine."""
         request_id = str(uuid.uuid4())
+        # This request's cancellation signal, taken here: the coroutine runs
+        # on vLLM's loop thread, whose context does not carry it. A request
+        # past its budget used to decode on to max_tokens; now it is aborted
+        # in vLLM at its next token (as a closed stream already was).
+        signal = cancel.current()
 
         async def _gen():
             final = None
             async for output in self._engine.generate(prompt, sampling_params, request_id):
+                if signal is not None and signal.is_set():
+                    abort = getattr(self._engine, "abort", None)
+                    if abort is not None:
+                        await abort(request_id)
+                    raise cancel.GenerationCancelled("request cancelled")
                 final = output
             return final
 
