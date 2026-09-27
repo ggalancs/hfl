@@ -11,6 +11,7 @@ from hfl.api.model_loader import load_llm, load_llm_sync, load_tts
 from hfl.api.state import reset_state
 from hfl.converter.formats import ModelType
 from hfl.exceptions import (
+    ModelLoadError,
     ModelNotFoundError,
     ModelNotReadyError,
     ModelTypeMismatchError,
@@ -289,7 +290,7 @@ class TestLoadLLMCleanupOnFailure:
         # to_thread: load() raises, cleanup unload() succeeds.
         mock_to_thread.side_effect = [RuntimeError("load boom"), None]
 
-        with pytest.raises(RuntimeError, match="load boom"):
+        with pytest.raises(ModelLoadError, match="load boom"):
             await load_llm("new-model")
 
         # Both the load and the cleanup unload were routed through to_thread.
@@ -337,7 +338,7 @@ class TestLoadLLMCleanupOnFailure:
         # raises — the cleanup error must be swallowed (logged), root re-raised.
         mock_to_thread.side_effect = [RuntimeError("root cause"), RuntimeError("cleanup boom")]
 
-        with pytest.raises(RuntimeError, match="root cause"):
+        with pytest.raises(ModelLoadError, match="root cause"):
             await load_llm("new-model")
 
         # The cleanup error must be logged, not re-raised.

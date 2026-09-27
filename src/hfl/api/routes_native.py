@@ -201,6 +201,24 @@ def _resolve_thinking_level(think: bool | str | None) -> str:
     return "off"
 
 
+def _default_thinking_level(manifest: Any) -> str:
+    """What an omitted ``think`` means for this model, as Ollama resolves it:
+    the model's default (``/api/show``'s ``thinking.default``), so a model
+    that reasons unless told not to (Qwen3) has its reasoning returned in
+    ``thinking`` — HFL hid it, and a reply whose budget went on reasoning
+    came back empty (Qwen3-8B in the compatibility sweep, measured)."""
+    try:
+        from hfl.models.thinking import thinking_controls
+
+        controls = thinking_controls(manifest)
+    except Exception:
+        return "off"
+    default = (controls or {}).get("default")
+    if default is True:
+        return "medium"
+    return default if isinstance(default, str) and default in _VALID_THINKING_LEVELS else "off"
+
+
 def _merge_mcp_tools(existing: list[dict] | None) -> list[dict] | None:
     """Merge tools exposed by connected MCP servers into ``existing``.
 
@@ -317,7 +335,11 @@ async def api_generate(
     # P1-1 + Phase 10 P1: reasoning channel exposure with level
     # support. ``think=True`` still maps to "medium"; new clients
     # pass ``"low"`` / ``"medium"`` / ``"high"`` explicitly.
-    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    gen_config.thinking_level = (
+        _resolve_thinking_level(req.think)
+        if req.think is not None
+        else _default_thinking_level(state.current_model)
+    )
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
     # ``think`` absent: the model's own default; present: it reaches the
@@ -581,7 +603,11 @@ async def api_chat(
             return refused
 
     # P1-1 + Phase 10 P1: reasoning channel w/ multi-level support.
-    gen_config.thinking_level = _resolve_thinking_level(req.think)
+    gen_config.thinking_level = (
+        _resolve_thinking_level(req.think)
+        if req.think is not None
+        else _default_thinking_level(state.current_model)
+    )
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
     # ``think`` absent: the model's own default; present: it reaches the
@@ -686,14 +712,15 @@ async def api_chat(
         # A fixed sentence, never the exception's text (py/stack-trace-exposure).
         return JSONResponse(status_code=400, content={"error": UNSUPPORTED})
 
-    # With ``think``, the reasoning goes in ``message.thinking`` — all of it
-    # when the token cap cut it short (it used to be lost then).
+    # With ``think`` (or a model that reasons by default and none asked
+    # otherwise), the reasoning goes in ``message.thinking`` — all of it when
+    # the token cap cut it short (it used to be lost then).
     message = _build_chat_message(
         raw_text=result.text,
         model_name=req.model,
         tools=tools,
         engine_tool_calls=getattr(result, "tool_calls", None),
-        show_thinking=bool(req.think),
+        show_thinking=gen_config.expose_reasoning,
     )
 
     envelope: dict[str, Any] = {

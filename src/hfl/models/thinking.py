@@ -21,6 +21,7 @@ opposite defaults.
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 from typing import Any
 
 from hfl.models.capabilities import detect_capabilities
@@ -71,8 +72,15 @@ def _from_template(template: str) -> dict[str, Any] | None:
 
 def thinking_controls(manifest: Any) -> dict[str, Any] | None:
     """``{"values": [...], "default": ...}``, or None for a model that does
-    not reason or whose template cannot be rendered here."""
-    found = _from_template(model_template(manifest))
+    not reason or whose template cannot be rendered here. The template's
+    part is cached per model file (every chat without ``think`` asks)."""
+    path = str(getattr(manifest, "local_path", "") or "")
+    try:
+        stamp = Path(path).stat().st_mtime_ns if path else 0
+    except OSError:
+        stamp = 0
+    own = getattr(manifest, "chat_template", None)
+    found = _for_file(path, stamp, own if isinstance(own, str) else None)
     if found is not None:
         return found
     try:
@@ -80,3 +88,10 @@ def thinking_controls(manifest: Any) -> dict[str, Any] | None:
     except Exception:
         reasons = False
     return {"values": [True], "default": True} if reasons and template_env() else None
+
+
+@functools.lru_cache(maxsize=128)
+def _for_file(path: str, stamp: int, own: str | None) -> dict[str, Any] | None:
+    from types import SimpleNamespace
+
+    return _from_template(model_template(SimpleNamespace(local_path=path, chat_template=own)))

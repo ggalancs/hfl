@@ -19,6 +19,8 @@ from hfl.api.state import get_state
 from hfl.converter.formats import ModelType, detect_model_type
 from hfl.engine.selector import select_engine, select_tts_engine
 from hfl.exceptions import (
+    HFLError,
+    ModelLoadError,
     ModelNotFoundError,
     ModelNotReadyError,
     ModelTypeMismatchError,
@@ -197,17 +199,22 @@ async def load_llm(
         engine = select_engine(model_path)
         started = time.monotonic()
         try:
-            await asyncio.to_thread(
-                engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx)
-            )
-            _record_load(manifest.name, started)
-        except Exception:
-            if engine.is_loaded:
-                try:
-                    await asyncio.to_thread(engine.unload)
-                except Exception as cleanup_error:
-                    logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
-            raise
+            await _load_into(engine, manifest, n_ctx)
+        except (MemoryError, HFLError):
+            raise  # already says what happened
+        except Exception as exc:
+            reason = _why_not_loaded(engine, manifest, exc)
+            fallback = _fallback_for(engine, manifest)
+            if fallback is None:
+                raise ModelLoadError(manifest.name, reason) from exc
+            logger.warning("%s; trying %s", reason, _backend_name(fallback))
+            try:
+                await _load_into(fallback, manifest, n_ctx)
+            except Exception as again:
+                reason += "; " + _why_not_loaded(fallback, manifest, again)
+                raise ModelLoadError(manifest.name, reason) from again
+            engine = fallback
+        _record_load(manifest.name, started)
         return engine, manifest
 
     from hfl.config import config as _hfl_config
@@ -337,6 +344,79 @@ def _record_load(name: str, started: float) -> None:
         get_metrics().record_model_load(name, (time.monotonic() - started) * 1000)
     except Exception:  # pragma: no cover — metrics must never break a load
         logger.debug("failed to record a model load", exc_info=True)
+
+
+async def _load_into(engine: "InferenceEngine", manifest: "ModelManifest", n_ctx: int) -> None:
+    """``engine.load`` off the event loop; a half-loaded engine is unloaded
+    on failure so it never leaks."""
+    try:
+        await asyncio.to_thread(
+            engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx)
+        )
+    except BaseException:
+        if engine.is_loaded:
+            try:
+                await asyncio.to_thread(engine.unload)
+            except Exception as cleanup_error:
+                logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
+        raise
+
+
+def _backend_name(engine: object) -> str:
+    return type(engine).__name__.removesuffix("Engine") or "the backend"
+
+
+def _why_not_loaded(engine: object, manifest: "ModelManifest", exc: BaseException) -> str:
+    """Why a model did not load, for the client — without the paths the
+    backend's message carries (a 500 once leaked them): the first line, the
+    model's folder and HFL's home replaced. A GGUF llama.cpp refused gets
+    its architecture named, which is what usually explains it."""
+    import hfl.config
+
+    text = (str(exc).strip().splitlines() or [type(exc).__name__])[0]
+    local = str(manifest.local_path)
+    for secret in sorted({local, str(Path(local).parent), str(hfl.config.config.home_dir)}, key=len,
+                         reverse=True):  # fmt: skip
+        text = text.replace(secret, "…")
+    if local.endswith(".gguf") and "Failed to load model" in text:
+        from hfl.converter.gguf_header import read_fields
+
+        try:
+            arch = read_fields(Path(local), {"general.architecture"}).get("general.architecture")
+        except Exception:
+            arch = None
+        text = (
+            f"llama.cpp could not load the file (architecture '{arch or 'unknown'}'): this "
+            "llama.cpp does not support it, or the file is not a model on its own "
+            "(e.g. a speculative-decoding draft head)"
+        )
+    return f"{manifest.name} could not be loaded by {_backend_name(engine)}: {text[:300]}"
+
+
+def _fallback_for(engine: object, manifest: "ModelManifest") -> "InferenceEngine | None":
+    """Another backend for a model the chosen one could not load, or None.
+
+    - MLX's loader maps each architecture's weights by name and refuses
+      ones it does not know (distilgpt2: "82 parameters not in model",
+      measured): Transformers runs them.
+    - llama-cpp-python bundles its own llama.cpp, older than the one
+      installed as ``llama-server`` (Homebrew's): a newer architecture
+      (Spark-X2.5's ``spark2_5``, measured) loads only on the latter.
+    """
+    from hfl.engine.selector import _create_engine
+
+    gguf = str(manifest.local_path).endswith(".gguf")
+    backend = _backend_name(engine)
+    try:
+        if backend == "MLX" and not gguf:
+            return _create_engine("transformers")
+        if backend == "LlamaCpp" and gguf:
+            from hfl.engine.llama_server import binary
+
+            return _create_engine("llama-server") if binary() else None
+    except Exception:
+        return None
+    return None
 
 
 def load_kwargs_for(manifest: "ModelManifest", n_ctx: int | None) -> dict[str, Any]:

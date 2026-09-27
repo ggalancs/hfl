@@ -169,22 +169,31 @@ def try_model(a: Audit, base: str, item: dict) -> dict:
     return result
 
 
+def _ran(result: dict) -> bool:
+    """It loaded and produced text: whether a base model (no chat template)
+    also knows the answer is a question about the model, not about HFL."""
+    return result.get("status_code") == 200 and bool((result.get("reply") or "").strip())
+
+
 def report(work: Path, results: list[dict]) -> Path:
     ok = [r for r in results if r["answered"]]
+    ran = [r for r in results if _ran(r)]
     lines = [
         "# HFL compatibility sweep",
         "",
-        f"{len(ok)} of {len(results)} answered correctly.",
+        f"{len(ran)} of {len(results)} loaded and answered; {len(ok)} said Paris "
+        "(base models, without a chat template, are asked to complete a sentence).",
         "",
-        "| repo | kind | size | pulled | answered | engine | pull s | chat s | note |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| repo | kind | size | pulled | ran | Paris | engine | pull s | chat s | note |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         size = f"{r['params_b']} B params" if "params_b" in r else f"{r.get('size_gb')} GB"
         note = (r.get("error") or ("" if r["answered"] else r.get("reply", ""))).replace("|", "/")
         lines.append(
             f"| {r['repo']} | {r['kind']} | {size} | {'yes' if r['pulled'] else 'NO'} | "
-            f"{'yes' if r['answered'] else 'NO'} | {r.get('engine') or ''} | "
+            f"{'yes' if _ran(r) else 'NO'} | {'yes' if r['answered'] else 'no'} | "
+            f"{r.get('engine') or ''} | "
             f"{r.get('pull_s', '')} | {r.get('chat_s', '')} | {note[:140].replace(chr(10), ' ')} |"
         )
     path = work / "SWEEP.md"
@@ -199,6 +208,7 @@ def main() -> int:
     parser.add_argument("--max-params", type=float, default=4.0, help="billions (safetensors)")
     parser.add_argument("--max-gguf-gb", type=float, default=6.0)
     parser.add_argument("--list", action="store_true", help="list the candidates and stop")
+    parser.add_argument("--only", help="comma-separated repos to re-run (results replaced)")
     args = parser.parse_args()
     work = args.work.expanduser().resolve()
     items = safetensors_candidates(args.n, args.max_params) + gguf_candidates(
@@ -213,6 +223,10 @@ def main() -> int:
         raise SystemExit(f"{hfl} does not exist: run audit/local_audit.py --setup first")
     store = work / "sweep.json"
     results: list[dict] = json.loads(store.read_text()) if store.exists() else []
+    if args.only:
+        wanted = {r.strip() for r in args.only.split(",")}
+        items = [i for i in items if i["repo"] in wanted]
+        results = [r for r in results if r["repo"] not in wanted]
     done = {r["repo"] for r in results}
     audit = Audit(hfl, work)
     try:
