@@ -627,7 +627,7 @@ def api_lora_all(a: Audit) -> str:
     return out.text[:100]
 
 
-@check("B17", "POST /api/lora/apply")
+@check("B17", "POST /api/lora/apply", needs=("A20",))
 def api_lora_apply(a: Audit) -> str:
     c = _c(a)
     adapter = a.home / "adapters" / "moe_shakespeare15M.gguf"
@@ -650,16 +650,17 @@ def api_lora_apply(a: Audit) -> str:
     return "applied (text changed); a path outside HFL 400"
 
 
-@check("B19", "GET /api/lora/{model}")
+@check("B19", "GET /api/lora/{model}", needs=("B17",))
 def api_lora_model(a: Audit) -> str:
     out = _c(a).get("/api/lora/stories").json()
     expect(out.get("adapters"), out)
     return f"{len(out['adapters'])} adapter(s)"
 
 
-@check("B18", "POST /api/lora/remove")
+@check("B18", "POST /api/lora/remove", needs=("B17",))
 def api_lora_remove(a: Audit) -> str:
     c = _c(a)
+    expect(hasattr(a, "_lora"), "B17 applied no adapter to remove")
     adapter_id, before, prompt = a._lora  # type: ignore[attr-defined]
     out = c.post("/api/lora/remove", json={"model": "stories", "adapter_id": adapter_id})
     expect(out.status_code == 200, out.text[:200])
@@ -838,7 +839,10 @@ def ui(a: Audit) -> str:
 
 @check("B63", "WS /ws/chat")
 def ws_chat(a: Audit) -> str:
-    from websockets.sync.client import connect
+    try:
+        from websockets.sync.client import connect
+    except ImportError as exc:
+        raise Uncheckable("the harness's Python has no `websockets`") from exc
 
     base = a.shared().replace("http://", "ws://")
     with connect(base + "/ws/chat", open_timeout=30) as ws:

@@ -17,7 +17,7 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git curl espeak-ng libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir uv httpx
+RUN pip install --no-cache-dir uv httpx websockets
 # llama-cpp-python from its project's generic CPU wheels, as HFL's own image:
 # built here it targets this CPU, and on arm64 under Docker Desktop gcc 12
 # fails on the fp16 intrinsics ("target specific option mismatch").

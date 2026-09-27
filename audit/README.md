@@ -11,8 +11,9 @@ without the setting) so a check that cannot fail does not pass.
 
 ## What you need
 
-- Python ≥ 3.10 with `httpx` to run the harness (the repo's dev venv has it:
-  `pip install -e ".[dev]"`).
+- Python ≥ 3.10 with `httpx` and `websockets` to run the harness (the repo's
+  dev venv has both: `pip install -e ".[dev]"`; without `websockets` the
+  WebSocket check reports `NO COMPROBABLE AQUÍ`).
 - [`uv`](https://docs.astral.sh/uv/) — `--setup` and section C build the
   wheel and venvs with it.
 - ~20 GB of disk and a network connection (models come from the Hugging Face
