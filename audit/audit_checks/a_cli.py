@@ -512,8 +512,9 @@ def mcp(a: Audit) -> str:
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         ]
         # As a client does: stdin stays open until the answer is in. Closed
-        # early, MCP SDK 2.x ends the session and drops pending requests
-        # (1.x answered them): the Linux run listed no tools for that reason.
+        # early, newer MCP SDKs (1.30 on the Linux run, 2.2 too) end the
+        # session and drop pending requests (1.28 answered them): the Linux
+        # run listed no tools for that reason.
         proc = subprocess.Popen(
             [a.hfl, "mcp", "serve", "--capabilities", "web_fetch"],
             stdin=subprocess.PIPE,
