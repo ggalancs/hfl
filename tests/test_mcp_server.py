@@ -9,6 +9,8 @@ Only the SDK-bound ``build_server`` path is gated.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from hfl.mcp import server as mcp_server
@@ -369,3 +371,80 @@ class TestServeEntrypoints:
         from hfl.mcp.server import serve_stdio
 
         await serve_stdio(["web_search"])  # must not raise
+
+
+# -- both SDK APIs ---------------------------------------------------------------
+
+
+class _Tool:
+    def __init__(self, name, description, inputSchema):
+        self.name, self.description, self.input_schema = name, description, inputSchema
+
+
+class _Text:
+    def __init__(self, type, text):
+        self.type, self.text = type, text
+
+
+class _Server1x:
+    """The 1.x low-level Server: tools wired with decorators."""
+
+    def __init__(self, name):
+        self.handlers = {}
+
+    def list_tools(self):
+        return lambda fn: self.handlers.setdefault("list", fn)
+
+    def call_tool(self):
+        return lambda fn: self.handlers.setdefault("call", fn)
+
+
+class _Server2x:
+    """The 2.x Server: no decorators; handlers given to the constructor."""
+
+    def __init__(self, name, on_list_tools=None, on_call_tool=None):
+        self.handlers = {"list": on_list_tools, "call": on_call_tool}
+
+
+def _server(monkeypatch, cls):
+    from hfl.mcp import server as srv
+
+    if cls is _Server2x:  # its results validate their parts: the SDK's own types
+        from mcp.types import TextContent, Tool
+    else:
+        Tool, TextContent = _Tool, _Text
+    sdk = {"Server": cls, "Tool": Tool, "TextContent": TextContent, "InitializationOptions": object}
+    monkeypatch.setattr(srv.HFLMCPServer, "_require_sdk", lambda self: sdk)
+
+    async def echo(arguments):
+        if "boom" in arguments:
+            raise ValueError("bad input")
+        return [{"type": "text", "text": f"hi {arguments.get('who', '')}"}]
+
+    built = srv.HFLMCPServer(["model_list"])
+    built._tools = {"echo": srv._ToolSpec("echo", "says hi", {"type": "object"}, echo)}
+    return built.build_server()
+
+
+@pytest.mark.asyncio
+async def test_the_1x_sdk_gets_decorated_handlers(monkeypatch):
+    server = _server(monkeypatch, _Server1x)
+    assert [t.name for t in await server.handlers["list"]()] == ["echo"]
+    assert [c.text for c in await server.handlers["call"]("echo", {"who": "a"})] == ["hi a"]
+
+
+@pytest.mark.asyncio
+async def test_the_2x_sdk_gets_constructor_handlers(monkeypatch):
+    """2.x dropped the decorators: `hfl mcp serve` died at start (local
+    audit A21), and a <2 cap broke `hfl[all]` with vLLM 0.30 (Linux C1).
+    Checked for real with mcp 1.28 and 2.2: a stdio session lists the tools
+    and calls one."""
+    pytest.importorskip("mcp.types")
+    server = _server(monkeypatch, _Server2x)
+    listing = await server.handlers["list"](None, None)
+    assert [t.name for t in listing.tools] == ["echo"]
+    ok = await server.handlers["call"](None, SimpleNamespace(name="echo", arguments={"who": "b"}))
+    assert [c.text for c in ok.content] == ["hi b"]
+    bad = await server.handlers["call"](None, SimpleNamespace(name="echo", arguments={"boom": 1}))
+    failed = getattr(bad, "is_error", getattr(bad, "isError", None))  # 2.x / 1.x name
+    assert failed is True and bad.content[0].text == "ERROR: bad input"

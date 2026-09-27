@@ -73,12 +73,14 @@ def _sample(tokenizer, response_format, seed: int, steps: int = 200) -> str:
     guide = Guide(tokenizer, response_format, [eos])
     rng = np.random.default_rng(seed)
     n_vocab = len(tokenizer)
+    closers = [i for i in range(n_vocab) if any(c in tokenizer.decode([i]) for c in '"}')]
     drawn: list[int] = []
     last = None
     for _ in range(steps):
         mask = guide.mask(last, n_vocab)
         logits = rng.normal(size=(1, n_vocab)).astype(np.float32)
         logits[0, eos] += 4.0  # prefer stopping as soon as the format allows it
+        logits[0, closers] += 3.0  # and closing what is open, within the budget
         from llguidance.numpy import apply_token_bitmask_inplace
 
         apply_token_bitmask_inplace(logits, mask)

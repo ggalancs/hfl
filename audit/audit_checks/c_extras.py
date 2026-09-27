@@ -8,12 +8,14 @@ gets a venv of its own; its modules must import and ``hfl version`` run.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 
 from local_audit import APPLE_SILICON, Audit, Uncheckable, check, expect
 
 MODULES = {
-    "all": ["llama_cpp", "transformers", "mlx_lm", "faster_whisper", "diffusers", "mcp"],
+    "all": ["llama_cpp", "transformers", "mlx_lm", "faster_whisper", "diffusers", "mcp", "vllm"],
     "audio": ["sounddevice", "soundfile"],
     "build": ["PyInstaller"],
     "convert": ["gguf"],
@@ -46,8 +48,12 @@ EXTRA_ID = {
 def _extra(a: Audit, extra: str) -> str:
     wheel = a.wheel()
     venv = a.work / "extras" / extra
-    if not (venv / "bin" / "python").exists():
-        subprocess.run(["uv", "venv", "-q", "--python", "3.12", str(venv)], check=True)
+    installed = venv / ".audit-installed"
+    if not installed.exists():
+        # New, or an install that never finished (a full disk left [coqui]
+        # with half a torch: "module 'torch' has no attribute 'Tensor'"
+        # on every later run): start this venv again.
+        subprocess.run(["uv", "venv", "-q", "--clear", "--python", "3.12", str(venv)], check=True)
     log = a.work / "logs" / f"extra-{extra}.log"
     done = subprocess.run(
         # --reinstall-package: a rebuilt wheel keeps its version; install it anyway.
@@ -66,15 +72,29 @@ def _extra(a: Audit, extra: str) -> str:
         timeout=3600,
     )
     log.write_text(done.stdout + done.stderr)
+    if done.returncode == 0:
+        installed.write_text("")
     if done.returncode != 0:
         tail = " ".join((done.stdout + done.stderr).split())[-300:]
         if extra in LINUX_CUDA:
             raise Uncheckable(f"does not install here (Linux + CUDA only): {tail}")
         expect(False, f"pip install hfl[{extra}] failed: {tail}")
-    modules = [m for m in MODULES[extra] if APPLE_SILICON or m != "mlx_lm"]
-    if not modules:  # [mlx]'s marker installs nothing off Apple Silicon
-        raise Uncheckable("MLX exists only on macOS with Apple Silicon")
-    code = "; ".join(f"import {m}" for m in modules)
+    linux = sys.platform.startswith("linux")
+    modules = [
+        m for m in MODULES[extra] if (APPLE_SILICON or m != "mlx_lm") and (linux or m != "vllm")
+    ]
+    if not modules:  # a platform marker installs nothing here
+        why = "vLLM is a Linux backend" if extra == "vllm" else "MLX is macOS on Apple Silicon only"
+        raise Uncheckable(why)
+    # pystray reads the display as it is imported: on a Linux with none (a
+    # container) whether it is installed is the question here, not a desktop.
+    headless = linux and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY")
+    code = "; ".join(
+        f"import importlib.util as u; assert u.find_spec({m!r})"
+        if headless and m == "pystray"
+        else f"import {m}"
+        for m in modules
+    )
     if extra == "coqui":
         # As HFL imports it: coqui-tts needs the helper HFL's coqui engine
         # supplies under transformers 5 (a bare `import TTS` fails there).

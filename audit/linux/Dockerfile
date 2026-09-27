@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir uv httpx websockets
 # built here it targets this CPU, and on arm64 under Docker Desktop gcc 12
 # fails on the fp16 intrinsics ("target specific option mismatch").
 ENV UV_EXTRA_INDEX_URL=https://abetlen.github.io/llama-cpp-python/whl/cpu
+# uv's cache in the work volume, next to the venvs, so it hard-links each
+# package into every venv instead of copying it: on Linux pip's torch
+# carries CUDA (~5 GB), and with the cache in the container's own layer every
+# extra's venv held a copy — the volume grew to 45 GB and filled Docker's disk.
+ENV UV_CACHE_DIR=/work/.uv-cache UV_LINK_MODE=hardlink
 
 WORKDIR /src
 COPY . /src

@@ -116,7 +116,12 @@ transformers = [
 # Upper bounds on the heavy, fast-moving native deps below: they are the
 # largest vuln/breakage surface and pre-1.0 ones break by minor. Cap at the
 # next major (convention shared with transformers/hub/mlx).
-vllm = ["vllm>=0.6.0,<1.0"]
+# vLLM: Linux only (its GPU backend; on macOS `[all]` used to build a CPU
+# 0.7 from source). Floor at 0.30, which has wheels for x86_64 and aarch64:
+# with a low floor the resolver fell back to 0.6.5 whenever another extra
+# asked for a newer torch/llguidance, and 0.6.5 has no wheel — `hfl[all]`
+# failed building it on Linux arm64 (Linux audit C1).
+vllm = ["vllm>=0.30.0,<1.0; sys_platform == 'linux'"]
 convert = ["gguf>=0.10.0"]
 
 # TTS support
@@ -154,12 +159,14 @@ tray = [
     "Pillow>=12.3.0",
 ]
 
-# Model Context Protocol client/server (Phase 9+). Capped at the next major:
-# the 2.x SDK removed the low-level Server's list_tools()/call_tool()
-# decorators that hfl.mcp.server wires its tools with, and an uncapped range
-# let a clean install pull 2.2 — `hfl mcp serve` then died at start with
-# "'Server' object has no attribute 'list_tools'" (local audit A21).
-mcp = ["mcp>=1.0.0,<2.0"]
+# Model Context Protocol client/server (Phase 9+). 1.x and 2.x both work:
+# 2.x dropped the low-level Server's list_tools()/call_tool() decorators
+# (`hfl mcp serve` died with "'Server' object has no attribute 'list_tools'",
+# local audit A21), and hfl.mcp.server wires either API; the client reads
+# both field names. Not capped below 2 any more: vLLM 0.30 requires mcp 2,
+# and the cap made `hfl[all]` fall back to a vLLM with no wheel (Linux audit
+# C1). Capped at the next major, whose API is unknown.
+mcp = ["mcp>=1.0.0,<3.0"]
 
 # Apple Silicon native backend (Phase 13+ — V2 row 14).
 # 0.31.2+ is required for the ``gemma4`` architecture; the same
@@ -169,16 +176,20 @@ mcp = ["mcp>=1.0.0,<2.0"]
 # blocked the very next minor for no concrete reason.
 mlx = [
     "mlx-lm>=0.31.2,<1.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    # A response format (JSON, a schema, a grammar) on this backend.
-    "hfl[structured]; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # A response format (JSON, a schema, a grammar) on this backend. Named
+    # here, not as hfl[structured]: hatchling flattens a self-reference and
+    # drops its marker, so [mlx] installed llguidance on Linux too.
+    "llguidance>=1.7.0,<2.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 # Structured output (JSON, a JSON schema, a GBNF grammar) on MLX and
 # Transformers: llguidance builds the token mask (llama.cpp's own constrained
-# decoding is built on it). 1.8 is the API used (LLMatcher, grammar_from,
-# the numpy/torch/mlx mask helpers, whitespace_pattern); capped at the next
-# major. Without it those backends refuse a response format with a 400.
-structured = ["llguidance>=1.8.0,<2.0"]
+# decoding is built on it). 1.7 has the API used (LLMatcher, grammar_from,
+# the numpy/torch/mlx mask helpers, JSON separators) — and 1.7 is what vLLM
+# 0.30 pins (<1.8), so a 1.8 floor made `hfl[all]` fall back to a vLLM with
+# no wheel (Linux audit C1). Capped at the next major. Without it those
+# backends refuse a response format with a 400.
+structured = ["llguidance>=1.7.0,<2.0"]
 
 # Speech-to-text (Whisper) — Phase 16 / V2 row 16. Prefers
 # faster-whisper (CPU+GPU); openai-whisper stays as a fallback.

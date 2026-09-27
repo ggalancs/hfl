@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import threading
 import uuid
@@ -115,7 +116,17 @@ class VLLMEngine(InferenceEngine):
 
             self._ensure_loop()
             engine_args = AsyncEngineArgs(model=model_path, **kwargs)
-            self._engine = self._run_async(AsyncLLMEngine.from_engine_args(engine_args))
+
+            async def _create() -> Any:
+                # from_engine_args is a plain classmethod (vLLM 0.6 through
+                # 0.30 at least): handing its result to run_coroutine_threadsafe
+                # raised TypeError on every real load — the tests faked it as
+                # a coroutine. Built inside the engine's own loop, which then
+                # runs its requests; awaited only if a version returns one.
+                engine = AsyncLLMEngine.from_engine_args(engine_args)
+                return await engine if inspect.isawaitable(engine) else engine
+
+            self._engine = self._run_async(_create())
             self._is_async = True
             logger.info("vLLM async engine loaded: %s", model_path)
         except (ImportError, AttributeError):

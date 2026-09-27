@@ -26,7 +26,7 @@ def _fresh_client():
     mcp.reset_client()
 
 
-def _install_fake_sdk(monkeypatch):
+def _install_fake_sdk(monkeypatch, schema_field: str = "inputSchema"):
     """Replace ``_require_sdk`` with a fake that returns controllable stand-ins.
 
     Returns the captured state so the test body can inspect calls.
@@ -52,10 +52,9 @@ def _install_fake_sdk(monkeypatch):
             state["initialized"] = True
 
         async def list_tools(self):
-            tool = SimpleNamespace(
-                name="echo",
-                description="echo tool",
-                inputSchema={"type": "object", "properties": {"msg": {"type": "string"}}},
+            tool = SimpleNamespace(name="echo", description="echo tool")
+            setattr(  # 1.x names the field inputSchema, 2.x input_schema
+                tool, schema_field, {"type": "object", "properties": {"msg": {"type": "string"}}}
             )
             state["listed_tools"].append(tool)
             return SimpleNamespace(tools=[tool])
@@ -275,3 +274,14 @@ class TestMCPTool:
         assert tool["type"] == "function"
         assert tool["function"]["name"] == "fs__read"
         assert tool["function"]["parameters"] == {"type": "object"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["inputSchema", "input_schema"])
+async def test_a_tools_schema_is_read_from_either_sdk(monkeypatch, field):
+    """The 2.x SDK names it input_schema: reading only inputSchema gave every
+    tool of a 2.x server an empty schema, so the model had no parameters."""
+    _install_fake_sdk(monkeypatch, schema_field=field)
+    client = mcp.MCPClient()
+    tools = await client.connect("fs", "stdio://echo hi")
+    assert tools[0].input_schema["properties"] == {"msg": {"type": "string"}}

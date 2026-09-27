@@ -97,12 +97,13 @@ class TestStaticPyprojectPins:
             f"[{extra_name}] transformers pin must cap before the next major: {pin!r}"
         )
 
-    def test_mcp_capped_below_the_2x_api(self):
-        """The 2.x SDK dropped the Server decorators hfl.mcp.server uses; an
-        uncapped pin let a clean install take 2.2 and `hfl mcp serve` died
-        at start (local audit A21)."""
+    def test_mcp_takes_1x_and_2x_but_not_the_next_major(self):
+        """hfl.mcp.server serves both SDK APIs (2.x dropped the decorators
+        1.x used, local audit A21). A cap below 2 made `hfl[all]` fall back
+        to a vLLM with no wheel, vLLM 0.30 requiring mcp 2 (Linux audit C1)."""
         pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["mcp"], "mcp")
-        assert "<2" in pin.replace(" ", ""), f"mcp must stay below 2.0: {pin!r}"
+        compact = pin.replace(" ", "")
+        assert "<3" in compact and "<2" not in compact, pin
 
     def test_structured_output_comes_with_its_backends(self):
         """llguidance is capped below its next major, and [mlx] and
@@ -111,8 +112,23 @@ class TestStaticPyprojectPins:
         extras = _load_pyproject()["project"]["optional-dependencies"]
         pin = _find_pin(extras["structured"], "llguidance")
         assert "<2" in pin.replace(" ", ""), pin
-        for backend in ("mlx", "transformers"):
-            assert any(dep.startswith("hfl[structured]") for dep in extras[backend]), backend
+        # vLLM 0.30 pins llguidance <1.8: a 1.8 floor broke `hfl[all]`.
+        assert ">=1.7" in pin.replace(" ", ""), pin
+        assert any(dep.startswith("hfl[structured]") for dep in extras["transformers"])
+        # [mlx] names it with the platform marker (a self-reference loses it
+        # in the wheel), at the same range as [structured].
+        mlx = [d for d in extras["mlx"] if d.startswith("llguidance")]
+        assert len(mlx) == 1 and mlx[0].split(";")[0].strip() == pin.strip(), mlx
+        assert "sys_platform == 'darwin'" in mlx[0], mlx
+
+    def test_vllm_is_linux_only_with_a_floor_that_has_wheels(self):
+        """A low floor let the resolver fall back to vLLM 0.6.5, which has no
+        wheel, whenever another extra wanted newer torch/llguidance:
+        `hfl[all]` failed building it on Linux arm64 (Linux audit C1)."""
+        deps = _load_pyproject()["project"]["optional-dependencies"]["vllm"]
+        assert len(deps) == 1
+        spec, _, marker = deps[0].partition(";")
+        assert ">=0.30" in spec.replace(" ", "") and "sys_platform == 'linux'" in marker
 
     def test_coqui_brings_its_codec(self):
         """From torch 2.9 coqui-tts refuses to import without torchcodec,

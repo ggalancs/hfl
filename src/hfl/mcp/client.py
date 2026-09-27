@@ -195,7 +195,11 @@ class MCPClient:
                         server_id=server_id,
                         name=t.name,
                         description=t.description or "",
-                        input_schema=getattr(t, "inputSchema", None) or {"type": "object"},
+                        # 2.x names it input_schema (inputSchema is its JSON
+                        # alias): reading only inputSchema lost every schema.
+                        input_schema=getattr(t, "input_schema", None)
+                        or getattr(t, "inputSchema", None)
+                        or {"type": "object"},
                     )
                     for t in getattr(listing, "tools", [])
                 ]

@@ -27,11 +27,13 @@ _TOKENIZERS: dict[tuple[int, int], tuple[Any, Any]] = {}
 _LOCK = threading.Lock()
 
 
-# Whitespace between JSON tokens as llama.cpp's JSON grammar bounds it: a
-# space, or a newline and up to 20 of indentation. Unbounded (llguidance's
-# default), Qwen2.5-0.5B wrote `"population": 1,` and then spaces until the
-# token limit (measured).
-_JSON_OPTIONS: Any = {"whitespace_pattern": r"(?:[ ]|\n[ \t]{0,20})?"}
+# JSON on one line, with a space after ":" and ",": whitespace left free
+# (llguidance's default), Qwen2.5-0.5B wrote `"population": 1,` and then
+# spaces until the token limit (measured). A bounded whitespace_pattern fixed
+# that on llguidance 1.8 only — 1.7, the line vLLM 0.30 requires, ignores it
+# (measured, the same runaway) — so no free whitespace at all, which every
+# version honours (measured on 1.7.0, 1.7.6, 1.8.0: valid JSON, stopped).
+_JSON_OPTIONS: Any = {"whitespace_flexible": False, "item_separator": ", ", "key_separator": ": "}
 
 
 def available() -> bool:

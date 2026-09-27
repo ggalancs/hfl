@@ -220,49 +220,72 @@ class HFLMCPServer:
             "InitializationOptions": InitializationOptions,
         }
 
+    def _tool_list(self, Tool: Any) -> list[Any]:
+        return [
+            Tool(name=spec.name, description=spec.description, inputSchema=spec.input_schema)
+            for spec in self._tools.values()
+        ]
+
+    async def _run_tool(
+        self, name: str, arguments: dict[str, Any] | None, TextContent: Any
+    ) -> tuple[list[Any], bool]:
+        """A tool's answer as MCP text parts, and whether it is an error.
+        A ValueError is the contract for bad input; MCP shows it as an error
+        result, as it does a crash (whose text stays in the log)."""
+        spec = self._tools.get(name)
+        if spec is None:
+            raise ValueError(f"unknown tool {name!r}")
+        try:
+            payload = await spec.handler(arguments or {})
+        except ValueError as exc:
+            return [TextContent(type="text", text=f"ERROR: {exc}")], True
+        except Exception:
+            logger.exception("MCP tool handler crashed: %s", name)
+            return [TextContent(type="text", text="ERROR: internal server error")], True
+        # Each dict back through the SDK's own type, so the client sees
+        # canonical content.
+        out = [
+            TextContent(type="text", text=part.get("text", ""))
+            for part in payload
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        return out, False
+
     def build_server(self) -> Any:
-        """Construct the ``mcp.server.Server`` with tool handlers wired up."""
+        """Construct the ``mcp.server.Server`` with tool handlers wired up.
+
+        The SDK's 1.x and 2.x wire them differently — decorators on 1.x,
+        constructor handlers on 2.x (which dropped the decorators: `hfl mcp
+        serve` died at start with "'Server' object has no attribute
+        'list_tools'"). Both are served: vLLM 0.30 requires MCP 2, so a 1.x
+        cap made `hfl[all]` fall back to a vLLM with no wheel."""
         sdk = self._require_sdk()
-        Server = sdk["Server"]
-        Tool = sdk["Tool"]
-        TextContent = sdk["TextContent"]
+        Server, Tool, TextContent = sdk["Server"], sdk["Tool"], sdk["TextContent"]
 
-        server = Server("hfl")
+        if hasattr(Server, "list_tools"):  # 1.x
+            server = Server("hfl")
 
-        @server.list_tools()
-        async def _list_tools() -> list[Any]:
-            return [
-                Tool(
-                    name=spec.name,
-                    description=spec.description,
-                    inputSchema=spec.input_schema,
-                )
-                for spec in self._tools.values()
-            ]
+            @server.list_tools()
+            async def _list_tools() -> list[Any]:
+                return self._tool_list(Tool)
 
-        @server.call_tool()
-        async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
-            spec = self._tools.get(name)
-            if spec is None:
-                raise ValueError(f"unknown tool {name!r}")
-            try:
-                payload = await spec.handler(arguments or {})
-            except ValueError as exc:
-                # ValueError is the contract for "bad input"; MCP
-                # surfaces it as an IsError response.
-                return [TextContent(type="text", text=f"ERROR: {exc}")]
-            except Exception:
-                logger.exception("MCP tool handler crashed: %s", name)
-                return [TextContent(type="text", text="ERROR: internal server error")]
-            # Marshal each dict back through the TextContent constructor
-            # so the MCP client sees canonical SDK types.
-            out = []
-            for part in payload:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    out.append(TextContent(type="text", text=part.get("text", "")))
-            return out
+            @server.call_tool()
+            async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+                content, _ = await self._run_tool(name, arguments, TextContent)
+                return content
 
-        return server
+            return server
+
+        from mcp import types
+
+        async def on_list_tools(ctx: Any, params: Any) -> Any:
+            return types.ListToolsResult(tools=self._tool_list(Tool))
+
+        async def on_call_tool(ctx: Any, params: Any) -> Any:
+            content, failed = await self._run_tool(params.name, params.arguments, TextContent)
+            return types.CallToolResult(content=content, isError=failed)
+
+        return Server("hfl", on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 async def serve_stdio(capabilities: list[str] | None = None) -> None:

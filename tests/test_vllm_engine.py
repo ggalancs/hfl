@@ -26,7 +26,9 @@ def mock_vllm():
     # Async engine mocks
     mock_async_engine_instance = MagicMock()
     mock_async_engine_class = MagicMock()
-    mock_async_engine_class.from_engine_args = AsyncMock(return_value=mock_async_engine_instance)
+    # A plain classmethod, as in vLLM (0.6 through 0.30): the AsyncMock this
+    # used to be hid that HFL's load raised TypeError on every real vLLM.
+    mock_async_engine_class.from_engine_args = MagicMock(return_value=mock_async_engine_instance)
     mock_engine_args = MagicMock()
 
     # Main vllm module
@@ -101,6 +103,23 @@ class TestVLLMEngineLoad:
         assert engine._model_path == "/path/to/model"
         mock_vllm["engine_args"].assert_called_once_with(model="/path/to/model")
 
+        engine.unload()
+
+    def test_load_takes_the_engine_as_real_vllm_returns_it(self, mock_vllm):
+        """from_engine_args returns the engine itself (a coroutine only if a
+        version ever makes it one): both load, and it is the one used."""
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        engine = VLLMEngine()
+        engine.load("/m")
+        assert engine._engine is mock_vllm["async_engine"]
+        engine.unload()
+        mock_vllm["async_engine_class"].from_engine_args = AsyncMock(
+            return_value=mock_vllm["async_engine"]
+        )
+        engine = VLLMEngine()
+        engine.load("/m")
+        assert engine._engine is mock_vllm["async_engine"]
         engine.unload()
 
     def test_load_with_kwargs(self, mock_vllm):

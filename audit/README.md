@@ -49,6 +49,12 @@ docker run --rm -v hfl-audit-work:/work hfl-audit-linux --setup
 docker run --rm -v hfl-audit-work:/work hfl-audit-linux --only A,B,D,E
 ```
 
+For B38's real search from inside the container, `AUDIT_SEARXNG_URL` must be
+an address the container reaches: a SearXNG published on the host's
+`127.0.0.1` is not reachable through `host.docker.internal`; use the SearXNG
+container's own address (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <name>`,
+port 8080) with `-e AUDIT_SEARXNG_URL=http://<ip>:8080`.
+
 Results accumulate in `<work>/results.json` (a re-run of some checks updates
 only those) and every run writes `<work>/REPORT.md`: the counts, what is not
 OK first, then every check with its evidence.
