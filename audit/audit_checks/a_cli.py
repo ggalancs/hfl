@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -509,18 +511,39 @@ def mcp(a: Audit) -> str:
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         ]
-        proc = subprocess.run(
+        # As a client does: stdin stays open until the answer is in. Closed
+        # early, MCP SDK 2.x ends the session and drops pending requests
+        # (1.x answered them): the Linux run listed no tools for that reason.
+        proc = subprocess.Popen(
             [a.hfl, "mcp", "serve", "--capabilities", "web_fetch"],
-            input="\n".join(json.dumps(r) for r in session) + "\n",
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
             env=a.env,
         )
-        replies = [json.loads(x) for x in proc.stdout.splitlines() if x.startswith("{")]
-        listed = next((r for r in replies if r.get("id") == 2), {})
+        listed: dict = {}
+        guard = threading.Timer(60, proc.kill)  # readline must not wait forever
+        guard.start()
+        try:
+            assert proc.stdin is not None and proc.stdout is not None
+            for message in session:
+                proc.stdin.write(json.dumps(message) + "\n")
+            proc.stdin.flush()
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                if line.startswith("{") and json.loads(line).get("id") == 2:
+                    listed = json.loads(line)
+                    break
+        finally:
+            guard.cancel()
+            proc.kill()
+            proc.wait(timeout=30)
         names = [t["name"] for t in listed.get("result", {}).get("tools", [])]
-        expect(names == ["web_fetch"], f"tools listed: {names} {proc.stderr[-160:]}")
+        expect(names == ["web_fetch"], f"tools listed: {names}")
 
     part("serve over stdio answers initialize", serves)
     part("--capabilities limits the tools", exposes_only_the_capabilities_asked)
