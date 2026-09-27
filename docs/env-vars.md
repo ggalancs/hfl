@@ -53,6 +53,8 @@ the host string does not.
 |----------------------|-------------------------|---------|--------------|
 | `HFL_LLM_LIBRARY`    | `OLLAMA_LLM_LIBRARY`    | (auto)  | Pin auto-selection to a specific backend: `llama-cpp`, `llama-server`, `transformers`, `vllm`, `mlx`. `llama-server` serves GGUF models only (others keep their backend) and needs llama.cpp's `llama-server` installed. Per-call `backend=` argument still wins. |
 | `HFL_LLAMA_SERVER_BIN` | — | (PATH) | The `llama-server` executable to run, when it is not on the PATH. |
+| `HFL_PROMPT_CACHE_PERSIST` | — | `false` | Keep llama-server's prompt cache on disk (`<HFL_HOME>/cache/llama-server/`) across unload and reload: each slot's KV is saved when the model unloads and restored when it loads again with the same file and settings, so a long prefix is not evaluated again (measured: 1860 prompt tokens → 1). It writes the KV of every slot at each unload — gigabytes for a long context on a large model. |
+| `HFL_PROMPT_CACHE_MAX_GB` | — | `4` | Disk budget for that cache over all models; the least recently saved go first. |
 
 > On the command line: `hfl serve --parallel N` asks for N requests at once per
 > GGUF text model (it implies `llama-server`), and `hfl serve --backend NAME`

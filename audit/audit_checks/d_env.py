@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import re
 import time
 from pathlib import Path
 
@@ -690,3 +691,50 @@ def d53(a: Audit) -> str:
     unread = [v for v in documented if f'"{v}"' not in source]
     expect(not unread, f"documented but never read: {unread}")
     return f"{len(documented)} documented, all read by the code"
+
+
+LONG = "You are a coding assistant. " + " ".join(
+    f"Rule {i}: keep functions short and named clearly." for i in range(150)
+)
+
+
+def _reload_evaluates(a: Audit, env: dict) -> int:
+    """Prompt tokens llama-server evaluates for a long prefix it has seen,
+    after the model was unloaded and loaded again."""
+    body = {
+        "model": "chat",
+        "stream": False,
+        "messages": [{"role": "system", "content": LONG}, {"role": "user", "content": "hi"}],
+        "options": {"temperature": 0, "num_predict": 4},
+    }
+    with a.server(env={"HFL_LLM_LIBRARY": "llama-server", **env}) as base:
+        httpx.post(base + "/api/chat", json=body, timeout=300)
+        httpx.post(base + "/api/chat", json={**body, "keep_alive": 0}, timeout=300)
+        deadline = time.monotonic() + 60
+        while httpx.get(base + "/api/ps").json()["models"] and time.monotonic() < deadline:
+            time.sleep(0.5)
+        httpx.post(base + "/api/chat", json=body, timeout=300)
+        log = max((a.home / "logs").glob("llama-server-*.log"), key=lambda p: p.stat().st_mtime)
+        time.sleep(1)  # timings are written as the slot is released
+        counts = re.findall(r"prompt eval time =\s+[\d.]+ ms /\s+(\d+) tokens", log.read_text())
+    expect(counts, "no prompt timings in llama-server's log")
+    return int(counts[-1])
+
+
+@probe("D54", "HFL_PROMPT_CACHE_PERSIST")
+def d54(a: Audit) -> str:
+    need_llama_server()
+    on = _reload_evaluates(a, {"HFL_PROMPT_CACHE_PERSIST": "true"})
+    off = _reload_evaluates(a, {})
+    expect(on < 10 < off, f"after a reload: {on} prompt tokens evaluated with it, {off} without")
+    return f"after a reload the long prefix cost {on} prompt tokens with it, {off} without"
+
+
+@probe("D55", "HFL_PROMPT_CACHE_MAX_GB")
+def d55(a: Audit) -> str:
+    need_llama_server()
+    tiny = _reload_evaluates(
+        a, {"HFL_PROMPT_CACHE_PERSIST": "true", "HFL_PROMPT_CACHE_MAX_GB": "0.001"}
+    )
+    expect(tiny > 10, f"a 1 MB budget still restored the prefix ({tiny} tokens evaluated)")
+    return f"a 1 MB budget keeps nothing: the prefix is evaluated again ({tiny} tokens)"

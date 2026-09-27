@@ -363,6 +363,12 @@ def test_env_does_not_disable_the_reuse():
         # dir()-based version of this guard since it was added.
         # TestMeasuredReuse loads with the default and measures the reuse.
         "kv_cache_type",
+        # A copy of llama-server's cache on disk, off by default; neither
+        # knob turns in-process reuse off (on, a reload even starts warm).
+        # tests/test_prompt_cache_disk.py::test_off_by_default and
+        # ::test_launch_points_llama_server_at_the_folder_and_restores
+        "prompt_cache_persist",
+        "prompt_cache_max_gb",
     }
     suspicious = [name for name in suspicious if name not in proven]
     assert suspicious == [], (

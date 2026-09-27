@@ -112,6 +112,80 @@ def _speculative_args(exe: str, draft: Any, gpu_layers: int) -> list[str]:
     return args
 
 
+def _argv_slots(argv: list[str]) -> int:
+    try:
+        return int(argv[argv.index("-np") + 1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def _prompt_cache_root() -> Path:
+    from hfl.config import config
+
+    return Path(config.home_dir) / "cache" / "llama-server"
+
+
+def _prompt_cache_dir(argv: list[str], model_path: str) -> Path | None:
+    """The folder for this exact process's slots, or None when the prompt
+    cache is not kept on disk. Keyed by everything that shapes the KV —
+    the model file (path, size, mtime), its LoRA files, context, slots,
+    cache type, template: KV restored into anything else would be silently
+    wrong, so any change starts a fresh folder."""
+    from hfl.config import config
+
+    if not getattr(config, "prompt_cache_persist", False):
+        return None
+    import hashlib
+
+    def stat(path: str) -> list[Any]:
+        try:
+            info = Path(path).stat()
+        except OSError:
+            return [path]
+        return [path, info.st_size, info.st_mtime_ns]
+
+    loras: list[str] = []
+    if "--lora-scaled" in argv:
+        spec = argv[argv.index("--lora-scaled") + 1]
+        loras = [item.rsplit(":", 1)[0] for item in spec.split(",")]
+    identity = json.dumps(
+        [argv[1:], stat(model_path), [stat(p) for p in loras]], sort_keys=True, default=str
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
+    folder = _prompt_cache_root() / f"{Path(model_path).stem}-{digest}"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _trim_prompt_cache(current: Path) -> None:
+    """Keep the saved KV under ``HFL_PROMPT_CACHE_MAX_GB``, over all models:
+    the least recently saved folders go first, then this one's files."""
+    from hfl.config import config
+
+    budget = float(getattr(config, "prompt_cache_max_gb", 4.0)) * 1024**3
+    root = _prompt_cache_root()
+    if not root.is_dir():
+        return
+    folders = sorted((f for f in root.iterdir() if f.is_dir()), key=lambda f: f.stat().st_mtime)
+
+    def size(folder: Path) -> int:
+        return sum(p.stat().st_size for p in folder.glob("slot-*.bin"))
+
+    total = sum(size(f) for f in folders)
+    for folder in [f for f in folders if f != current] + [current]:
+        if total <= budget:
+            return
+        for saved in folder.glob("slot-*.bin"):
+            total -= saved.stat().st_size
+            saved.unlink(missing_ok=True)
+        if folder != current:
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+        logger.info("prompt cache: %s dropped to stay under %.1f GB", folder.name, budget / 1024**3)
+
+
 def _gpu_layers(requested: Any) -> int:
     """llama-cpp-python's ``-1`` (all layers) is llama-server's ``999``."""
     return int(requested) if isinstance(requested, int) and requested >= 0 else 999
@@ -320,6 +394,8 @@ class LlamaServerEngine(InferenceEngine):
         self._template_args: list[str] = []
         self._loras: list[tuple[str, str, float]] = []
         self._timeout = 600.0
+        # Where this process keeps its slots' KV between runs (None: off).
+        self._cache_dir: Path | None = None
 
     # ------------------------------------------------------------------ life
 
@@ -413,7 +489,60 @@ class LlamaServerEngine(InferenceEngine):
 
     def _launch(self, base_argv: list[str], model_path: str, timeout: float) -> None:
         assert self._log_path is not None
+        self._cache_dir = _prompt_cache_dir(base_argv, model_path)
+        if self._cache_dir is not None:
+            base_argv = [*base_argv, "--slot-save-path", str(self._cache_dir)]
         self._proc, self._client = start_server(base_argv, model_path, self._log_path, timeout)
+        if self._cache_dir is not None:
+            self._restore_slots(_argv_slots(base_argv))
+
+    # --------------------------------------------------- prompt cache on disk
+
+    def _restore_slots(self, slots: int) -> None:
+        """Each slot's KV as the last unload of this exact model and
+        configuration saved it (``HFL_PROMPT_CACHE_PERSIST``)."""
+        assert self._cache_dir is not None
+        restored = 0
+        for slot in range(slots):
+            saved = self._cache_dir / f"slot-{slot}.bin"
+            if not saved.is_file():
+                continue
+            try:
+                done = self._http().post(
+                    f"/slots/{slot}?action=restore", json={"filename": saved.name}, timeout=300
+                )
+                done.raise_for_status()
+                restored += int(done.json().get("n_restored", 0))
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.warning("prompt cache: slot %d not restored (%s); dropped", slot, exc)
+                saved.unlink(missing_ok=True)
+        if restored:
+            logger.info("prompt cache: %d tokens restored from disk", restored)
+
+    def _save_slots(self) -> None:
+        """Each slot's KV to disk before the process stops; empty ones and
+        whatever the size budget cannot hold are not kept."""
+        if self._cache_dir is None or self._client is None:
+            return
+        saved = 0
+        for slot in range(_argv_slots(self._argv) or self._slots):
+            name = f"slot-{slot}.bin"
+            try:
+                done = self._client.post(
+                    f"/slots/{slot}?action=save", json={"filename": name}, timeout=300
+                )
+                done.raise_for_status()
+                tokens = int(done.json().get("n_saved", 0))
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.warning("prompt cache: slot %d not saved (%s)", slot, exc)
+                tokens = 0
+            if tokens:
+                saved += tokens
+            else:
+                (self._cache_dir / name).unlink(missing_ok=True)
+        if saved:
+            logger.info("prompt cache: %d tokens saved to disk", saved)
+        _trim_prompt_cache(self._cache_dir)
 
     def _props(self) -> dict[str, Any]:
         try:
@@ -481,8 +610,11 @@ class LlamaServerEngine(InferenceEngine):
 
     def unload(self) -> None:
         if self._client is not None:
-            self._client.close()
-            self._client = None
+            try:
+                self._save_slots()
+            finally:
+                self._client.close()
+                self._client = None
         self._stop()
 
     # ------------------------------------------------------------- requests

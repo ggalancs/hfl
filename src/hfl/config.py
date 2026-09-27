@@ -261,6 +261,20 @@ class HFLConfig:
             os.environ.get("HFL_RATE_LIMIT_LOCAL", "").strip().lower() in ("1", "true", "yes", "on")
         )
     )
+    # llama-server's prompt cache kept on disk across unload/reload: a
+    # coding agent's long prefix is not evaluated again after keep_alive
+    # unloads the model. Off by default: it writes the KV of every slot at
+    # unload (gigabytes for a long context on a large model), capped by
+    # prompt_cache_max_gb over all models.
+    prompt_cache_persist: bool = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_PROMPT_CACHE_PERSIST", "").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+    )
+    prompt_cache_max_gb: float = field(
+        default_factory=lambda: _env_float(4.0, "HFL_PROMPT_CACHE_MAX_GB")
+    )
     rate_limit_requests: int = field(
         default_factory=lambda: _env_int(60, "HFL_RATE_LIMIT_REQUESTS")
     )
