@@ -49,3 +49,44 @@ def model_template(manifest: Any) -> str:
     except (OSError, ValueError) as exc:
         logger.debug("no chat template readable from %s: %s", path, exc)
     return ""
+
+
+def template_env() -> Any | None:
+    """The sandboxed Jinja environment chat templates render in, with what
+    they expect (``raise_exception``, ``strftime_now``, a ``tojson`` that
+    keeps non-ASCII, ``{% generation %}`` and loop controls), or None
+    without jinja2 — not a core dependency; every backend that renders
+    templates in-process brings it."""
+    import json as _json
+    from datetime import datetime
+
+    try:
+        import jinja2
+        import jinja2.ext
+        from jinja2.ext import loopcontrols
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+    except ImportError:
+        return None
+
+    def _raise(message: str) -> None:
+        raise jinja2.TemplateError(message)
+
+    def _tojson(value: Any, ensure_ascii: bool = False, indent: Any = None, **_: Any) -> str:
+        return _json.dumps(value, ensure_ascii=ensure_ascii, indent=indent)
+
+    class _IgnoreGeneration(jinja2.ext.Extension):
+        """``{% generation %}`` (SmolLM3's template): its content, as
+        llama-cpp-python and Transformers render it."""
+
+        tags = {"generation"}
+
+        def parse(self, parser: Any) -> Any:
+            next(parser.stream)
+            return parser.parse_statements(("name:endgeneration",), drop_needle=True)
+
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True, lstrip_blocks=True, extensions=[loopcontrols, _IgnoreGeneration]
+    )
+    env.filters["tojson"] = _tojson
+    env.globals.update(raise_exception=_raise, strftime_now=lambda f: datetime.now().strftime(f))
+    return env

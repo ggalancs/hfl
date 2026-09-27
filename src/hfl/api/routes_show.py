@@ -31,6 +31,7 @@ from hfl.exceptions import ModelNotFoundError
 from hfl.models.capabilities import detect_capabilities
 from hfl.models.chat_template import model_template
 from hfl.models.registry import get_registry
+from hfl.models.thinking import thinking_controls
 
 router = APIRouter(tags=["Ollama"])
 
@@ -148,7 +149,7 @@ async def show_model(req: ShowRequest) -> dict[str, Any]:
     if manifest is None:
         raise ModelNotFoundError(req.model)
 
-    return {
+    body = {
         "modelfile": render_modelfile(manifest),
         "parameters": _format_parameters(manifest),
         "template": model_template(manifest),
@@ -157,3 +158,7 @@ async def show_model(req: ShowRequest) -> dict[str, Any]:
         "capabilities": detect_capabilities(manifest),
         "license": manifest.license_name or manifest.license or "",
     }
+    thinking = thinking_controls(manifest)
+    if thinking is not None:  # Ollama omits it for a model that does not reason
+        body["thinking"] = thinking
+    return body

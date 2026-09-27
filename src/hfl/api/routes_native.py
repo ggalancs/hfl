@@ -195,6 +195,8 @@ def _resolve_thinking_level(think: bool | str | None) -> str:
         level = think.lower().strip()
         if level in _VALID_THINKING_LEVELS:
             return level
+        if level == "max":  # Ollama's top level; HFL's is "high"
+            return "high"
     logger.warning("ignoring unknown think= value: %r", think)
     return "off"
 

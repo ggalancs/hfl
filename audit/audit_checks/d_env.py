@@ -244,6 +244,21 @@ def d15(a: Audit) -> str:
 
 @probe("D16", "HFL_HOST")
 def d16(a: Audit) -> str:
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+        # 0.0.0.0 is allowed in a container: then it must answer on a
+        # non-loopback address, which only a 0.0.0.0 bind does.
+        with a.server(env={"HFL_HOST": "0.0.0.0"}) as base:
+            lan = base.replace("127.0.0.1", _lan_ip())
+            code = httpx.get(lan + "/healthz", timeout=10).status_code
+        expect(code == 200, code)
+        with a.server() as base:  # control: the default loopback bind does not
+            try:
+                httpx.get(base.replace("127.0.0.1", _lan_ip()) + "/healthz", timeout=5)
+                reached = True
+            except httpx.HTTPError:
+                reached = False
+        expect(not reached, "the default bind answered on the LAN address too")
+        return f"serve takes its host from it (0.0.0.0: answered on {_lan_ip()}; default: not)"
     out = a.cli("serve", "--port", "1", env={"HFL_HOST": "0.0.0.0"}, timeout=60)
     expect(out.returncode == 1 and "0.0.0.0" in out.stdout + out.stderr, out.stdout[-200:])
     return "serve takes its host from it (0.0.0.0, refused unattended)"
