@@ -299,6 +299,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (distilgpt2), llama-cpp-python → llama-server for an architecture only the
   newer llama.cpp knows (Spark-X2.5's `spark2_5`).
 
+- **A response format and a draft model together on MLX** (the draft was
+  dropped for formatted requests): the format still holds while the draft
+  model proposes tokens (16 of 16 valid, measured).
+
 ### Changed
 
 - **No repetition penalty on a tool turn unless the client sets one.** A
@@ -607,6 +611,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pystray to check it was installed).
 - Every variable the code reads is documented, and only those (13 were
   missing; one documented variable was read by nothing).
+
+- **`pip install 'hfl[all]'` failed on Linux** (building vLLM 0.6.5 from
+  source): HFL capped `mcp` below 2 and `llguidance` at 1.8+, both of which
+  vLLM 0.30 contradicts, so the resolver fell back to a vLLM with no wheel.
+  HFL now works with MCP SDK 1.x and 2.x (`hfl mcp serve` and the client:
+  2.x also renamed a tool's schema field, which would have emptied every
+  connected tool's parameters) and with llguidance 1.7 and 1.8; the `[vllm]`
+  extra is Linux-only, from 0.30 (wheels for x86_64 and aarch64). Checked on
+  Linux arm64: `[all]` installs and imports vLLM 0.30.
+- **vLLM could not load a model at all**: HFL handed the engine factory's
+  result to the event loop as if it were a coroutine (TypeError on every
+  real load). Checked against vLLM 0.30's API; not run (no NVIDIA here).
+- **A Modelfile `TEMPLATE` got `.ThinkLevel` "medium" for `think: true`**;
+  Ollama gives "" (a boolean names no level). Now identical to Ollama's own
+  template code on all 20 templates it ships, `think: true` included.
+- **`[mlx]` installed llguidance on Linux**: a self-referencing extra lost
+  its platform marker in the wheel.
+- **Transformers loads weights on one thread** (`HF_DEACTIVATE_ASYNC_LOAD`,
+  unless you set it): with safetensors 0.8.0 its loader threads can deadlock
+  and freeze the whole process. Seen once, not reproduced; a mitigation
+  that removes the condition, no slower on the models measured.
 
 ### Internal
 
