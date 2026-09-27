@@ -19,7 +19,7 @@ without the setting) so a check that cannot fail does not pass.
   Hub; all are Apache-2.0 or MIT, so no license is accepted on your behalf).
 - Optional, each unlocking checks that otherwise report `NO COMPROBABLE AQUÍ`:
   `llama-server` on `PATH` (`brew install llama.cpp`), Docker, Homebrew,
-  `cmake` (safetensors → GGUF conversion), a speech synthesiser (macOS `say`,
+  a speech synthesiser (macOS `say`,
   or `espeak-ng`), Apple Silicon (MLX), Linux + NVIDIA (vLLM).
 
 ## Run it

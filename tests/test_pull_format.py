@@ -6,6 +6,7 @@ conversion that cannot run says why instead of a traceback (audit E10)."""
 
 from __future__ import annotations
 
+import types
 from unittest.mock import patch
 
 import pytest
@@ -74,20 +75,90 @@ def test_a_conversion_that_cannot_run_says_why(temp_config, monkeypatch) -> None
     assert not isinstance(result.exception, ToolNotFoundError)
 
 
-def test_ensure_tools_checks_for_cmake_before_building(temp_config, monkeypatch) -> None:
+def _converter(temp_config, monkeypatch, *, which, llama_cpp=False):
     from hfl.converter.gguf_converter import GGUFConverter
 
-    converter = GGUFConverter()
+    monkeypatch.setattr("hfl.converter.gguf_converter.config", temp_config)
+    monkeypatch.setattr("hfl.converter.gguf_converter.shutil.which", which)
     monkeypatch.setattr(
-        "hfl.converter.gguf_converter.shutil.which",
-        lambda tool: None if tool == "cmake" else f"/usr/bin/{tool}",
+        "hfl.converter.gguf_converter.subprocess.run",
+        lambda cmd, **k: types.SimpleNamespace(returncode=0 if llama_cpp else 1),
     )
-    ran: list = []
-    monkeypatch.setattr(
-        "hfl.converter.gguf_converter.subprocess.run", lambda *a, **k: ran.append(a)
-    )
+    return GGUFConverter()
+
+
+def test_a_quantizer_built_here_before_comes_first(temp_config, monkeypatch) -> None:
+    converter = _converter(temp_config, monkeypatch, which=lambda t: f"/opt/{t}")
+    converter.quantize_bin.parent.mkdir(parents=True)
+    converter.quantize_bin.write_text("")
+    assert converter._quantizer() == [str(converter.quantize_bin)]
+
+
+def test_then_llama_quantize_on_the_path(temp_config, monkeypatch) -> None:
+    """Homebrew's llama.cpp ships it: no build needed (it used to need cmake)."""
+    converter = _converter(temp_config, monkeypatch, which=lambda t: f"/opt/{t}")
+    assert converter._quantizer() == ["/opt/llama-quantize"]
+
+
+def test_then_llama_cpp_pythons_own_quantizer(temp_config, monkeypatch) -> None:
+    from hfl.converter.gguf_converter import _LLAMA_CPP_QUANTIZE
+
+    converter = _converter(temp_config, monkeypatch, which=lambda t: None, llama_cpp=True)
+    assert converter._quantizer()[-1] == _LLAMA_CPP_QUANTIZE
+
+
+def test_with_none_and_no_cmake_it_says_how_to_get_one(temp_config, monkeypatch) -> None:
+    converter = _converter(temp_config, monkeypatch, which=lambda t: None)
     with pytest.raises(ToolNotFoundError) as caught:
-        converter.ensure_tools()
-    assert caught.value.tool_name == "cmake"
-    assert "brew install cmake" in str(caught.value.details)
-    assert ran == []  # nothing cloned or built before the check
+        converter._quantizer()
+    assert "brew install llama.cpp" in str(caught.value.details)
+    assert "hfl[llama]" in str(caught.value.details)
+
+
+def test_the_source_archive_is_extracted_safely(tmp_path, monkeypatch) -> None:
+    """Without git the converter comes from llama.cpp's archive: the whole
+    tree (the script imports its ``conversion`` package), but no member that
+    would land outside the target, and no links."""
+    import io
+    import tarfile
+    from contextlib import contextmanager
+
+    from hfl.converter import gguf_converter
+
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:gz") as tar:
+
+        def add(name: str, data: bytes = b"x", kind: bytes = tarfile.REGTYPE) -> None:
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            info.size = len(data) if kind == tarfile.REGTYPE else 0
+            if kind == tarfile.SYMTYPE:
+                info.linkname = "/etc/passwd"
+            tar.addfile(info, io.BytesIO(data) if kind == tarfile.REGTYPE else None)
+
+        add("llama.cpp-master/convert_hf_to_gguf.py", b"print(1)")
+        add("llama.cpp-master/conversion/__init__.py")
+        add("llama.cpp-master/gguf-py/gguf/__init__.py")
+        add("llama.cpp-master/../../escape.py")
+        add("llama.cpp-master/link", kind=tarfile.SYMTYPE)
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def iter_bytes(self):
+            yield raw.getvalue()
+
+    @contextmanager
+    def stream(*a, **k):
+        yield Response()
+
+    monkeypatch.setattr("httpx.stream", stream)
+    target = tmp_path / "tools" / "llama.cpp"
+    target.parent.mkdir()
+    gguf_converter._download_converter(target)
+    assert (target / "convert_hf_to_gguf.py").read_text() == "print(1)"
+    assert (target / "conversion" / "__init__.py").exists()
+    assert (target / "gguf-py" / "gguf" / "__init__.py").exists()
+    assert not (target / "link").exists()
+    assert list(tmp_path.rglob("escape.py")) == []  # nowhere, not beside the target either

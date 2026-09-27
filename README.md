@@ -93,10 +93,12 @@ them.
 | `mcp` | Model Context Protocol client and server |
 | `all` | Everything above |
 
-Converting safetensors to GGUF builds llama.cpp's tools the first time, which
-needs **git**, **cmake** and a **C++ compiler** (`xcode-select --install` on
-macOS, `sudo apt install build-essential cmake` on Debian/Ubuntu). Pre-quantized
-GGUF and MLX models need none of this.
+Converting safetensors to GGUF fetches llama.cpp's converter (Python) the
+first time and quantizes with a `llama-quantize` already on the machine:
+Homebrew's (`brew install llama.cpp`), a distro package's, or the one inside
+llama-cpp-python (`pip install 'hfl[llama]'`). Nothing is compiled unless none
+of those exists; then it needs **git**, **cmake** and a **C++ compiler**.
+Pre-quantized GGUF and MLX models need none of this.
 
 </details>
 

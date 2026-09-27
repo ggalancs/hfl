@@ -95,10 +95,12 @@ temperatura por conversación, e imágenes para los modelos que pueden verlas.
 | `mcp` | Cliente y servidor de Model Context Protocol |
 | `all` | Todo lo anterior |
 
-Convertir safetensors a GGUF compila las herramientas de llama.cpp la primera
-vez, lo que necesita **git**, **cmake** y un **compilador de C++**
-(`xcode-select --install` en macOS, `sudo apt install build-essential cmake` en
-Debian/Ubuntu). Los modelos GGUF ya cuantizados y los MLX no necesitan nada de esto.
+Convertir safetensors a GGUF descarga la primera vez el conversor de llama.cpp
+(Python) y cuantiza con un `llama-quantize` que ya esté en la máquina: el de
+Homebrew (`brew install llama.cpp`), el de un paquete del sistema o el que trae
+llama-cpp-python (`pip install 'hfl[llama]'`). Solo se compila algo si no hay
+ninguno; entonces hacen falta **git**, **cmake** y un **compilador de C++**.
+Los modelos GGUF ya cuantizados y los MLX no necesitan nada de esto.
 
 </details>
 

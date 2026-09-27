@@ -546,18 +546,17 @@ def e10(a: Audit) -> str:
     def honours_format() -> None:  # on Apple Silicon MLX used to keep safetensors
         expect("Converting to GGUF" in text, f"--format gguf ignored: {tail}")
 
-    def fails_cleanly_or_converts() -> None:
-        expect("Traceback" not in text, f"traceback: {tail}")
-        if shutil.which("cmake") is None:
-            expect(out.returncode != 0 and "cmake is not installed" in text, tail)
-            raise Uncheckable("the conversion needs cmake, not installed here (said so clearly)")
+    def converts() -> None:
+        # No cmake needed any more: the converter is Python, and quantizing
+        # uses a llama-quantize already here (Homebrew's, llama-cpp-python's).
+        expect(out.returncode == 0 and "Traceback" not in text, tail)
         data = json.loads((a.home / "models.json").read_text())
         models = data if isinstance(data, list) else data.get("models", [])
         converted = [m for m in models if m.get("repo_id") == repo and m.get("format") == "gguf"]
-        expect(out.returncode == 0 and converted, tail)
+        expect(converted, f"no GGUF registered for {repo}: {tail}")
 
     part("--format gguf honoured", honours_format)
-    part("converts, or says what it lacks", fails_cleanly_or_converts)
+    part("converts and quantizes, registered as GGUF", converts)
     return part.verdict()
 
 

@@ -40,7 +40,7 @@ from pathlib import Path
 from rich.console import Console
 
 from hfl.config import config
-from hfl.exceptions import ToolNotFoundError
+from hfl.exceptions import ConversionError, ToolNotFoundError
 
 console = Console()
 
@@ -245,6 +245,65 @@ def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
         return "unknown"
 
 
+# Quantizes argv[1] -> argv[2] at type argv[3] with llama-cpp-python's own
+# llama_model_quantize: the [llama] extra ships the quantizer, compiled.
+_LLAMA_CPP_QUANTIZE = """
+import ctypes, sys
+import llama_cpp
+source, target, kind = sys.argv[1], sys.argv[2], sys.argv[3].upper()
+ftype = getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_" + kind, None)
+if ftype is None:
+    sys.exit(f"llama-cpp-python cannot quantize to {kind}")
+params = llama_cpp.llama_model_quantize_default_params()
+params.ftype = ftype
+code = llama_cpp.llama_model_quantize(source.encode(), target.encode(), ctypes.byref(params))
+sys.exit(1 if code != 0 else 0)
+"""
+
+LLAMA_CPP_ARCHIVE = (
+    "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/refs/heads/" + LLAMA_CPP_BRANCH
+)
+
+
+def _download_converter(target: Path) -> None:
+    """llama.cpp's source from its archive, for a machine without git.
+
+    The whole tree, not only ``convert_hf_to_gguf.py`` and ``gguf-py``: the
+    script now imports its own ``conversion`` package, and a list of the
+    files it needs would break on its next split. Regular files and
+    directories only (no links, no devices), none outside ``target``."""
+    import tarfile
+    import tempfile
+
+    import httpx
+
+    with tempfile.TemporaryDirectory(dir=target.parent) as staging:
+        archive = Path(staging) / "llama.cpp.tar.gz"
+        with httpx.stream("GET", LLAMA_CPP_ARCHIVE, timeout=60.0, follow_redirects=True) as r:
+            r.raise_for_status()
+            with open(archive, "wb") as sink:
+                for chunk in r.iter_bytes():
+                    sink.write(chunk)
+        unpacked = Path(staging) / "src"
+        with tarfile.open(archive, "r:gz") as tar:
+            for member in tar.getmembers():
+                parts = Path(member.name).parts
+                inner = Path(*parts[1:]) if len(parts) > 1 else None
+                if inner is None or not (member.isfile() or member.isdir()):
+                    continue
+                if inner.is_absolute() or ".." in inner.parts:
+                    continue
+                if member.isdir():
+                    (unpacked / inner).mkdir(parents=True, exist_ok=True)
+                    continue
+                source = tar.extractfile(member)
+                if source is None:
+                    continue
+                (unpacked / inner).parent.mkdir(parents=True, exist_ok=True)
+                (unpacked / inner).write_bytes(source.read())
+        shutil.move(str(unpacked), str(target))
+
+
 def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
     """Verify git clone integrity by checking remote URL."""
     try:
@@ -387,6 +446,7 @@ class GGUFConverter:
         probe = (
             "import sys\n"
             "try:\n"
+            "    import numpy, torch  # noqa: F401\n"
             "    import huggingface_hub  # noqa: F401\n"
             "    import transformers  # noqa: F401\n"
             "    from transformers import AutoTokenizer  # noqa: F401\n"
@@ -401,44 +461,31 @@ class GGUFConverter:
         )
         if result.returncode != 0:
             stderr = result.stderr.strip() or "<no stderr>"
-            raise RuntimeError(
-                "The Python interpreter HFL would use to run "
-                "convert_hf_to_gguf.py cannot import transformers + "
-                "huggingface_hub cleanly:\n\n"
-                f"    {stderr}\n\n"
-                "This usually means an incompatible package combo on the "
-                "host Python (often transformers 5.x with huggingface_hub "
-                "0.x, or vice versa). Fix it with:\n\n"
-                "    pip install --upgrade --force-reinstall \\\n"
-                "        'transformers>=4.47.0,<5.0' \\\n"
-                "        'huggingface-hub>=0.27.0,<1.0'\n\n"
-                f"Interpreter: {sys.executable}"
+            # A ConversionError, which `hfl pull` shows as a message; the
+            # advice to pin transformers 4.x predated HFL's move to 5.x.
+            raise ConversionError(
+                "safetensors",
+                "GGUF",
+                "llama.cpp's converter runs in this Python and cannot import what it "
+                f"needs ({stderr}). Install HFL's Transformers extra here: "
+                f"pip install 'hfl[transformers]'  (interpreter: {sys.executable})",
             )
 
-    def ensure_tools(self):
+    def ensure_tools(self) -> None:
+        """Make sure ``convert_hf_to_gguf.py`` (and its ``gguf-py``) is here.
+
+        Only the Python converter: nothing is compiled. It used to build
+        all of llama.cpp with cmake on the first conversion, so every install
+        without cmake and a C++ toolchain — a new user, Docker, a clean audit —
+        failed at HFL's main feature, while an install that had built it once
+        kept working. Quantizing finds a ``llama-quantize`` of its own
+        (:meth:`_quantizer`).
         """
-        Verifies that llama.cpp is available.
-        If not, clones and compiles it automatically.
-        """
-        if self.convert_script.exists() and self.quantize_bin.exists():
+        if self.convert_script.exists():
             return
-
-        # Building llama.cpp's converter needs git and cmake (and a C++
-        # compiler, which cmake reports itself). Check first: a missing tool
-        # used to surface as a FileNotFoundError traceback mid-build.
-        build_hint = (
-            "Install it (macOS: `brew install cmake git`; Debian/Ubuntu: "
-            "`apt install cmake git build-essential`), or pull a GGUF build "
-            "of the model instead: `hfl search <name> --gguf`."
-        )
-        for tool in ("git", "cmake"):
-            if shutil.which(tool) is None:
-                raise ToolNotFoundError(tool, build_hint)
-
-        console.print("[yellow]Installing conversion tools (llama.cpp)...[/]")
-
-        if not self.llama_cpp_dir.exists():
-            self.llama_cpp_dir.parent.mkdir(parents=True, exist_ok=True)
+        console.print("[yellow]Fetching llama.cpp's converter (Python only)...[/]")
+        self.llama_cpp_dir.parent.mkdir(parents=True, exist_ok=True)
+        if shutil.which("git") is not None:
             subprocess.run(
                 [
                     "git",
@@ -451,55 +498,68 @@ class GGUFConverter:
                 ],
                 check=True,
             )
-            # Verify clone integrity
             if not _verify_git_clone(self.llama_cpp_dir, LLAMA_CPP_REPO):
                 shutil.rmtree(self.llama_cpp_dir)
                 raise RuntimeError(
                     "Git clone integrity verification failed. "
                     "The cloned repository does not match expected source."
                 )
+        else:
+            _download_converter(self.llama_cpp_dir)
+        if not self.convert_script.exists():
+            raise ToolNotFoundError(
+                "convert_hf_to_gguf.py",
+                f"llama.cpp's source was fetched into {self.llama_cpp_dir} without it.",
+            )
+        console.print("[green]Converter ready.[/]")
 
-        # Compile llama.cpp
+    def _quantizer(self) -> list[str]:
+        """The command that quantizes ``<in> <out> <TYPE>``, from what is
+        already on this machine, in order: a ``llama-quantize`` built here
+        before, one on the PATH (Homebrew's llama.cpp, a distro package),
+        llama-cpp-python's own quantizer (the [llama] extra). Only when none
+        exists is llama.cpp built, which needs git, cmake and a C++ compiler.
+        """
+        if self.quantize_bin.exists():
+            return [str(self.quantize_bin)]
+        on_path = shutil.which("llama-quantize")
+        if on_path is not None:
+            return [on_path]
+        probe = subprocess.run(
+            [sys.executable, "-c", "import llama_cpp; llama_cpp.llama_model_quantize"],
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return [sys.executable, "-c", _LLAMA_CPP_QUANTIZE]
+        self._build_quantizer()
+        return [str(self.quantize_bin)]
+
+    def _build_quantizer(self) -> None:
+        """Build llama.cpp's ``llama-quantize`` — the last resort."""
+        hint = (
+            "Quantizing needs llama-quantize: `brew install llama.cpp` (macOS), "
+            "`pip install 'hfl[llama]'`, or git + cmake + a C++ compiler to build it. "
+            "Or pull a GGUF build of the model: `hfl search <name> --gguf`."
+        )
+        for tool in ("git", "cmake"):
+            if shutil.which(tool) is None:
+                raise ToolNotFoundError(tool, hint)
+        if not (self.llama_cpp_dir / "CMakeLists.txt").exists():
+            raise ToolNotFoundError(
+                "llama.cpp's build files", "The converter was fetched without them. " + hint
+            )
+        console.print("[yellow]Building llama-quantize (llama.cpp)...[/]")
         build_dir = self.llama_cpp_dir / "build"
         build_dir.mkdir(exist_ok=True)
-
-        # Detect if CUDA is available
-        cuda_flag = "-DGGML_CUDA=ON" if shutil.which("nvcc") else ""
-
         cmake_cmd = ["cmake", ".."]
-        if cuda_flag:
-            cmake_cmd.append(cuda_flag)
-
+        if shutil.which("nvcc"):
+            cmake_cmd.append("-DGGML_CUDA=ON")
         subprocess.run(cmake_cmd, cwd=build_dir, check=True)
         subprocess.run(
-            ["cmake", "--build", ".", "--config", "Release", "-j"],
+            ["cmake", "--build", ".", "--config", "Release", "-j", "--target", "llama-quantize"],
             cwd=build_dir,
             check=True,
         )
-
-        # Install Python dependencies for the conversion script
-        requirements_file = self.llama_cpp_dir / "requirements.txt"
-        if requirements_file.exists():
-            # A uv-made venv has no pip: say so instead of a traceback.
-            has_pip = (
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "--version"], capture_output=True
-                ).returncode
-                == 0
-            )
-            if not has_pip:
-                raise ToolNotFoundError(
-                    "pip",
-                    "llama.cpp's converter needs its Python requirements installed "
-                    f"into this environment: `uv pip install -r {requirements_file}` "
-                    "(or add pip to it), then pull again.",
-                )
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
-                check=True,
-            )
-
-        console.print("[green]Conversion tools ready.[/]")
 
     def convert(
         self,
@@ -573,15 +633,7 @@ class GGUFConverter:
 
         console.print(f"[cyan]Step 2/2:[/] Quantizing to {quant}...")
 
-        subprocess.run(
-            [
-                str(self.quantize_bin),
-                str(fp16_path),
-                str(final_path),
-                quant,
-            ],
-            check=True,
-        )
+        subprocess.run([*self._quantizer(), str(fp16_path), str(final_path), quant], check=True)
 
         # Clean up intermediate FP16
         fp16_path.unlink(missing_ok=True)

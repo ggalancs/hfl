@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+LLAMA_REPO_URL = "https://github.com/ggml-org/llama.cpp.git"
+
 
 class TestModelFormat:
     """Tests for ModelFormat enum."""
@@ -469,49 +471,29 @@ class TestGGUFConverter:
             "On macOS 'python' doesn't exist, only 'python3'."
         )
 
-    def test_ensure_tools_uses_sys_executable_for_pip(self, temp_config, monkeypatch):
-        """
-        Verifies that pip is invoked with sys.executable -m pip.
-
-        This ensures that the pip from the correct environment is used.
-        """
+    def test_ensure_tools_neither_builds_nor_pip_installs(self, monkeypatch, temp_config):
+        """Fetching the converter is a clone (or a download): no cmake, no pip
+        into the user's environment."""
         from hfl.converter.gguf_converter import GGUFConverter
 
-        # Patch config in the converter module to use temp_config
         monkeypatch.setattr("hfl.converter.gguf_converter.config", temp_config)
-
         converter = GGUFConverter()
+        commands: list[list[str]] = []
 
-        # Create directory and requirements.txt
-        converter.llama_cpp_dir.mkdir(parents=True, exist_ok=True)
-        (converter.llama_cpp_dir / "requirements.txt").write_text("numpy\n")
+        def run(cmd, **kwargs):
+            commands.append(cmd)
+            converter.convert_script.parent.mkdir(parents=True, exist_ok=True)
+            converter.convert_script.write_text("# fetched")
+            return MagicMock(returncode=0, stdout=LLAMA_REPO_URL)
 
-        captured_commands = []
-
-        def capture_run(cmd, **kwargs):
-            captured_commands.append(cmd)
-            return MagicMock(returncode=0, stdout="abc123")
-
-        with patch("hfl.converter.gguf_converter.subprocess.run", side_effect=capture_run):
-            with patch(  # no CUDA; git and cmake present whatever this host has
-                "hfl.converter.gguf_converter.shutil.which",
-                side_effect=lambda t: None if t == "nvcc" else f"/usr/bin/{t}",
-            ):
-                try:
-                    converter.ensure_tools()
-                except Exception:
-                    pass  # May fail after pip, we only care about capturing commands
-
-        # Find the pip call
-        pip_calls = [c for c in captured_commands if "-m" in c and "pip" in c]
-        assert len(pip_calls) >= 1, "No pip call with -m found"
-
-        pip_cmd = pip_calls[0]
-        assert pip_cmd[0] == sys.executable, (
-            f"pip must be invoked with sys.executable ({sys.executable}), not with '{pip_cmd[0]}'"
-        )
-        assert pip_cmd[1] == "-m"
-        assert pip_cmd[2] == "pip"
+        with (
+            patch("hfl.converter.gguf_converter.subprocess.run", side_effect=run),
+            patch("hfl.converter.gguf_converter.shutil.which", lambda t: f"/usr/bin/{t}"),
+            patch("hfl.converter.gguf_converter._verify_git_clone", return_value=True),
+        ):
+            converter.ensure_tools()
+        assert commands and commands[0][:2] == ["git", "clone"]
+        assert not any(c[0] == "cmake" or "pip" in c for c in commands)
 
     def test_convert_with_quantization(self, temp_config):
         """Verifies complete conversion with quantization."""

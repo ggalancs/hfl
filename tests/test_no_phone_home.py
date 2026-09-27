@@ -43,10 +43,18 @@ ALLOWED_HOSTS: dict[str, str] = {
     "api.tavily.com": "RUNTIME opt-in: web_search backend, needs TAVILY_API_KEY.",
     "api.search.brave.com": "RUNTIME opt-in: web_search backend, needs BRAVE_API_KEY.",
     "serpapi.com": "RUNTIME opt-in: web_search backend, needs SERPAPI_API_KEY.",
+    "codeload.github.com": (
+        "RUNTIME, on demand: llama.cpp's converter source (a tool, not a model), fetched "
+        "once, on the first safetensors->GGUF conversion, when git is not installed."
+    ),
     # --- reference only: printed or documented, never fetched ------------
     "tavily.com": "REFERENCE: where to get the key, shown in an error message.",
     "search.brave.com": "REFERENCE: where to get the key, shown in an error message.",
-    "github.com": "REFERENCE: this project's own repo, printed by `hfl version`.",
+    "github.com": (
+        "REFERENCE: this project's own repo, printed by `hfl version`. Also RUNTIME, on "
+        "demand: `git clone` of llama.cpp's converter on the first safetensors->GGUF "
+        "conversion (a tool, not a model source)."
+    ),
     "docs.ollama.com": "REFERENCE: the API HFL is wire-compatible with; documentation links.",
     # --- the machine itself ----------------------------------------------
     "localhost": "LOCAL: the server's own bind address.",
