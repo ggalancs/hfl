@@ -39,7 +39,10 @@ Any OpenAI, Ollama or Anthropic client can now talk to `http://localhost:11434` 
 opening that address in a browser gives you a chat page, served by HFL itself
 (no account, nothing loaded from the internet): your conversations, a system
 prompt and temperature per conversation, and images for models that can see
-them.
+them. Its model panel searches the Hub, downloads (with progress) and deletes
+models — owner operations, so the page is allowed them only once you start HFL
+with `HFL_ORIGINS=http://127.0.0.1:11434` (that trusts every page served at
+that address, including `/docs`, which loads scripts from a CDN).
 
 ## Why HFL
 

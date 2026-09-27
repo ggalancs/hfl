@@ -203,9 +203,9 @@ def _record_server_pull(
     from datetime import datetime
 
     from hfl.converter.formats import detect_format
+    from hfl.core.container import get_registry
     from hfl.models.manifest import ModelManifest
     from hfl.models.provenance import log_conversion
-    from hfl.models.registry import ModelRegistry
 
     fmt = detect_format(local_path)
     if local_path.is_file():
@@ -239,7 +239,9 @@ def _record_server_pull(
         gated=license_info.gated,
         license_accepted_at=accepted_at,
     )
-    registry = ModelRegistry()
+    # The server's own registry: a fresh ModelRegistry() wrote the file, but
+    # the one /api/tags and every load read kept its old view until restart.
+    registry = get_registry()
     if alias and registry.get(alias) is None:  # never steal a name in use
         manifest.alias = alias
     registry.add(manifest)
@@ -356,14 +358,18 @@ async def _run_pull_streaming(
         else f"sha256:{resolved.repo_id.replace('/', '--')}"
     )
 
-    # Emit an opening "downloading" event with total=0 so clients
-    # render "Starting download..." before the first bytes arrive.
-    yield _event(
-        "downloading",
-        digest=digest_label,
-        total=0,
-        completed=0,
-    )
+    # The size of what will be fetched, from the Hub (empty: unknown), and
+    # how much of it is on disk: every heartbeat carries real progress.
+    from hfl.hub.downloader import bytes_done, expected_files
+
+    planned = await asyncio.to_thread(expected_files, resolved)
+    total = sum(planned.values())
+
+    def progress() -> dict[str, int]:
+        done = bytes_done(resolved, planned) if planned else 0
+        return {"total": total, "completed": min(done, total) if total else done}
+
+    yield _event("downloading", digest=digest_label, **progress())
 
     # --- Phase 2: download ------------------------------------------
     # We run the blocking hf_hub_download in a worker; meanwhile a
@@ -375,14 +381,9 @@ async def _run_pull_streaming(
         try:
             await asyncio.wait_for(asyncio.shield(download_task), timeout=2.0)
         except asyncio.TimeoutError:
-            # 2 s since the last heartbeat — emit another so the
-            # client keeps the progress bar alive.
-            yield _event(
-                "downloading",
-                digest=digest_label,
-                total=0,
-                completed=0,
-            )
+            # 2 s since the last heartbeat — emit another, with the bytes
+            # on disk so far, so the client keeps the progress bar alive.
+            yield _event("downloading", digest=digest_label, **await asyncio.to_thread(progress))
         except asyncio.CancelledError:  # pragma: no cover — client disconnect
             download_task.cancel()
             raise

@@ -248,6 +248,7 @@ markers = [
     "acceptance: tool-calling acceptance suite (spec §6, T1–T7)",
     "slow: tests that take noticeable wall-clock time (sleeps, concurrency)",
     "integration: tests that exercise filesystem, subprocesses, or system probes",
+    "hub_sizes: runs the real hfl.hub.downloader.expected_files (stubbed otherwise)",
 ]
 
 [tool.coverage.run]

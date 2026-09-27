@@ -41,6 +41,15 @@ def set_english_language(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_hub_size_lookup(request, monkeypatch):
+    """``/api/pull`` asks the Hub for the files' sizes (its progress total);
+    unit tests must not reach the network. A test of that lookup itself
+    opts out with ``@pytest.mark.hub_sizes``."""
+    if request.node.get_closest_marker("hub_sizes") is None:
+        monkeypatch.setattr("hfl.hub.downloader.expected_files", lambda resolved: {})
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiter():
     """Reset rate limiter storage before each test to prevent 429 errors.
 

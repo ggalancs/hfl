@@ -593,7 +593,21 @@
     "untitled": "New conversation",
     "copy": "Copy",
     "copied": "Copied",
-    "export": "Save conversation"
+    "export": "Save conversation",
+    "models": "Models",
+    "models_local": "On this machine",
+    "models_hub": "Hugging Face Hub",
+    "search_placeholder": "Search models on the Hub",
+    "search": "Search",
+    "searching": "Searching…",
+    "no_results": "Nothing found.",
+    "download": "Download",
+    "downloading": "Starting…",
+    "downloaded": "downloaded.",
+    "installed": "Installed",
+    "gated": "gated",
+    "confirm_delete": "Delete for good?",
+    "models_owner_hint": "Downloading and deleting models are the server owner's operations, refused to a web page by default. To allow them from this page, start HFL with HFL_ORIGINS={origin} — only if you trust every page this server serves at that address (its /docs page loads scripts from a CDN). Or use the CLI: hfl pull / hfl rm."
   },
   "shortname": {
     "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",

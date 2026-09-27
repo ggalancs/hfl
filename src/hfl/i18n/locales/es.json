@@ -593,7 +593,21 @@
     "untitled": "Nueva conversación",
     "copy": "Copiar",
     "copied": "Copiado",
-    "export": "Guardar conversación"
+    "export": "Guardar conversación",
+    "models": "Modelos",
+    "models_local": "En este equipo",
+    "models_hub": "Hugging Face Hub",
+    "search_placeholder": "Buscar modelos en el Hub",
+    "search": "Buscar",
+    "searching": "Buscando…",
+    "no_results": "No se ha encontrado nada.",
+    "download": "Descargar",
+    "downloading": "Empezando…",
+    "downloaded": "descargado.",
+    "installed": "Instalado",
+    "gated": "con acceso restringido",
+    "confirm_delete": "¿Borrar definitivamente?",
+    "models_owner_hint": "Descargar y borrar modelos son operaciones del dueño del servidor, que por defecto se niegan a una página web. Para permitirlas desde esta página, arranca HFL con HFL_ORIGINS={origin}; solo si confías en todas las páginas que este servidor sirve en esa dirección (su página /docs carga scripts de un CDN). O usa la CLI: hfl pull / hfl rm."
   },
   "shortname": {
     "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",

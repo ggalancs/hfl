@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 from html.parser import HTMLParser
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -179,3 +180,39 @@ def test_no_inline_event_handlers(client):
     would be dead, silently."""
     page = client.get("/ui").text
     assert not re.findall(r"<[^>]*\son[a-z]+\s*=", page)
+
+
+# -- the model manager (plan 0.22 P1-11) ---------------------------------------
+
+PAGE_ORIGIN = "http://127.0.0.1:11434"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/api/pull", {"model": "acme/m-GGUF", "stream": False}),
+        ("DELETE", "/api/delete", {"model": "nope"}),
+    ],
+)
+def test_the_page_manages_models_only_where_the_owner_trusts_it(
+    temp_config, monkeypatch, method, path, body
+) -> None:
+    """Downloading and deleting stay the owner's: the page's own origin is
+    refused like any web page's (the page then shows how to allow it)
+    unless the owner listed it in HFL_ORIGINS."""
+    local = TestClient(app, client=("127.0.0.1", 5555))
+    headers = {"Origin": PAGE_ORIGIN}
+    refused = local.request(method, path, json=body, headers=headers)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == "cross_origin_admin_forbidden"
+    monkeypatch.setattr(temp_config, "cors_origins", [PAGE_ORIGIN])
+    monkeypatch.setattr("hfl.config.config", temp_config)
+    with patch("hfl.hub.resolver.resolve", side_effect=RuntimeError("stop before the Hub")):
+        allowed = local.request(method, path, json=body, headers=headers)
+    assert allowed.status_code != 403
+
+
+def test_the_page_carries_the_manager(client) -> None:
+    page = client.get("/ui").text
+    for needle in ('id="models"', "/api/discover", "/api/pull", "/api/delete", "HFL_ORIGINS"):
+        assert needle in page, needle

@@ -131,6 +131,77 @@ def _download_snapshot(
     return Path(local_path)
 
 
+_SAFETENSORS_FILES = [
+    "*.safetensors",
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "tokenizer.model",  # SentencePiece
+    "generation_config.json",
+]
+
+
+def model_dir_for(resolved: ResolvedModel) -> Path:
+    """Where ``pull_model`` puts ``resolved``: ~/.hfl/models/<org>--<model>/."""
+    return config.models_dir / resolved.repo_id.replace("/", "--")
+
+
+def _planned(resolved: ResolvedModel, names: list[str]) -> list[str]:
+    """Of a repo's files, the ones ``pull_model`` fetches for ``resolved``."""
+    import fnmatch
+
+    if resolved.format == "gguf" and resolved.filename:
+        wanted = {resolved.filename, *resolved.parts, *filter(None, [resolved.projector])}
+        return [n for n in names if n in wanted]
+    if resolved.format == "safetensors":
+        return [n for n in names if any(fnmatch.fnmatch(n, p) for p in _SAFETENSORS_FILES)]
+    return list(names)
+
+
+def expected_files(resolved: ResolvedModel) -> dict[str, int]:
+    """The files a pull of ``resolved`` downloads and their sizes, from the
+    Hub; empty when it cannot say (a progress total is then unknown)."""
+    from huggingface_hub import HfApi
+
+    try:
+        info = HfApi().model_info(
+            resolved.repo_id,
+            revision=resolved.revision,
+            files_metadata=True,
+            token=_token_quietly(resolved.repo_id),
+        )
+    except Exception:
+        return {}
+    sizes = {s.rfilename: int(s.size or 0) for s in (info.siblings or [])}
+    return {name: sizes[name] for name in _planned(resolved, list(sizes))}
+
+
+def _token_quietly(repo_id: str) -> str | None:
+    try:
+        return ensure_auth(repo_id)
+    except Exception:
+        return None
+
+
+def bytes_done(resolved: ResolvedModel, planned: dict[str, int]) -> int:
+    """Bytes of ``planned`` on disk now: files already in place plus the
+    ones ``huggingface_hub`` is still writing (``*.incomplete``)."""
+    folder = model_dir_for(resolved)
+    done = 0
+    for name in planned:
+        try:
+            done += (folder / name).stat().st_size
+        except OSError:
+            pass
+    partial = folder / ".cache" / "huggingface" / "download"
+    try:
+        done += sum(p.stat().st_size for p in partial.rglob("*.incomplete"))
+    except OSError:
+        pass
+    return done
+
+
 def pull_model(resolved: ResolvedModel) -> Path:
     """
     Download a model and return the local path.
@@ -144,8 +215,8 @@ def pull_model(resolved: ResolvedModel) -> Path:
     _rate_limit()
     token = ensure_auth(resolved.repo_id)
 
-    # Destination directory: ~/.hfl/models/<org>/<model>/
-    model_dir = config.models_dir / resolved.repo_id.replace("/", "--")
+    # Destination directory: ~/.hfl/models/<org>--<model>/
+    model_dir = model_dir_for(resolved)
     model_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(
@@ -178,17 +249,7 @@ def pull_model(resolved: ResolvedModel) -> Path:
         return path
     # Complete snapshot download with retry
     # Filter only the necessary files
-    allow_patterns = []
-    if resolved.format == "safetensors":
-        allow_patterns = [
-            "*.safetensors",
-            "config.json",
-            "tokenizer.json",
-            "tokenizer_config.json",
-            "special_tokens_map.json",
-            "tokenizer.model",  # SentencePiece
-            "generation_config.json",
-        ]
+    allow_patterns = list(_SAFETENSORS_FILES) if resolved.format == "safetensors" else []
 
     return _download_snapshot(
         repo_id=resolved.repo_id,

@@ -38,7 +38,11 @@ hfl serve --model hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
 Cualquier cliente de OpenAI, Ollama o Anthropic puede hablar ya con `http://localhost:11434`,
 y abrir esa dirección en el navegador te da una página de chat servida por el propio HFL
 (sin cuenta y sin cargar nada de internet): tus conversaciones, mensaje de sistema y
-temperatura por conversación, e imágenes para los modelos que pueden verlas.
+temperatura por conversación, e imágenes para los modelos que pueden verlas. Su panel de
+modelos busca en el Hub, descarga (con progreso) y borra modelos: son operaciones del
+dueño, así que la página solo puede hacerlas si arrancas HFL con
+`HFL_ORIGINS=http://127.0.0.1:11434` (eso confía en todas las páginas servidas en esa
+dirección, también `/docs`, que carga scripts de un CDN).
 
 ## Por qué HFL
 
