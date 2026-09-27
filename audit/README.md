@@ -39,6 +39,15 @@ python audit/local_audit.py --work ~/hfl-audit --only B3,D14,E8
 python audit/local_audit.py --work ~/hfl-audit --list
 ```
 
+On Linux without a Linux machine, [`linux/Dockerfile`](linux/Dockerfile) runs
+the same audit in a CPU-only container; the work directory is a Docker volume:
+
+```bash
+docker build -t hfl-audit-linux -f audit/linux/Dockerfile .
+docker run --rm -v hfl-audit-work:/work hfl-audit-linux --setup
+docker run --rm -v hfl-audit-work:/work hfl-audit-linux --only A,B,D,E
+```
+
 Results accumulate in `<work>/results.json` (a re-run of some checks updates
 only those) and every run writes `<work>/REPORT.md`: the counts, what is not
 OK first, then every check with its evidence.

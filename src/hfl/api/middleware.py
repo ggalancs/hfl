@@ -37,6 +37,18 @@ TRUSTED_PROXY_NETWORKS = [
 ]
 
 
+def _is_local_peer(request: Request) -> bool:
+    """A request made on this machine: a loopback peer that relays nobody
+    (no X-Forwarded-For). A proxy that says whom it forwards is not one."""
+    host = request.client.host if request.client else ""
+    if request.headers.get("X-Forwarded-For"):
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
 def _is_trusted_proxy(ip: str) -> bool:
     """Check if IP is from a trusted proxy network."""
     try:
@@ -233,10 +245,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app: Any,
         requests_per_window: int = 60,
         window_seconds: int = 60,
+        limit_local: bool = False,
     ) -> None:
         super().__init__(app)
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
+        self.limit_local = limit_local
         self._request_counts: dict[str, list[float]] = defaultdict(list)
         self._request_counter = 0
         self._cleanup_interval = 1000  # Clean up stale IPs every N requests
@@ -341,6 +355,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Skip rate limiting for excluded paths (health checks, etc.)
         if self._is_excluded(request.url.path):
             response: Response = await call_next(request)
+            return response
+
+        if not self.limit_local and _is_local_peer(request):
+            response = await call_next(request)
             return response
 
         client_ip = self._get_client_ip(request)

@@ -252,6 +252,15 @@ class HFLConfig:
     rate_limit_enabled: bool = field(
         default_factory=lambda: os.environ.get("HFL_RATE_LIMIT_ENABLED", "true").lower() == "true"
     )
+    # Whether requests made on this machine (a loopback peer, no
+    # X-Forwarded-For) count against the limit. Off: a local coding agent
+    # sending tool call after tool call hit the default 60/min. On for a
+    # reverse proxy on this host that does not send X-Forwarded-For.
+    rate_limit_local: bool = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_RATE_LIMIT_LOCAL", "").strip().lower() in ("1", "true", "yes", "on")
+        )
+    )
     rate_limit_requests: int = field(
         default_factory=lambda: _env_int(60, "HFL_RATE_LIMIT_REQUESTS")
     )

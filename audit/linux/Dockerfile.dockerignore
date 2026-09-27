@@ -1,0 +1,21 @@
+# The audit's own build context: the repository as the audit reads it (docs
+# included — section D checks every variable against docs/env-vars.md), none
+# of the local environments or caches.
+.git
+.venv
+.venv-ci
+venv
+local
+dist
+build
+htmlcov
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.egg-info
+CLAUDE.md
+coverage.json
+coverage.xml
+uv.lock

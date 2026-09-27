@@ -446,6 +446,7 @@ if config.rate_limit_enabled:
         RateLimitMiddleware,
         requests_per_window=config.rate_limit_requests,
         window_seconds=config.rate_limit_window,
+        limit_local=config.rate_limit_local,
     )
 
 # API key authentication (runs before rate limiting)

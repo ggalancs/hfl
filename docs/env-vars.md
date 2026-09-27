@@ -73,6 +73,7 @@ the host string does not.
 | `HFL_RATE_LIMIT_ENABLED`     | —                  | `true`                   | Master switch for the in-process rate limiter. |
 | `HFL_RATE_LIMIT_REQUESTS`    | —                  | `60`                     | Requests per window. |
 | `HFL_RATE_LIMIT_WINDOW`      | —                  | `60`                     | Window size in seconds. |
+| `HFL_RATE_LIMIT_LOCAL`       | —                  | `false`                  | Also limit requests from this machine. By default a loopback peer that forwards nobody (no `X-Forwarded-For`) is exempt, so a local coding agent never hits the per-IP limit. |
 | `HFL_MAX_REQUEST_BYTES`      | —                  | `10485760` (10 MiB)      | Cap on request body. `0` disables. |
 | `HFL_MAX_BLOB_BYTES`         | —                  | `0` (no cap)             | Cap on one `/api/blobs` upload (GGUFs for `create`), which the request-body cap exempts. Over it: 413. |
 | `HFL_ALLOW_REMOTE_CODE`      | —                  | `false`                  | Truthy lets Transformers run a model repository's own Python (`trust_remote_code`). Off by default: a request or Modelfile can never turn it on. |

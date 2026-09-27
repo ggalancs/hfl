@@ -577,21 +577,41 @@ def _rate(a: Audit, env: dict) -> list[int]:
 
 @probe("D42", "HFL_RATE_LIMIT_ENABLED")
 def d42(a: Audit) -> str:
-    off = _rate(a, {"HFL_RATE_LIMIT_ENABLED": "false", "HFL_RATE_LIMIT_REQUESTS": "2"})
+    off = _rate(
+        a,
+        {
+            "HFL_RATE_LIMIT_ENABLED": "false",
+            "HFL_RATE_LIMIT_REQUESTS": "2",
+            "HFL_RATE_LIMIT_LOCAL": "true",
+        },
+    )
     expect(429 not in off, off)
     return "off: no 429 over the limit"
 
 
 @probe("D43", "HFL_RATE_LIMIT_REQUESTS")
 def d43(a: Audit) -> str:
-    codes = _rate(a, {"HFL_RATE_LIMIT_REQUESTS": "2", "HFL_RATE_LIMIT_WINDOW": "60"})
+    codes = _rate(
+        a,
+        {
+            "HFL_RATE_LIMIT_REQUESTS": "2",
+            "HFL_RATE_LIMIT_WINDOW": "60",
+            "HFL_RATE_LIMIT_LOCAL": "true",
+        },
+    )
     expect(429 in codes, codes)
     return f"2 per window: {codes}"
 
 
 @probe("D44", "HFL_RATE_LIMIT_WINDOW")
 def d44(a: Audit) -> str:
-    with a.server(env={"HFL_RATE_LIMIT_REQUESTS": "1", "HFL_RATE_LIMIT_WINDOW": "2"}) as base:
+    with a.server(
+        env={
+            "HFL_RATE_LIMIT_LOCAL": "true",
+            "HFL_RATE_LIMIT_REQUESTS": "1",
+            "HFL_RATE_LIMIT_WINDOW": "2",
+        }
+    ) as base:
         first = [httpx.get(base + "/api/tags").status_code for _ in range(2)]
         time.sleep(3)
         after = httpx.get(base + "/api/tags").status_code

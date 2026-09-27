@@ -275,3 +275,51 @@ class TestInMemoryRateLimiter:
         """reset() for nonexistent client should not raise."""
         limiter = InMemoryRateLimiter()
         limiter.reset("nonexistent")
+
+
+def _local_app(limit_local: bool = False) -> FastAPI:
+    app = FastAPI()
+    app.add_middleware(
+        RateLimitMiddleware, requests_per_window=2, window_seconds=60, limit_local=limit_local
+    )
+
+    @app.get("/test")
+    def test_endpoint():
+        return {"status": "ok"}
+
+    return app
+
+
+class TestLocalPeers:
+    """A coding agent on this machine must not hit the per-IP limit (plan
+    0.22 P1-12): a loopback peer is exempt unless HFL_RATE_LIMIT_LOCAL."""
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "::1"])
+    def test_a_loopback_peer_is_not_limited(self, host):
+        client = TestClient(_local_app(), client=(host, 50000))
+        assert [client.get("/test").status_code for _ in range(5)] == [200] * 5
+
+    def test_a_proxy_on_loopback_that_forwards_someone_is(self):
+        client = TestClient(_local_app(), client=("127.0.0.1", 50000))
+        codes = [
+            client.get("/test", headers={"X-Forwarded-For": "203.0.113.9"}).status_code
+            for _ in range(3)
+        ]
+        assert codes[-1] == 429
+
+    def test_a_remote_peer_still_is(self):
+        client = TestClient(_local_app(), client=("192.0.2.4", 50000))
+        assert [client.get("/test").status_code for _ in range(3)][-1] == 429
+
+    def test_limit_local_limits_loopback_too(self):
+        client = TestClient(_local_app(limit_local=True), client=("127.0.0.1", 50000))
+        assert [client.get("/test").status_code for _ in range(3)][-1] == 429
+
+
+def test_the_setting_reaches_the_server(monkeypatch):
+    from hfl.config import HFLConfig
+
+    monkeypatch.setenv("HFL_RATE_LIMIT_LOCAL", "true")
+    assert HFLConfig().rate_limit_local is True
+    monkeypatch.delenv("HFL_RATE_LIMIT_LOCAL")
+    assert HFLConfig().rate_limit_local is False
