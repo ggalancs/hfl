@@ -67,7 +67,11 @@ def suite(
                 lambda r: r["message"]["content"],
             ),
         ):
-            payload = {"model": model, "stream": False, "options": {"num_predict": 200}, **body}
+            # Greedy: sampled, a 0.5B model's "json" sometimes spends the whole
+            # budget inside one string (15-16 of 20 valid either way, measured) —
+            # a check that passed or failed by luck.
+            options = {"num_predict": 200, "temperature": 0}
+            payload = {"model": model, "stream": False, "options": options, **body}
             out = c.post(path, json=payload)
             if not formats:
                 expect(out.status_code == 400 and "constrain" in out.text, (path, out.status_code))

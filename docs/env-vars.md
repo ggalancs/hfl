@@ -153,6 +153,11 @@ its own web search may not work; configure SearXNG or a keyed service.
   `HFL_GENERATION_TIMEOUT=soon`) stops the command with one line naming the
   variable and what it takes (exit 2). An empty value counts as unset.
 
+- HFL sets `HF_DEACTIVATE_ASYNC_LOAD=1` (Transformers loads weights on one
+  thread) unless you set it yourself: with safetensors 0.8.0 its loader
+  threads can deadlock, freezing the whole process. `HF_DEACTIVATE_ASYNC_LOAD=0`
+  restores parallel loading.
+
 - Variables not listed here may exist in the codebase but are
   considered internal — they are not part of the documented operator
   surface and may change without a deprecation period.
