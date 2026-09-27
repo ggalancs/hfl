@@ -79,6 +79,10 @@ class ModelRegistry:
         # Thread safety
         self._lock = threading.RLock()
         self._indexes_dirty = False
+        # The file as last read or written: another process (`hfl pull` in a
+        # terminal, while `hfl serve` runs) changes it, and reads reload when
+        # it differs — the server listed nothing pulled after it started.
+        self._seen: tuple[int, int, int] | None = None
         self._load()
 
     @contextmanager
@@ -110,12 +114,29 @@ class ModelRegistry:
             _unlock_file(fd)
             os.close(fd)
 
+    def _signature(self) -> tuple[int, int, int] | None:
+        try:
+            info = self.path.stat()
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size, info.st_ino)
+
+    def _reload_if_changed(self) -> None:
+        """Re-read the file when another process has written it since.
+        Call with ``self._lock`` held; a stat when nothing changed."""
+        if self._signature() == self._seen:
+            return
+        with self._file_lock(exclusive=False):
+            self._load()
+            self._indexes_dirty = False
+
     def _load(self) -> None:
         """Load models from disk and build indexes.
 
         Includes corruption recovery: if the main file is corrupt,
         attempts to recover from backup.
         """
+        self._seen = self._signature()
         if not self.path.exists():
             self._models = []
             self._rebuild_indexes()
@@ -248,6 +269,7 @@ class ModelRegistry:
             with contextlib.suppress(OSError):
                 temp_path.chmod(0o600)
             temp_path.replace(self.path)  # Atomic on POSIX
+            self._seen = self._signature()
             logger.debug("Saved registry with %s models", len(self._models))
         except Exception as e:
             logger.error("Failed to save registry: %s", e)
@@ -354,6 +376,7 @@ class ModelRegistry:
         Lookup is O(1) for all three identifiers.
         """
         with self._lock:
+            self._reload_if_changed()
             self._ensure_indexes()
             # Try name first (most common)
             if name in self._by_name:
@@ -471,6 +494,7 @@ class ModelRegistry:
     def list_all(self) -> list[ModelManifest]:
         """Lists all registered models, sorted by creation date (thread-safe)."""
         with self._lock:
+            self._reload_if_changed()
             self._ensure_indexes()
             return sorted(self._models, key=lambda m: m.created_at, reverse=True)
 
@@ -512,6 +536,7 @@ class ModelRegistry:
     def __len__(self) -> int:
         """Return the number of registered models (thread-safe)."""
         with self._lock:
+            self._reload_if_changed()
             return len(self._models)
 
     def __contains__(self, name: str) -> bool:

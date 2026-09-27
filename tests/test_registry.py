@@ -783,13 +783,14 @@ class TestRegistryOptimizations:
         )
         temp_config.registry_path.write_text(json.dumps(data))
 
-        # Registry doesn't see the change yet
-        assert len(registry) == 1
-
-        # After refresh, it should see both
-        registry.refresh()
+        # Another process wrote the file: the next read sees it (a server
+        # did not list anything `hfl pull` added after it started).
         assert len(registry) == 2
         assert "external-model" in registry
+        assert [m.name for m in registry.list_all()].count("external-model") == 1
+
+        registry.refresh()
+        assert len(registry) == 2
 
 
 def test_pulling_again_keeps_the_alias(temp_config):
@@ -808,3 +809,28 @@ def test_pulling_again_keeps_the_alias(temp_config):
     assert registry.get("mine") is not None and registry.get("m").alias == "mine"
     registry.add(entry(alias="renamed"))
     assert registry.get("m").alias == "renamed"
+
+
+def test_a_running_server_lists_a_model_pulled_by_another_process(temp_config) -> None:
+    """`hfl serve` in one terminal, `hfl pull` in another: the pull wrote the
+    registry file, the server's registry kept its view from start-up, and
+    chatting with the new model said "Model not found" (compatibility
+    sweep, measured)."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from hfl.api.server import app
+    from hfl.core.container import reset_container
+    from hfl.models.manifest import ModelManifest
+    from hfl.models.registry import ModelRegistry
+
+    reset_container()
+    client = TestClient(app, client=("127.0.0.1", 5555))
+    assert client.get("/api/tags").json()["models"] == []  # the server has read it
+    other = ModelRegistry()  # another process
+    other.add(ModelManifest(name="pulled-later", repo_id="org/m", local_path="/m", format="gguf"))
+    names = [m["name"] for m in client.get("/api/tags").json()["models"]]
+    assert names == ["pulled-later"]
+    assert json.loads(temp_config.registry_path.read_text())[0]["name"] == "pulled-later"
+    reset_container()
