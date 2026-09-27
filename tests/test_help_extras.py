@@ -66,3 +66,17 @@ def test_packages_come_from_the_markers(metadata_from_pyproject) -> None:
     assert "dev" not in order and "build" not in order
     assert order[0] == "llama" and order[-1] == "all"
     assert packages["tts"] == PROJECT["optional-dependencies"]["tts"]
+
+
+def test_an_extra_that_breaks_on_import_is_still_listed(tmp_path, monkeypatch) -> None:
+    """pystray raises Xlib's DisplayNameError (not an ImportError) on a
+    Linux without a display: the table must not die with it."""
+    from hfl.cli.main import app
+
+    (tmp_path / "pystray").mkdir()
+    (tmp_path / "pystray" / "__init__.py").write_text("raise RuntimeError('Bad display')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "pystray", raising=False)
+    result = CliRunner().invoke(app, ["help", "--extras"], env={"COLUMNS": "220"})
+    assert result.exit_code == 0, result.stdout
+    assert "Bad display" not in result.stdout

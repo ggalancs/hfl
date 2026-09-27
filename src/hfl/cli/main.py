@@ -1022,10 +1022,11 @@ def _choose_backend(backend: str, parallel: int) -> None:
         os.environ["HFL_LLM_LIBRARY"] = backend
     if parallel > 0:
         hfl_config.queue_max_inflight = parallel
+        hfl_config.parallel_explicit = True
     if backend == "llama-server":
-        from hfl.engine.llama_server import DEFAULT_SLOTS
+        from hfl.engine.llama_server import _slots
 
-        slots = parallel if parallel > 1 else DEFAULT_SLOTS
+        slots = _slots()
         console.print(f"[cyan]{escape_markup(t('messages.parallel_on', slots=slots))}[/]")
 
 
@@ -2542,7 +2543,7 @@ def help_command(
     ),
 ):
     """Show help information and available options."""
-    import importlib
+    import importlib.util
 
     from rich.panel import Panel
     from rich.table import Table
@@ -2575,12 +2576,17 @@ def help_command(
             install_cmd = f"pip install 'hfl[{extra_name}]'"
             check_module = t(f"help.extras.{extra_name}.check_module")
 
-            # Check if installed
+            # Installed = findable. Importing it ran the package: slow for
+            # torch or vllm, and pystray raises Xlib's DisplayNameError on a
+            # Linux without a display (local audit A13 on Linux).
             if check_module and check_module != "null":
                 try:
-                    importlib.import_module(check_module)
+                    found = importlib.util.find_spec(check_module) is not None
+                except (ImportError, ValueError):
+                    found = False
+                if found:
                     status = f"[green]{t('help.extras_installed')}[/]"
-                except ImportError:
+                else:
                     status = f"[dim]{t('help.extras_not_installed')}[/]"
             else:
                 status = "[dim]—[/]"

@@ -11,8 +11,8 @@ for the Python binding) and in its own process, so a crash in the model
 does not take the server down.
 
 Opt in with ``HFL_LLM_LIBRARY=llama-server`` (GGUF models only; anything
-else keeps its usual backend). ``HFL_NUM_PARALLEL`` sets the slots when
-above 1; the default is 4. The slots share one KV buffer sized to the
+else keeps its usual backend). ``HFL_NUM_PARALLEL`` sets the slots (1 included);
+unset, the default is 4. The slots share one KV buffer sized to the
 model's context (``--kv-unified``), so memory is what a single-slot load
 would use.
 
@@ -73,8 +73,8 @@ def _free_port() -> int:
 def _slots() -> int:
     from hfl.config import config
 
-    configured = int(getattr(config, "queue_max_inflight", 1) or 1)
-    return configured if configured > 1 else DEFAULT_SLOTS
+    configured = max(1, int(getattr(config, "queue_max_inflight", 1) or 1))
+    return configured if getattr(config, "parallel_explicit", False) else DEFAULT_SLOTS
 
 
 def _gpu_layers(requested: Any) -> int:

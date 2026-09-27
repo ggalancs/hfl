@@ -221,6 +221,7 @@ class TestProcess:
         import hfl.config
 
         monkeypatch.setattr(hfl.config.config, "queue_max_inflight", 8)
+        monkeypatch.setattr(hfl.config.config, "parallel_explicit", True)
         eng = LlamaServerEngine()
         eng.load(str(fake_server[0]))
         try:

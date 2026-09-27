@@ -5,8 +5,11 @@
 from __future__ import annotations
 
 import json
+import platform
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -148,9 +151,16 @@ def check_(a: Audit) -> str:
 
 @check("A11", "hfl doctor")
 def doctor(a: Audit) -> str:
-    out = a.ok("doctor")
-    expect("metal" in out.lower(), f"Metal not detected: {out[-400:]}")
-    return "Metal detected; extras listed"
+    out = a.ok("doctor").lower()
+    # What this machine has, as doctor must report it.
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        want = "metal"
+    elif shutil.which("nvidia-smi"):
+        want = "nvidia"
+    else:
+        want = "cpu only"
+    expect(want in out, f"{want!r} not reported: {out[-400:]}")
+    return f"reports {want}"
 
 
 @check("A9", "hfl debug")
@@ -318,6 +328,10 @@ def serve(a: Audit) -> str:
         expect(httpx.get(base + "/api/tags", timeout=30).status_code == 401, "no key: not 401")
         good = httpx.get(base + "/api/tags", headers={"Authorization": "Bearer audit-key"})
         expect(good.status_code == 200, good.text[:200])
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+        # In a container 0.0.0.0 is allowed by design (only what `docker run
+        # -p` publishes leaves it), so the refusal cannot be seen here.
+        return "--model preloads; --api-key enforced; 0.0.0.0 refusal: n/a in a container"
     refused = a.cli("serve", "--host", "0.0.0.0", "--port", "1", timeout=60)
     expect(refused.returncode == 1, "bound 0.0.0.0 unattended with no key")
     return "--model preloads; --api-key enforced; unattended 0.0.0.0 refused"
@@ -384,14 +398,24 @@ def create(a: Audit) -> str:
 def lora(a: Audit) -> str:
     """``hfl lora`` changes the running server's model (it used to load a copy
     of its own in the CLI process). Checked on the server it was sent to."""
-    from huggingface_hub import hf_hub_download
-
     adapters = a.home / "adapters"
     adapters.mkdir(exist_ok=True)
     adapter = adapters / "moe_shakespeare15M.gguf"
     if not adapter.exists():
-        source = hf_hub_download("ggml-org/stories15M_MOE", "moe_shakespeare15M.gguf")
-        shutil.copyfile(source, adapter)
+        # Through the audited venv: the harness needs only httpx.
+        fetch = (
+            "import shutil, sys; from huggingface_hub import hf_hub_download; "
+            "shutil.copyfile(hf_hub_download('ggml-org/stories15M_MOE', "
+            "'moe_shakespeare15M.gguf'), sys.argv[1])"
+        )
+        got = subprocess.run(
+            [a.python, "-c", fetch, str(adapter)],
+            capture_output=True,
+            text=True,
+            env=a.env,
+            timeout=600,
+        )
+        expect(got.returncode == 0, f"adapter download: {got.stderr[-300:]}")
     with a.server() as base:
         httpx.post(
             base + "/api/generate",

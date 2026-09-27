@@ -396,6 +396,15 @@ class HFLConfig:
             1, "HFL_QUEUE_MAX_INFLIGHT", "HFL_NUM_PARALLEL", "OLLAMA_NUM_PARALLEL"
         )
     )
+    # Whether the operator chose that count (an env var above, or ``hfl serve
+    # --parallel``). llama-server takes DEFAULT_SLOTS otherwise; without this,
+    # asking for 1 was indistinguishable from the default and gave 4.
+    parallel_explicit: bool = field(
+        default_factory=lambda: any(
+            os.environ.get(name, "").strip()
+            for name in ("HFL_QUEUE_MAX_INFLIGHT", "HFL_NUM_PARALLEL", "OLLAMA_NUM_PARALLEL")
+        )
+    )
     # Max queue depth, with the same Ollama-fallback chain as the
     # in-flight cap.
     queue_max_size: int = field(
