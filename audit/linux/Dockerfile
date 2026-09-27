@@ -9,7 +9,7 @@
 #
 # The repository is copied in; everything the audit makes (venvs, models,
 # REPORT.md) stays in the /work volume.
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-trixie
 
 # git + a C/C++ toolchain + cmake: what a package without a wheel for this
 # platform builds from source with.
@@ -18,6 +18,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git curl espeak-ng libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir uv httpx websockets
+# llama.cpp's llama-server, the official release (the build Homebrew ships on
+# the Mac audit), for the checks that need it (E2, E14, D21, D22, D33, D54,
+# D55); checksums pinned, a mismatch stops the build.
+ARG TARGETARCH
+ARG LLAMA_BUILD=b10964
+RUN set -e; \
+    case "$TARGETARCH" in \
+      arm64) arch=arm64; sum=5f0e9c95d970892e43380f82ebcab960edfd20a1cd0f7abffa13b29fdb924949 ;; \
+      amd64) arch=x64;   sum=9abf88aea48a55d0f80edb1ee20220b186848cca0b4e919d71518cfd7ca67443 ;; \
+      *) echo "no llama.cpp build for $TARGETARCH"; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/llama.tgz \
+      "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_BUILD}/llama-${LLAMA_BUILD}-bin-ubuntu-${arch}.tar.gz"; \
+    echo "$sum  /tmp/llama.tgz" | sha256sum -c -; \
+    mkdir -p /opt/llama && tar xzf /tmp/llama.tgz -C /opt/llama --strip-components=1; \
+    rm /tmp/llama.tgz
+ENV PATH=/opt/llama:$PATH
 # llama-cpp-python from its project's generic CPU wheels, as HFL's own image:
 # built here it targets this CPU, and on arm64 under Docker Desktop gcc 12
 # fails on the fp16 intrinsics ("target specific option mismatch").
