@@ -160,6 +160,8 @@
     </div>
   </section>
   <section id="models" hidden aria-label="__T_models__">
+    <h3>__T_running__</h3>
+    <div id="running"></div>
     <h3>__T_models_local__</h3>
     <div id="local"></div>
     <h3>__T_models_hub__</h3>
@@ -724,7 +726,45 @@ async function drawLocal() {
     });
     box.appendChild(row([span("name", m.name), span("info", humanSize(m.size)), del]));
   }
+  if (models.length) {
+    const disk = models.reduce((sum, m) => sum + (m.size || 0), 0);
+    box.appendChild(status(T.disk_total.replace("{n}", models.length).replace("{size}", humanSize(disk))));
+  }
 }
+
+// What is loaded now, the machine's memory and the queue: read-only, from
+// /api/ps (the memory figures come only to a caller on this machine) and
+// /healthz. Refreshed while the panel is open.
+async function drawRunning() {
+  const box = $("running");
+  let ps = {}, health = {};
+  try {
+    const [a, b] = await Promise.all([call("/api/ps"), call("/healthz")]);
+    ps = a.ok ? await a.json() : {};
+    health = b.ok ? await b.json() : {};
+  } catch { box.innerHTML = ""; box.appendChild(status(T.unreachable, true)); return; }
+  box.innerHTML = "";
+  const running = ps.models || [];
+  if (!running.length) box.appendChild(status(T.none_running));
+  for (const m of running) {
+    const d = m.details || {};
+    const until = m.expires_at ? T.unloads_at.replace("{time}", new Date(m.expires_at).toLocaleTimeString()) : "";
+    const info = [d.engine, humanSize(m.size), d.context_size ? d.context_size.toLocaleString() + " ctx" : "",
+      d.acceleration, until].filter(Boolean).join(" · ");
+    box.appendChild(row([span("name", m.name), span("info", info)]));
+  }
+  const mem = ps.memory;
+  if (mem) {
+    box.appendChild(status(T.memory_line.replace("{used}", humanSize(mem.in_use_bytes))
+      .replace("{total}", humanSize(mem.total_bytes)).replace("{budget}", humanSize(mem.budget_bytes))
+      .replace("{models}", humanSize(mem.models_bytes) || "0 B")));
+  }
+  if (health.queue_in_flight !== undefined) {
+    box.appendChild(status(T.queue_line.replace("{busy}", health.queue_in_flight)
+      .replace("{waiting}", health.queue_depth ?? 0)));
+  }
+}
+let runningTimer = null;
 
 async function search(q) {
   const box = $("results");
@@ -794,7 +834,11 @@ $("toggle-models").addEventListener("click", () => {
   const panel = $("models");
   panel.hidden = !panel.hidden;
   $("toggle-models").setAttribute("aria-expanded", String(!panel.hidden));
-  if (!panel.hidden) drawLocal();
+  clearInterval(runningTimer);
+  if (!panel.hidden) {
+    drawLocal(); drawRunning();
+    runningTimer = setInterval(drawRunning, 5000);
+  }
 });
 $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();

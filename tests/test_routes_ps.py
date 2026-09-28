@@ -208,6 +208,25 @@ class TestRoutesPsKeepAliveDeadline:
         assert entry["expires_at"].startswith("2026-04-17T15:30:00")
         assert entry["expires_at"].endswith("Z")
 
+    def test_a_model_loaded_by_alias_has_its_expires_at(self, client, llm_manifest):
+        """The deadline is kept under the name the request used (the reaper
+        reads it that way); /api/ps looked it up by the manifest's name, so
+        a model loaded by alias always showed expires_at null."""
+        from hfl.api.state import ResidentModel
+
+        state = get_state()
+        engine = MagicMock(is_loaded=True)
+        state._residents["qwen-coder"] = ResidentModel(
+            name="qwen-coder", engine=engine, manifest=llm_manifest, footprint=1
+        )
+        state._engine, state._current_model = engine, llm_manifest
+        deadline = datetime(2026, 4, 17, 15, 30, 0, tzinfo=timezone.utc)
+        state.set_keep_alive_deadline("qwen-coder", deadline)
+
+        entry = client.get("/api/ps").json()["models"][0]
+        assert entry["name"] == llm_manifest.name
+        assert (entry["expires_at"] or "").startswith("2026-04-17T15:30:00")
+
     def test_clearing_deadline_restores_null(self, client, llm_manifest):
         """set_keep_alive_deadline(None) clears the field."""
         state = get_state()

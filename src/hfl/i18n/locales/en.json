@@ -609,7 +609,13 @@
     "installed": "Installed",
     "gated": "gated",
     "confirm_delete": "Delete for good?",
-    "models_owner_hint": "Downloading and deleting models are the server owner's operations, refused to a web page by default. To allow them from this page, start HFL with HFL_ORIGINS={origin} — only if you trust every page this server serves at that address (its /docs page loads scripts from a CDN). Or use the CLI: hfl pull / hfl rm."
+    "models_owner_hint": "Downloading and deleting models are the server owner's operations, refused to a web page by default. To allow them from this page, start HFL with HFL_ORIGINS={origin} — only if you trust every page this server serves at that address (its /docs page loads scripts from a CDN). Or use the CLI: hfl pull / hfl rm.",
+    "running": "Running now",
+    "none_running": "No model loaded",
+    "unloads_at": "unloads at {time}",
+    "memory_line": "Memory: {used} of {total} in use · limit {budget} · models {models}",
+    "queue_line": "Queue: {busy} generating, {waiting} waiting",
+    "disk_total": "Models: {n} · {size} on disk"
   },
   "shortname": {
     "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",

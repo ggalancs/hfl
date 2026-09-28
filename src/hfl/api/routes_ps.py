@@ -146,7 +146,7 @@ def _size_vram_estimate(manifest: "ModelManifest", engine: Any | None) -> int:
     return int(manifest.size_bytes or 0)
 
 
-def _expires_at_iso(manifest: "ModelManifest") -> str | None:
+def _expires_at_iso(manifest: "ModelManifest", key: str | None = None) -> str | None:
     """Compute the "expires at" ISO-8601 timestamp for this model.
 
     HFL does not yet serialise a per-model keep-alive deadline to disk;
@@ -158,7 +158,10 @@ def _expires_at_iso(manifest: "ModelManifest") -> str | None:
     state = get_state()
     getter = getattr(state, "keep_alive_deadline_for", None)
     if callable(getter):
-        dt = getter(manifest.name)
+        # Deadlines are kept under the name the request used, an alias
+        # included (the reaper reads them that way): looked up by the
+        # manifest's name, a model loaded by alias never had an expires_at.
+        dt = getter(key or manifest.name)
         if isinstance(dt, datetime):
             # Use UTC ISO-8601 with trailing Z — Ollama's convention.
             return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -166,7 +169,7 @@ def _expires_at_iso(manifest: "ModelManifest") -> str | None:
 
 
 def _render_model(
-    manifest: "ModelManifest", engine: Any | None, footprint: int = 0
+    manifest: "ModelManifest", engine: Any | None, footprint: int = 0, key: str | None = None
 ) -> dict[str, Any]:
     """Build one Ollama-shaped model entry."""
     return {
@@ -175,7 +178,7 @@ def _render_model(
         "size": int(footprint or manifest.size_bytes or 0),
         "digest": _manifest_digest(manifest),
         "details": _manifest_details(manifest, engine),
-        "expires_at": _expires_at_iso(manifest),
+        "expires_at": _expires_at_iso(manifest, key),
         "size_vram": _size_vram_estimate(manifest, engine),
     }
 
@@ -199,7 +202,9 @@ async def list_running(request: Request) -> dict[str, Any]:
     seen: set[str] = set()
 
     for resident in state.resident_models():
-        entries.append(_render_model(resident.manifest, resident.engine, resident.footprint))
+        entries.append(
+            _render_model(resident.manifest, resident.engine, resident.footprint, resident.name)
+        )
         # The key is the name the request used (possibly an alias); the
         # pointer below carries the manifest's. Remember both.
         seen.update((resident.name, resident.manifest.name))

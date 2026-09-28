@@ -609,7 +609,13 @@
     "installed": "Instalado",
     "gated": "con acceso restringido",
     "confirm_delete": "¿Borrar definitivamente?",
-    "models_owner_hint": "Descargar y borrar modelos son operaciones del dueño del servidor, que por defecto se niegan a una página web. Para permitirlas desde esta página, arranca HFL con HFL_ORIGINS={origin}; solo si confías en todas las páginas que este servidor sirve en esa dirección (su página /docs carga scripts de un CDN). O usa la CLI: hfl pull / hfl rm."
+    "models_owner_hint": "Descargar y borrar modelos son operaciones del dueño del servidor, que por defecto se niegan a una página web. Para permitirlas desde esta página, arranca HFL con HFL_ORIGINS={origin}; solo si confías en todas las páginas que este servidor sirve en esa dirección (su página /docs carga scripts de un CDN). O usa la CLI: hfl pull / hfl rm.",
+    "running": "En marcha",
+    "none_running": "Ningún modelo cargado",
+    "unloads_at": "se descarga a las {time}",
+    "memory_line": "Memoria: {used} de {total} en uso · límite {budget} · modelos {models}",
+    "queue_line": "Cola: {busy} generando, {waiting} esperando",
+    "disk_total": "Modelos: {n} · {size} en disco"
   },
   "shortname": {
     "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",

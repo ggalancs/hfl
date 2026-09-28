@@ -44,7 +44,8 @@ _KEYS = (
         "conversations delete settings system_prompt system_placeholder temperature "
         "model_default attach remove image_error storage_full menu untitled copy copied export "
         "models models_local models_hub search_placeholder search searching no_results download "
-        "downloading downloaded installed gated confirm_delete models_owner_hint"
+        "downloading downloaded installed gated confirm_delete models_owner_hint "
+        "running none_running unloads_at memory_line queue_line disk_total"
     ).split(),
 )
 

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The chat page shows what is running.** The Models panel (▦) opens with
+  the models loaded now — engine, memory, context, GPU layers, when each
+  unloads — the machine's memory against the budget, the queue, and the disk
+  the local models take. Read-only, refreshed while the panel is open.
 - **Downloads are checked against the Hub's sha256.** huggingface_hub
   checks a download's size only: a file with one byte flipped on disk was
   kept as it was on the next pull (checked for real). After every pull HFL
@@ -40,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`/api/ps` gave no `expires_at` for a model loaded by an alias**: the
+  deadline is kept under the name the request used, and `/api/ps` looked it
+  up by the manifest's name. Ollama clients showed such a model as never
+  unloading.
 - **The release executables and the macOS DMG could not run any model.**
   llama.cpp was not in the executables at all, and where it was installed
   (DMG, MSI) PyInstaller left out its native libraries, so every chat was a
