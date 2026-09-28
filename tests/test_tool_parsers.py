@@ -148,6 +148,24 @@ class TestFallback:
         }
         assert "think" not in cleaned.lower()
 
+    def test_doubled_braces_from_qwen25_coder_template(self):
+        """Qwen2.5-Coder's GGUF template shows the call with doubled braces
+        and the model copies them: 4 of 10 replies to Open WebUI's request
+        came back as text, not as a call."""
+        text = '{{"name": "calculate_timestamp", "arguments": {"days_ago": 0}}}}'
+        cleaned, calls = parse_fallback(text)
+        assert calls[0]["function"]["name"] == "calculate_timestamp"
+        assert calls[0]["function"]["arguments"] == {"days_ago": 0}
+        assert cleaned == ""  # the leftover braces are not an answer
+
+    def test_a_non_call_object_before_the_call_is_skipped(self):
+        text = 'Config {not json} then {"name": "t", "arguments": {}}'
+        cleaned, calls = parse_fallback(text)
+        assert calls[0]["function"]["name"] == "t" and cleaned.startswith("Config")
+
+    def test_braces_in_plain_text_are_not_a_call(self):
+        assert parse_fallback("Use {braces} freely, and {more}.")[1] == []
+
     def test_name_arguments_envelope(self):
         text = '{"name": "write_wiki", "arguments": {"path": "a", "content": "b"}}'
         _, calls = parse_fallback(text)

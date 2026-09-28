@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docs/integrations.md`: Open WebUI, AnythingLLM, Continue, aider,
+  LangChain and LiteLLM with HFL**, each recipe run for real (versions and
+  what was checked are listed; LibreChat and Docker on Linux are marked not
+  checked).
 - **The chat page shows what is running.** The Models panel (▦) opens with
   the models loaded now — engine, memory, context, GPU layers, when each
   unloads — the machine's memory against the budget, the queue, and the disk
@@ -44,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tool calls written with doubled braces arrived as text.** Qwen2.5-Coder's
+  own GGUF template shows the call as `{{"name": ..., "arguments": ...}}`
+  and the model copies it; the loose parser gave up on the first block that
+  was not JSON. Measured with Open WebUI's request: 4 of 10 replies came
+  back as text instead of a call, 0 of 20 after the fix.
 - **`/api/ps` gave no `expires_at` for a model loaded by an alias**: the
   deadline is kept under the name the request used, and `/api/ps` looked it
   up by the manifest's name. Ollama clients showed such a model as never
