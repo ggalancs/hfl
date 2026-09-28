@@ -18,7 +18,7 @@ con OpenAI, Ollama y Anthropic. Sin cuenta. Sin nube propia, por diseño.
 </div>
 
 <p align="center">
-  <img src="docs/assets/hfl-run-demo.svg" alt="Terminal: hfl run descarga un modelo del Hub de Hugging Face la primera vez y abre un chat local (salida real, abreviada)" width="880">
+  <img src="docs/assets/hfl-run-demo.svg" alt="Terminal, animada: hfl run descarga un modelo del Hub de Hugging Face la primera vez, lo comprueba contra el sha256 del Hub, lo carga y responde a una pregunta (salida real, abreviada, esperas acortadas)" width="880">
 </p>
 
 ## Empezar
@@ -75,6 +75,20 @@ dirección, también `/docs`, que carga scripts de un CDN).
   elige la mejor cuantización de la comunidad para tu máquina (`hfl pull-smart`),
   dimensiona los modelos Mixture-of-Experts por sus parámetros totales, comprueba
   licencias antes de descargar y guarda la procedencia de cada descarga.
+
+### Frente a descargar los ficheros a mano
+
+`hf download` y `git lfs clone` traen los ficheros de un repo; qué hacer con
+ellos queda de tu parte. HFL trae solo los ficheros que el modelo necesita y
+los ejecuta:
+
+| | `hf download` / `git lfs` | HFL |
+|---|---|---|
+| Qué ficheros | todo el repo, o los patrones que indiques | la cuantización que pediste (más las partes de un modelo dividido y el proyector de visión) |
+| Checkpoints safetensors | se descargan tal cual | se convierten a GGUF y se cuantizan, o se ejecutan tal cual (MLX, Transformers) |
+| Comprobación tras descargar | `hf download`: el tamaño; `git lfs`: el sha256 de cada objeto | contra el sha256 del Hub; un fichero dañado se vuelve a descargar |
+| Licencia | no se mira | se comprueba antes de descargar, y se guarda con el modelo junto al repo y el commit de origen |
+| Después | tu propio código o servidor | un chat, y las APIs de OpenAI, Ollama y Anthropic en un solo puerto |
 
 ## Instalación
 

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An animated demo in the README, recorded from a real `hfl run`**
+  (`scripts/demo_svg.py`: a pseudo-terminal and a terminal emulator record
+  the run; lines are only left out, never written, and long waits are
+  shortened, as the caption says), and a comparison with downloading the
+  files yourself (`hf download`, `git lfs`).
 - **`docs/integrations.md`: Open WebUI, AnythingLLM, Continue, aider,
   LangChain and LiteLLM with HFL**, each recipe run for real (versions and
   what was checked are listed; LibreChat and Docker on Linux are marked not

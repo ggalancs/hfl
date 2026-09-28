@@ -18,7 +18,7 @@ Ollama- and Anthropic-compatible API. No account. No cloud of its own — by des
 </div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ggalancs/hfl/main/docs/assets/hfl-run-demo.svg" alt="Terminal: hfl run downloads a model from the Hugging Face Hub on first use and starts a local chat (real output, abridged)" width="880">
+  <img src="https://raw.githubusercontent.com/ggalancs/hfl/main/docs/assets/hfl-run-demo.svg" alt="Terminal, animated: hfl run downloads a model from the Hugging Face Hub on first use, checks it against the Hub's sha256, loads it and answers a question (real output, abridged, waits shortened)" width="880">
 </p>
 
 ## Quick start
@@ -72,6 +72,19 @@ that address, including `/docs`, which loads scripts from a CDN).
   the best community quant for your machine (`hfl pull-smart`), size
   Mixture-of-Experts models by their total parameters, check licenses before
   downloading and keep a provenance record of every pull.
+
+### Compared with downloading the files yourself
+
+`hf download` and `git lfs clone` fetch a repo's files; what to do with them
+is left to you. HFL fetches only the files a model needs and runs them:
+
+| | `hf download` / `git lfs` | HFL |
+|---|---|---|
+| Which files | the whole repo, or the patterns you give | the one quant you asked for (plus a split model's parts and a vision projector) |
+| safetensors checkpoints | downloaded as they are | converted to GGUF and quantized, or run as they are (MLX, Transformers) |
+| Checked after download | `hf download`: the size; `git lfs`: each object's sha256 | against the Hub's sha256; a damaged file is fetched again |
+| License | not looked at | checked before downloading, and kept with the model with the repo and commit it came from |
+| Then | your own code or server | a chat, and OpenAI, Ollama and Anthropic APIs on one port |
 
 ## Install
 
