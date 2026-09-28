@@ -65,7 +65,7 @@ class TestStaticPyprojectPins:
     in the pin bounds is caught before merge.
     """
 
-    def test_huggingface_hub_pin_targets_1x(self):
+    def test_huggingface_hub_pin_accepts_1x_and_2x(self):
         cfg = _load_pyproject()
         deps = cfg["project"]["dependencies"]
         pin = _find_pin(deps, "huggingface-hub")
@@ -78,8 +78,9 @@ class TestStaticPyprojectPins:
             "Dropping below 1.5 re-introduces the is_offline_mode "
             "ImportError chain that crashed convert_hf_to_gguf.py."
         )
-        assert "<2.0" in pin or "<2," in pin, (
-            f"huggingface-hub pin must cap before the next major: {pin!r}"
+        # 2.x was checked for real (see pyproject); 3.x has not been.
+        assert "<3.0" in pin or "<3," in pin, (
+            f"huggingface-hub pin must cap before the next unchecked major: {pin!r}"
         )
 
     @pytest.mark.parametrize("extra_name", ["transformers", "tts"])

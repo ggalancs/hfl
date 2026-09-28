@@ -15,6 +15,7 @@ Compliance with HuggingFace ToS (R8 - Legal Audit):
 - Identifying User-Agent
 """
 
+import importlib
 import os
 import time
 from pathlib import Path
@@ -66,13 +67,20 @@ def _rate_limit() -> None:
 # with their real message. (``ConnectionError``/``TimeoutError`` in the
 # stdlib fallback are the *specific* OSError subclasses, not the broad
 # base, so they likewise don't swallow HTTP errors.)
-_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
-try:
-    from httpx import TransportError
+#
+# huggingface_hub 2.x raises httpx2's errors, 1.x httpx's: separate classes,
+# and catching only httpx's would stop retrying every failure under 2.x.
+def _retryable() -> tuple[type[Exception], ...]:
+    found: list[type[Exception]] = []
+    for module in ("httpx", "httpx2"):
+        try:
+            found.append(importlib.import_module(module).TransportError)
+        except (ImportError, AttributeError):
+            continue
+    return tuple(found) or (ConnectionError, TimeoutError)
 
-    _RETRYABLE_EXCEPTIONS = (TransportError,)
-except ImportError:
-    pass
+
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = _retryable()
 
 
 def _on_download_retry(exception: Exception, attempt: int) -> None:

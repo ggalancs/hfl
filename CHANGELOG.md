@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **huggingface_hub 2.x is accepted** (`>=1.5.0,<3.0`, was `<2.0`), and
+  uvicorn up to 0.53. Hub 2.0 moved its HTTP stack to httpx2; HFL was run on
+  it: the test suite, the Hub timeouts against an unreachable address,
+  offline detection, and pulling, serving, searching and discovering models.
+  transformers, tokenizers, diffusers and sentence-transformers still require
+  hub 1.x, so installs with those extras keep 1.x.
+
 ### Fixed
+
+- **Download retries under huggingface_hub 2.x.** A transport failure is
+  retried again: 2.x raises httpx2's errors, and only httpx's were caught.
 
 - **llama.cpp models failed to load in a Linux `hfl[all]` install.** Every
   load stopped with "property 'stream' of '_StderrHandler' object has no
