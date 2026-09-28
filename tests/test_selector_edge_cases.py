@@ -51,3 +51,25 @@ class TestMissingDependencyErrorDetails:
         assert "llama-cpp-python" in message
         assert "CUDA" in message
         assert "Metal" in message
+
+
+def test_a_llama_cpp_whose_native_library_does_not_load_is_a_clear_501(monkeypatch) -> None:
+    """Installed but unloadable (an executable that did not bundle libllama:
+    FileNotFoundError on import) was an opaque 500; it says what failed."""
+    import sys
+    import types
+
+    from hfl.engine.selector import MissingDependencyError, _get_llama_cpp_engine
+
+    broken = types.ModuleType("hfl.engine.llama_cpp")
+
+    def missing_library(name: str):
+        raise FileNotFoundError("Shared library with base name 'llama' not found")
+
+    broken.__getattr__ = missing_library  # type: ignore[method-assign]
+    monkeypatch.setitem(sys.modules, "hfl.engine.llama_cpp", broken)
+    with pytest.raises(MissingDependencyError) as caught:
+        _get_llama_cpp_engine()
+    assert caught.value.status_code == 501
+    assert "native library did not load" in str(caught.value)
+    assert "Shared library with base name 'llama' not found" in str(caught.value)

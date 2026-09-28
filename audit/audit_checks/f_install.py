@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -126,17 +127,30 @@ def f5(a: Audit) -> str:
     return "starts with its menu-bar icon and serves"
 
 
-@check("F6", "PyInstaller executable", needs=(EXTRA_ID["build"],))
+@check("F6", "PyInstaller executable runs a model", needs=(EXTRA_ID["llama"],))
 def f6(a: Audit) -> str:
-    venv = a.work / "extras" / "build"
-    pyinstaller = venv / "bin" / "pyinstaller"
-    if not pyinstaller.exists():
-        raise Uncheckable("run section C first (the [build] extra provides PyInstaller)")
+    """Built from hfl.spec in the ``[llama]`` venv, as the release workflows
+    do, then run for real: ``platform_check.py --hfl <executable>`` pulls,
+    serves and answers with llama.cpp in process, without llama-server on
+    PATH. ``version`` alone passed for the 0.22.0 executables and DMG, which
+    could not run any model (llama.cpp's libraries were not bundled)."""
+    venv = a.work / "extras" / "llama"
+    python = venv / "bin" / "python"
+    if not python.exists():
+        raise Uncheckable("run section C first (the [llama] extra's venv)")
+    added = subprocess.run(
+        ["uv", "pip", "install", "-q", "--python", str(python), "pyinstaller"],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    expect(added.returncode == 0, added.stderr[-300:])
     out_dir = a.work / "pyi"
     build = subprocess.run(
         [
-            str(pyinstaller),
+            str(venv / "bin" / "pyinstaller"),
             "--noconfirm",
+            "--clean",
             "--distpath",
             str(out_dir / "dist"),
             "--workpath",
@@ -151,9 +165,30 @@ def f6(a: Audit) -> str:
     expect(build.returncode == 0, build.stderr[-300:])
     binary = next((p for p in (out_dir / "dist").rglob("hfl") if p.is_file()), None)
     expect(binary, "no executable built")
-    version = subprocess.run([str(binary), "version"], capture_output=True, text=True, timeout=120)
-    expect(version.returncode == 0 and "hfl v" in version.stdout, version.stderr[-300:])
-    return f"built; `{binary.name} version`: {version.stdout.strip().splitlines()[0]}"
+    # PATH without llama-server: the executable must run the model itself.
+    path = os.pathsep.join(
+        d
+        for d in os.environ.get("PATH", "").split(os.pathsep)
+        if d and not (Path(d) / "llama-server").exists()
+    )
+    checked = subprocess.run(
+        [
+            a.python,
+            str(REPO / "scripts" / "platform_check.py"),
+            "--hfl",
+            str(binary),
+            "--expect-backend",
+            "llama.cpp",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=2400,
+        env={**a.env, "PATH": path},
+    )
+    lines = [x for x in checked.stdout.splitlines() if x[:3] in ("OK ", "BAD")]
+    expect(checked.returncode == 0, " · ".join(x for x in lines if x.startswith("BAD"))[-400:]
+           or checked.stderr[-300:])  # fmt: skip
+    return f"{binary.stat().st_size // 2**20} MB; platform_check.py: {len(lines)} checks passed"
 
 
 @check("F7", "MSI / winget")

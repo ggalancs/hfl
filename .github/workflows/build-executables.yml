@@ -7,11 +7,6 @@ on:
         description: 'Version tag (e.g., v0.1.0)'
         required: false
         default: 'dev'
-      include_llama:
-        description: 'Include llama-cpp-python (larger binary)'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -22,15 +17,21 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             artifact_name: hfl-linux-x86_64
-          - os: macos-latest
+            arch: x86-64
+          # An Intel runner: macos-latest is Apple Silicon, and the 0.22.0
+          # "hfl-macos-x86_64" was in fact an arm64 binary.
+          - os: macos-15-intel
             platform: macos
             artifact_name: hfl-macos-x86_64
+            arch: x86_64
           - os: macos-14
             platform: macos-arm
             artifact_name: hfl-macos-arm64
+            arch: arm64
           - os: windows-latest
             platform: windows
             artifact_name: hfl-windows-x86_64
+            arch: x86-64
 
     runs-on: ${{ matrix.os }}
 
@@ -48,12 +49,22 @@ jobs:
           pip install pyinstaller
           pip install -e .
 
-      - name: Install llama-cpp-python (optional)
-        if: ${{ inputs.include_llama }}
-        run: |
-          pip install llama-cpp-python
+      # llama.cpp is always in the executable: without it no GGUF model runs
+      # (the 0.22.0 executables could not run any). Linux and Windows take the
+      # prebuilt CPU wheel, built for any x86-64 CPU. macOS builds from
+      # source: the prebuilt macOS wheels of 0.3.34 and 0.3.35 are corrupt
+      # (Bad CRC-32). On Intel, GGML_NATIVE=OFF so the binary does not need
+      # the runner's CPU features; on Apple Silicon the M1 runner is the
+      # baseline every Apple Silicon Mac has.
+      - name: Install llama-cpp-python (prebuilt, Linux and Windows)
+        if: ${{ matrix.platform == 'linux' || matrix.platform == 'windows' }}
+        run: pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu "llama-cpp-python>=0.3.20"
+
+      - name: Install llama-cpp-python (from source, macOS)
+        if: ${{ matrix.platform == 'macos' || matrix.platform == 'macos-arm' }}
+        run: pip install --no-binary=llama-cpp-python "llama-cpp-python>=0.3.20"
         env:
-          CMAKE_ARGS: ${{ matrix.platform == 'macos' && '-DGGML_METAL=ON' || matrix.platform == 'macos-arm' && '-DGGML_METAL=ON' || '' }}
+          CMAKE_ARGS: ${{ matrix.platform == 'macos' && '-DGGML_METAL=OFF -DGGML_NATIVE=OFF' || '-DGGML_METAL=ON' }}
 
       - name: Build executable
         run: |
@@ -65,12 +76,20 @@ jobs:
           chmod +x dist/hfl
           ./dist/hfl version
           ./dist/hfl --help
+          # The architecture the file name promises.
+          file dist/hfl | tee /dev/stderr | grep -q "${{ matrix.arch }}"
 
       - name: Test executable (Windows)
         if: matrix.platform == 'windows'
         run: |
           ./dist/hfl.exe version
           ./dist/hfl.exe --help
+
+      # `version` and `--help` passed for executables that could not run any
+      # model. Run one, for real: pull, serve, answer over the three APIs,
+      # served by llama.cpp in process.
+      - name: Check the executable runs a model (llama.cpp in process)
+        run: python scripts/platform_check.py --hfl dist/hfl${{ matrix.platform == 'windows' && '.exe' || '' }} --expect-backend llama.cpp
 
       - name: Rename artifact (Unix)
         if: matrix.platform != 'windows'

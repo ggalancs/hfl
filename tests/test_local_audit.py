@@ -120,3 +120,14 @@ def test_only_what_was_logged_during_the_check_counts(tmp_path: Path) -> None:
     later = la.Check("E98", "same shared log", _logged("fine\n", offset_after=True))
     out = la.run(audit, [earlier, later])
     assert (out["E97"]["status"], out["E98"]["status"]) == (la.BROKEN, la.OK)
+
+
+def test_platform_check_recognises_an_engine_switch_as_the_audit_does() -> None:
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "platform_check.py"
+    spec = importlib.util.spec_from_file_location("platform_check", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.ENGINE_SWITCH.pattern == la.ENGINE_SWITCH.pattern

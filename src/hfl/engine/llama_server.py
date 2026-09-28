@@ -32,7 +32,6 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -51,6 +50,7 @@ from hfl.engine.base import (
     reasoning_template_vars,
     repeat_penalty_for,
 )
+from hfl.utils.self_exec import child_guard_argv
 
 logger = logging.getLogger(__name__)
 
@@ -318,14 +318,7 @@ def start_server(
         # Through the guard: if HFL dies without unloading (SIGKILL, a
         # crash), the guard stops llama-server instead of leaving it
         # holding the model in memory.
-        guarded = [
-            sys.executable,
-            "-m",
-            "hfl.engine._child_guard",
-            str(os.getpid()),
-            "--",
-            *argv,
-        ]
+        guarded = child_guard_argv(os.getpid(), argv)
         proc = subprocess.Popen(
             guarded,
             stdin=subprocess.DEVNULL,

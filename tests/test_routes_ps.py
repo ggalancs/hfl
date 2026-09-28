@@ -338,3 +338,31 @@ class TestListedOnce:
 
         names = [m["name"] for m in client.get("/api/ps").json()["models"]]
         assert names == [llm_manifest.name]
+
+
+@pytest.mark.parametrize(
+    ("module", "cls", "label"),
+    [
+        ("hfl.engine.llama_cpp", "LlamaCppEngine", "llama.cpp"),
+        ("hfl.engine.llama_server", "LlamaServerEngine", "llama-server"),
+        ("hfl.engine.mlx_engine", "MLXEngine", "MLX"),
+        ("hfl.engine.transformers_engine", "TransformersEngine", "Transformers"),
+        ("hfl.engine.vllm_engine", "VLLMEngine", "vLLM"),
+    ],
+)
+def test_details_name_the_engine_running_the_model(module, cls, label) -> None:
+    """Which engine runs a model is readable over the API: an engine that
+    failed and was replaced by another is visible, not only in the log. The
+    classes are the real ones, so a rename is caught here."""
+    import importlib
+
+    from hfl.api.routes_ps import _manifest_details, engine_label
+
+    engine_class = getattr(importlib.import_module(module), cls)
+    engine = engine_class.__new__(engine_class)  # no load, no backend needed
+    assert engine_label(engine) == label
+
+    class _Manifest:
+        format, architecture, parameters, quantization = "gguf", "qwen2", "0.5B", "Q4_K_M"
+
+    assert _manifest_details(_Manifest(), engine)["engine"] == label

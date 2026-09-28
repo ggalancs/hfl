@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -43,6 +44,11 @@ HFL = str(Path(sysconfig.get_path("scripts")) / ("hfl.exe" if os.name == "nt" el
 CHAT = ("Qwen/Qwen2.5-0.5B-Instruct-GGUF", "Q4_K_M", "chat")  # Apache-2.0, ~400 MB
 EMBED = ("nomic-ai/nomic-embed-text-v1.5-GGUF", "Q4_K_M", "embed")  # Apache-2.0, ~80 MB
 QUESTION = "What is the capital of France? Answer with one word."
+# model_loader's warning when the chosen engine could not load a model and
+# another one was tried. Another engine answering hides a broken one: in-process
+# llama.cpp failed every load in a Linux ``hfl[all]`` while llama-server
+# answered. Same pattern as the local audit's (a test keeps them equal).
+ENGINE_SWITCH = re.compile(r"could not be loaded by \w+: [^\n]*; trying \w+")
 
 
 def _port() -> int:
@@ -108,7 +114,17 @@ def _checks(run: Run, http: httpx.Client) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--keep", action="store_true", help="keep the HFL home it creates")
+    parser.add_argument("--hfl", help="the hfl to check (e.g. a PyInstaller executable)")
+    parser.add_argument(
+        "--expect-backend",
+        choices=("llama.cpp", "llama-server", "MLX", "Transformers", "vLLM"),
+        help="fail unless this engine served the chat model (an executable that "
+        "lacks llama.cpp would otherwise pass through a llama-server on PATH)",
+    )
     args = parser.parse_args()
+    if args.hfl:
+        global HFL
+        HFL = str(Path(args.hfl).resolve())
 
     home = Path(tempfile.mkdtemp(prefix="hfl-platform-"))
     # UTF-8 everywhere: a Windows console's cp1252 cannot print rich's tables.
@@ -151,10 +167,27 @@ def main() -> int:
         run.check("hfl serve", True, f"port {port}")
         _checks(run, http)
         served = (home / "serve.log").read_text(encoding="utf-8", errors="replace")
+        # The engine /api/ps reports for the chat model (``details.engine``).
+        running = http.get("/api/ps").json().get("models", [])
         backend = next(
-            (b for b in ("llama-server", "llama.cpp", "MLX", "Transformers") if b in served), "?"
+            (
+                m.get("details", {}).get("engine", "?")
+                for m in running
+                # Listed by its manifest name (qwen2.5-0.5b-instruct-gguf-q4_k_m),
+                # not by the alias.
+                if str(m.get("name", "")).startswith(CHAT[0].split("/")[1].lower())
+            ),
+            "?",
         )
-        print(f"backend seen in the server log: {backend}", flush=True)
+        print(f"engine serving the chat model: {backend}", flush=True)
+        if args.expect_backend:
+            run.check("served by " + args.expect_backend, backend == args.expect_backend, backend)
+        switched = ENGINE_SWITCH.search(served)
+        run.check(
+            "each model served by the engine chosen for it",
+            switched is None,
+            switched.group(0)[:200] if switched else backend,
+        )
         outdated = run.hfl("outdated", timeout=120)
         run.check("hfl outdated", outdated.returncode == 0, outdated.stdout.strip()[-200:])
         removed = run.hfl("rm", "embed", "--yes", timeout=60)

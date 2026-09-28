@@ -62,6 +62,14 @@ def _get_llama_cpp_engine() -> InferenceEngine:
             "For macOS with Metal:\n"
             '  CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python'
         ) from e
+    except (OSError, RuntimeError) as e:
+        # Installed, but its native library did not load: missing (an
+        # executable that did not bundle it: FileNotFoundError), built for
+        # another CPU, or lacking a system library (libgomp, in the 0.21.0
+        # image). It was an opaque 500; say what failed.
+        raise MissingDependencyError(
+            f"llama-cpp-python is installed but its native library did not load: {e}"
+        ) from e
 
 
 def _llama_server_if_no_llama_cpp(model_path: Path) -> InferenceEngine | None:

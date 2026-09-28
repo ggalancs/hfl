@@ -3439,7 +3439,17 @@ def cli_main() -> None:
     """The ``hfl`` command. An unreadable setting (``HFL_PORT=abc``) is a
     one-line message naming the variable, not a traceback."""
     from hfl.exceptions import InvalidConfigError
+    from hfl.utils.self_exec import CHILD_GUARD_FLAG
 
+    if len(sys.argv) > 1 and sys.argv[1] == CHILD_GUARD_FLAG:
+        # An executable starting llama-server through its guard (see
+        # hfl.utils.self_exec): run the guard, not the CLI.
+        from hfl.engine import _child_guard
+
+        raise SystemExit(_child_guard.main([sys.argv[0], *sys.argv[2:]]))
+    from hfl.utils.self_exec import watch_onefile_launcher
+
+    watch_onefile_launcher()
     try:
         app()
     except InvalidConfigError as exc:

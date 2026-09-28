@@ -22,13 +22,13 @@ import shlex
 import shutil
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from hfl.i18n import t
+from hfl.utils.self_exec import hfl_argv
 
 TOOLS = ("claude", "codex")
 DEFAULT_TOKEN = "hfl"  # any non-empty token: HFL checks one only with --api-key
@@ -114,16 +114,7 @@ def start_server(
 ) -> subprocess.Popen[bytes]:
     """``hfl serve`` on 127.0.0.1:``port``, logging to ``log_path``."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        "-c",
-        "from hfl.cli.main import cli_main; cli_main()",
-        "serve",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-    ]
+    cmd = hfl_argv("serve", "--host", "127.0.0.1", "--port", str(port))
     if api_key:
         cmd += ["--api-key", api_key]
     if parallel:

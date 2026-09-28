@@ -37,10 +37,20 @@ jobs:
           python -m pip install --upgrade pip build pyinstaller
           choco install wixtoolset --no-progress -y
 
+      # llama-cpp-python's prebuilt CPU wheel: built for any x86-64 CPU. A
+      # build on the runner can target the runner's CPU and stop with an
+      # illegal instruction on another one.
       - name: Build PyInstaller executable
+        env:
+          HFL_PYI_ICON: packaging\windows\hfl.ico
         run: |
-          pip install -e ".[llama]"
-          pyinstaller --onefile --name hfl --icon packaging\windows\hfl.ico --collect-data hfl src\hfl\cli\main.py
+          pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -e ".[llama]"
+          pyinstaller hfl.spec --clean
+
+      # The 0.22.0 executables and DMG could not run any model (llama.cpp's
+      # libraries were not in the binary). Run one, for real, before packaging.
+      - name: Check the executable runs a model (llama.cpp in process)
+        run: python scripts/platform_check.py --hfl dist\hfl.exe --expect-backend llama.cpp
 
       - name: Derive version
         id: ver

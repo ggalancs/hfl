@@ -81,11 +81,11 @@ def _manifest_digest(manifest: "ModelManifest") -> str:
 def _manifest_details(manifest: "ModelManifest", engine: Any | None = None) -> dict[str, Any]:
     """Compose the Ollama ``details`` sub-object from an HFL manifest.
 
-    ``acceleration`` / ``context_size`` are HFL extensions on top of
-    Ollama's schema (extra keys, so ollama-python and Open WebUI ignore
-    them). They exist so "is this model actually on the GPU, and at what
-    context?" is answerable over the API instead of only by re-reading
-    the server log.
+    ``acceleration`` / ``context_size`` / ``engine`` are HFL extensions on
+    top of Ollama's schema (extra keys, so ollama-python and Open WebUI
+    ignore them). They exist so "is this model actually on the GPU, at what
+    context, and which engine runs it?" is answerable over the API instead
+    of only by re-reading the server log.
     """
     details: dict[str, Any] = {
         "format": manifest.format or "unknown",
@@ -95,6 +95,7 @@ def _manifest_details(manifest: "ModelManifest", engine: Any | None = None) -> d
         "quantization_level": manifest.quantization,
     }
     if engine is not None:
+        details["engine"] = engine_label(engine)
         accel = getattr(engine, "acceleration", None)
         if accel:
             details["acceleration"] = accel
@@ -102,6 +103,22 @@ def _manifest_details(manifest: "ModelManifest", engine: Any | None = None) -> d
         if isinstance(ctx, int) and ctx > 0:
             details["context_size"] = ctx
     return details
+
+
+# The engine's class, as users know the engine (the ``--backend`` names).
+_ENGINE_LABELS = {
+    "LlamaCppEngine": "llama.cpp",
+    "LlamaServerEngine": "llama-server",
+    "MLXEngine": "MLX",
+    "TransformersEngine": "Transformers",
+    "VLLMEngine": "vLLM",
+}
+
+
+def engine_label(engine: Any) -> str:
+    """Which engine runs a model: ``llama.cpp``, ``llama-server``, ``MLX``…"""
+    name = type(engine).__name__
+    return _ENGINE_LABELS.get(name) or name.removesuffix("Engine") or name
 
 
 def _size_vram_estimate(manifest: "ModelManifest", engine: Any | None) -> int:

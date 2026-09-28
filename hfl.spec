@@ -3,12 +3,20 @@
 #
 # Build commands:
 #   pyinstaller hfl.spec
+#   HFL_PYI_ICON=packaging/macos/hfl.icns pyinstaller hfl.spec   # with an icon
+#
+# Every packaging (the release executables, the DMG, the MSI) builds from
+# this spec, and each checks the result runs a model (platform_check.py
+# --hfl dist/hfl --expect-backend llama.cpp) before shipping it: the 0.22.0
+# executables and DMG could not run any model.
 #
 # Output: dist/hfl (or dist/hfl.exe on Windows)
 
+import importlib.util
+import os
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files
 
 block_cipher = None
 
@@ -21,6 +29,19 @@ rich_data = collect_data_files('rich')
 # ``Path(__file__).parent / "locales"``; without bundling them the frozen
 # binary crashes on every command with "Translation file not found".
 hfl_data = collect_data_files('hfl')
+
+# Packages whose native libraries are loaded at run time (ctypes / a Rust
+# extension), which PyInstaller's import analysis does not see. Without
+# them the executable could not run a model: ``import llama_cpp`` failed
+# with FileNotFoundError (libllama missing), and downloads fell back from
+# Xet to plain HTTP. Collected when the build environment has them.
+native_datas, native_binaries, native_imports = [], [], []
+for package in ('llama_cpp', 'hf_xet'):
+    if importlib.util.find_spec(package) is not None:
+        d, b, h = collect_all(package)
+        native_datas += d
+        native_binaries += b
+        native_imports += h
 
 # Detect platform
 is_windows = sys.platform == 'win32'
@@ -47,6 +68,9 @@ hidden_imports = [
     'hfl.engine.base',
     'hfl.engine.selector',
     'hfl.engine.llama_cpp',
+    'hfl.engine.llama_server',
+    'hfl.engine._child_guard',  # llama-server runs under it (hfl.utils.self_exec)
+    'hfl.utils.self_exec',
     'hfl.converter',
     'hfl.converter.formats',
     'hfl.converter.gguf_converter',
@@ -86,7 +110,7 @@ hidden_imports = [
 ]
 
 # Additional data to include
-datas = rich_data + hfl_data
+datas = rich_data + hfl_data + native_datas
 
 # Exclude heavy optional modules not needed for basic CLI
 excludes = [
@@ -114,9 +138,9 @@ excludes = [
 a = Analysis(
     ['src/hfl/cli/main.py'],
     pathex=[],
-    binaries=[],
+    binaries=native_binaries,
     datas=datas,
-    hiddenimports=hidden_imports + rich_imports,
+    hiddenimports=hidden_imports + rich_imports + native_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -149,5 +173,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add icon if desired: icon='assets/hfl.ico'
+    # The DMG and MSI builds pass their icon (.icns / .ico) through the
+    # environment, so all three packagings build from this one spec.
+    icon=os.environ.get('HFL_PYI_ICON') or None,
 )

@@ -40,12 +40,21 @@ jobs:
           python -m pip install --upgrade pip pyinstaller
           brew install create-dmg
 
+      # llama-cpp-python from source (Metal): the prebuilt macOS wheels of
+      # 0.3.34 and 0.3.35 are corrupt (Bad CRC-32; pip refuses them). Built
+      # on macos-14 (M1), so it runs on every Apple Silicon Mac.
       - name: Build PyInstaller binary
+        env:
+          CMAKE_ARGS: "-DGGML_METAL=ON"
+          HFL_PYI_ICON: packaging/macos/hfl.icns
         run: |
           pip install -e ".[llama]"
-          pyinstaller --onefile --name hfl --icon packaging/macos/hfl.icns \
-                      --collect-data hfl \
-                      src/hfl/cli/main.py
+          pyinstaller hfl.spec --clean
+
+      # The 0.22.0 DMG could not run any model (llama.cpp's libraries were not
+      # in the binary). Run one, for real, before packaging it.
+      - name: Check the binary runs a model (llama.cpp in process)
+        run: python scripts/platform_check.py --hfl dist/hfl --expect-backend llama.cpp
 
       - name: Derive version
         id: ver

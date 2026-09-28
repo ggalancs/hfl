@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/api/ps` names the engine running each model** (`details.engine`:
+  `llama.cpp`, `llama-server`, `MLX`, `Transformers`, `vLLM`), beside the
+  existing `acceleration` and `context_size`. Ollama clients ignore it.
+- `scripts/platform_check.py --hfl <executable> --expect-backend <engine>`:
+  the same end-to-end check against a PyInstaller executable, failing when
+  another engine served the model.
+
+### Fixed
+
+- **The release executables and the macOS DMG could not run any model.**
+  llama.cpp was not in the executables at all, and where it was installed
+  (DMG, MSI) PyInstaller left out its native libraries, so every chat was a
+  500. All three now build from `hfl.spec`, which bundles llama.cpp (and
+  `hf_xet`, for Xet downloads), and each release workflow runs a model with
+  the built executable before shipping it.
+- **`hfl-macos-x86_64` was an Apple Silicon binary**: it was built on
+  `macos-latest`, which is arm64. It is built on an Intel runner now, and
+  every executable's architecture is checked.
+- **Executables could not start llama-server or `hfl launch`'s server**:
+  they ran `hfl -m …`, which only a Python interpreter understands.
+- **A one-file executable killed with SIGKILL left `hfl serve` running**
+  (port bound, models in memory): the program now stops when its launcher is
+  gone.
+- A llama-cpp-python whose native library does not load (missing, or built
+  for another CPU) is a clear 501 with the reason, not an opaque 500.
+
 ### Changed
 
 - **uvicorn up to 0.54** (`<0.55`). Its changes are to the experimental,
