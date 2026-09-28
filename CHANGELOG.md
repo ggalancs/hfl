@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-28
+
 ### Added
 
 - **Short model names: `hfl run qwen3-coder`.** A name that is neither a
