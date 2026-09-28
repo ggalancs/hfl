@@ -16,8 +16,9 @@ without the setting) so a check that cannot fail does not pass.
   without `websockets` the WebSocket check reports `NO COMPROBABLE AQUÍ`).
 - [`uv`](https://docs.astral.sh/uv/) — `--setup` and section C build the
   wheel and venvs with it.
-- ~20 GB of disk and a network connection (models come from the Hugging Face
-  Hub; all are Apache-2.0 or MIT, so no license is accepted on your behalf).
+- ~20 GB of disk (and ~20 GB free in Docker for F3's `all` image) and a
+  network connection (models come from the Hugging Face Hub; all are
+  Apache-2.0 or MIT, so no license is accepted on your behalf).
 - Optional, each unlocking checks that otherwise report `NO COMPROBABLE AQUÍ`:
   `llama-server` on `PATH` (`brew install llama.cpp`), Docker, Homebrew,
   a SearXNG instance in `AUDIT_SEARXNG_URL` (a real web search; with none,
@@ -27,8 +28,8 @@ without the setting) so a check that cannot fail does not pass.
 ## Run it
 
 ```bash
-# 1. Build this checkout's wheel and install it into <work>/venv (all extras
-#    that exist on this platform) and <work>/venv-core (no extras).
+# 1. Build this checkout's wheel and install it into <work>/venv (hfl[all]
+#    as a user installs it, plus otel) and <work>/venv-core (no extras).
 python audit/local_audit.py --work ~/hfl-audit --setup
 
 # 2. Every check (a few hours; see "Long runs" below).
@@ -54,6 +55,12 @@ an address the container reaches: a SearXNG published on the host's
 `127.0.0.1` is not reachable through `host.docker.internal`; use the SearXNG
 container's own address (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <name>`,
 port 8080) with `-e AUDIT_SEARXNG_URL=http://<ip>:8080`.
+
+A check whose server switched engines after a failed load (the log's
+"could not be loaded by X: …; trying Y") is `ROTO` even if every answer was
+right: the other engine answering hid a llama.cpp that failed to load every
+model in a Linux `hfl[all]`. F3 builds both published images (`llama` and
+`all`) for this machine's architecture; the other one is left to CI.
 
 Results accumulate in `<work>/results.json` (a re-run of some checks updates
 only those) and every run writes `<work>/REPORT.md`: the counts, what is not

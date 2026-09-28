@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import httpx
-from local_audit import Audit, Uncheckable, check, expect
+from local_audit import Audit, Parts, Uncheckable, check, expect
 
 from audit_checks.c_extras import EXTRA_ID
 
@@ -38,16 +38,27 @@ def f2(a: Audit) -> str:
     return f"{len(extras)} extras: " + ", ".join(sorted(set(extras.values())))
 
 
-@check("F3", "Docker image (arm64) and compose")
+@check("F3", "Docker images (llama and all, this machine's arch)")
 def f3(a: Audit) -> str:
+    """Both images the Docker workflow publishes, built and checked with the
+    workflow's own ``image_check.py``. Only ``llama`` was built here once, and
+    the ``all`` image's llama.cpp failed to load every model (dill, which
+    vLLM brings, broke the load's stderr silencing): CI caught it at release."""
     if shutil.which("docker") is None:
         raise Uncheckable("docker not installed")
-    tag = "hfl-audit:local"
+    part = Parts()
+    for extras in ("llama", "all"):
+        part(f"{extras} image", lambda extras=extras: _image(a, extras))
+    return part.verdict()
+
+
+def _image(a: Audit, extras: str) -> None:
+    tag = f"hfl-audit-{extras}:local"
     build = subprocess.run(
-        ["docker", "build", "-q", "-t", tag, str(REPO)],
+        ["docker", "build", "-q", "--build-arg", f"HFL_EXTRAS={extras}", "-t", tag, str(REPO)],
         capture_output=True,
         text=True,
-        timeout=3600,
+        timeout=5400,
     )
     expect(build.returncode == 0, build.stderr[-300:])
     try:
@@ -65,7 +76,6 @@ def f3(a: Audit) -> str:
         expect(check_.returncode == 0, " · ".join(lines)[-400:] or check_.stderr[-300:])
     finally:
         subprocess.run(["docker", "rmi", "-f", tag], capture_output=True)
-    return "built; image_check.py: " + " · ".join(x[:40] for x in lines)
 
 
 @check("F4", "Homebrew formula")

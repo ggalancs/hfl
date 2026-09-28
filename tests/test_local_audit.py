@@ -90,3 +90,33 @@ def test_report_puts_what_is_not_ok_first(tmp_path: Path) -> None:
     text = la.report(tmp_path, results).read_text()
     assert text.index("## Not OK") < text.index("## A.")
     assert "| B3 | bench | ROTO | only done |" in text
+
+
+SWITCH = "chat could not be loaded by LlamaCpp: boom; trying LlamaServer\n"
+
+
+def _logged(line: str, offset_after: bool = False):
+    """A check that writes ``line`` to a server log it used."""
+
+    def fn(audit: la.Audit) -> str:
+        log = audit.work / "logs" / "serve-1.log"
+        with open(log, "a") as out:
+            out.write(line)
+        audit._logs.append((log, log.stat().st_size if offset_after else 0))
+        return "answered"
+
+    return fn
+
+
+def test_a_check_whose_load_went_to_another_engine_is_broken(tmp_path: Path) -> None:
+    audit = la.Audit(tmp_path / "venv" / "bin" / "hfl", tmp_path)
+    out = la.run(audit, [la.Check("E98", "switched", _logged(SWITCH))])
+    assert out["E98"]["status"] == la.BROKEN and "trying LlamaServer" in out["E98"]["evidence"]
+
+
+def test_only_what_was_logged_during_the_check_counts(tmp_path: Path) -> None:
+    audit = la.Audit(tmp_path / "venv" / "bin" / "hfl", tmp_path)
+    earlier = la.Check("E97", "switched", _logged(SWITCH))
+    later = la.Check("E98", "same shared log", _logged("fine\n", offset_after=True))
+    out = la.run(audit, [earlier, later])
+    assert (out["E97"]["status"], out["E98"]["status"]) == (la.BROKEN, la.OK)

@@ -134,3 +134,24 @@ def test_a_gguf_the_bundled_llama_cpp_cannot_load_goes_to_llama_server(server, m
     reset_state()
     out = _generate(client, "draft")
     assert asked == [] and out.json()["code"] == "ModelLoadError"
+
+
+def test_the_switch_is_logged_as_the_local_audit_recognises_it(server, monkeypatch, caplog) -> None:
+    """The audit fails a check whose load went to another engine (the other
+    engine answering hid a llama.cpp load that always failed): its pattern
+    must match the warning this code writes."""
+    import re
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "audit"))
+    import local_audit
+
+    client, _ = server
+    mlx = MLXEngine(ValueError("Received 82 parameters not in model: h.0.attn"))
+    monkeypatch.setattr("hfl.api.model_loader.select_engine", lambda path: mlx)
+    monkeypatch.setattr("hfl.engine.selector._create_engine", lambda name: TransformersEngine())
+    with caplog.at_level("WARNING", logger="hfl.api.model_loader"):
+        _generate(client, "distil")
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert re.search(local_audit.ENGINE_SWITCH, logged), logged

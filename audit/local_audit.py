@@ -23,6 +23,7 @@ Every server it starts is stopped when the check ends.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -55,6 +56,12 @@ def pyproject() -> dict[str, Any]:
 
 
 OK, BROKEN, UNCHECKABLE, PERMISSION = "OK", "ROTO", "NO COMPROBABLE AQUÍ", "REQUIERE PERMISO"
+
+
+# model_loader's warning when the chosen engine could not load a model and
+# another one is tried: "<model> could not be loaded by LlamaCpp: <why>; trying
+# LlamaServer".
+ENGINE_SWITCH = re.compile(r"could not be loaded by \w+: [^\n]*; trying \w+")
 
 
 class Broken(AssertionError):
@@ -167,6 +174,9 @@ class Audit:
         }
         self.port = 0  # of the running server, if any
         self._shared: tuple[Any, str] | None = None
+        # The server logs the running check wrote to, each from an offset:
+        # read by ``engine_switches`` when it ends.
+        self._logs: list[tuple[Path, int]] = []
 
     # -- the CLI --------------------------------------------------------------
 
@@ -212,6 +222,7 @@ class Audit:
         port = _port()
         log_path = self.work / "logs" / f"serve-{port}.log"
         log = open(log_path, "wb")
+        self._logs.append((log_path, 0))
         proc = subprocess.Popen(
             [self.hfl, "serve", "--port", str(port), *args],
             stdout=log,
@@ -254,7 +265,23 @@ class Audit:
             manager = self.server(env={"HFL_RATE_LIMIT_ENABLED": "false"})
             self._shared = (manager, manager.__enter__())
         self.port = int(self._shared[1].rsplit(":", 1)[1])
+        log_path = self.work / "logs" / f"serve-{self.port}.log"
+        self._logs.append((log_path, log_path.stat().st_size))
         return self._shared[1]
+
+    def engine_switches(self) -> list[str]:
+        """Loads that failed and went to another engine, in the logs of the
+        servers used since the last call. The other engine answering hid the
+        failure: in-process llama.cpp failed to load every model in a Linux
+        ``hfl[all]`` while llama-server answered and every check passed."""
+        found: set[str] = set()
+        for path, start in self._logs:
+            with contextlib.suppress(OSError), open(path, "rb") as log:
+                log.seek(start)
+                text = log.read().decode(errors="replace")
+                found.update(m.group(0)[:300] for m in ENGINE_SWITCH.finditer(text))
+        self._logs = []
+        return sorted(found)
 
     def close(self) -> None:
         if self._shared is not None:
@@ -362,6 +389,7 @@ def run(audit: Audit, checks: list[Check]) -> dict[str, dict]:
     results = json.loads(results_path.read_text()) if results_path.exists() else {}
     for item in checks:
         started = time.monotonic()
+        audit.engine_switches()  # forget what the servers logged before this check
         try:
             evidence = item.fn(audit)
             status = OK
@@ -373,6 +401,10 @@ def run(audit: Audit, checks: list[Check]) -> dict[str, dict]:
             status, evidence = PERMISSION, str(exc)
         except Exception:  # a check that crashed found something too
             status, evidence = BROKEN, "check crashed: " + traceback.format_exc()[-600:]
+        switched = audit.engine_switches()
+        if status == OK and switched:
+            status = BROKEN
+            evidence = "a load failed and another engine answered: " + " · ".join(switched)
         seconds = time.monotonic() - started
         results[item.cid] = {
             "title": item.title,
@@ -462,8 +494,12 @@ def report(work: Path, results: dict[str, dict]) -> Path:
     return path
 
 
-# Every extra that installs on the platform; ``mlx`` only on Apple Silicon.
-SETUP_EXTRAS = "llama,transformers,tts,stt,imagegen,convert,mcp,audio,tray,otel"
+# ``hfl[all]`` as a user installs it, plus ``otel`` (not in ``all``); its
+# markers leave out what does not install on the platform (``mlx`` off Apple
+# Silicon, ``vllm`` off Linux). It was once a hand-written list without
+# ``vllm`` and ``coqui``: on Linux vLLM brings dill, dill (imported by torch)
+# made every llama-cpp-python load fail, and no check had dill installed.
+SETUP_EXTRAS = "all,otel"
 
 
 def setup(work: Path, python: str) -> None:
@@ -480,8 +516,8 @@ def setup(work: Path, python: str) -> None:
     subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dist), str(repo)], check=True)
     wheel = next(dist.glob("hfl-*.whl"))
     (work / "wheel.txt").write_text(str(wheel))
-    extras = SETUP_EXTRAS + (",mlx" if APPLE_SILICON else "")
-    for venv, spec in ((work / "venv", f"{wheel}[{extras}]"), (work / "venv-core", str(wheel))):
+    installs = ((work / "venv", f"{wheel}[{SETUP_EXTRAS}]"), (work / "venv-core", str(wheel)))
+    for venv, spec in installs:
         if not (venv / "bin" / "python").exists():
             subprocess.run(["uv", "venv", "-q", "--python", python, str(venv)], check=True)
         python_bin = str(venv / "bin" / "python")
