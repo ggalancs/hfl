@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **llama.cpp models failed to load in a Linux `hfl[all]` install.** Every
+  load stopped with "property 'stream' of '_StderrHandler' object has no
+  setter": `import torch` imports dill when it is installed (vLLM brings it),
+  dill adds a logging handler whose stream cannot be set, and the load's
+  stderr silencing tried to set it. That handler is now left alone. Where
+  `llama-server` was installed, HFL switched to it and the failure went
+  unseen; the Docker `all` image check caught it.
+
 ## [0.22.0] - 2026-09-28
 
 ### Added

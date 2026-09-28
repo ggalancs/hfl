@@ -83,7 +83,16 @@ def _suppress_stderr():
     # at the real stderr for the duration; only the C library goes quiet.
     handlers = _stream_handlers_on(stderr_fd)
     kept = os.fdopen(os.dup(saved_fd), "w", buffering=1) if handlers else None
-    previous = [(h, h.setStream(kept)) for h in handlers] if kept else []
+    previous = []
+    for handler in handlers if kept else []:
+        try:
+            previous.append((handler, handler.setStream(kept)))
+        except AttributeError:
+            # A stream that cannot be set: logging's ``_StderrHandler`` (dill
+            # adds one on import, and dill comes with ``hfl[all]``) always
+            # writes to ``sys.stderr``. It goes quiet with the load, as before;
+            # failing here failed every llama.cpp load in that install.
+            continue
     try:
         # Redirect stderr to /dev/null
         devnull = os.open(os.devnull, os.O_WRONLY)

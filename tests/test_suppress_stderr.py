@@ -49,3 +49,29 @@ def test_everything_is_restored_afterwards() -> None:
     out = _run()
     assert "HFL-INFO-AFTER" in out.stderr and "C-AFTER" in out.stderr
     assert "SAME-STREAM" in out.stdout
+
+
+READ_ONLY_STREAM = textwrap.dedent(
+    """
+    import logging, os, sys
+    # What dill does on import (it comes with hfl[all]): a handler whose
+    # ``stream`` is a read-only property that follows ``sys.stderr``.
+    logging.getLogger("dill").addHandler(logging._StderrHandler())
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(message)s")
+    from hfl.engine.llama_cpp import _suppress_stderr
+    log = logging.getLogger("hfl.engine.llama_cpp")
+    with _suppress_stderr():
+        os.write(2, b"C-LIBRARY-NOISE\\n")
+        log.warning("HFL-WARNING-INSIDE")
+    os.write(2, b"C-AFTER\\n")
+    """
+)
+
+
+def test_a_handler_whose_stream_cannot_be_set_does_not_fail_the_load() -> None:
+    out = subprocess.run(
+        [sys.executable, "-c", READ_ONLY_STREAM], capture_output=True, text=True, timeout=120
+    )
+    assert out.returncode == 0, out.stderr
+    assert "HFL-WARNING-INSIDE" in out.stderr and "C-AFTER" in out.stderr
+    assert "C-LIBRARY-NOISE" not in out.stderr
