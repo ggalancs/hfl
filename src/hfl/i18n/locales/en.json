@@ -368,7 +368,8 @@
     "memory_refused_gpu": "Not enough GPU memory for {model}: it needs ~{need} GB, and the GPU would reach {after} of {total} GB ({after_pct}%), over the HFL_MEMORY_BUDGET of {budget}%.",
     "unknown_backend": "Unknown backend {backend}: choose one of {choices}.",
     "bad_parallel": "--parallel must be 0 or more.",
-    "llama_server_missing": "Parallel requests need llama.cpp's llama-server, which is not installed (e.g. `brew install llama.cpp`), or set HFL_LLAMA_SERVER_BIN."
+    "llama_server_missing": "Parallel requests need llama.cpp's llama-server, which is not installed (e.g. `brew install llama.cpp`), or set HFL_LLAMA_SERVER_BIN.",
+    "tray_no_display": "The tray needs a desktop session, and none was found (no DISPLAY or WAYLAND_DISPLAY). Run `hfl serve` without --tray."
   },
   "warnings": {
     "download_cancelled": "Download cancelled.",

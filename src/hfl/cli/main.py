@@ -1152,6 +1152,14 @@ def serve(
 
     # Tray mode: launch system tray icon with server control
     if tray:
+        # On a Linux with no desktop session (a server, SSH, a container)
+        # pystray fails as it is imported, reaching for an X display: that
+        # was a DisplayNameError traceback. Say what is missing instead.
+        if sys.platform.startswith("linux") and not (
+            os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        ):
+            console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/]")
+            raise typer.Exit(1)
         try:
             from hfl.tray.icon import run_tray
 
@@ -1170,6 +1178,12 @@ def serve(
                 "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
                 "Install with: [cyan]pip install hfl[tray][/]"
             )
+            raise typer.Exit(1) from None
+        except Exception as exc:
+            # DISPLAY set but no X server answering it (Xlib's errors).
+            if not type(exc).__module__.startswith("Xlib"):
+                raise
+            console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/] ({exc})")
             raise typer.Exit(1) from None
 
     # R6 - Privacy warning when exposing to the network.

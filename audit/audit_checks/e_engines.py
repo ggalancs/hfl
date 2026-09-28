@@ -229,9 +229,12 @@ def e2(a: Audit) -> str:
             "options": {"num_predict": 256, "temperature": 0},
         }
         c.post("/api/chat", json=body)
-        started = time.monotonic()
-        c.post("/api/chat", json=body)
-        one = time.monotonic() - started
+        singles = []
+        for _ in range(3):  # the median of three: one timing was noise-bound
+            started = time.monotonic()
+            c.post("/api/chat", json=body)
+            singles.append(time.monotonic() - started)
+        one = sorted(singles)[1]
         started = time.monotonic()
         with concurrent.futures.ThreadPoolExecutor(4) as pool:
             codes = list(pool.map(lambda _: c.post("/api/chat", json=body).status_code, range(4)))
@@ -241,9 +244,14 @@ def e2(a: Audit) -> str:
             "a long reply to measure",
             lambda: expect(one > 0.3, f"one reply took {one:.2f}s: too short to measure"),
         )
+        # Serialized, four take ~4x one; overlapping, less. Measured with
+        # llama-server alone on a 4-core CPU (no GPU): -np 1 gave 4.00-4.15x,
+        # -np 4 gave 2.85-3.18x; HFL in front added nothing measurable. The
+        # 3x this used to demand sat inside that CPU's own spread; 3.5x is
+        # between the two.
         part(
-            "4 at once overlap (< 3x one)",
-            lambda: expect(four < one * 3, f"one {one:.2f}s, four {four:.2f}s"),
+            "4 at once overlap (< 3.5x one)",
+            lambda: expect(four < one * 3.5, f"one {one:.2f}s, four {four:.2f}s"),
         )
     return part.verdict()
 

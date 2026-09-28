@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -97,6 +98,16 @@ def f4(a: Audit) -> str:
 
 @check("F5", "tray app (hfl serve --tray)")
 def f5(a: Audit) -> str:
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        # Without a desktop session the icon cannot exist: what can be
+        # checked is that HFL says so plainly, not with a traceback.
+        done = a.cli("serve", "--tray", "--port", "18777", timeout=60)
+        out = done.stdout + done.stderr
+        expect(done.returncode == 1 and "Traceback" not in out, out[-300:])
+        expect("desktop session" in out, out[-300:])
+        raise Uncheckable(f"no desktop session here; it says so: {out.strip()[:120]}")
     port = "18777"
     log = a.work / "logs" / "tray.log"
     with open(log, "wb") as sink:

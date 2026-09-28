@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`hfl serve --tray` on a Linux with no desktop session** (a server, SSH,
+  a container) was a traceback from the tray library; it now says a
+  desktop session is needed and exits.
 - **Tool calls written with doubled braces arrived as text.** Qwen2.5-Coder's
   own GGUF template shows the call as `{{"name": ..., "arguments": ...}}`
   and the model copies it; the loose parser gave up on the first block that
