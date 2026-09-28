@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **uvicorn up to 0.54** (`<0.55`). Its changes are to the experimental,
+  opt-in HTTP/2 server, which HFL does not use; every API route checked over
+  a real server gives the same result on 0.53 and 0.54.
+
 ## [0.22.1] - 2026-09-28
 
 ### Changed
