@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`hfl search` reads a query the way a person writes it.** "coding
+  assistant 7b" went to the Hub as a phrase and matched five repo names (7
+  downloads for the best); it now searches coding models of about 7B and
+  lists Qwen2.5-Coder-7B-Instruct first. Tasks (code, vision, embedding,
+  speech, transcription, reasoning, math), sizes ("7b") and "gguf" are read,
+  the rest is searched as names; it prints how the query was read, and
+  `--literal` searches the text as written. Sizes are labelled "Q4": what
+  `hfl pull` makes by default, not the repo's download size.
 - **Generation speed, time to first token and memory in `/metrics`**:
   `hfl_generation_tokens_per_second` (over the decode phase only, not
   tokens ÷ total time), `hfl_time_to_first_token_ms` (streams),

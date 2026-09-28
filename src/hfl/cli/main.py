@@ -1753,9 +1753,12 @@ def search(
         "-s",
         help=t("commands.search.options.sort"),
     ),
+    literal: bool = typer.Option(False, "--literal", help=t("commands.search.options.literal")),
 ):
     """Search models on HuggingFace Hub with interactive pagination."""
     from huggingface_hub import HfApi
+
+    from hfl.hub.query import describe, hub_queries, parse
 
     # Validate minimum length
     if len(query.strip()) < 3:
@@ -1764,12 +1767,24 @@ def search(
 
     api = HfApi()
 
+    # "coding assistant 7b" means a coding model of about 7B, not repos whose
+    # name contains that phrase (the Hub's search matches ids: it found five,
+    # the best with 7 downloads). Read the query; say how it was read.
+    intent = parse(query)
+    searches: list[dict] = [{"search": query}]
+    if not literal and intent.interpreted:
+        searches = hub_queries(intent)
+        gguf_only = gguf_only or intent.gguf
+        size_range = intent.size_range()
+        if size_range is not None and max_params is None and min_params is None:
+            min_params, max_params = size_range
+        console.print(f"[dim]{t('messages.search_interpreted', reading=describe(intent))}[/]")
+
     try:
         # Search models with progress spinner
         with progress_spinner(t("messages.searching", query=query)):
             size_filter = max_params is not None or min_params is not None
             kwargs: dict = {
-                "search": query,
                 "sort": sort,
                 # The size filter can only run on names, after the Hub answers;
                 # fetch a wider window so it filters more than the first page.
@@ -1783,7 +1798,14 @@ def search(
                 kwargs["filter"] = "gguf"
             # ``sort="downloads"`` is already descending on hub API v1;
             # the legacy ``direction=-1`` kwarg was removed in hub 1.0.
-            models = list(api.list_models(**kwargs))
+            found: dict[str, Any] = {}
+            for extra in searches:
+                for m in api.list_models(**kwargs, **extra):
+                    found.setdefault(m.id, m)
+            models = list(found.values())
+            if len(searches) > 1 and sort in ("downloads", "likes"):
+                # Several searches merged: order them as one list.
+                models.sort(key=lambda m: getattr(m, sort, 0) or 0, reverse=True)
     except Exception as e:
         if _hub_unreachable(e):
             _print_hub_unreachable()

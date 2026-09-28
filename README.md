@@ -50,7 +50,8 @@ that address, including `/docs`, which loads scripts from a CDN).
   builds run natively on Apple Silicon, and safetensors checkpoints are converted
   and quantized for you on pull. Copy a repo name from the Hub and run it.
 - **Browse the Hub from your terminal.** `hfl search` pages through the live
-  Hub with sizes, downloads and formats at a glance; filter by GGUF or by size,
+  Hub with sizes, downloads and formats at a glance; ask in plain words
+  ("coding assistant 7b") or filter by GGUF or by size,
   press a number and the model is pulled, license check included.
 - **Yours alone.** No account, no sign-in, no cloud service behind it. On its own
   HFL talks to one server, the Hugging Face Hub, to fetch weights; its web-search
@@ -117,6 +118,7 @@ Pre-quantized GGUF and MLX models need none of this.
 hfl search qwen3                          # everything matching, most downloaded first
 hfl search qwen3 --gguf --max-params 8    # GGUF only, 8B or smaller — searched across the whole Hub
 hfl search llama --sort likes             # or: downloads (default), created
+hfl search "coding assistant 7b"         # read as: coding models of about 7B
 ```
 
 Each page lists up to ten models with their size, downloads, likes, format and

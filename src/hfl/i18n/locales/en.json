@@ -60,7 +60,8 @@
         "gguf_only": "Show only models with GGUF files",
         "max_params": "Max parameters in billions (e.g.: 70)",
         "min_params": "Min parameters in billions (e.g.: 7)",
-        "sort": "Sort by: downloads, likes, created"
+        "sort": "Sort by: downloads, likes, created",
+        "literal": "Search the text as written, without reading a task or size from it"
       }
     },
     "rm": {
@@ -318,7 +319,8 @@
     "memory_summary": "Memory: {in_use} of {total} GB in use ({pct}%) · budget {budget}% ({limit} GB) · room left: {free} GB · models: {models} GB",
     "memory_summary_gpu": "GPU: {in_use} of {total} GB in use ({pct}%) · room left: {free} GB",
     "run_pulling": "{model} is not on this machine yet — pulling it first.",
-    "parallel_on": "Parallel requests: {slots} at once per GGUF model (llama-server); other formats keep their usual backend."
+    "parallel_on": "Parallel requests: {slots} at once per GGUF model (llama-server); other formats keep their usual backend.",
+    "search_interpreted": "Reading the query as: {reading} (--literal to search the text as written)"
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

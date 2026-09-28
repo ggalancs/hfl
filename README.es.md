@@ -51,7 +51,8 @@ dirección, también `/docs`, que carga scripts de un CDN).
   checkpoints safetensors se convierten y cuantizan solos al descargarlos. Copia
   el nombre de un repositorio del Hub y ejecútalo.
 - **Explora el Hub desde tu terminal.** `hfl search` recorre el Hub en vivo
-  página a página, con tamaño, descargas y formato de un vistazo; filtra por GGUF
+  página a página, con tamaño, descargas y formato de un vistazo; pide en
+  palabras normales ("coding assistant 7b") o filtra por GGUF
   o por tamaño, pulsa un número y el modelo se descarga, con la licencia
   comprobada antes.
 - **Solo tuyo.** Sin cuenta, sin inicio de sesión, sin un servicio en la nube
@@ -120,6 +121,7 @@ Los modelos GGUF ya cuantizados y los MLX no necesitan nada de esto.
 hfl search qwen3                          # todo lo que coincide, los más descargados primero
 hfl search qwen3 --gguf --max-params 8    # solo GGUF de 8B o menos, buscando en todo el Hub
 hfl search llama --sort likes             # o: downloads (por defecto), created
+hfl search "coding assistant 7b"         # se lee como: modelos de código de unos 7B
 ```
 
 Cada página muestra hasta diez modelos con su tamaño, descargas, likes, formato y

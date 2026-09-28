@@ -190,7 +190,10 @@ def display_model_row(model: Any, index: int, show_index: bool = True) -> None:
     # Extract parameters and estimate size
     params = extract_params_from_name(model_id)
     size_q4 = estimate_model_size(params, "Q4")
-    size_str = f"[magenta]~{size_q4}[/]" if params else ""
+    # At Q4: what ``hfl pull`` makes by default (safetensors are quantized to
+    # Q4_K_M), not the repo's download size. Unlabelled, "~3.7GB" for a 16-bit
+    # 7B repo read as a wrong number.
+    size_str = f"[magenta]~{size_q4} Q4[/]" if params else ""
 
     # Index number
     idx_str = f"[dim]{index:3}.[/] " if show_index else ""
