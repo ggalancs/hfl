@@ -137,6 +137,7 @@ async def stream_with_backpressure(
     span_cm.__enter__()
     completed_normally = False
     chunks = 0
+    first_at: float | None = None  # when the first token reached the client
     try:
         while True:
             # Check total timeout
@@ -172,6 +173,8 @@ async def stream_with_backpressure(
                 raise item
 
             chunks += 1
+            if first_at is None:
+                first_at = time.monotonic()
             yield format_item(item)
 
         # The producer has delivered its sentinel (the ``None`` that broke the
@@ -180,7 +183,12 @@ async def stream_with_backpressure(
         # raising ``format_done``) would skip the flag and record a spurious
         # orphan.
         completed_normally = True
-        _record_stream_generation(sync_iterator, chunks, time.monotonic() - start_time)
+        _record_stream_generation(
+            sync_iterator,
+            chunks,
+            time.monotonic() - start_time,
+            None if first_at is None else first_at - start_time,
+        )
         # Send done message
         yield format_done()
 
@@ -217,7 +225,9 @@ def _record_error(error_type: str) -> None:
         logger.debug("failed to record a stream error", exc_info=True)
 
 
-def _record_stream_generation(sync_iterator: Any, chunks: int, seconds: float) -> None:
+def _record_stream_generation(
+    sync_iterator: Any, chunks: int, seconds: float, first_token_s: float | None = None
+) -> None:
     """A finished stream in the generation metrics, as ``run_dispatched``
     records a non-streamed one (streams used to count nothing: a server
     serving agents reported almost no tokens). The engine's own counts when
@@ -227,10 +237,18 @@ def _record_stream_generation(sync_iterator: Any, chunks: int, seconds: float) -
         from hfl.metrics import get_metrics
 
         prompt_n, generated = stream_counts(sync_iterator)
+        tokens_out = generated if generated is not None else chunks
+        if first_token_s is None:  # nothing was sent
+            get_metrics().record_generation(seconds * 1000, prompt_n or 0, tokens_out)
+            return
         get_metrics().record_generation(
             duration_ms=seconds * 1000,
             tokens_in=prompt_n or 0,
-            tokens_out=generated if generated is not None else chunks,
+            tokens_out=tokens_out,
+            first_token_ms=first_token_s * 1000,
+            # From the first token on: prompt processing is not generation.
+            decode_ms=(seconds - first_token_s) * 1000,
+            decode_tokens=tokens_out - 1,
         )
     except Exception:  # pragma: no cover — metrics must never break a stream
         logger.debug("failed to record stream metrics", exc_info=True)

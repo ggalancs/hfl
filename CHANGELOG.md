@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Generation speed, time to first token and memory in `/metrics`**:
+  `hfl_generation_tokens_per_second` (over the decode phase only, not
+  tokens ÷ total time), `hfl_time_to_first_token_ms` (streams),
+  `hfl_models_loaded`, `hfl_models_memory_bytes` and the machine's memory
+  and budget (`hfl_memory_*`, for a local caller only, as in `/api/ps`).
+  Every metric is described in `docs/metrics.md`.
 - **`/api/ps` names the engine running each model** (`details.engine`:
   `llama.cpp`, `llama-server`, `MLX`, `Transformers`, `vLLM`), beside the
   existing `acceleration` and `context_size`. Ollama clients ignore it.

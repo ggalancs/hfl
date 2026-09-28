@@ -37,12 +37,31 @@ _LATENCY_BUCKETS_MS: tuple[float, ...] = (
 )
 
 
-def _bucket_index(value_ms: float) -> int:
+# Generation speed buckets (tokens per second), for the decode phase only:
+# prompt processing runs ~10x faster, and tokens ÷ total time mixes the two.
+_TOKENS_PER_SECOND_BUCKETS: tuple[float, ...] = (
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    30.0,
+    50.0,
+    75.0,
+    100.0,
+    150.0,
+    200.0,
+    300.0,
+    500.0,
+)
+
+
+def _bucket_index(value_ms: float, bounds: tuple[float, ...] = _LATENCY_BUCKETS_MS) -> int:
     """Index of the first bucket boundary >= ``value_ms``, or the +Inf bucket."""
-    for i, boundary in enumerate(_LATENCY_BUCKETS_MS):
+    for i, boundary in enumerate(bounds):
         if value_ms <= boundary:
             return i
-    return len(_LATENCY_BUCKETS_MS)
+    return len(bounds)
 
 
 @dataclass
@@ -104,6 +123,17 @@ class Metrics:
         default_factory=lambda: [0] * (len(_LATENCY_BUCKETS_MS) + 1), repr=False
     )
     _generation_latency_sum_ms: float = field(default=0.0, repr=False)
+    # Time to first token of streamed replies (ms), and generation speed
+    # (tokens/s over the decode phase, from the engine's own timing when it
+    # has one).
+    _ttft_buckets: list[int] = field(
+        default_factory=lambda: [0] * (len(_LATENCY_BUCKETS_MS) + 1), repr=False
+    )
+    _ttft_sum_ms: float = field(default=0.0, repr=False)
+    _tps_buckets: list[int] = field(
+        default_factory=lambda: [0] * (len(_TOKENS_PER_SECOND_BUCKETS) + 1), repr=False
+    )
+    _tps_sum: float = field(default=0.0, repr=False)
 
     def record_request(
         self,
@@ -143,6 +173,10 @@ class Metrics:
         duration_ms: float,
         tokens_in: int,
         tokens_out: int,
+        *,
+        first_token_ms: float | None = None,
+        decode_ms: float | None = None,
+        decode_tokens: int | None = None,
     ) -> None:
         """Record a text generation.
 
@@ -150,6 +184,13 @@ class Metrics:
             duration_ms: Generation duration in milliseconds
             tokens_in: Number of input tokens
             tokens_out: Number of output tokens
+            first_token_ms: Time until the first token reached the client
+                (streams), for ``hfl_time_to_first_token_ms``.
+            decode_ms: Time spent generating (prompt processing excluded), for
+                ``hfl_generation_tokens_per_second``.
+            decode_tokens: Tokens generated in ``decode_ms`` (default
+                ``tokens_out``; a stream times from its first token, so the
+                tokens after it).
         """
         with self._lock:
             self.tokens_input += tokens_in
@@ -160,6 +201,14 @@ class Metrics:
             # All-time histogram (Prometheus): monotonic bucket counts + sum.
             self._generation_latency_buckets[_bucket_index(duration_ms)] += 1
             self._generation_latency_sum_ms += duration_ms
+            if first_token_ms is not None and first_token_ms >= 0:
+                self._ttft_buckets[_bucket_index(first_token_ms)] += 1
+                self._ttft_sum_ms += first_token_ms
+            decoded = tokens_out if decode_tokens is None else decode_tokens
+            if decode_ms and decode_ms > 0 and decoded > 0:
+                rate = decoded / (decode_ms / 1000)
+                self._tps_buckets[_bucket_index(rate, _TOKENS_PER_SECOND_BUCKETS)] += 1
+                self._tps_sum += rate
 
     def record_model_load(self, model_name: str, duration_ms: float) -> None:
         """Record a model load.
@@ -240,8 +289,13 @@ class Metrics:
         # Linear interpolation between floor and ceiling values
         return sorted_values[f] * (c - k) + sorted_values[c] * (k - f)
 
-    def export_prometheus(self) -> str:
+    def export_prometheus(self, include_host: bool = False) -> str:
         """Export metrics in Prometheus format.
+
+        Args:
+            include_host: add the machine's memory figures (the owner's view:
+                ``/api/ps`` shows them to a local caller only, and so does
+                ``/metrics`` unless the owner made it public).
 
         Returns:
             Prometheus-formatted metrics string
@@ -398,8 +452,24 @@ class Metrics:
                 self._generation_latency_buckets,
                 self._generation_latency_sum_ms,
             )
-
-            return "\n".join(lines)
+            self._append_histogram(
+                lines,
+                "hfl_time_to_first_token_ms",
+                "Time from the start of a streamed reply to its first token, in ms "
+                "(model load excluded)",
+                self._ttft_buckets,
+                self._ttft_sum_ms,
+            )
+            self._append_histogram(
+                lines,
+                "hfl_generation_tokens_per_second",
+                "Generation speed over the decode phase (prompt processing excluded)",
+                self._tps_buckets,
+                self._tps_sum,
+                _TOKENS_PER_SECOND_BUCKETS,
+            )
+        _append_residency(lines, include_host)
+        return "\n".join(lines)
 
     @staticmethod
     def _append_histogram(
@@ -408,6 +478,7 @@ class Metrics:
         help_text: str,
         buckets: list[int],
         sum_ms: float,
+        bounds: tuple[float, ...] = _LATENCY_BUCKETS_MS,
     ) -> None:
         """Append a Prometheus histogram (cumulative ``_bucket``/``_sum``/
         ``_count``) for the given per-boundary bucket counts."""
@@ -418,7 +489,7 @@ class Metrics:
         lines.append(f"# HELP {name} {help_text}")
         lines.append(f"# TYPE {name} histogram")
         cumulative = 0
-        for i, boundary in enumerate(_LATENCY_BUCKETS_MS):
+        for i, boundary in enumerate(bounds):
             cumulative += buckets[i]
             lines.append(f'{name}_bucket{{le="{boundary}"}} {cumulative}')
         cumulative += buckets[-1]  # +Inf overflow bucket
@@ -523,6 +594,50 @@ class Metrics:
 
 
 # Singleton access delegated to container for unified management
+
+
+def _gauge(lines: list[str], name: str, help_text: str, value: float) -> None:
+    lines.append("")
+    lines.append(f"# HELP {name} {help_text}")
+    lines.append(f"# TYPE {name} gauge")
+    # Integers as integers: ``:g`` rounded 64 GiB to 6.87195e+10.
+    lines.append(f"{name} {value}" if isinstance(value, int) else f"{name} {value:.6f}")
+
+
+def _append_residency(lines: list[str], include_host: bool) -> None:
+    """Models loaded now and, for the owner, the memory figures ``/api/ps``
+    reports: read at scrape time, like the dispatcher gauges."""
+    try:
+        from hfl.api.state import get_state
+
+        residents = list(get_state().resident_models())
+    except Exception:  # pragma: no cover — no server state (CLI, some tests)
+        return
+    _gauge(lines, "hfl_models_loaded", "Language models resident in memory", len(residents))
+    if not include_host:
+        return
+    try:
+        from hfl.engine.residency import budget_fraction, current_gpu_memory, current_memory
+
+        memory = current_memory()
+        gpu = current_gpu_memory()
+        budget = budget_fraction()
+    except Exception:  # pragma: no cover — a probe that failed reports nothing
+        return
+    held = sum(r.footprint for r in residents)
+    _gauge(lines, "hfl_models_memory_bytes", "Estimated memory of the loaded models", held)
+    if memory is not None:
+        _gauge(lines, "hfl_memory_total_bytes", "Machine memory", memory.total)
+        _gauge(lines, "hfl_memory_in_use_bytes", "Machine memory in use", memory.in_use)
+        _gauge(
+            lines,
+            "hfl_memory_budget_bytes",
+            "Memory the machine may have in use after a load (HFL_MEMORY_BUDGET)",
+            int(memory.total * budget),
+        )
+    if gpu is not None:
+        _gauge(lines, "hfl_gpu_memory_total_bytes", "GPU memory", gpu.total)
+        _gauge(lines, "hfl_gpu_memory_in_use_bytes", "GPU memory in use", gpu.in_use)
 
 
 def get_metrics() -> Metrics:

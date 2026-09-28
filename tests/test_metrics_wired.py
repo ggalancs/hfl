@@ -118,3 +118,39 @@ def test_loads_and_unloads_are_counted(fresh_metrics, temp_config, monkeypatch, 
     assert fresh_metrics.model_unloads == 1
     assert "hfl_model_unloads_total 1" in fresh_metrics.export_prometheus()
     reset_state()
+
+
+class Paced(Counted):
+    """A stream whose first token takes a while (prompt processing), then
+    the rest come fast."""
+
+    def __iter__(self):
+        import time
+
+        time.sleep(0.2)
+        yield self._chunks[0]
+        for chunk in self._chunks[1:]:
+            time.sleep(0.01)
+            yield chunk
+
+
+def test_a_stream_records_its_first_token_time_and_decode_speed(fresh_metrics, monkeypatch):
+    """The prompt's 200 ms go to time-to-first-token, not into the speed:
+    10 tokens after the first in ~0.1 s is ~100 tok/s, not 11 tok / 0.3 s."""
+    import hfl.engine.base as base
+
+    monkeypatch.setattr(base, "stream_counts", lambda s: (s.prompt_tokens, s.generated_tokens))
+    _drain(Paced([str(i) for i in range(11)], prompt=5, generated=11))
+    out = fresh_metrics.export_prometheus()
+    ttft = float(
+        next(x for x in out.splitlines() if x.startswith("hfl_time_to_first_token_ms_sum")).split()[
+            -1
+        ]
+    )
+    speed = float(
+        next(
+            x for x in out.splitlines() if x.startswith("hfl_generation_tokens_per_second_sum")
+        ).split()[-1]
+    )
+    assert 180 <= ttft <= 1000, ttft
+    assert 40 <= speed <= 110, speed  # tokens ÷ total time would be ~35

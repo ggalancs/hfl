@@ -426,6 +426,7 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 - [Hub-native features](https://github.com/ggalancs/hfl/blob/main/docs/hub-native-features.md) — discover, recommend, pull-smart, verify, bench and more
 - [Environment variables](https://github.com/ggalancs/hfl/blob/main/docs/env-vars.md) — every setting and its default
 - [Apple Silicon and Docker clients](https://github.com/ggalancs/hfl/blob/main/docs/apple-silicon-and-docker-clients.md)
+- [Metrics](https://github.com/ggalancs/hfl/blob/main/docs/metrics.md) — what `/metrics` exports for Prometheus: speed, time to first token, memory, queue
 - [Benchmarks](https://github.com/ggalancs/hfl/blob/main/docs/benchmarks.md) — HFL, Ollama and llama-server on the same GGUF, with the script to rerun it
 - [Model compatibility](https://github.com/ggalancs/hfl/blob/main/docs/compatibility.md) — chat, tool calling, reasoning and vision checked for real on 13 families and both GGUF backends
 - [Architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)

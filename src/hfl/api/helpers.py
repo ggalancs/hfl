@@ -85,6 +85,7 @@ def _account_generation(result: Any, operation: str) -> None:
             duration_ms=total_ns / 1e6,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
+            decode_ms=eval_ns / 1e6 if eval_ns > 0 else None,  # the engine's own timing
         )
     except Exception:  # pragma: no cover — metrics must never break a request
         logger.debug("failed to record generation metrics", exc_info=True)
