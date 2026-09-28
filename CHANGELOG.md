@@ -93,6 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **huggingface_hub back to `<2.0`** (0.22.1 allowed 2.x). HFL runs on hub
+  2.0, but tokenizers, transformers, diffusers and sentence-transformers
+  still require 1.x, and allowing 2.0 made `pip install hfl[stt]` resolve
+  tokenizers 0.13.3, which has no wheel for Python 3.12 and needs a Rust
+  compiler. HFL's own 2.x support (download retries under httpx2) stays.
 - **uvicorn up to 0.54** (`<0.55`). Its changes are to the experimental,
   opt-in HTTP/2 server, which HFL does not use; every API route checked over
   a real server gives the same result on 0.53 and 0.54.
