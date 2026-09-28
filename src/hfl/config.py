@@ -91,6 +91,32 @@ def _parse_percent(name: str, default: float) -> float:
         raise InvalidConfigError(name, raw, ["a percentage, e.g. 85 or 85%"]) from None
 
 
+_SPLIT_MODES = ("none", "layer", "row", "tensor")
+
+
+def _parse_tensor_split(name: str) -> list[float] | None:
+    """``"3,1"`` -> [3.0, 1.0]: the share of the model each GPU takes."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        parts = [float(p) for p in raw.split(",")]
+    except ValueError:
+        parts = []
+    if not parts or any(p < 0 for p in parts) or sum(parts) <= 0:
+        raise InvalidConfigError(name, raw, ["one share per GPU, e.g. 3,1"]) from None
+    return parts
+
+
+def _parse_split_mode(name: str) -> str | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    if raw.strip().lower() not in _SPLIT_MODES:
+        raise InvalidConfigError(name, raw, list(_SPLIT_MODES))
+    return raw.strip().lower()
+
+
 def _parse_nonnegative_int(default: int, *names: str) -> int:
     return max(0, _env_int(default, *names))
 
@@ -438,6 +464,23 @@ class HFLConfig:
             os.environ.get("HFL_VERIFY_DOWNLOADS", "1").strip().lower()
             not in ("0", "false", "no", "off")
         )
+    )
+
+    # Several GPUs (llama.cpp and llama-server): how the model is split over
+    # them. Unset, llama.cpp spreads the layers over every visible GPU.
+    # Not checked on multi-GPU hardware; the flags are passed as documented.
+    gpu_tensor_split: list[float] | None = field(
+        default_factory=lambda: _parse_tensor_split("HFL_TENSOR_SPLIT")
+    )
+    gpu_main: int | None = field(
+        default_factory=lambda: (
+            _env_int(0, "HFL_MAIN_GPU") if os.environ.get("HFL_MAIN_GPU", "").strip() else None
+        )
+    )
+    gpu_split_mode: str | None = field(default_factory=lambda: _parse_split_mode("HFL_SPLIT_MODE"))
+    # vLLM: GPUs one model is sharded over (tensor parallelism).
+    vllm_tensor_parallel_size: int = field(
+        default_factory=lambda: max(1, _env_int(1, "HFL_TENSOR_PARALLEL_SIZE"))
     )
 
     # Retry settings

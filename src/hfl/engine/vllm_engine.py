@@ -115,6 +115,9 @@ class VLLMEngine(InferenceEngine):
             from vllm.engine.async_llm_engine import AsyncLLMEngine
 
             self._ensure_loop()
+            if _hfl_config.vllm_tensor_parallel_size > 1:
+                # HFL_TENSOR_PARALLEL_SIZE: the GPUs one model is sharded over.
+                kwargs.setdefault("tensor_parallel_size", _hfl_config.vllm_tensor_parallel_size)
             engine_args = AsyncEngineArgs(model=model_path, **kwargs)
 
             async def _create() -> Any:

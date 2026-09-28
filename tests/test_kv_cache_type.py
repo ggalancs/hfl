@@ -116,3 +116,29 @@ class TestConfigField:
         from hfl.config import HFLConfig
 
         assert HFLConfig().kv_cache_type == "q4_0"
+
+
+class TestMultiGpuReachesLlama:
+    """HFL_TENSOR_SPLIT / HFL_MAIN_GPU / HFL_SPLIT_MODE reach Llama(...)."""
+
+    def test_split_options_are_passed(self, temp_config, fake_llama, monkeypatch):
+        from hfl.config import config
+
+        monkeypatch.setattr(config, "gpu_tensor_split", [3.0, 1.0])
+        monkeypatch.setattr(config, "gpu_main", 1)
+        monkeypatch.setattr(config, "gpu_split_mode", "row")
+        gguf = temp_config.home_dir / "m.gguf"
+        gguf.write_bytes(b"fake")
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        LlamaCppEngine().load(str(gguf))
+        got = fake_llama.instances[-1]
+        assert (got["tensor_split"], got["main_gpu"], got["split_mode"]) == ([3.0, 1.0], 1, 2)
+
+    def test_unset_passes_none_of_them(self, temp_config, fake_llama):
+        gguf = temp_config.home_dir / "m.gguf"
+        gguf.write_bytes(b"fake")
+        from hfl.engine.llama_cpp import LlamaCppEngine
+
+        LlamaCppEngine().load(str(gguf))
+        assert not {"tensor_split", "main_gpu", "split_mode"} & set(fake_llama.instances[-1])

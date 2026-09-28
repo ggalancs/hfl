@@ -67,6 +67,24 @@ def unload_all() -> None:
 atexit.register(unload_all)
 
 
+# llama.cpp's split modes (llama_split_mode): how a model spans several GPUs.
+_SPLIT_MODE_IDS = {"none": 0, "layer": 1, "row": 2, "tensor": 3}
+
+
+def multi_gpu_kwargs(cfg: Any) -> dict[str, Any]:
+    """``Llama(...)`` arguments for ``HFL_TENSOR_SPLIT`` / ``HFL_MAIN_GPU`` /
+    ``HFL_SPLIT_MODE``; empty when none is set (llama.cpp then spreads the
+    layers over every visible GPU itself)."""
+    out: dict[str, Any] = {}
+    if getattr(cfg, "gpu_tensor_split", None):
+        out["tensor_split"] = list(cfg.gpu_tensor_split)
+    if getattr(cfg, "gpu_main", None) is not None:
+        out["main_gpu"] = int(cfg.gpu_main)
+    if getattr(cfg, "gpu_split_mode", None):
+        out["split_mode"] = _SPLIT_MODE_IDS[cfg.gpu_split_mode]
+    return out
+
+
 @contextmanager
 def _suppress_stderr():
     """Temporarily suppresses stderr (to silence Metal/CUDA logs)."""
@@ -1877,6 +1895,7 @@ class LlamaCppEngine(InferenceEngine):
                     "verbose": verbose,
                     "flash_attn": flash_attn,
                     "chat_format": chat_format,
+                    **multi_gpu_kwargs(hfl_config),
                 }
                 # Phase 11 P1: KV cache quantisation. Maps
                 # ``"q4_0"`` / ``"q8_0"`` strings to llama-cpp's

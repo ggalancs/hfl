@@ -186,6 +186,21 @@ def _trim_prompt_cache(current: Path) -> None:
         logger.info("prompt cache: %s dropped to stay under %.1f GB", folder.name, budget / 1024**3)
 
 
+def _multi_gpu_args() -> list[str]:
+    """llama-server's flags for ``HFL_TENSOR_SPLIT`` / ``HFL_MAIN_GPU`` /
+    ``HFL_SPLIT_MODE``; none when unset (the layers go over every GPU)."""
+    from hfl.config import config
+
+    args: list[str] = []
+    if config.gpu_tensor_split:
+        args += ["--tensor-split", ",".join(f"{share:g}" for share in config.gpu_tensor_split)]
+    if config.gpu_main is not None:
+        args += ["--main-gpu", str(config.gpu_main)]
+    if config.gpu_split_mode:
+        args += ["--split-mode", config.gpu_split_mode]
+    return args
+
+
 def _gpu_layers(requested: Any) -> int:
     """llama-cpp-python's ``-1`` (all layers) is llama-server's ``999``."""
     return int(requested) if isinstance(requested, int) and requested >= 0 else 999
@@ -442,6 +457,7 @@ class LlamaServerEngine(InferenceEngine):
             "--kv-unified",
             "-ngl",
             str(_gpu_layers(kwargs.get("n_gpu_layers"))),
+            *_multi_gpu_args(),
             "--jinja",
             "--reasoning-format",
             "none",

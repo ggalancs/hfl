@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Several GPUs: `HFL_TENSOR_SPLIT`, `HFL_MAIN_GPU`, `HFL_SPLIT_MODE`**
+  (llama.cpp and llama-server) **and `HFL_TENSOR_PARALLEL_SIZE`** (vLLM).
+  Unset, nothing changes: llama.cpp spreads the layers over every GPU. Not
+  checked on multi-GPU hardware; checked that both llama.cpp backends take
+  the options (llama-server rejects invalid values of these flags, so it
+  parses them) and that a malformed value stops with the variable's name.
 - **An animated demo in the README, recorded from a real `hfl run`**
   (`scripts/demo_svg.py`: a pseudo-terminal and a terminal emulator record
   the run; lines are only left out, never written, and long waits are

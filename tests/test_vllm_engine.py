@@ -727,3 +727,20 @@ def test_a_cancelled_request_is_aborted_in_vllm():
         assert len(aborted) == 1
     finally:
         engine.unload()
+
+
+def test_tensor_parallel_size_comes_from_the_environment(mock_vllm, monkeypatch):
+    """HFL_TENSOR_PARALLEL_SIZE shards one model over that many GPUs."""
+    from hfl.engine import vllm_engine
+
+    monkeypatch.setattr(vllm_engine._hfl_config, "vllm_tensor_parallel_size", 2)
+    vllm_engine.VLLMEngine().load("/models/m")
+    assert mock_vllm["engine_args"].call_args.kwargs["tensor_parallel_size"] == 2
+
+
+def test_one_gpu_passes_no_tensor_parallel_size(mock_vllm, monkeypatch):
+    from hfl.engine import vllm_engine
+
+    monkeypatch.setattr(vllm_engine._hfl_config, "vllm_tensor_parallel_size", 1)
+    vllm_engine.VLLMEngine().load("/models/m")
+    assert "tensor_parallel_size" not in mock_vllm["engine_args"].call_args.kwargs
