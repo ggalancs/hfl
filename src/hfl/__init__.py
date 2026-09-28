@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Gabriel Galán Pelayo
 """hfl - Download, run and try any Hugging Face model on your own machine."""
 
-__version__ = "0.22.0"
+__version__ = "0.22.1"
 
 # Every Hub API call gets a connect timeout. Without it, a network that drops
 # packets instead of refusing them hung each Hub command forever. Imports

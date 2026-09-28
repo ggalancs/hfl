@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-09-28
+
 ### Changed
 
 - **huggingface_hub 2.x is accepted** (`>=1.5.0,<3.0`, was `<2.0`), and
