@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hfl-echo-engine"
+version = "0.1.0"
+description = "A minimal HFL engine plugin: it answers with the last message. A template for real ones."
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["hfl"]
+
+# HFL finds engines under this entry point: `hfl serve --backend echo`
+# or HFL_LLM_LIBRARY=echo selects this one.
+[project.entry-points."hfl.engines"]
+echo = "hfl_echo_engine:EchoEngine"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hfl_echo_engine"]

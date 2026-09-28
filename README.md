@@ -442,6 +442,7 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 - [Environment variables](https://github.com/ggalancs/hfl/blob/main/docs/env-vars.md) — every setting and its default
 - [Apple Silicon and Docker clients](https://github.com/ggalancs/hfl/blob/main/docs/apple-silicon-and-docker-clients.md)
 - [Using HFL with other tools](https://github.com/ggalancs/hfl/blob/main/docs/integrations.md) — Open WebUI, AnythingLLM, Continue, aider, LangChain, LiteLLM: recipes run for real
+- [Engine plugins](https://github.com/ggalancs/hfl/blob/main/docs/plugins.md) — add an engine from another package
 - [Metrics](https://github.com/ggalancs/hfl/blob/main/docs/metrics.md) — what `/metrics` exports for Prometheus: speed, time to first token, memory, queue
 - [Benchmarks](https://github.com/ggalancs/hfl/blob/main/docs/benchmarks.md) — HFL, Ollama and llama-server on the same GGUF, with the script to rerun it
 - [Model compatibility](https://github.com/ggalancs/hfl/blob/main/docs/compatibility.md) — chat, tool calling, reasoning and vision checked for real on 13 families and both GGUF backends

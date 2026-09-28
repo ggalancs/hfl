@@ -1007,10 +1007,13 @@ def _choose_backend(backend: str, parallel: int) -> None:
     import os
 
     from hfl.config import config as hfl_config
+    from hfl.engine.selector import plugin_engines
 
     backend = backend.strip().lower()
-    if backend not in _BACKENDS:
-        message = t("errors.unknown_backend", backend=backend, choices=", ".join(_BACKENDS))
+    plugins = tuple(plugin_engines())
+    if backend not in _BACKENDS and backend not in plugins:
+        choices = ", ".join((*_BACKENDS, *plugins))
+        message = t("errors.unknown_backend", backend=backend, choices=choices)
         console.print(f"[red]{escape_markup(message)}[/]")
         raise typer.Exit(2)
     if parallel < 0:

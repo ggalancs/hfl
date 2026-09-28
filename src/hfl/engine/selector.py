@@ -27,7 +27,7 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from hfl.converter.formats import ModelFormat, ModelType, detect_format, detect_model_type
 from hfl.engine.base import AudioEngine, InferenceEngine
@@ -199,7 +199,7 @@ def _resolve_forced_backend() -> str | None:
     if not raw:
         return None
     name = raw.strip().lower()
-    if name in {"llama-cpp", "llama-server", "transformers", "vllm", "mlx"}:
+    if name in BUILTIN_BACKENDS or name in plugin_engines():
         return name
     _logging.getLogger(__name__).warning(
         "HFL_LLM_LIBRARY=%r is not a recognised backend, ignoring", raw
@@ -334,7 +334,30 @@ def _create_engine(name: str) -> InferenceEngine:
         return _get_vllm_engine()
     if name == "mlx":
         return _get_mlx_engine()
+    plugin = plugin_engines().get(name)
+    if plugin is not None:
+        engine = plugin()
+        if not isinstance(engine, InferenceEngine):
+            raise ValueError(f"Engine plugin {name!r} did not return an InferenceEngine")
+        return engine
     raise ValueError(f"Unknown backend: {name}")
+
+
+BUILTIN_BACKENDS = ("llama-cpp", "llama-server", "transformers", "vllm", "mlx")
+
+
+def plugin_engines() -> dict[str, Any]:
+    """Engines other packages register under the ``hfl.engines`` entry
+    point, by name. A plugin cannot take a built-in engine's name: picking
+    ``llama-cpp`` must never run someone else's code. It was dormant: the
+    discovery existed, but no backend choice ever consulted it."""
+    from hfl.plugins import discover_engines
+
+    return {
+        name: loader
+        for name, loader in discover_engines().items()
+        if name not in BUILTIN_BACKENDS and name != "llama-cpp"
+    }
 
 
 def _has_cuda() -> bool:

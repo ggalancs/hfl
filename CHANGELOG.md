@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Engine plugins work.** Packages registering an engine under the
+  `hfl.engines` entry point are selectable with `--backend <name>` or
+  `HFL_LLM_LIBRARY`; the discovery existed but no backend choice consulted
+  it. A plugin cannot take a built-in engine's name. `docs/plugins.md` and
+  `examples/hfl-echo-engine` (installed and served for real). TTS plugins
+  are still not consulted.
 - **Several GPUs: `HFL_TENSOR_SPLIT`, `HFL_MAIN_GPU`, `HFL_SPLIT_MODE`**
   (llama.cpp and llama-server) **and `HFL_TENSOR_PARALLEL_SIZE`** (vLLM).
   Unset, nothing changes: llama.cpp spreads the layers over every GPU. Not
