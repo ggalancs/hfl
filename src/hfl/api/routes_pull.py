@@ -400,6 +400,12 @@ async def _run_pull_streaming(
             )
             yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
             return
+        from hfl.exceptions import DownloadIntegrityError
+
+        if isinstance(exc, DownloadIntegrityError):
+            # Says which file and what to expect; no paths in it.
+            yield _event("error", error=f"{exc.message}: {exc.details}", code="integrity")
+            return
         detail = log_internal_failure(logger, "download", exc)
         yield _event("error", error=detail)
         return

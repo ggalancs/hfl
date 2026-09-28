@@ -139,6 +139,81 @@ def _download_snapshot(
     return Path(local_path)
 
 
+def _hub_sha256(resolved: ResolvedModel, token: str | None) -> dict[str, str]:
+    """The sha256 the Hub publishes for each of the repo's LFS files (the
+    weights), by name; empty when the Hub could not say."""
+    from huggingface_hub import HfApi
+
+    try:
+        info = HfApi().model_info(
+            resolved.repo_id, revision=resolved.revision, files_metadata=True, token=token
+        )
+    except Exception as exc:
+        logger.warning("Could not read the Hub's checksums for %s: %s", resolved.repo_id, exc)
+        return {}
+    out: dict[str, str] = {}
+    for sibling in info.siblings or []:
+        lfs = getattr(sibling, "lfs", None)
+        digest = getattr(lfs, "sha256", None) if lfs is not None else None
+        if isinstance(digest, str) and digest:
+            out[sibling.rfilename] = digest.lower()
+    return out
+
+
+def _sha256_of(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(16 * 2**20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify_downloads(
+    resolved: ResolvedModel, model_dir: Path, token: str | None, names: list[str]
+) -> None:
+    """Compare the downloaded weights with the sha256 the Hub publishes.
+
+    huggingface_hub checks a download's size, not its content: a file
+    damaged in transit, on disk, or resumed from a broken partial passed.
+    A mismatch is deleted and downloaded once more; a second mismatch is a
+    ``DownloadIntegrityError``. Files the Hub gives no sha256 for (small
+    git files) are not checked, and saying "checked" when nothing could be
+    compared would be false: that case is reported as not checked.
+    """
+    from hfl.exceptions import DownloadIntegrityError
+
+    if not config.verify_downloads:
+        return
+    expected = _hub_sha256(resolved, token)
+    present = [n for n in names if n in expected and (model_dir / n).is_file()]
+    if not present:
+        console.print("[yellow]Integrity not checked: the Hub gave no sha256 for these files[/]")
+        return
+    for name in present:
+        path = model_dir / name
+        actual = _sha256_of(path)
+        if actual == expected[name]:
+            continue
+        logger.warning("%s: sha256 mismatch (%s…); downloading it again", name, actual[:16])
+        console.print(f"[yellow]{name} does not match the Hub's sha256; downloading it again[/]")
+        _discard(model_dir, name)
+        _download_file(resolved.repo_id, name, resolved.revision, model_dir, token)
+        actual = _sha256_of(path)
+        if actual != expected[name]:
+            _discard(model_dir, name)
+            raise DownloadIntegrityError(resolved.repo_id, name, expected[name], actual)
+    console.print(f"[dim]Checked {len(present)} file(s) against the Hub's sha256[/]")
+
+
+def _discard(model_dir: Path, name: str) -> None:
+    """Delete a downloaded file and huggingface_hub's record of it, so the
+    next download fetches it again instead of trusting the copy on disk."""
+    (model_dir / name).unlink(missing_ok=True)
+    (model_dir / ".cache" / "huggingface" / "download" / f"{name}.metadata").unlink(missing_ok=True)
+
+
 _SAFETENSORS_FILES = [
     "*.safetensors",
     "config.json",
@@ -254,15 +329,19 @@ def pull_model(resolved: ResolvedModel) -> Path:
                 local_dir=model_dir,
                 token=token,
             )
+        _verify_downloads(resolved, model_dir, token, [resolved.filename, *filter(None, extras)])
         return path
     # Complete snapshot download with retry
     # Filter only the necessary files
     allow_patterns = list(_SAFETENSORS_FILES) if resolved.format == "safetensors" else []
 
-    return _download_snapshot(
+    snapshot = _download_snapshot(
         repo_id=resolved.repo_id,
         revision=resolved.revision,
         local_dir=model_dir,
         token=token,
         allow_patterns=allow_patterns or None,
     )
+    downloaded = [str(p.relative_to(model_dir)) for p in model_dir.rglob("*") if p.is_file()]
+    _verify_downloads(resolved, model_dir, token, [n for n in downloaded if ".cache" not in n])
+    return snapshot

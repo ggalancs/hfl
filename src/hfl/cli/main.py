@@ -102,6 +102,7 @@ def pull(
     from huggingface_hub.utils import GatedRepoError
 
     from hfl.converter.formats import ModelFormat, detect_format
+    from hfl.exceptions import DownloadIntegrityError
     from hfl.hub.downloader import pull_model
     from hfl.hub.license_checker import check_model_license, require_user_acceptance
 
@@ -207,6 +208,9 @@ def pull(
         # Network/transport failure that exhausted retries — surface the real
         # underlying cause (RetryExhausted carries it), not just the wrapper.
         console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.last_exception or e}")
+        raise typer.Exit(1) from e
+    except DownloadIntegrityError as e:
+        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.details}")
         raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
 

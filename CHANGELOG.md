@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Downloads are checked against the Hub's sha256.** huggingface_hub
+  checks a download's size only: a file with one byte flipped on disk was
+  kept as it was on the next pull (checked for real). After every pull HFL
+  hashes the weights the Hub publishes a sha256 for; a mismatch is deleted
+  and downloaded once more, and a second mismatch fails the pull
+  (`DownloadIntegrityError`, `code: "integrity"` on `/api/pull`). Files the
+  Hub gives no sha256 for are reported as not checked. `HFL_VERIFY_DOWNLOADS=0`
+  skips it.
 - **`hfl search` reads a query the way a person writes it.** "coding
   assistant 7b" went to the Hub as a phrase and matched five repo names (7
   downloads for the best); it now searches coding models of about 7B and

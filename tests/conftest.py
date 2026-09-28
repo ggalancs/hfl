@@ -42,11 +42,14 @@ def set_english_language(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_hub_size_lookup(request, monkeypatch):
-    """``/api/pull`` asks the Hub for the files' sizes (its progress total);
-    unit tests must not reach the network. A test of that lookup itself
+    """``/api/pull`` asks the Hub for the files' sizes (its progress total),
+    and every pull for their sha256 (the integrity check); unit tests must
+    not reach the network — a real connection left open to the Hub made the
+    offline tests of later cases pass through it. A test of those lookups
     opts out with ``@pytest.mark.hub_sizes``."""
     if request.node.get_closest_marker("hub_sizes") is None:
         monkeypatch.setattr("hfl.hub.downloader.expected_files", lambda resolved: {})
+        monkeypatch.setattr("hfl.hub.downloader._hub_sha256", lambda resolved, token: {})
 
 
 @pytest.fixture(autouse=True)

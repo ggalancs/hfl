@@ -67,6 +67,18 @@ class DownloadError(HFLError):
         self.repo_id = repo_id
 
 
+class DownloadIntegrityError(DownloadError):
+    """A downloaded file does not match the sha256 the Hub publishes for it."""
+
+    def __init__(self, repo_id: str, filename: str, expected: str, actual: str):
+        super().__init__(
+            repo_id,
+            f"{filename} does not match the Hub's sha256 (expected {expected[:16]}…, "
+            f"got {actual[:16]}…) after downloading it again; the file was deleted",
+        )
+        self.filename = filename
+
+
 class NetworkError(DownloadError):
     """Network error during download."""
 

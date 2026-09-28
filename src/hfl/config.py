@@ -430,6 +430,16 @@ class HFLConfig:
         default_factory=lambda: _env_float(60, "HFL_QUEUE_ACQUIRE_TIMEOUT")
     )
 
+    # Downloaded weights compared with the sha256 the Hub publishes for them
+    # (huggingface_hub only checks the size). Off: ``HFL_VERIFY_DOWNLOADS=0``,
+    # to save the hashing time on very large models.
+    verify_downloads: bool = field(
+        default_factory=lambda: (
+            os.environ.get("HFL_VERIFY_DOWNLOADS", "1").strip().lower()
+            not in ("0", "false", "no", "off")
+        )
+    )
+
     # Retry settings
     max_retries: int = 3
     retry_base_delay: float = 1.0
