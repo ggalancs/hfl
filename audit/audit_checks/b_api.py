@@ -16,8 +16,7 @@ import socket
 from pathlib import Path
 
 import httpx
-import tomllib
-from local_audit import QUESTION, Audit, Parts, Uncheckable, check, expect
+from local_audit import QUESTION, Audit, Parts, Uncheckable, check, expect, pyproject
 
 REPO = Path(__file__).resolve().parents[2]
 USER = [{"role": "user", "content": QUESTION}]
@@ -77,7 +76,7 @@ def root(a: Audit) -> str:
 
 @check("B36", "GET /api/version")
 def api_version(a: Audit) -> str:
-    wanted = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+    wanted = pyproject()["project"]["version"]
     body = _c(a).get("/api/version").json()
     expect(body.get("version") == wanted, body)
     return body["version"]

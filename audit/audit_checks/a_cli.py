@@ -15,8 +15,7 @@ import time
 from pathlib import Path
 
 import httpx
-import tomllib
-from local_audit import MODELS, QUESTION, Audit, Parts, check, expect
+from local_audit import MODELS, QUESTION, Audit, Parts, check, expect, pyproject
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -183,9 +182,7 @@ def config(a: Audit) -> str:
 def help_(a: Audit) -> str:
     a.ok("help")
     out = a.ok("help", "--extras")
-    extras = tomllib.loads((REPO / "pyproject.toml").read_text())["project"][
-        "optional-dependencies"
-    ]
+    extras = pyproject()["project"]["optional-dependencies"]
     missing = [e for e in extras if e not in ("dev", "build", "all") and e not in out]
     expect(not missing, f"extras not in `hfl help --extras`: {missing}")
     return f"all {len(extras)} extras named"
@@ -194,7 +191,7 @@ def help_(a: Audit) -> str:
 @check("A40", "hfl version")
 def version(a: Audit) -> str:
     out = a.ok("version")
-    wanted = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+    wanted = pyproject()["project"]["version"]
     expect(wanted in out, f"version {wanted} not in: {out}")
     return out.strip().splitlines()[0]
 

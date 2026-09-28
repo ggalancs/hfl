@@ -43,6 +43,17 @@ from typing import Any
 
 import httpx
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10: its predecessor (pytest brings it; `pip install tomli`)
+    import tomli as tomllib
+
+
+def pyproject() -> dict[str, Any]:
+    """This checkout's pyproject.toml."""
+    return dict(tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()))
+
+
 OK, BROKEN, UNCHECKABLE, PERMISSION = "OK", "ROTO", "NO COMPROBABLE AQUÍ", "REQUIERE PERMISO"
 
 
