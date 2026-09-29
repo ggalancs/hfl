@@ -251,4 +251,17 @@ def footprint_of_loaded(model_path: str | Path, engine: Any) -> Footprint:
         ctx = int(getattr(engine, "context_size", 0) or 0)
     except (TypeError, ValueError):
         ctx = 0
-    return estimate_footprint(model_path, ctx)
+    estimate = estimate_footprint(model_path, ctx)
+    # An engine that reserves memory up front (vLLM: a fraction of the GPU
+    # for its KV cache) says how much; that, not the file, is what it holds.
+    reserved = getattr(engine, "reserved_bytes", None)
+    if not isinstance(reserved, int) or isinstance(reserved, bool):
+        return estimate
+    if reserved > estimate.total_bytes:
+        return Footprint(
+            weights_bytes=estimate.weights_bytes,
+            kv_bytes=reserved - estimate.weights_bytes,
+            n_ctx=estimate.n_ctx,
+            kv_known=True,
+        )
+    return estimate

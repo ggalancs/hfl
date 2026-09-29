@@ -101,7 +101,12 @@ class TestVLLMEngineLoad:
         assert engine.is_loaded
         assert engine._is_async is True
         assert engine._model_path == "/path/to/model"
-        mock_vllm["engine_args"].assert_called_once_with(model="/path/to/model")
+        mock_vllm["engine_args"].assert_called_once()
+        # HFL's memory budget, not vLLM's own 90 % of the GPU.
+        assert mock_vllm["engine_args"].call_args.kwargs == {
+            "model": "/path/to/model",
+            "gpu_memory_utilization": 0.85,
+        }
 
         engine.unload()
 
@@ -156,7 +161,12 @@ class TestVLLMEngineLoad:
 
             assert engine.is_loaded
             assert engine._is_async is False
-            mock_vllm["llm"].assert_called_once_with(model="/path/to/model")
+            mock_vllm["llm"].assert_called_once()
+        # HFL's memory budget, not vLLM's own 90 % of the GPU.
+        assert mock_vllm["llm"].call_args.kwargs == {
+            "model": "/path/to/model",
+            "gpu_memory_utilization": 0.85,
+        }
 
     def test_unload(self, mock_vllm):
         from hfl.engine.vllm_engine import VLLMEngine
@@ -753,7 +763,9 @@ class TestLoadOptions:
 
     @staticmethod
     def _strict(seen: dict):
-        def engine_args(*, model, max_model_len=None, tensor_parallel_size=1):
+        def engine_args(
+            *, model, max_model_len=None, tensor_parallel_size=1, gpu_memory_utilization=0.9
+        ):
             seen.update(model=model, max_model_len=max_model_len)
             return MagicMock()
 
@@ -865,3 +877,95 @@ class TestPromptTokens:
 
         with pytest.raises(RuntimeError):
             VLLMEngine().count_prompt_tokens([ChatMessage(role="user", content="hi")])
+
+
+class TestReservedMemory:
+    """vLLM reserves a share of the GPU at load; HFL charged it the weights
+    alone, so the rest looked like HFL's own overhead: never evictable, and
+    another model was refused instead of vLLM unloaded to make room."""
+
+    def test_the_share_of_each_gpu_it_runs_on(self, mock_vllm, monkeypatch):
+        from hfl.engine import vllm_engine
+        from hfl.engine.residency import MemoryView
+
+        gib = 1024**3
+        # By path: the fixture's patch.dict(sys.modules) can drop the module
+        # a name imported earlier still points to.
+        monkeypatch.setattr(
+            "hfl.engine.residency.current_gpu_memory", lambda: MemoryView(2 * 24 * gib, 0, 0)
+        )
+        monkeypatch.setattr(vllm_engine, "_gpu_count", lambda: 2)
+        one = vllm_engine._reserved_bytes({"gpu_memory_utilization": 0.5})
+        two = vllm_engine._reserved_bytes(
+            {"gpu_memory_utilization": 0.5, "tensor_parallel_size": 2}
+        )
+        assert (one, two) == (12 * gib, 24 * gib)
+
+    def test_no_gpu_measured_is_nothing_claimed(self, mock_vllm, monkeypatch):
+        from hfl.engine import vllm_engine
+
+        monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", lambda: None)
+        assert vllm_engine._reserved_bytes({"gpu_memory_utilization": 0.85}) == 0
+
+    def test_a_loaded_model_counts_what_its_engine_reserved(self, tmp_path):
+        import types
+
+        from hfl.engine.footprint import footprint_of_loaded
+
+        (tmp_path / "model.safetensors").write_bytes(b"\0" * 4096)
+        plain = footprint_of_loaded(str(tmp_path), types.SimpleNamespace()).total_bytes
+        reserving = types.SimpleNamespace(reserved_bytes=10 * 1024**3)
+        assert footprint_of_loaded(str(tmp_path), reserving).total_bytes == 10 * 1024**3
+        # A mock or a non-int says nothing.
+        for odd in (MagicMock(), True, None, "5"):
+            got = footprint_of_loaded(str(tmp_path), types.SimpleNamespace(reserved_bytes=odd))
+            assert got.total_bytes == plain
+
+
+class TestGpuShare:
+    """vLLM took 90 % of the GPU for a 1 GB model; an embedding model beside
+    it found no room (L4). It gets the model's footprint plus headroom."""
+
+    @staticmethod
+    def _gpu(monkeypatch, vllm_engine, fp_total):
+        from hfl.engine.footprint import GIB, Footprint
+        from hfl.engine.residency import MemoryView
+
+        monkeypatch.setattr(
+            "hfl.engine.residency.current_gpu_memory", lambda: MemoryView(24 * GIB, 0, 0)
+        )
+        monkeypatch.setattr(vllm_engine, "_gpu_count", lambda: 1)
+        monkeypatch.setattr(
+            "hfl.engine.footprint.estimate_footprint",
+            lambda path, ctx: Footprint(fp_total, 0, ctx, True),
+        )
+
+    def test_a_small_model_takes_a_small_share(self, mock_vllm, monkeypatch, tmp_path):
+        from hfl.engine import vllm_engine
+        from hfl.engine.footprint import GIB
+
+        self._gpu(monkeypatch, vllm_engine, GIB + GIB // 2)
+        # 1.5 GiB + 2 GiB headroom over 24 GiB: 0.15, not 0.9.
+        assert vllm_engine._gpu_share(str(tmp_path), {"max_model_len": 4096}) == 0.15
+
+    def test_never_above_the_budget(self, mock_vllm, monkeypatch, tmp_path):
+        from hfl.engine import vllm_engine
+        from hfl.engine.footprint import GIB
+
+        self._gpu(monkeypatch, vllm_engine, 40 * GIB)
+        assert vllm_engine._gpu_share(str(tmp_path), {}) == 0.85
+
+    def test_unknown_gpu_keeps_the_budget(self, mock_vllm, monkeypatch, tmp_path):
+        from hfl.engine import vllm_engine
+
+        monkeypatch.setattr("hfl.engine.residency.current_gpu_memory", lambda: None)
+        assert vllm_engine._gpu_share(str(tmp_path), {}) == 0.85
+
+
+def test_the_load_asks_for_the_models_share_unless_given_one(mock_vllm, monkeypatch, tmp_path):
+    from hfl.engine import vllm_engine
+
+    monkeypatch.setattr(vllm_engine, "_gpu_share", lambda path, args: 0.33)
+    assert vllm_engine._vllm_args(str(tmp_path), {})["gpu_memory_utilization"] == 0.33
+    given = vllm_engine._vllm_args(str(tmp_path), {"gpu_memory_utilization": 0.7})
+    assert given["gpu_memory_utilization"] == 0.7

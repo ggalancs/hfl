@@ -61,6 +61,52 @@ def _prompt_tokens(output: Any) -> int:
     return len(getattr(output, "prompt_token_ids", None) or [])
 
 
+def _gpu_share(model_path: str, args: dict[str, Any]) -> float:
+    """The share of each GPU vLLM may reserve (``gpu_memory_utilization``).
+
+    vLLM takes 90 % by default, whatever else runs there: an embedding model
+    beside a 1 GB chat model then found no room ("Failed to create
+    llama_context", on an L4). It gets what the model needs instead — HFL's
+    footprint at the context it serves, plus headroom for activations and
+    CUDA graphs — within HFL_MEMORY_BUDGET; the whole budget when the size
+    or the GPU cannot be read.
+    """
+    import math
+
+    from hfl.engine.footprint import GIB, estimate_footprint
+    from hfl.engine.residency import budget_fraction, current_gpu_memory
+
+    budget = min(0.9, budget_fraction())
+    gpu = current_gpu_memory()
+    ctx = args.get("max_model_len") or _model_max_len(model_path) or 0
+    need = estimate_footprint(model_path, int(ctx)).total_bytes
+    if gpu is None or need <= 0:
+        return round(budget, 2)
+    need += max(2 * GIB, need // 4)
+    gpus = max(1, int(args.get("tensor_parallel_size", 1) or 1))
+    share = need / gpus / (gpu.total / _gpu_count())
+    return min(round(budget, 2), max(0.1, math.ceil(share * 100) / 100))
+
+
+def _reserved_bytes(args: dict[str, Any]) -> int:
+    """What vLLM reserves: its share of every GPU it runs on (0 if unknown)."""
+    from hfl.engine.residency import current_gpu_memory
+
+    gpu = current_gpu_memory()
+    if gpu is None:
+        return 0
+    share = float(args.get("gpu_memory_utilization", 0.9))
+    gpus = max(1, int(args.get("tensor_parallel_size", 1) or 1))
+    per_gpu = gpu.total / max(1, _gpu_count())
+    return int(per_gpu * share * gpus)
+
+
+def _gpu_count() -> int:
+    from hfl.engine.residency import _nvidia_smi
+
+    return len(_nvidia_smi(["--query-gpu=memory.total"]) or []) or 1
+
+
 def _own_tools_on_path() -> None:
     """The folder of HFL's own interpreter on ``PATH``, if it is not.
 
@@ -93,6 +139,8 @@ def _vllm_args(model_path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     if isinstance(n_ctx, int) and n_ctx > 0:
         limit = _model_max_len(model_path)
         args["max_model_len"] = min(n_ctx, limit) if limit else n_ctx
+    if "gpu_memory_utilization" not in args:
+        args["gpu_memory_utilization"] = _gpu_share(model_path, args)
     if args.pop("lora_paths", None):
         logger.warning("ADAPTER: HFL does not apply LoRA adapters on vLLM yet; ignored")
     if args.pop("draft_model_path", None):
@@ -172,6 +220,7 @@ class VLLMEngine(InferenceEngine):
         self._model_path = model_path
         self._prompt_format = self._detect_prompt_format(model_path)
         kwargs = _vllm_args(model_path, kwargs)
+        self._reserved = _reserved_bytes(kwargs)
         _own_tools_on_path()
 
         try:
@@ -379,6 +428,11 @@ class VLLMEngine(InferenceEngine):
         """
         prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
         return self.generate(prompt, config)
+
+    @property
+    def reserved_bytes(self) -> int:
+        """GPU memory vLLM reserved at load (``hfl.engine.footprint``)."""
+        return int(getattr(self, "_reserved", 0) or 0) if self._engine is not None else 0
 
     def count_prompt_tokens(
         self,
