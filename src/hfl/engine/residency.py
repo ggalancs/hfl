@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from hfl.engine.footprint import GIB
 
@@ -52,7 +53,12 @@ class MemoryView:
     in_use: int
     """Total minus what the OS reports as available."""
     hfl_rss: int
-    """This process's resident set."""
+    """What HFL's processes (this one and those it started) hold."""
+    attributed: bool = True
+    """False when HFL's share could not be told apart from the rest: in a
+    container, nvidia-smi lists processes under IDs HFL never sees (a
+    process with PID 23 was listed as PID 1, on Modal). The planner then
+    takes its own models' footprints to be inside ``in_use``."""
 
 
 @dataclass(frozen=True)
@@ -108,6 +114,32 @@ def budget_fraction() -> float:
     return min(max(pct, 10.0), 100.0) / 100.0
 
 
+def _own_processes() -> list[Any]:
+    """This process and every process it started (psutil ``Process``es).
+
+    llama-server and vLLM's engine run as child processes: their memory is
+    the models HFL loaded. Counted as other programs' — as it was, with only
+    this process's own — each such model was charged twice at admission
+    (in "in use" and again as its footprint), and HFL could not evict it to
+    make room. Measured: a second model planned at 61.3 GB with the first
+    llama-server's 0.8 GB counted in both.
+    """
+    import psutil
+
+    me = psutil.Process(os.getpid())
+    try:
+        return [me, *me.children(recursive=True)]
+    except psutil.Error:
+        return [me]
+
+
+def _own_pids() -> set[int]:
+    try:
+        return {p.pid for p in _own_processes()}
+    except Exception:  # psutil absent or failing: this process alone
+        return {os.getpid()}
+
+
 def current_memory() -> MemoryView | None:
     """Measure the machine now, or None when psutil is unavailable."""
     try:
@@ -116,7 +148,12 @@ def current_memory() -> MemoryView | None:
         return None
     try:
         vm = psutil.virtual_memory()
-        rss = psutil.Process(os.getpid()).memory_info().rss
+        rss = 0
+        for proc in _own_processes():
+            try:
+                rss += proc.memory_info().rss
+            except psutil.Error:  # a child that exited meanwhile
+                continue
     except Exception as exc:  # pragma: no cover - platform-specific failure
         logger.debug("memory measurement failed: %s", exc)
         return None
@@ -148,6 +185,9 @@ def plan_admission(
     accounted = sum(r.footprint for r in residents)
 
     def base_of(view: MemoryView) -> int:
+        if not view.attributed:
+            # HFL's share unseen: its loaded models are somewhere in in_use.
+            return max(0, view.in_use - accounted)
         others = max(0, view.in_use - view.hfl_rss)
         overhead = max(0, view.hfl_rss - accounted)  # interpreter, libraries, CUDA context
         return others + overhead
@@ -274,13 +314,19 @@ def current_gpu_memory() -> MemoryView | None:
     except (ValueError, IndexError):
         return None
     mine = 0
+    seen = False
+    own = _own_pids()  # llama-server and vLLM hold their VRAM in child processes
     for row in _nvidia_smi(["--query-compute-apps=pid,used_memory"]) or []:
         try:
-            if int(row[0]) == os.getpid():
+            if int(row[0]) in own:
                 mine += int(float(row[1])) * _MIB
+                seen = True
         except (ValueError, IndexError):
             continue
-    return MemoryView(total=total, in_use=used, hfl_rss=mine)
+    # None of HFL's processes listed while memory is in use: IDs from another
+    # namespace (a container), or nothing of HFL's on the GPU yet — the
+    # planner's fallback is right for both.
+    return MemoryView(total=total, in_use=used, hfl_rss=mine, attributed=seen)
 
 
 _UNMEASURED_GPU: bool | None = None

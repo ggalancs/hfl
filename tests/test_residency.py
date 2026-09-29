@@ -330,3 +330,87 @@ class TestNvidiaSmi:
         monkeypatch.setattr(residency, "_UNMEASURED_GPU", None)
         monkeypatch.setattr(residency, "current_gpu_memory", lambda: MemoryView(1, 0, 0))
         assert residency.discrete_gpu_unmeasured() is False
+
+
+class TestChildProcessesAreOurs:
+    """llama-server and vLLM run models in child processes. Counted as other
+    programs', each model was charged twice at admission and could not be
+    evicted to make room (a second model planned with the first counted in
+    "in use" and again as its footprint)."""
+
+    def test_a_childs_ram_counts_as_ours(self):
+        # Without psutil there is no measurement at all (the CI venv).
+        pytest.importorskip("psutil")
+        import subprocess
+        import sys
+        import time
+
+        from hfl.engine import residency
+
+        alone = residency.current_memory()
+        assert alone is not None
+        # A child holding ~200 MB, as a llama-server holds its model.
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "b = bytearray(200 * 1024 * 1024); b[::4096] = b'x' * len(b[::4096]); "
+             "import time; time.sleep(60)"]
+        )  # fmt: skip
+        try:
+            time.sleep(1.5)
+            with_child = residency.current_memory()
+            assert with_child is not None
+            assert with_child.hfl_rss - alone.hfl_rss > 150 * 1024**2
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_a_childs_vram_counts_as_ours(self, monkeypatch):
+        import os
+
+        from hfl.engine import residency
+
+        child_pid = 424242
+        monkeypatch.setattr(residency, "_own_pids", lambda: {os.getpid(), child_pid})
+        TestNvidiaSmi._smi(
+            monkeypatch,
+            {
+                "--query-gpu=memory.total,memory.used": "24576, 4096\n",
+                "--query-compute-apps=pid,used_memory": (
+                    f"{os.getpid()}, 300\n{child_pid}, 2000\n999999, 500\n"
+                ),
+            },
+        )
+        view = residency.current_gpu_memory()
+        assert view is not None and view.hfl_rss == 2300 * 1024**2
+
+
+class TestUnattributedGpu:
+    """In a container nvidia-smi lists processes under IDs HFL never sees
+    (PID 23 listed as 1, on Modal): HFL's models were charged twice, once
+    inside "in use" and once as residents (planned 3.6 GB, took 2.6 GB)."""
+
+    def test_no_process_of_ours_listed_is_unattributed(self, monkeypatch):
+        from hfl.engine import residency
+
+        monkeypatch.setattr(residency, "_own_pids", lambda: {23})
+        TestNvidiaSmi._smi(
+            monkeypatch,
+            {
+                "--query-gpu=memory.total,memory.used": "24576, 2048\n",
+                "--query-compute-apps=pid,used_memory": "1, 2000\n",
+            },
+        )
+        view = residency.current_gpu_memory()
+        assert view is not None and view.attributed is False
+
+    def test_the_planner_then_finds_its_models_inside_in_use(self):
+        from hfl.engine.residency import plan_admission
+
+        gib = 1024**3
+        ram = MemoryView(total=64 * gib, in_use=8 * gib, hfl_rss=2 * gib)
+        # Two resident models of 1 GiB each already on the GPU (3 GiB in use).
+        gpu = MemoryView(total=24 * gib, in_use=3 * gib, hfl_rss=0, attributed=False)
+        residents = [ResidentView("a", gib, 1.0), ResidentView("b", gib, 2.0)]
+        plan = plan_admission(gib // 2, ram, residents, 0.85, gpu=gpu)
+        assert plan.fits
+        assert plan.gpu_used_after == 3 * gib + gib // 2  # not 5.5 GiB
