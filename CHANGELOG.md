@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A model asked for by alias was loaded again on every switch.**
+  Resident models were kept under the alias ("chat"); loading another model
+  re-filed the first under its manifest name, and every later "chat" loaded
+  another copy — 5 alternating requests between two aliased models made 5
+  loads, ~14 s and 0.6 GB each, with memory climbing. They are kept under
+  the registered name; the same 5 requests now make 2 loads, and a switch
+  takes 0.05–0.1 s. A `keep_alive` sent with an alias now reaches the model.
+- **Reading a GGUF's metadata took ~3 s, three to four times per load.** It
+  parsed the whole header (the tokenizer's arrays included) to read six
+  numbers, so a 0.5B model that loads in 0.2 s answered its first request
+  in ~13 s. HFL's own header reader reads only those keys (0.08 s, same
+  values) and caches them per file; it no longer needs the optional `gguf`
+  package, without which the memory estimate and context sizing had no
+  model data at all.
+
 ## [0.23.0] - 2026-09-29
 
 ### Added

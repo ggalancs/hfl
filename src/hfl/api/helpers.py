@@ -395,6 +395,7 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
         APIValidationError: The value can't be parsed (maps to 400).
     """
     from hfl.api.state import get_state
+    from hfl.core import get_registry
     from hfl.exceptions import ValidationError as APIValidationError
     from hfl.utils.duration import (
         InvalidKeepAliveError,
@@ -409,6 +410,11 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
         raise APIValidationError(str(exc)) from exc
 
     state = get_state()
+    # Keyed by the model's registered name, like resident models: an alias
+    # ("chat") set a keep_alive that the model, kept under its name, never read.
+    entry = get_registry().get(model_name)
+    if entry is not None:
+        model_name = str(entry.name)
 
     if delta is None:
         # Field omitted: the model keeps the keep_alive it already had — an

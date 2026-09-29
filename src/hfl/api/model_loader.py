@@ -71,8 +71,15 @@ def _canonical_model_name(model_name: str) -> str:
         valid = True
     except ValidationError as exc:
         valid, error = False, exc
-    if valid and get_registry().get(model_name) is not None:
-        return model_name
+    if valid:
+        entry = get_registry().get(model_name)
+        if entry is not None:
+            # Its manifest's name, not the alias: resident models are kept
+            # under that name (so ``/api/stop`` and eviction find them).
+            # Returning the alias, a model loaded as "chat" was re-filed
+            # under its name at the next load of another model, and every
+            # later "chat" loaded another copy — 14 s and 0.6 GB each time.
+            return str(entry.name)
 
     spec = parse_model_spec(model_name)
     if spec.repo_id is not None and spec.revision is None:

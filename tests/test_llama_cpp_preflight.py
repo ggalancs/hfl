@@ -30,64 +30,13 @@ of them, first verify on the *exact* model that caused the incident.
 
 from __future__ import annotations
 
-import sys
-import types
-
 import pytest
 
 from hfl.engine import llama_cpp as engine_module
 from hfl.exceptions import OutOfMemoryError
+from tests.gguf_file import model_fields, write_gguf
 
 # --- Helpers -----------------------------------------------------------------
-
-
-def _fake_gguf_module(
-    arch: str | None = None,
-    block_count: int | None = None,
-    embedding_length: int | None = None,
-    context_length: int | None = None,
-    head_count: int | None = None,
-    head_count_kv: int | None = None,
-    chat_template: str | None = None,
-) -> types.ModuleType:
-    """Build a fake ``gguf`` module whose ``GGUFReader`` exposes the
-    requested metadata fields. String fields are stored as UTF-8
-    bytes; int fields are stored as a little-endian byte blob so the
-    production ``_read_int`` helper can decode them without numpy.
-    """
-    fake = types.ModuleType("gguf")
-
-    class _FakeStrField:
-        def __init__(self, value: str) -> None:
-            self.parts = [value.encode("utf-8")]
-
-    class _FakeIntField:
-        def __init__(self, value: int) -> None:
-            # 8 bytes little-endian — matches uint64 which is what
-            # GGUF uses for most layout integers.
-            self.parts = [value.to_bytes(8, "little", signed=False)]
-
-    class _FakeReader:
-        def __init__(self, path: str) -> None:
-            self.path = path
-            self.fields: dict = {}
-            if arch is not None:
-                self.fields["general.architecture"] = _FakeStrField(arch)
-            if arch is not None and block_count is not None:
-                self.fields[f"{arch}.block_count"] = _FakeIntField(block_count)
-            if arch is not None and embedding_length is not None:
-                self.fields[f"{arch}.embedding_length"] = _FakeIntField(embedding_length)
-            if arch is not None and context_length is not None:
-                self.fields[f"{arch}.context_length"] = _FakeIntField(context_length)
-            if arch is not None and head_count is not None:
-                self.fields[f"{arch}.attention.head_count"] = _FakeIntField(head_count)
-            if arch is not None and head_count_kv is not None:
-                self.fields[f"{arch}.attention.head_count_kv"] = _FakeIntField(head_count_kv)
-            if chat_template is not None:
-                self.fields["tokenizer.chat_template"] = _FakeStrField(chat_template)
-
-    fake.GGUFReader = _FakeReader  # type: ignore[attr-defined]
-    return fake
 
 
 def _install_stub_llama(monkeypatch, captured: dict) -> None:
@@ -129,8 +78,14 @@ def _stub_memory_snapshot(
 
 
 @pytest.fixture
-def dummy_gguf(tmp_path):
-    """A tiny on-disk ``.gguf`` file whose path validation passes.
+def gguf_meta() -> dict:
+    """The metadata the next test GGUF gets (``patched_gguf`` sets it)."""
+    return {}
+
+
+@pytest.fixture
+def dummy_gguf(tmp_path, gguf_meta):
+    """A tiny real ``.gguf`` (header with ``gguf_meta``, no tensors).
 
     ``size_mb`` can be overridden by calling ``dummy_gguf(size_mb=...)``
     — some tests need the file to *look* large so the preflight has
@@ -139,23 +94,23 @@ def dummy_gguf(tmp_path):
 
     def _make(size_mb: float = 0.001) -> str:
         path = tmp_path / "model.gguf"
-        path.write_bytes(b"GGUF\x00\x00\x00\x00" + b"\x00" * int(size_mb * 1024 * 1024))
+        write_gguf(path, gguf_meta, size_bytes=int(size_mb * 1024 * 1024))
         return str(path)
 
     return _make
 
 
 @pytest.fixture
-def sparse_gguf(tmp_path):
-    """A ``.gguf`` file that *reports* a multi-GB size without consuming
-    the disk. The memory helpers only ever call ``stat().st_size``, so a
-    sparse file lets us test against the real 47 GB weights of the model
-    from the incident."""
+def sparse_gguf(tmp_path, gguf_meta):
+    """A real ``.gguf`` header that *reports* a multi-GB size without
+    consuming the disk (sparse): the memory helpers only read the header
+    and ``stat().st_size``, so this tests against the real 47 GB weights of
+    the model from the incident."""
 
     def _make(size_bytes: int) -> str:
         path = tmp_path / "sparse.gguf"
-        with open(path, "wb") as fh:
-            fh.write(b"GGUF\x00\x00\x00\x00")
+        write_gguf(path, gguf_meta)
+        with open(path, "r+b") as fh:
             fh.truncate(size_bytes)
         return str(path)
 
@@ -163,12 +118,13 @@ def sparse_gguf(tmp_path):
 
 
 @pytest.fixture
-def patched_gguf(monkeypatch):
-    """Install a fake ``gguf`` module in ``sys.modules`` with a chosen
-    set of layout fields."""
+def patched_gguf(gguf_meta):
+    """Set the layout fields of the next test GGUF (a real header, read by
+    HFL's own reader — no fake ``gguf`` package)."""
 
     def _install(**kwargs) -> None:
-        monkeypatch.setitem(sys.modules, "gguf", _fake_gguf_module(**kwargs))
+        gguf_meta.clear()
+        gguf_meta.update(model_fields(**kwargs))
 
     return _install
 

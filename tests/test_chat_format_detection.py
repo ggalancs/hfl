@@ -8,14 +8,13 @@ chat quality. The detection helper reads ``general.architecture`` from
 the GGUF header and explicitly maps Gemma family architectures to the
 correct ``chat_format`` string, restoring the right prompt template.
 
-These tests run in default CI (no ``gguf`` package installed) by
-patching the ``gguf`` import via ``sys.modules`` injection.
+These tests run in default CI (no ``gguf`` package installed) on real
+GGUF headers written by ``tests/gguf_file.py``.
 """
 
 from __future__ import annotations
 
 import sys
-import types
 
 import pytest
 
@@ -23,35 +22,16 @@ from hfl.engine.llama_cpp import (
     _ARCHITECTURE_CHAT_FORMAT,
     _detect_chat_format_from_gguf,
 )
-
-
-def _fake_gguf_module(arch: str | None) -> types.ModuleType:
-    """Build a fake ``gguf`` module whose GGUFReader returns a single
-    ``general.architecture`` field with the given value (or no field
-    at all when ``arch`` is None)."""
-    fake = types.ModuleType("gguf")
-
-    class _FakeField:
-        def __init__(self, value: str) -> None:
-            self.parts = [value.encode("utf-8")]
-
-    class _FakeReader:
-        def __init__(self, path: str) -> None:
-            self.path = path
-            self.fields: dict = {}
-            if arch is not None:
-                self.fields["general.architecture"] = _FakeField(arch)
-
-    fake.GGUFReader = _FakeReader  # type: ignore[attr-defined]
-    return fake
+from tests.gguf_file import model_fields, write_gguf
 
 
 @pytest.fixture
-def patched_gguf(monkeypatch):
-    """Helper to inject a fake gguf module that reports a chosen arch."""
+def patched_gguf(tmp_path):
+    """A real GGUF header reporting ``arch`` (no architecture key when
+    None); returns its path. HFL reads it with its own header reader."""
 
-    def _install(arch: str | None) -> None:
-        monkeypatch.setitem(sys.modules, "gguf", _fake_gguf_module(arch))
+    def _install(arch: str | None) -> str:
+        return str(write_gguf(tmp_path / f"{arch or 'none'}.gguf", model_fields(arch)))
 
     return _install
 
@@ -70,30 +50,28 @@ class TestArchitectureMap:
 
 class TestDetectChatFormat:
     def test_gemma4_maps_to_gemma(self, patched_gguf):
-        patched_gguf("gemma4")
-        assert _detect_chat_format_from_gguf("/dummy/path.gguf") == "gemma"
+        assert _detect_chat_format_from_gguf(patched_gguf("gemma4")) == "gemma"
 
     @pytest.mark.parametrize("arch", ["gemma", "gemma2", "gemma3", "gemma4"])
     def test_every_gemma_variant_maps_to_gemma(self, patched_gguf, arch):
-        patched_gguf(arch)
-        assert _detect_chat_format_from_gguf("/dummy/path.gguf") == "gemma"
+        assert _detect_chat_format_from_gguf(patched_gguf(arch)) == "gemma"
 
     def test_unknown_architecture_returns_none(self, patched_gguf):
         """For architectures we don't override, return None so
         llama-cpp-python's own auto-detection takes over."""
-        patched_gguf("qwen3")
-        assert _detect_chat_format_from_gguf("/dummy/path.gguf") is None
+        assert _detect_chat_format_from_gguf(patched_gguf("qwen3")) is None
 
     def test_missing_architecture_field_returns_none(self, patched_gguf):
-        patched_gguf(None)
-        assert _detect_chat_format_from_gguf("/dummy/path.gguf") is None
+        assert _detect_chat_format_from_gguf(patched_gguf(None)) is None
 
-    def test_no_gguf_package_returns_none(self, monkeypatch):
-        """If the optional ``gguf`` package isn't installed at all, the
-        helper must return ``None`` (and not raise)."""
-        # Hide gguf from sys.modules and force the import to fail.
-        monkeypatch.setitem(sys.modules, "gguf", None)
-        assert _detect_chat_format_from_gguf("/dummy/path.gguf") is None
+    def test_works_without_the_gguf_package(self, monkeypatch, patched_gguf):
+        """Detection no longer needs the optional ``gguf`` package: without
+        it, Gemma models went back to the wrong prompt format."""
+        monkeypatch.setitem(sys.modules, "gguf", None)  # importing it fails
+        assert _detect_chat_format_from_gguf(patched_gguf("gemma4")) == "gemma"
+
+    def test_a_missing_file_returns_none(self, tmp_path):
+        assert _detect_chat_format_from_gguf(str(tmp_path / "absent.gguf")) is None
 
 
 # --- Integration: load() picks up the format ---------------------------------
@@ -119,16 +97,14 @@ class TestLoadUsesDetectedFormat:
         """When ``LlamaCppEngine.load`` is called without an explicit
         ``chat_format``, the detection helper's output must be forwarded
         to the underlying ``Llama`` constructor."""
+        from pathlib import Path
+
         from hfl.engine import llama_cpp as engine_module
 
-        patched_gguf("gemma4")
+        dummy = Path(patched_gguf("gemma4"))
 
         captured: dict = {}
         _install_stub_llama(monkeypatch, captured)
-
-        # Create a dummy ``.gguf`` file so the path validation passes.
-        dummy = tmp_path / "model.gguf"
-        dummy.write_bytes(b"GGUF\x00\x00\x00\x00")
 
         engine = engine_module.LlamaCppEngine()
         engine.load(str(dummy), n_gpu_layers=0, verbose=True)
@@ -139,15 +115,14 @@ class TestLoadUsesDetectedFormat:
     def test_explicit_chat_format_overrides_detection(self, monkeypatch, patched_gguf, tmp_path):
         """A caller passing ``chat_format=`` explicitly wins over the
         auto-detection."""
+        from pathlib import Path
+
         from hfl.engine import llama_cpp as engine_module
 
-        patched_gguf("gemma4")  # would normally yield "gemma"
+        dummy = Path(patched_gguf("gemma4"))  # would normally yield "gemma"
 
         captured: dict = {}
         _install_stub_llama(monkeypatch, captured)
-
-        dummy = tmp_path / "model.gguf"
-        dummy.write_bytes(b"GGUF\x00\x00\x00\x00")
 
         engine = engine_module.LlamaCppEngine()
         engine.load(
@@ -158,3 +133,38 @@ class TestLoadUsesDetectedFormat:
         )
 
         assert captured.get("chat_format") == "chatml"
+
+
+class TestModelInfoIsCachedPerFile:
+    """Read once per version of the file: it was read three to four times
+    per load with a parser that took 2.8 s for a 0.5B model's header, so a
+    model that loads in 0.2 s answered its first request in ~13 s."""
+
+    def test_a_second_read_does_not_open_the_file(self, tmp_path, monkeypatch):
+        from hfl.converter import gguf_header
+        from hfl.engine.llama_cpp import _read_gguf_model_info
+
+        path = str(write_gguf(tmp_path / "m.gguf", model_fields("qwen2", block_count=24)))
+        calls: list[str] = []
+        real = gguf_header.read_fields
+
+        def counted(p, wanted=None):
+            calls.append(str(p))
+            return real(p, wanted)
+
+        monkeypatch.setattr(gguf_header, "read_fields", counted)
+        first = _read_gguf_model_info(path)
+        opened = len(calls)
+        assert _read_gguf_model_info(path) == first and len(calls) == opened
+
+    def test_a_replaced_file_is_read_again(self, tmp_path):
+        import os
+
+        from hfl.engine.llama_cpp import _read_gguf_model_info
+
+        path = tmp_path / "m.gguf"
+        write_gguf(path, model_fields("qwen2", block_count=24))
+        assert _read_gguf_model_info(str(path))["block_count"] == 24
+        write_gguf(path, model_fields("qwen2", block_count=28), size_bytes=4096)
+        os.utime(path, ns=(1, 2))  # a different mtime, whatever the clock's resolution
+        assert _read_gguf_model_info(str(path))["block_count"] == 28

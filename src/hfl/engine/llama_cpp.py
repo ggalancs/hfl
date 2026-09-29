@@ -995,26 +995,9 @@ def _detect_chat_format_from_gguf(model_path: str) -> str | None:
     which silently destroys output quality. Detecting the architecture
     from the GGUF header lets us pick the correct format ahead of time.
     """
-    try:
-        import gguf
-    except ImportError:
-        logger.debug(
-            "gguf package not installed; skipping chat-format auto-detection. "
-            "Install hfl[convert] for full support."
-        )
-        return None
-
-    try:
-        reader = gguf.GGUFReader(model_path)
-        arch_field = reader.fields.get("general.architecture")
-        if arch_field is None:
-            return None
-        # The architecture value is stored as a UTF-8 string in the last
-        # ``parts`` chunk of the field record.
-        arch_bytes = bytes(arch_field.parts[-1])
-        arch = arch_bytes.decode("utf-8", errors="replace").strip()
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.debug("could not read GGUF metadata for %s: %s", model_path, exc)
+    info = _read_gguf_model_info(model_path)
+    arch = info["architecture"] if info else None
+    if arch is None:
         return None
 
     fmt = _ARCHITECTURE_CHAT_FORMAT.get(arch)
@@ -1027,93 +1010,75 @@ def _read_gguf_model_info(model_path: str) -> dict | None:
     """Read layout metadata from a GGUF header for memory estimation.
 
     Returns a dict with keys ``architecture``, ``block_count``,
-    ``embedding_length`` and ``max_context``. Any field that isn't
-    present in the GGUF (or that fails to decode) is set to ``None``.
+    ``embedding_length``, ``max_context``, ``head_count``,
+    ``head_count_kv``, ``has_chat_template`` and ``add_bos_token``; a
+    field the header lacks is ``None``. Returns ``None`` for a file that is
+    not a readable GGUF.
 
-    Returns ``None`` if the optional ``gguf`` package isn't installed
-    or the file isn't readable — in that case the caller should fall
-    back to whatever safety nets don't require metadata (arch-based
-    caps and user-supplied ``n_ctx`` still apply).
+    Read with HFL's own header reader, only the keys needed, and cached per
+    file. It used ``gguf.GGUFReader``, which parses the whole header —
+    the tokenizer's arrays included — to hand back six numbers: 2.8 s for
+    a 0.5B model, three to four times per load, so a model that loads in
+    0.2 s took 13 s to answer its first request. Without the optional
+    ``gguf`` package it returned nothing at all, and the memory estimate
+    and context sizing ran blind.
     """
     try:
-        import gguf
-    except ImportError:
-        logger.debug(
-            "gguf package not installed; skipping GGUF model info probe. "
-            "Install hfl[convert] for full support."
-        )
+        stat = os.stat(model_path)
+    except OSError:
         return None
+    return _gguf_model_info_cached(model_path, stat.st_size, stat.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=64)
+def _gguf_model_info_cached(model_path: str, size: int, mtime_ns: int) -> dict | None:
+    """``_read_gguf_model_info`` for one version of the file (size and
+    mtime are the cache key: a replaced file is read again)."""
+    from hfl.converter.gguf_header import read_fields
 
     try:
-        reader = gguf.GGUFReader(model_path)
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.debug("could not open GGUF %s: %s", model_path, exc)
+        arch = read_fields(model_path, {"general.architecture"}).get("general.architecture")
+        if not isinstance(arch, str) or not arch.strip():
+            return None
+        arch = arch.strip()
+        keys = {
+            f"{arch}.block_count",
+            f"{arch}.embedding_length",
+            f"{arch}.context_length",
+            f"{arch}.attention.head_count",
+            f"{arch}.attention.head_count_kv",
+            "tokenizer.chat_template",
+            "tokenizer.ggml.add_bos_token",
+        }
+        fields = read_fields(model_path, keys)
+    except (OSError, ValueError) as exc:
+        logger.debug("could not read GGUF metadata for %s: %s", model_path, exc)
         return None
 
-    def _read_str(field_name: str) -> str | None:
-        field = reader.fields.get(field_name)
-        if field is None:
+    def _int(key: str) -> int | None:
+        value = fields.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
             return None
-        try:
-            return bytes(field.parts[-1]).decode("utf-8", errors="replace").strip()
-        except Exception:  # pragma: no cover — defensive
-            return None
+        return value
 
-    def _read_int(field_name: str) -> int | None:
-        field = reader.fields.get(field_name)
-        if field is None:
-            return None
-        try:
-            value = field.parts[-1]
-            if isinstance(value, (bytes, bytearray, memoryview)):
-                return int.from_bytes(bytes(value), "little", signed=False)
-            # numpy array with a single scalar, or plain int
-            import numpy as np
-
-            arr = np.asarray(value)
-            return int(arr.flat[0])
-        except Exception:
-            return None
-
-    def _read_bool(field_name: str) -> bool | None:
-        field = reader.fields.get(field_name)
-        if field is None:
-            return None
-        try:
-            value = field.parts[-1]
-            if isinstance(value, (bytes, bytearray, memoryview)):
-                return bool(int.from_bytes(bytes(value), "little", signed=False))
-            import numpy as np
-
-            arr = np.asarray(value)
-            return bool(int(arr.flat[0]))
-        except Exception:
-            return None
-
-    arch = _read_str("general.architecture")
-    if arch is None:
-        return None
-
+    bos = fields.get("tokenizer.ggml.add_bos_token")
     return {
         "architecture": arch,
-        "block_count": _read_int(f"{arch}.block_count"),
-        "embedding_length": _read_int(f"{arch}.embedding_length"),
-        "max_context": _read_int(f"{arch}.context_length"),
-        "head_count": _read_int(f"{arch}.attention.head_count"),
-        "head_count_kv": _read_int(f"{arch}.attention.head_count_kv"),
+        "block_count": _int(f"{arch}.block_count"),
+        "embedding_length": _int(f"{arch}.embedding_length"),
+        "max_context": _int(f"{arch}.context_length"),
+        "head_count": _int(f"{arch}.attention.head_count"),
+        "head_count_kv": _int(f"{arch}.attention.head_count_kv"),
         # Presence of an embedded Jinja chat template. When True we
         # must NOT override ``chat_format`` with our static map —
         # the embedded template is always more accurate than any
         # preset llama-cpp-python ships, especially for new arches
         # like Gemma 4 whose prompt format differs from Gemma 2.
-        "has_chat_template": "tokenizer.chat_template" in reader.fields,
-        # Phase 11 P1 — V2 row 39. Gemma 4 models are shipped with
-        # ``tokenizer.ggml.add_bos_token = false`` because their chat
-        # template handles the BOS token explicitly. Engines that
-        # also auto-prepend BOS double-insert it and mis-predict the
-        # first few tokens. We surface this flag so the tokenize /
-        # generate paths can respect it.
-        "add_bos_token": _read_bool("tokenizer.ggml.add_bos_token"),
+        "has_chat_template": "tokenizer.chat_template" in fields,
+        # Gemma 4 ships ``tokenizer.ggml.add_bos_token = false`` because its
+        # chat template writes BOS itself; engines that also prepend it
+        # double-insert BOS and mis-predict the first tokens.
+        "add_bos_token": bos if isinstance(bos, bool) else None,
     }
 
 

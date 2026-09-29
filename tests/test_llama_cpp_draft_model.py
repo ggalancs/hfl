@@ -24,26 +24,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from hfl.engine import llama_cpp as engine_module
+from tests.gguf_file import model_fields, write_gguf
 
 # --- Helpers (lifted from test_llama_cpp_preflight) -------------------------
-
-
-def _fake_gguf_module(arch: str = "qwen") -> types.ModuleType:
-    fake = types.ModuleType("gguf")
-
-    class _Field:
-        def __init__(self, value):
-            if isinstance(value, str):
-                self.parts = [value.encode("utf-8")]
-            else:
-                self.parts = [int(value).to_bytes(8, "little", signed=False)]
-
-    class _Reader:
-        def __init__(self, path):
-            self.fields = {"general.architecture": _Field(arch)}
-
-    fake.GGUFReader = _Reader  # type: ignore[attr-defined]
-    return fake
 
 
 def _stub_memory(monkeypatch):
@@ -65,21 +48,13 @@ def _stub_memory(monkeypatch):
 
 @pytest.fixture
 def gguf_path(tmp_path):
-    p = tmp_path / "model.gguf"
-    p.write_bytes(b"GGUF\x00\x00\x00\x00" + b"\x00" * 1024)
-    return str(p)
+    """A real qwen GGUF header (no tensors), padded to 1 KB."""
+    return str(write_gguf(tmp_path / "model.gguf", model_fields("qwen"), size_bytes=1032))
 
 
 @pytest.fixture
 def draft_gguf(tmp_path):
-    p = tmp_path / "draft.gguf"
-    p.write_bytes(b"GGUF\x00\x00\x00\x00" + b"\x00" * 512)
-    return str(p)
-
-
-@pytest.fixture
-def fake_gguf_for_qwen(monkeypatch):
-    monkeypatch.setitem(sys.modules, "gguf", _fake_gguf_module(arch="qwen"))
+    return str(write_gguf(tmp_path / "draft.gguf", model_fields("qwen"), size_bytes=520))
 
 
 @pytest.fixture
@@ -102,7 +77,7 @@ def stub_llama_capture(monkeypatch):
 
 class TestDraftModelWiring:
     def test_no_draft_path_does_not_load_a_second_llama(
-        self, monkeypatch, fake_gguf_for_qwen, stub_llama_capture, gguf_path
+        self, monkeypatch, stub_llama_capture, gguf_path
     ):
         _stub_memory(monkeypatch)
 
@@ -117,7 +92,6 @@ class TestDraftModelWiring:
     def test_draft_path_loads_draft_then_target_with_draft_adapter(
         self,
         monkeypatch,
-        fake_gguf_for_qwen,
         stub_llama_capture,
         gguf_path,
         draft_gguf,
@@ -149,7 +123,6 @@ class TestDraftModelWiring:
     def test_draft_load_failure_does_not_block_target(
         self,
         monkeypatch,
-        fake_gguf_for_qwen,
         gguf_path,
         draft_gguf,
     ):
@@ -187,7 +160,6 @@ class TestDraftModelWiring:
     def test_prompt_lookup_mode_does_not_load_a_second_llama(
         self,
         monkeypatch,
-        fake_gguf_for_qwen,
         stub_llama_capture,
         gguf_path,
     ):
@@ -232,7 +204,6 @@ class TestDraftModelWiring:
     def test_unload_releases_both_target_and_draft(
         self,
         monkeypatch,
-        fake_gguf_for_qwen,
         stub_llama_capture,
         gguf_path,
         draft_gguf,
