@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **llama-server completions cut at `num_predict` said `done_reason:
+  "stop"`.** HFL read `stopped_limit`, which current llama-server builds no
+  longer send (they send `stop_type: "limit"`); it reads both now, and such
+  a reply says `"length"`, as Ollama does.
 - **A request to llama-server could fail with "Server disconnected without
   sending a response"** (HTTP 500). llama-server closes kept-alive
   connections on its own, and HFL sent the next request on one it had just

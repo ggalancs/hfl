@@ -48,12 +48,17 @@ def _chat(base: str, model: str = "chat", **options: object) -> httpx.Response:
 
 def _long(base: str, tokens: int) -> httpx.Response:
     """A generation that really runs ``tokens`` tokens: the short QUESTION ends in
-    a fraction of a second whatever num_predict says, so no queue ever forms."""
-    long = [
-        {"role": "user", "content": "Count from 1 to 2000, one number per line, no commentary."}
-    ]
-    body = {"model": "chat", "stream": False, "messages": long, "options": {"num_predict": tokens}}
-    return httpx.post(base + "/api/chat", json=body, timeout=600)
+    a fraction of a second whatever num_predict says, so no queue ever forms.
+    A raw continuation of a count, greedy: asked in chat to count, the small
+    model stopped after 31-54 tokens; continuing "1..8" it ran 1500 of 1500."""
+    body = {
+        "model": "chat",
+        "stream": False,
+        "raw": True,
+        "prompt": "".join(f"{n}\n" for n in range(1, 9)),
+        "options": {"num_predict": tokens, "temperature": 0},
+    }
+    return httpx.post(base + "/api/generate", json=body, timeout=600)
 
 
 def probe(cid: str, var: str) -> object:
@@ -224,9 +229,19 @@ def d13(a: Audit) -> str:
 
 @probe("D14", "HFL_GENERATION_TIMEOUT")
 def d14(a: Audit) -> str:
+    ended = []
     with a.server(env={"HFL_GENERATION_TIMEOUT": "1"}) as base:
         _chat(base, num_predict=2)  # the load is not what the budget times
-        out = _long(base, 4000)
+        # A reply that ended on its own inside the budget (in chat, a small
+        # model stopped counting after 7-54 tokens) says nothing about the
+        # timeout: ask again.
+        for _ in range(3):
+            out = _long(base, 4000)
+            if out.status_code != 200 or int(out.json().get("eval_count") or 0) >= 4000:
+                break
+            ended.append(out.json().get("eval_count"))
+        else:
+            raise Uncheckable(f"every reply ended on its own inside 1 s: {ended} tokens")
     expect(
         out.status_code == 504,
         (
@@ -234,7 +249,9 @@ def d14(a: Audit) -> str:
             out.json().get("eval_count") if out.status_code == 200 else out.text[:200],
         ),
     )
-    return "a 1 s budget on a long generation: 504"
+    return "a 1 s budget on a long generation: 504" + (
+        f" (after replies that ended on their own: {ended} tokens)" if ended else ""
+    )
 
 
 @probe("D15", "HFL_HOME")

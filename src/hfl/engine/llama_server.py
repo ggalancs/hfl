@@ -918,7 +918,9 @@ class LlamaServerEngine(InferenceEngine):
             response = self._http().post("/completion", json=body)
             response.raise_for_status()
             data = response.json()
-        stop = "length" if data.get("stopped_limit") else "stop"
+        # Current builds say ``stop_type: "limit"``; older ones ``stopped_limit``.
+        hit_limit = data.get("stop_type") == "limit" or bool(data.get("stopped_limit"))
+        stop = "length" if hit_limit else "stop"
         result = self._result(data.get("content") or "", data, started, stop, None)
         if cfg.logprobs is not None:
             result.logprobs = _logprob_entries(data.get("completion_probabilities"), cfg.logprobs)

@@ -97,6 +97,23 @@ def test_the_streamed_chat_is_reassembled_as_its_blocking_answer() -> None:
     assert result.eval_duration == 30_000_000 and result.logprobs[0]["token"] == "Hel"
 
 
+@pytest.mark.parametrize(
+    ("final", "reason"),
+    [
+        ({"stop_type": "limit"}, "length"),  # current llama-server (b10964, Homebrew)
+        ({"stop_type": "eos"}, "stop"),
+        ({"stopped_limit": True}, "length"),  # older builds
+    ],
+)
+def test_a_completion_cut_at_num_predict_says_length(final: dict, reason: str) -> None:
+    """HFL read only ``stopped_limit``, which current builds no longer send:
+    every completion said "stop", even one cut at num_predict."""
+    events = [{"content": "1", "stop": False}, {"content": "", "stop": True, **final}]
+    engine = _engine(lambda request: httpx.Response(200, content=_sse(events)))
+    with cancel.scope(threading.Event()):
+        assert engine.generate("0", GenerationConfig()).stop_reason == reason
+
+
 def test_the_streamed_completion_is_reassembled() -> None:
     events = [
         {"content": " Paris", "stop": False, "completion_probabilities": [{"token": " Paris"}]},
