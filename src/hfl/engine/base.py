@@ -423,6 +423,18 @@ class InferenceEngine(ABC):
         return False
 
     @property
+    def generates_on_all_cpu_cores(self) -> bool:
+        """Whether this engine generates on the CPU with every core.
+
+        Two such engines generating at once fight over the cores: two
+        llama-server processes on a 4-core CPU went from 154 tok/s in turn
+        to 30 tok/s at once. Their requests take turns across models (the
+        dispatcher's :class:`~hfl.engine.dispatcher.CpuTurn`); requests to
+        the same model still share its parallel slots.
+        """
+        return False
+
+    @property
     def acceleration(self) -> str | None:
         """Human-readable summary of the hardware the model is running on.
 

@@ -44,11 +44,37 @@ def serve(monkeypatch, temp_config, tmp_path):
         os.environ["HFL_LLM_LIBRARY"] = before
 
 
-def test_auto_changes_nothing(serve):
+def test_auto_serves_gguf_in_parallel_when_llama_server_is_here(serve):
+    """Nothing chosen and llama-server installed: parallel slots, as with
+    ``--parallel 4`` (one at a time, four requests took four times one)."""
+    import hfl.config
+
     run, started = serve
-    assert run().exit_code == 0
+    result = run()
+    assert result.exit_code == 0, result.output
+    assert os.environ["HFL_LLM_LIBRARY"] == "llama-server"
+    assert hfl.config.config.queue_max_inflight == 4
+    assert "parallel" in result.output.lower()
+    started.assert_called_once()
+
+
+def test_auto_changes_nothing_without_llama_server(serve):
+    run, started = serve
+    assert run(binary=False).exit_code == 0
     assert "HFL_LLM_LIBRARY" not in os.environ
     started.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("HFL_NUM_PARALLEL", "1"), ("OLLAMA_NUM_PARALLEL", "1"), ("HFL_LLM_LIBRARY", "llama-cpp")],
+)
+def test_a_choice_in_the_environment_keeps_one_at_a_time(serve, monkeypatch, name, value):
+    run, _ = serve
+    monkeypatch.setenv(name, value)
+    result = run()
+    assert result.exit_code == 0, result.output
+    assert os.environ.get("HFL_LLM_LIBRARY") in (None, "llama-cpp")
 
 
 def test_parallel_implies_llama_server_for_gguf(serve, temp_config):

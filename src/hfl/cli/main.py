@@ -995,6 +995,30 @@ def _print_hub_unreachable() -> None:
 _BACKENDS = ("auto", "llama-cpp", "llama-server", "transformers", "vllm", "mlx")
 
 
+_DEFAULT_PARALLEL = 4
+# What says "I chose": any of these set means the default is not applied.
+_PARALLEL_CHOICES = (
+    "HFL_NUM_PARALLEL",
+    "OLLAMA_NUM_PARALLEL",
+    "HFL_QUEUE_MAX_INFLIGHT",
+    "HFL_LLM_LIBRARY",
+    "OLLAMA_LLM_LIBRARY",
+)
+
+
+def _parallel_by_default() -> bool:
+    """Whether ``hfl serve`` serves GGUF models with parallel slots without
+    being asked: llama-server is installed and nothing chose otherwise
+    (``HFL_NUM_PARALLEL=1`` or ``--backend llama-cpp`` keep one at a time)."""
+    import os
+
+    if any(os.environ.get(name, "").strip() for name in _PARALLEL_CHOICES):
+        return False
+    from hfl.engine.llama_server import binary
+
+    return binary() is not None
+
+
 def _choose_backend(backend: str, parallel: int) -> None:
     """Apply ``--backend`` / ``--parallel`` for this server.
 
@@ -1019,6 +1043,13 @@ def _choose_backend(backend: str, parallel: int) -> None:
     if parallel < 0:
         console.print(f"[red]{escape_markup(t('errors.bad_parallel'))}[/]")
         raise typer.Exit(2)
+    if parallel == 0 and backend == "auto" and _parallel_by_default():
+        # Nothing named a backend or a level of parallelism, and
+        # llama-server is here: serve GGUF models with parallel slots. One
+        # at a time, four requests took four times one (bench: 1.0x);
+        # through llama-server 1.9x, single requests level on real models.
+        parallel = _DEFAULT_PARALLEL
+        console.print(f"[cyan]{escape_markup(t('messages.parallel_default'))}[/]")
     if parallel > 1 and backend == "auto":
         backend = "llama-server"
     if backend == "llama-server":

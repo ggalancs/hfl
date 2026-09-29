@@ -79,6 +79,64 @@ class DispatcherSnapshot:
     rejected_timeout_total: int
 
 
+class CpuTurn:
+    """Models whose engines each generate on every CPU core take turns.
+
+    Two of them at once fight over the cores and both slow to a crawl
+    (measured: two llama-server processes on a 4-core CPU, 154 tok/s in
+    turn, 30 tok/s at once). A request enters when no other model holds the
+    turn; requests to the model that holds it enter too, so its parallel
+    slots still work, unless another model is already waiting: then they
+    queue behind it, and no model can keep the turn for ever.
+
+    Keys are compared by identity (each model's dispatcher). Waiters are
+    plain futures of the running loop, so the turn is bound to no loop.
+    """
+
+    def __init__(self) -> None:
+        self._owner: object | None = None
+        self._count = 0
+        self._queue: list[tuple[object, asyncio.Future[None]]] = []
+
+    def _wake(self) -> None:
+        while self._queue and self._owner in (None, self._queue[0][0]):
+            key, fut = self._queue.pop(0)
+            if fut.done():  # cancelled while waiting
+                continue
+            self._owner = key
+            self._count += 1
+            fut.set_result(None)
+
+    async def enter(self, key: object, timeout: float) -> None:
+        """Take the turn for ``key``; ``asyncio.TimeoutError`` after ``timeout``."""
+        if not self._queue and self._owner in (None, key):
+            self._owner = key
+            self._count += 1
+            return
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        entry = (key, fut)
+        self._queue.append(entry)
+        try:
+            await asyncio.wait_for(fut, timeout)
+        except BaseException:
+            if entry in self._queue:
+                self._queue.remove(entry)
+                self._wake()
+            elif fut.done() and not fut.cancelled():
+                self.leave()  # admitted just as the wait gave up
+            raise
+
+    def leave(self) -> None:
+        self._count -= 1
+        if self._count == 0:
+            self._owner = None
+            self._wake()
+
+    @property
+    def owner(self) -> object | None:
+        return self._owner
+
+
 class InferenceDispatcher:
     """Bounded-concurrency dispatcher for inference requests.
 
@@ -100,6 +158,7 @@ class InferenceDispatcher:
         max_inflight: int = 1,
         max_queued: int = 16,
         acquire_timeout: float = 60.0,
+        turn: CpuTurn | None = None,
     ) -> None:
         if max_inflight < 1:
             raise ValueError("max_inflight must be >= 1")
@@ -114,6 +173,8 @@ class InferenceDispatcher:
 
         self._sem = asyncio.Semaphore(max_inflight)
         self._counter_lock = asyncio.Lock()
+        # Shared with other CPU-bound models' dispatchers: see CpuTurn.
+        self._turn = turn
         # Two exclusive() callers must take turns. Each acquires permits one
         # at a time, and the semaphore hands freed permits out in arrival
         # order, so with every slot busy they end up alternating: each holds
@@ -262,10 +323,29 @@ class InferenceDispatcher:
                 self._in_flight += 1
                 self._accepted_total += 1
 
+        # Phase 2b — a CPU-bound model also waits for its turn on the cores,
+        # within what is left of the same timeout.
+        if self._turn is not None:
+            try:
+                left = max(0.001, self._acquire_timeout - (time.monotonic() - start))
+                await self._turn.enter(self, left)
+            except BaseException as exc:
+                async with self._counter_lock:
+                    self._in_flight -= 1
+                    self._accepted_total -= 1
+                    if isinstance(exc, asyncio.TimeoutError):
+                        self._rejected_timeout_total += 1
+                self._sem.release()
+                if isinstance(exc, asyncio.TimeoutError):
+                    raise QueueTimeoutError(waited_seconds=time.monotonic() - start) from None
+                raise
+
         # Phase 3 — execute the guarded block.
         try:
             yield
         finally:
+            if self._turn is not None:
+                self._turn.leave()
             # Phase 4 — release the slot. Release the semaphore BEFORE
             # decrementing ``in_flight`` would create a window where a
             # new fast-path caller observes capacity but sees the

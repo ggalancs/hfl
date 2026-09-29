@@ -320,7 +320,8 @@
     "memory_summary_gpu": "GPU: {in_use} de {total} GB en uso ({pct}%) · margen: {free} GB",
     "run_pulling": "{model} aún no está en esta máquina: se descarga primero.",
     "parallel_on": "Peticiones en paralelo: {slots} a la vez por modelo GGUF (llama-server); los demás formatos usan su backend habitual.",
-    "search_interpreted": "Consulta interpretada como: {reading} (--literal para buscar el texto tal cual)"
+    "search_interpreted": "Consulta interpretada como: {reading} (--literal para buscar el texto tal cual)",
+    "parallel_default": "Sirviendo los modelos GGUF con llama-server y 4 peticiones en paralelo (HFL_NUM_PARALLEL=1 para una a la vez)."
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",

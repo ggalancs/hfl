@@ -65,6 +65,31 @@ def binary() -> str | None:
     return shutil.which("llama-server")
 
 
+@functools.lru_cache(maxsize=4)
+def has_gpu(exe: str) -> bool:
+    """Whether this llama-server build sees a GPU (``--list-devices``).
+
+    A CPU-only build lists ``(none)``; Accelerate's BLAS is listed on a Mac
+    but is the CPU. Unknown (the command failed) counts as a GPU: HFL then
+    keeps the concurrency it had rather than making models take turns.
+    """
+    try:
+        done = subprocess.run(
+            [exe, "--list-devices"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    text = done.stdout + done.stderr
+    if done.returncode != 0 or "Available devices" not in text:
+        return True
+    devices = [
+        line.strip().split(":", 1)[0]
+        for line in text.split("Available devices", 1)[1].splitlines()[1:]
+        if ":" in line
+    ]
+    return any(not name.upper().startswith(("BLAS", "CPU")) for name in devices)
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -388,6 +413,8 @@ class LlamaServerEngine(InferenceEngine):
         self._model_path = ""
         self._n_ctx = 0
         self._slots = 0
+        # Generating on the CPU alone (no GPU, or no layer offloaded).
+        self._cpu_only = False
         self._log_path: Path | None = None
         # The template llama-server renders, and whether it lists the tools
         # itself; when not, HFL writes them in (``_tools_as_text``).
@@ -489,6 +516,7 @@ class LlamaServerEngine(InferenceEngine):
         if not n_ctx:
             n_ctx = self._reported_ctx()
         self._model_path, self._n_ctx, self._slots = model_path, n_ctx, slots
+        self._cpu_only = _gpu_layers(kwargs.get("n_gpu_layers")) == 0 or not has_gpu(exe)
         logger.info(
             "llama-server serving %s: %d-token context shared by %d parallel slots",
             Path(model_path).name,
@@ -1005,6 +1033,11 @@ class LlamaServerEngine(InferenceEngine):
     @property
     def supports_concurrent_inference(self) -> bool:
         return True
+
+    @property
+    def generates_on_all_cpu_cores(self) -> bool:
+        # llama-server starts as many threads as the machine has cores.
+        return self._cpu_only
 
     @property
     def supports_structured_output(self) -> bool:

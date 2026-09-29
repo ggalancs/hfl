@@ -30,6 +30,7 @@ from local_audit import (
 
 from audit_checks.c_extras import EXTRA_ID
 
+REPO = Path(__file__).resolve().parents[2]
 USER = [{"role": "user", "content": QUESTION}]
 TOOL = {
     "type": "function",
@@ -189,11 +190,20 @@ def suite(
     part("count_tokens", counted)
 
 
-@check("E1", "llama.cpp in process (default)")
+@check("E1", "llama.cpp in process (HFL_NUM_PARALLEL=1)")
 def e1(a: Audit) -> str:
+    # The default serves GGUF through llama-server when it is on PATH (E16);
+    # one request at a time keeps llama-cpp-python in process.
     part = Parts()
-    with a.server() as base:
+    with a.server(env={"HFL_NUM_PARALLEL": "1"}) as base:
         suite(part, base, "chat")
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        part(
+            "served in process, not by llama-server",
+            lambda: expect(
+                "llama-server serving" not in log.read_text(errors="replace"), "llama-server"
+            ),
+        )
         c = httpx.Client(base_url=base, timeout=600)
         off = c.post(
             "/api/chat",
@@ -252,6 +262,59 @@ def e2(a: Audit) -> str:
         part(
             "4 at once overlap (< 3.5x one)",
             lambda: expect(four < one * 3.5, f"one {one:.2f}s, four {four:.2f}s"),
+        )
+    return part.verdict()
+
+
+def _llama_server_has_gpu(exe: str) -> bool:
+    """Read here, not through HFL: the floors must not trust the code they
+    check."""
+    listing = subprocess.run(
+        [exe, "--list-devices"], capture_output=True, text=True, timeout=60
+    ).stdout
+    return any(gpu in listing for gpu in ("MTL", "CUDA", "ROCm", "Vulkan", "SYCL"))
+
+
+@check("E16", "parallel by default: 4 requests, two models", needs=("A24",))
+def e16(a: Audit) -> str:
+    """``hfl serve`` with no option serves GGUF through llama-server with 4
+    slots, and it pays: ``scripts/bench_concurrency.py`` with floors.
+
+    Measured (qwen2.5 0.5B Q4 ``chat`` + Q8 ``chat8``): M3 Max, 4 same
+    model 1.88-1.93x, two models 1.44-1.51x; 4-core CPU, 1.23-1.28x and
+    1.02x — there two models take turns on the cores (0.2x when they did
+    not). The floors sit between those and serving in turn (1.0x) or the
+    CPU collapse (0.2x)."""
+    exe = need_llama_server()
+    gpu = _llama_server_has_gpu(exe)
+    floors = ("1.5", "1.2") if gpu else ("1.1", "0.8")
+    part = Parts()
+    out_file = a.work / "logs" / "concurrency.json"
+    with a.server() as base:
+        done = subprocess.run(
+            [
+                a.python, str(REPO / "scripts" / "bench_concurrency.py"), base,
+                "--model", "chat", "--other-model", "chat8", "--runs", "3", "--tokens", "96",
+                "--min-parallel-speedup", floors[0], "--min-two-model-speedup", floors[1],
+                "--out", str(out_file),
+            ],
+            capture_output=True, text=True, timeout=3600,
+        )  # fmt: skip
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        text = log.read_text(errors="replace")
+        part(
+            "served by llama-server, 4 slots",
+            lambda: expect("shared by 4 parallel slots" in text, "no llama-server in log"),
+        )
+    part(
+        f"speed-ups over the floors ({'GPU' if gpu else 'CPU'}: {floors[0]}x, {floors[1]}x)",
+        lambda: expect(done.returncode == 0, done.stderr.strip()[-400:] or done.stdout[-400:]),
+    )
+    if out_file.is_file():
+        d = json.loads(out_file.read_text())
+        return (
+            f"{part.verdict()}; 4 same {d['parallel']['speedup']}x, "
+            f"two models {d['two_models']['speedup']}x"
         )
     return part.verdict()
 

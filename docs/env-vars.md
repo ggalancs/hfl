@@ -25,7 +25,7 @@ the host string does not.
 
 | HFL                            | Ollama alias               | Default | What it does |
 |--------------------------------|----------------------------|---------|--------------|
-| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1`     | Requests one model serves at once. Only backends that serve several at once use it (llama-server: 4 when unset, and exactly what you set otherwise, 1 included; vLLM); every other backend runs one request at a time, across all its models. |
+| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1` (4 via llama-server by default, see below) | Requests one model serves at once. Only backends that serve several at once use it (llama-server: 4 when unset, and exactly what you set otherwise, 1 included; vLLM); every other backend runs one request at a time, across all its models. |
 | `HFL_QUEUE_MAX_SIZE` / `HFL_MAX_QUEUE`        | `OLLAMA_MAX_QUEUE`         | `16`    | Max wait queue; further requests get 429. |
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
 | `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `0`     | Optional ceiling on the **number** of resident models. `0` (default) = no ceiling: memory alone decides, see `HFL_MEMORY_BUDGET`. When set, loading one more model than this unloads the least recently used idle one. |
@@ -40,6 +40,16 @@ the host string does not.
 > queue of their own per model, with `HFL_NUM_PARALLEL` slots (llama-server: 4
 > when it is unset) — their requests neither wait behind each other nor
 > behind another model's.
+>
+> **Default:** when `hfl serve` gets no `--backend`/`--parallel` and none of
+> `HFL_NUM_PARALLEL`, `OLLAMA_NUM_PARALLEL`, `HFL_QUEUE_MAX_INFLIGHT`,
+> `HFL_LLM_LIBRARY`, `OLLAMA_LLM_LIBRARY` is set, and `llama-server` is on
+> `PATH` (or `HFL_LLAMA_SERVER_BIN`), GGUF models are served through
+> llama-server with 4 slots. Set `HFL_NUM_PARALLEL=1` to keep llama-cpp-python
+> in process. On a machine where llama-server sees no GPU, each process uses
+> every core, so two models take turns generating (requests to one model
+> still share its slots): at once they fought over the cores and fell to a
+> fifth of the speed.
 
 ## Lifecycle / keep-alive
 

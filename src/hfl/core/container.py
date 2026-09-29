@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from hfl.api.rate_limit import RateLimiter
     from hfl.api.state import ServerState
     from hfl.config import HFLConfig
-    from hfl.engine.dispatcher import DispatcherSnapshot, InferenceDispatcher
+    from hfl.engine.dispatcher import CpuTurn, DispatcherSnapshot, InferenceDispatcher
     from hfl.events import EventBus
     from hfl.metrics import Metrics
     from hfl.models.registry import ModelRegistry
@@ -216,11 +216,12 @@ def reset_container() -> None:
 
     This is primarily useful for testing.
     """
-    global _container
+    global _container, _CPU_TURN
     with _container_lock:
         if _container is not None:
             _container.reset_all()
         _container = None
+        _CPU_TURN = None
 
 
 # Convenience functions for accessing common singletons
@@ -320,14 +321,31 @@ def dispatcher_for(engine: object | None) -> "InferenceDispatcher":
             if concurrent
             else 1
         )
+        # Models that each generate on every CPU core take turns (CpuTurn).
+        cpu_bound = getattr(engine, "generates_on_all_cpu_cores", False) is True
         own = InferenceDispatcher(
             max_inflight=max(1, slots),
             max_queued=cfg.queue_max_size,
             acquire_timeout=cfg.queue_acquire_timeout_seconds,
+            turn=_cpu_turn() if cpu_bound else None,
         )
         engine._hfl_dispatcher = own  # type: ignore[attr-defined]
         _ENGINE_DISPATCHERS.add(own)
     return own
+
+
+# The one turn on the CPU cores all CPU-bound models share (created on
+# first use; it is bound to no event loop).
+_CPU_TURN: "CpuTurn | None" = None
+
+
+def _cpu_turn() -> "CpuTurn":
+    global _CPU_TURN
+    if _CPU_TURN is None:
+        from hfl.engine.dispatcher import CpuTurn
+
+        _CPU_TURN = CpuTurn()
+    return _CPU_TURN
 
 
 # Every per-engine queue alive, for the totals /healthz and /metrics report.

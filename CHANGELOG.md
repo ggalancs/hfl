@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **GGUF models are served in parallel by default.** When llama.cpp's
+  `llama-server` is on `PATH` and nothing chooses otherwise, `hfl serve`
+  serves GGUF models through it with 4 parallel slots (it says so at start).
+  Measured with `scripts/bench_concurrency.py` (qwen2.5 0.5B + 1.5B, 128
+  tokens): on an M3 Max, 4 requests to one model 264 → 454 tok/s (1.88x),
+  two models 216 → 298 tok/s; one request ~2% slower end to end. On a
+  4-core CPU with no GPU: one request 42 → 135 tok/s, 4 requests 43 → 165,
+  two models 75 → 143. `HFL_NUM_PARALLEL=1` (or any `--backend`,
+  `--parallel`, `HFL_LLM_LIBRARY`, `OLLAMA_NUM_PARALLEL`) keeps the previous
+  behaviour. Without llama-server nothing changes.
+- **On a CPU without GPU, llama-server models take turns across models.**
+  Each process starts a thread per core; two generating at once fought over
+  the cores and fell from 154 to 30 tok/s. Requests to one model still share
+  its slots; a model waiting for the cores is not overtaken by new requests
+  to the one using them. Where llama-server lists a GPU, nothing changes.
+- The audit checks it: E16 serves with the defaults and runs the benchmark
+  with floors (GPU 1.5x / 1.2x, CPU 1.1x / 0.8x); E1 keeps checking
+  llama-cpp-python in process with `HFL_NUM_PARALLEL=1`.
 - **Two llama.cpp models answer at the same time.** Every in-process model
   shared one queue of one slot, so a request to one model waited for another
   model's reply. Each llama.cpp model now has its own queue (still one call
