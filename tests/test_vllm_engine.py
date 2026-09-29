@@ -744,3 +744,124 @@ def test_one_gpu_passes_no_tensor_parallel_size(mock_vllm, monkeypatch):
     monkeypatch.setattr(vllm_engine._hfl_config, "vllm_tensor_parallel_size", 1)
     vllm_engine.VLLMEngine().load("/models/m")
     assert "tensor_parallel_size" not in mock_vllm["engine_args"].call_args.kwargs
+
+
+class TestLoadOptions:
+    """HFL passes every engine the same options (``load_kwargs_for``); vLLM's
+    AsyncEngineArgs knows none of them. With a mock that took anything, every
+    real load failed: "unexpected keyword argument 'n_ctx'" (L4, vLLM 0.30)."""
+
+    @staticmethod
+    def _strict(seen: dict):
+        def engine_args(*, model, max_model_len=None, tensor_parallel_size=1):
+            seen.update(model=model, max_model_len=max_model_len)
+            return MagicMock()
+
+        return engine_args
+
+    def test_hfl_options_become_vllm_arguments(self, mock_vllm, tmp_path, caplog):
+        import json
+
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        (tmp_path / "config.json").write_text(json.dumps({"max_position_embeddings": 4096}))
+        seen: dict = {}
+        mock_vllm["engine_args"].side_effect = self._strict(seen)
+        engine = VLLMEngine()
+        with (
+            patch.object(VLLMEngine, "_ensure_loop"),
+            patch.object(VLLMEngine, "_run_async", return_value=MagicMock()),
+        ):
+            engine.load(
+                str(tmp_path), n_ctx=32768, lora_paths=["/a.gguf"], draft_model_path="prompt-lookup"
+            )
+        # The context, capped at the model's own limit; the rest said, not passed.
+        assert seen == {"model": str(tmp_path), "max_model_len": 4096}
+        assert "ADAPTER" in caplog.text and "DRAFT" in caplog.text
+
+    def test_no_context_leaves_vllm_its_own(self, mock_vllm, tmp_path):
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        seen: dict = {}
+        mock_vllm["engine_args"].side_effect = self._strict(seen)
+        with (
+            patch.object(VLLMEngine, "_ensure_loop"),
+            patch.object(VLLMEngine, "_run_async", return_value=MagicMock()),
+        ):
+            VLLMEngine().load(str(tmp_path), n_ctx=None)
+        assert seen == {"model": str(tmp_path), "max_model_len": None}
+
+
+def test_the_interpreters_own_tools_are_on_path(mock_vllm, monkeypatch):
+    """ninja sits next to the interpreter; a venv that is not activated left
+    it off PATH, and vLLM's kernel build failed to find it (L4)."""
+    import os
+    import sys
+    from pathlib import Path
+
+    from hfl.engine.vllm_engine import _own_tools_on_path
+
+    own = str(Path(sys.executable).parent)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    _own_tools_on_path()
+    assert os.environ["PATH"].split(os.pathsep) == [own, "/usr/bin", "/bin"]
+    _own_tools_on_path()  # once only
+    assert os.environ["PATH"].split(os.pathsep).count(own) == 1
+
+
+class TestPromptTokens:
+    """vLLM reported 0 input tokens and could not count a prompt; the local
+    audit's count_tokens check failed on it (L4)."""
+
+    @staticmethod
+    def _tokenizer():
+        import types
+
+        return types.SimpleNamespace(encode=lambda text: text.split())
+
+    def test_a_generation_reports_the_prompt_tokens_vllm_read(self, mock_vllm):
+        import types
+
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        engine = VLLMEngine()
+        engine._is_async = False
+        done = types.SimpleNamespace(text="hi", token_ids=[5], finish_reason="stop")
+        engine._engine = MagicMock()
+        engine._engine.generate.return_value = [
+            types.SimpleNamespace(prompt_token_ids=[1, 2, 3], outputs=[done])
+        ]
+        assert engine.generate("a b c").tokens_prompt == 3
+
+    def test_counting_uses_the_prompt_chat_would_send(self, mock_vllm):
+        from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import PromptBuilder, VLLMEngine
+
+        engine = VLLMEngine()
+        engine._engine = MagicMock()
+        engine._engine.get_tokenizer.return_value = self._tokenizer()
+        messages = [ChatMessage(role="user", content="hello there")]
+        expected = len(PromptBuilder.build(messages, engine._prompt_format).split())
+        assert engine.count_prompt_tokens(messages) == expected
+
+    def test_the_async_engines_tokenizer_is_awaited(self, mock_vllm):
+        import asyncio
+
+        from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        async def get_tokenizer():
+            return self._tokenizer()
+
+        engine = VLLMEngine()
+        engine._engine = MagicMock()
+        engine._engine.get_tokenizer = get_tokenizer
+        with patch.object(VLLMEngine, "_run_async", lambda self, coro: asyncio.run(coro)):
+            assert engine.count_prompt_tokens([ChatMessage(role="user", content="hi")]) > 0
+
+    def test_without_a_model_it_says_so(self, mock_vllm):
+        from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        with pytest.raises(RuntimeError):
+            VLLMEngine().count_prompt_tokens([ChatMessage(role="user", content="hi")])

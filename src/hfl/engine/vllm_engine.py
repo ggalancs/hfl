@@ -38,6 +38,68 @@ from hfl.engine.prompt_builder import PromptBuilder, PromptFormat
 logger = logging.getLogger(__name__)
 
 
+def _model_max_len(model_path: str) -> int | None:
+    """The model's own context limit, from its ``config.json`` (None if
+    unreadable): vLLM refuses a ``max_model_len`` above it."""
+    import json
+    from pathlib import Path
+
+    try:
+        cfg = json.loads((Path(model_path) / "config.json").read_text())
+    except (OSError, ValueError):
+        return None
+    for key in ("max_position_embeddings", "max_sequence_length", "seq_length"):
+        value = cfg.get(key) if isinstance(cfg, dict) else None
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def _prompt_tokens(output: Any) -> int:
+    """The prompt's tokens as vLLM read them: reported as the request's
+    input tokens (they were 0 before, on every API)."""
+    return len(getattr(output, "prompt_token_ids", None) or [])
+
+
+def _own_tools_on_path() -> None:
+    """The folder of HFL's own interpreter on ``PATH``, if it is not.
+
+    vLLM's kernels build at first use with ``ninja``, which pip installs next
+    to the interpreter; flashinfer looks for it on ``PATH``. Run from a venv
+    that is not activated (``uv tool``, pipx, a service calling
+    ``venv/bin/hfl``), that folder is not there, and every load failed:
+    "No such file or directory: 'ninja'" (measured on an L4).
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    own = str(Path(sys.executable).parent)
+    parts = os.environ.get("PATH", "").split(os.pathsep)
+    if own not in parts:
+        os.environ["PATH"] = os.pathsep.join([own, *[p for p in parts if p]])
+
+
+def _vllm_args(model_path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """HFL's load options as vLLM's engine arguments.
+
+    Every engine gets the same options (``load_kwargs_for``): ``n_ctx``,
+    ``lora_paths``, ``draft_model_path``. vLLM knows none of them, and passed
+    as they were every load failed: "AsyncEngineArgs.__init__() got an
+    unexpected keyword argument 'n_ctx'" (measured on an L4, vLLM 0.30).
+    """
+    args = dict(kwargs)
+    n_ctx = args.pop("n_ctx", None)
+    if isinstance(n_ctx, int) and n_ctx > 0:
+        limit = _model_max_len(model_path)
+        args["max_model_len"] = min(n_ctx, limit) if limit else n_ctx
+    if args.pop("lora_paths", None):
+        logger.warning("ADAPTER: HFL does not apply LoRA adapters on vLLM yet; ignored")
+    if args.pop("draft_model_path", None):
+        logger.warning("DRAFT: HFL does not set up speculative decoding on vLLM yet; ignored")
+    return args
+
+
 class VLLMEngine(InferenceEngine):
     """vLLM-based inference engine with true async streaming.
 
@@ -109,6 +171,8 @@ class VLLMEngine(InferenceEngine):
         """
         self._model_path = model_path
         self._prompt_format = self._detect_prompt_format(model_path)
+        kwargs = _vllm_args(model_path, kwargs)
+        _own_tools_on_path()
 
         try:
             from vllm.engine.arg_utils import AsyncEngineArgs
@@ -205,6 +269,7 @@ class VLLMEngine(InferenceEngine):
         return GenerationResult(
             text=completion.text,
             tokens_generated=len(completion.token_ids),
+            tokens_prompt=_prompt_tokens(output),
             stop_reason=(str(completion.finish_reason) if completion.finish_reason else "stop"),
         )
 
@@ -217,6 +282,7 @@ class VLLMEngine(InferenceEngine):
         return GenerationResult(
             text=completion.text,
             tokens_generated=len(completion.token_ids),
+            tokens_prompt=_prompt_tokens(output),
             # vLLM says why it stopped; "length" = max_tokens cut the reply.
             stop_reason="length" if completion.finish_reason == "length" else "stop",
         )
@@ -313,6 +379,22 @@ class VLLMEngine(InferenceEngine):
         """
         prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
         return self.generate(prompt, config)
+
+    def count_prompt_tokens(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None = None,
+        tools: list[dict] | None = None,
+    ) -> int:
+        """The prompt ``chat`` builds, tokenized by vLLM's own tokenizer as
+        vLLM tokenizes a prompt (special tokens added)."""
+        if self._engine is None:
+            raise RuntimeError("no model loaded")
+        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
+        tokenizer = self._engine.get_tokenizer()
+        if inspect.isawaitable(tokenizer):  # AsyncLLMEngine: a coroutine
+            tokenizer = self._run_async(tokenizer)
+        return len(tokenizer.encode(prompt))
 
     def chat_stream(
         self,

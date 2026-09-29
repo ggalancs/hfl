@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **vLLM could not load any model through HFL** (first checked on a real
+  NVIDIA GPU, an L4 on Modal). HFL passed its own load options (`n_ctx`,
+  adapters, DRAFT) to vLLM, which refused them; `n_ctx` is now vLLM's
+  `max_model_len` (capped at the model's limit) and the others are ignored
+  with a warning. vLLM's kernel build could not find `ninja` when HFL ran
+  from a venv that was not activated (`uv tool`, pipx, a service); HFL puts
+  its interpreter's folder on `PATH`. vLLM also reported 0 input tokens and
+  could not count a prompt (`/v1/messages/count_tokens`); both work now.
+- **On Linux with NVIDIA, torch could fail to import once a GGUF model had
+  been used**: `undefined symbol: ncclCommResume`. A llama-cpp-python built
+  with CUDA links the system NCCL, and loaded first, torch bound to it
+  (system NCCL 2.25 vs torch 2.13's 2.29). Transformers, vLLM and embeddings
+  broke. HFL now imports torch before a CUDA llama.cpp (Linux only, only
+  when torch is installed; nothing changes elsewhere).
 - **llama-server completions cut at `num_predict` said `done_reason:
   "stop"`.** HFL read `stopped_limit`, which current llama-server builds no
   longer send (they send `stop_type: "limit"`); it reads both now, and such
