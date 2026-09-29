@@ -3,12 +3,17 @@
 """
 Automatic inference backend selection.
 
-Decision logic for LLM:
-  1. If model is GGUF -> LlamaCppEngine (Metal on macOS)
-  2. On Darwin-arm64 with mlx-lm installed + safetensors/pytorch -> MLXEngine
-  3. If NVIDIA GPU + safetensors model -> TransformersEngine (4bit)
-  4. If vLLM installed + GPU -> vLLM for production
-  5. Fallback -> Convert to GGUF + LlamaCppEngine
+Decision logic for LLM (``backend="auto"``):
+  1. A backend chosen for the server (``HFL_LLM_LIBRARY``, ``hfl serve
+     --backend``/``--parallel``; llama-server by default when it is on
+     PATH) -> that one; llama-server takes GGUF models only.
+  2. GGUF -> LlamaCppEngine (Metal on macOS, CUDA where built for it), or
+     llama-server when llama-cpp-python is not installed.
+  3. On Darwin-arm64 with mlx-lm installed + safetensors/pytorch -> MLXEngine
+  4. Safetensors/pytorch -> TransformersEngine, on CUDA, MPS or CPU at the
+     model's own precision (no quantization is applied).
+  vLLM is never picked on its own: ``HFL_LLM_LIBRARY=vllm`` or
+  ``--backend vllm``.
 
 The MLX path hits raw Metal directly and outperforms llama-cpp's
 Metal path on M-series silicon for Llama-family architectures. It is

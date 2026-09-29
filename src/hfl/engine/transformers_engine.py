@@ -97,7 +97,10 @@ class TransformersEngine(InferenceEngine):
             self._model = model
             self._model_id = model_path
             elapsed = time.perf_counter() - start_time
-            logger.info("Model loaded in %.2fs: %s", elapsed, model_path)
+            # The device it landed on: a model on the CPU where a GPU was
+            # expected is otherwise only visible as a slow reply.
+            device = getattr(model, "device", "unknown")
+            logger.info("Model loaded in %.2fs on %s: %s", elapsed, device, model_path)
         except Exception as e:
             logger.error("Failed to load model %s: %s", model_path, e)
             # Cleanup partial state on failure

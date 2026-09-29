@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   models 2.09x). A new audit check, E17, runs one model over two GPUs
   each way HFL offers — `HFL_TENSOR_SPLIT`, `HFL_SPLIT_MODE` +
   `HFL_MAIN_GPU` on both llama.cpp backends, `HFL_TENSOR_PARALLEL_SIZE` on
-  vLLM — and passes on two L4s. The bugs these runs found are under Fixed.
+  vLLM — and passes on two L4s. E18 checks the backend chosen with none
+  named (safetensors → Transformers on CUDA; a GGUF on the GPU), E19 vLLM
+  beside embedding models, E20 that the GPU memory HFL plans is what
+  `nvidia-smi` shows. The Transformers engine logs the device it loaded on.
+  The bugs these runs found are under Fixed.
 - **GGUF models are served in parallel by default.** When llama.cpp's
   `llama-server` is on `PATH` and nothing chooses otherwise, `hfl serve`
   serves GGUF models through it with 4 parallel slots (it says so at start).
@@ -54,6 +58,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Loaded models were charged twice against the memory budget** once
+  llama-server became the GGUF default: its memory, in a child process,
+  counted as another program's and again as the model's footprint, so
+  fewer models fitted than the budget allowed (on the Mac, a second model
+  was planned with the first counted twice). Memory held by HFL's child
+  processes (llama-server, vLLM) now counts as HFL's, for RAM and GPU.
+- **In a container, GPU memory was charged twice as well**: `nvidia-smi`
+  lists processes under IDs HFL never sees (PID 23 listed as 1). HFL then
+  takes its own models to be inside "in use" (on an L4: planned 3.6 GB
+  where 2.6 GB were used; now as used).
+- **vLLM reserved 85–90 % of the GPU for any model**, and HFL charged it
+  its weights alone: a GGUF embedding model beside a 1 GB vLLM model failed
+  ("Failed to create llama_context"). vLLM now reserves the model's
+  footprint plus headroom, within `HFL_MEMORY_BUDGET`, and HFL charges it
+  what it reserves; on an L4 both run side by side.
 - **Speech-to-text broke with PyAV 19.0.0**, released 2026-09-29: it dropped
   `av.open(metadata_errors=...)`, which faster-whisper 1.2.1 passes, and
   every transcription failed with a TypeError. `[stt]` caps PyAV below 19

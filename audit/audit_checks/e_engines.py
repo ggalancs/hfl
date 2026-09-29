@@ -475,6 +475,97 @@ def e17(a: Audit) -> str:
     return part.verdict()
 
 
+def _need_nvidia() -> None:
+    import sys
+
+    if not sys.platform.startswith("linux") or shutil.which("nvidia-smi") is None:
+        raise Uncheckable("needs Linux with an NVIDIA GPU")
+
+
+@check("E18", "automatic backend choice on NVIDIA")
+def e18(a: Audit) -> str:
+    """No backend named: a safetensors model goes to Transformers on CUDA —
+    not 4-bit, not the CPU — and a GGUF model to the GPU. Every other GPU
+    check names its backend, so what a user gets by default was unchecked."""
+    _need_nvidia()
+    part = Parts()
+    with a.server() as base:
+        before = sum(_gpu_mib())
+        part("GGUF answers", lambda: _answers(base, "chat"))
+        gguf_gain = sum(_gpu_mib()) - before
+        part("GGUF on the GPU", lambda: expect(gguf_gain > 200, f"GPU MiB gained {gguf_gain}"))
+        part("safetensors answers", lambda: _answers(base, "hfq"))
+        loaded = [x for x in _latest_serve_log(a).splitlines() if "Model loaded in" in x]
+        part(
+            "safetensors on CUDA (Transformers)",
+            lambda: expect(loaded and " on cuda" in loaded[-1], loaded[-1:] or "no load line"),
+        )
+    return part.verdict()
+
+
+@check("E19", "vLLM beside embeddings on one GPU", needs=("E5",))
+def e19(a: Audit) -> str:
+    """vLLM reserved 90 % of the GPU whatever else ran, and HFL charged it
+    its weights alone: the rest looked like overhead HFL could not free, so
+    an embedding model beside it (a RAG setup) could be refused. vLLM is
+    now held to HFL's budget and charged what it reserves; both answer,
+    side by side or with vLLM unloaded and loaded again."""
+    _need_nvidia()
+    part = Parts()
+    with a.server(env={"HFL_LLM_LIBRARY": "vllm"}, ready=600) as base:
+        part("vLLM answers", lambda: _answers(base, "hfq"))
+        for model in ("embed", "minilm"):
+
+            def embed(model: str = model) -> None:
+                out = httpx.post(
+                    base + "/api/embed", json={"model": model, "input": "hello"}, timeout=900
+                )
+                expect(out.status_code == 200 and out.json().get("embeddings"), out.text[:200])
+
+            part(f"{model} embeds beside it", embed)
+        part("vLLM answers again", lambda: _answers(base, "hfq"))
+        log = _latest_serve_log(a)
+    evicted = "vLLM unloaded to make room" if "make room" in log else "side by side"
+    return f"{part.verdict()} ({evicted})"
+
+
+@check("E20", "GPU memory as HFL plans it")
+def e20(a: Audit) -> str:
+    """Three GGUF models through llama-server, one after another: after each
+    load, the GPU memory HFL planned ("after load") is what nvidia-smi then
+    shows. llama-server runs in a child process; counted as another
+    program's, each model was charged twice and the plan overshot."""
+    _need_nvidia()
+    part = Parts()
+    with a.server() as base:
+        for model in ("chat", "think", "vision"):
+
+            def load(model: str = model) -> None:
+                # Loaded and answering; what it says is not the point here
+                # (a reasoning model spends 16 tokens thinking).
+                httpx.post(
+                    base + "/api/chat",
+                    json={"model": model, "stream": False, "messages": USER,
+                          "options": {"num_predict": 16}},
+                    timeout=900,
+                ).raise_for_status()  # fmt: skip
+                real = sum(_gpu_mib()) / 1024
+                plans = [x for x in _latest_serve_log(a).splitlines() if "Loading " in x]
+                planned = [float(v) for v in re.findall(r"after load ~([\d.]+) GB", plans[-1])]
+                expect(len(planned) >= 2, f"no GPU plan in: {plans[-1][-200:]}")
+                gpu_plan = planned[-1]
+                off = abs(gpu_plan - real)
+                expect(
+                    off <= max(0.6, 0.3 * real),
+                    f"planned {gpu_plan:.1f} GB, nvidia-smi {real:.1f} GB",
+                )
+
+            part(f"{model}: planned GPU memory is what it took", load)
+        ps = httpx.get(base + "/api/ps").json()["models"]
+        part("all three stay resident", lambda: expect(len(ps) == 3, [m["name"] for m in ps]))
+    return part.verdict()
+
+
 @check("E6", "embeddings on each engine")
 def e6(a: Audit) -> str:
     part = Parts()
