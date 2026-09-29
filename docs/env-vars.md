@@ -62,10 +62,10 @@ the host string does not.
 | HFL                  | Ollama alias            | Default | What it does |
 |----------------------|-------------------------|---------|--------------|
 | `HFL_LLM_LIBRARY`    | `OLLAMA_LLM_LIBRARY`    | (auto)  | Pin auto-selection to a specific backend: `llama-cpp`, `llama-server`, `transformers`, `vllm`, `mlx`. `llama-server` serves GGUF models only (others keep their backend) and needs llama.cpp's `llama-server` installed. Per-call `backend=` argument still wins. |
-| `HFL_TENSOR_SPLIT` | — | (unset) | Several GPUs, llama.cpp and llama-server: the share of the model each GPU takes, e.g. `3,1`. Unset, llama.cpp spreads the layers over every visible GPU. Not checked on multi-GPU hardware (both backends take it; a malformed value stops the server with its name). |
-| `HFL_MAIN_GPU` | — | (unset) | The GPU to use with `HFL_SPLIT_MODE=none`, or for intermediate results with `row`. |
+| `HFL_TENSOR_SPLIT` | — | (unset) | Several GPUs, llama.cpp and llama-server: the share of the model each GPU takes, e.g. `3,1`. Unset, llama.cpp spreads the layers over every visible GPU. Checked on two NVIDIA L4s (audit E17): `1,1` spreads the weights over both, `0,1` puts them all on GPU 1, on both backends. A malformed value stops the server with its name. |
+| `HFL_MAIN_GPU` | — | (unset) | The GPU to use with `HFL_SPLIT_MODE=none`, or for intermediate results with `row`. With `none` and `1`, the model went to GPU 1 only on two L4s (audit E17). |
 | `HFL_SPLIT_MODE` | — | (unset) | How a model spans several GPUs: `none`, `layer` (llama.cpp's default), `row`, `tensor`. |
-| `HFL_TENSOR_PARALLEL_SIZE` | — | `1` | vLLM: the number of GPUs one model is sharded over (tensor parallelism). Not checked on multi-GPU hardware. |
+| `HFL_TENSOR_PARALLEL_SIZE` | — | `1` | vLLM: the number of GPUs one model is sharded over (tensor parallelism). Checked on two NVIDIA L4s (audit E17): `2` puts the model on both. |
 | `HFL_LLAMA_SERVER_BIN` | — | (PATH) | The `llama-server` executable to run, when it is not on the PATH. |
 | `HFL_PROMPT_CACHE_PERSIST` | — | `false` | Keep llama-server's prompt cache on disk (`<HFL_HOME>/cache/llama-server/`) across unload and reload: each slot's KV is saved when the model unloads and restored when it loads again with the same file and settings, so a long prefix is not evaluated again (measured: 1860 prompt tokens → 1). It writes the KV of every slot at each unload — gigabytes for a long context on a large model. |
 | `HFL_PROMPT_CACHE_MAX_GB` | — | `4` | Disk budget for that cache over all models; the least recently saved go first. |

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Checked on real NVIDIA GPUs for the first time** (L4s on Modal): the
+  engine and extras sections of the local audit pass on one L4 — llama.cpp
+  with CUDA in process and as llama-server, Transformers, vLLM, speech,
+  image generation, conversion, parallel serving (4 requests 1.55x, two
+  models 2.09x). A new audit check, E17, runs one model over two GPUs
+  each way HFL offers — `HFL_TENSOR_SPLIT`, `HFL_SPLIT_MODE` +
+  `HFL_MAIN_GPU` on both llama.cpp backends, `HFL_TENSOR_PARALLEL_SIZE` on
+  vLLM — and passes on two L4s. The bugs these runs found are under Fixed.
 - **GGUF models are served in parallel by default.** When llama.cpp's
   `llama-server` is on `PATH` and nothing chooses otherwise, `hfl serve`
   serves GGUF models through it with 4 parallel slots (it says so at start).

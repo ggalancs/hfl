@@ -383,6 +383,98 @@ def e5(a: Audit) -> str:
     return part.verdict()
 
 
+def _gpu_mib() -> list[int]:
+    """Memory in use on each NVIDIA GPU, MiB, in index order."""
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    return [int(x) for x in out.stdout.split()]
+
+
+def _latest_serve_log(a: Audit) -> str:
+    log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+    return log.read_text(errors="replace")
+
+
+def _answers(base: str, model: str) -> None:
+    body = {"model": model, "stream": False, "messages": USER, "options": {"num_predict": 16}}
+    out = httpx.post(base + "/api/chat", json=body, timeout=900)
+    expect(out.status_code == 200 and _paris(out.json()["message"]["content"]), out.text[:200])
+
+
+@check("E17", "several NVIDIA GPUs", needs=("E4",))
+def e17(a: Audit) -> str:
+    """One model over two GPUs, each way HFL offers: llama.cpp in process and
+    llama-server (HFL_TENSOR_SPLIT, HFL_SPLIT_MODE + HFL_MAIN_GPU) and vLLM
+    (HFL_TENSOR_PARALLEL_SIZE). In process, HFL's own log names the devices
+    that took weights; llama-server's does not, so each GPU's memory before
+    and after the load says where the model went."""
+    import sys
+
+    if not sys.platform.startswith("linux") or shutil.which("nvidia-smi") is None:
+        raise Uncheckable("needs Linux with NVIDIA GPUs")
+    if len(_gpu_mib()) < 2:
+        raise Uncheckable(f"needs two NVIDIA GPUs; this machine has {len(_gpu_mib())}")
+    part = Parts()
+    one_at_a_time = {"HFL_NUM_PARALLEL": "1"}
+
+    def in_process(env: dict, want: set[str]) -> None:
+        with a.server(env={**one_at_a_time, **env}) as base:
+            _answers(base, "chat")
+            line = next((x for x in _latest_serve_log(a).splitlines() if "Acceleration:" in x), "")
+        where = line.split("GiB in")[-1] if "GiB in" in line else ""
+        found = set(re.findall(r"(CUDA\d)", where))
+        expect(found == want, f"weights in {sorted(found) or 'no GPU'}: {line[-120:]}")
+
+    part("llama.cpp, HFL_TENSOR_SPLIT=1,1: both GPUs",
+         lambda: in_process({"HFL_TENSOR_SPLIT": "1,1"}, {"CUDA0", "CUDA1"}))  # fmt: skip
+    # 1,1 is also llama.cpp's own default (layers over every GPU): 0,1 is what
+    # shows HFL passes the split at all.
+    part("llama.cpp, HFL_TENSOR_SPLIT=0,1: GPU 1 only",
+         lambda: in_process({"HFL_TENSOR_SPLIT": "0,1"}, {"CUDA1"}))  # fmt: skip
+    only_gpu1 = {"HFL_SPLIT_MODE": "none", "HFL_MAIN_GPU": "1"}
+    part("llama.cpp, HFL_SPLIT_MODE=none HFL_MAIN_GPU=1: GPU 1 only",
+         lambda: in_process(only_gpu1, {"CUDA1"}))  # fmt: skip
+
+    def server(env: dict) -> list[int]:
+        before = _gpu_mib()
+        with a.server("--backend", "llama-server", env=env) as base:
+            _answers(base, "chat")
+            after = _gpu_mib()
+        return [max(0, x - y) for x, y in zip(after, before)]
+
+    def split() -> None:
+        gain = server({"HFL_TENSOR_SPLIT": "1,1"})
+        expect(min(gain[:2]) > 150 and min(gain[:2]) > 0.4 * max(gain[:2]), f"MiB gained {gain}")
+
+    def main_gpu() -> None:
+        gain = server({"HFL_SPLIT_MODE": "none", "HFL_MAIN_GPU": "1"})
+        expect(gain[1] > 2 * max(gain[0], 1), f"MiB gained {gain}")
+
+    part("llama-server, HFL_TENSOR_SPLIT=1,1: both GPUs", split)
+
+    def split_to_gpu1() -> None:
+        gain = server({"HFL_TENSOR_SPLIT": "0,1"})
+        expect(gain[1] > 2 * max(gain[0], 1), f"MiB gained {gain}")
+
+    part("llama-server, HFL_TENSOR_SPLIT=0,1: GPU 1", split_to_gpu1)
+    part("llama-server, HFL_SPLIT_MODE=none HFL_MAIN_GPU=1: GPU 1", main_gpu)
+
+    def vllm() -> None:
+        has_vllm = subprocess.run([a.python, "-c", "import vllm"], capture_output=True, timeout=300)
+        if has_vllm.returncode != 0:
+            raise Uncheckable("vLLM is not installed in the audited venv")
+        env = {"HFL_LLM_LIBRARY": "vllm", "HFL_TENSOR_PARALLEL_SIZE": "2"}
+        with a.server(env=env, ready=600) as base:
+            _answers(base, "hfq")
+            used = _gpu_mib()
+        expect(min(used[:2]) > 1024, f"MiB in use {used}")
+
+    part("vLLM, HFL_TENSOR_PARALLEL_SIZE=2: both GPUs", vllm)
+    return part.verdict()
+
+
 @check("E6", "embeddings on each engine")
 def e6(a: Audit) -> str:
     part = Parts()
