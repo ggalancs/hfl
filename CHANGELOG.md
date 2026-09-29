@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named (safetensors → Transformers on CUDA; a GGUF on the GPU), E19 vLLM
   beside embedding models, E20 that the GPU memory HFL plans is what
   `nvidia-smi` shows. The Transformers engine logs the device it loaded on.
+  Sections A, B and D (CLI, API, environment) pass on an L4 too: 158
+  checks, 0 broken. On a 7B model (Qwen2.5-7B Q4_K_M, L4), 4 requests at
+  once reach 119.6 tok/s by default against 44.9 one at a time (2.68x);
+  a single request is 44.8 tok/s either way.
   The bugs these runs found are under Fixed.
 - **GGUF models are served in parallel by default.** When llama.cpp's
   `llama-server` is on `PATH` and nothing chooses otherwise, `hfl serve`
@@ -58,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **On NVIDIA without `pynvml`, every model opened with 4096 tokens.** The
+  GPU memory probe that picks the default context (Ollama's tiers: 4k,
+  32k from 24 GB, 256k from 48 GB) read only `pynvml`, which `[all]`
+  brings but `[llama]` alone does not; it now falls back to `nvidia-smi`,
+  as the memory planning does. Checked on a T4 without `pynvml`: 15 GiB
+  read, where nothing was.
 - **Loaded models were charged twice against the memory budget** once
   llama-server became the GGUF default: its memory, in a child process,
   counted as another program's and again as the model's footprint, so

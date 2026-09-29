@@ -66,7 +66,11 @@ def _probe_nvidia() -> float | None:
     try:
         import pynvml
     except ImportError:
-        return None
+        # No extra installs pynvml: this probe found nothing on every NVIDIA
+        # machine, and every model opened with the smallest tier (4096
+        # tokens, on an L4 and an 80 GB A100 alike). nvidia-smi comes with
+        # the driver; HFL's memory planning already reads it.
+        return _probe_nvidia_smi()
     # CON-9: NVML init/shutdown is process-global state; serialise the
     # whole init→query→shutdown so concurrent probes (e.g. parallel model
     # loads) can't tear down NVML out from under each other.
@@ -92,6 +96,17 @@ def _probe_nvidia() -> float | None:
                 pynvml.nvmlShutdown()
             except Exception:
                 pass
+
+
+def _probe_nvidia_smi() -> float | None:
+    from hfl.engine.residency import _nvidia_smi
+
+    rows = _nvidia_smi(["--query-gpu=memory.total"])
+    try:
+        total_mib = sum(float(row[0]) for row in rows or [])
+    except (ValueError, IndexError):
+        return None
+    return total_mib / 1024 if total_mib > 0 else None
 
 
 def _probe_metal() -> float | None:

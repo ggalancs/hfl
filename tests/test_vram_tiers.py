@@ -85,3 +85,35 @@ class TestProbeFallbackChain:
         monkeypatch.setattr(vram, "_probe_metal", lambda: 24.0)
         monkeypatch.setattr(vram, "_probe_rocm", lambda: None)
         assert vram.detect_vram_gib() == 24.0
+
+
+class TestNvidiaWithoutPynvml:
+    """No extra installs pynvml, so the NVIDIA probe found nothing and every
+    model opened with 4096 tokens, on any card. It reads nvidia-smi then."""
+
+    def _no_pynvml(self, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pynvml":
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    def test_two_cards_read_through_nvidia_smi(self, monkeypatch):
+        from hfl.engine import residency, vram
+
+        self._no_pynvml(monkeypatch)
+        monkeypatch.setattr(residency, "_nvidia_smi", lambda args: [["40960"], ["40960"]])
+        assert vram._probe_nvidia() == 80.0
+        assert vram.pick_ctx_size().ctx == 262144
+
+    def test_no_nvidia_smi_is_still_nothing(self, monkeypatch):
+        from hfl.engine import residency, vram
+
+        self._no_pynvml(monkeypatch)
+        monkeypatch.setattr(residency, "_nvidia_smi", lambda args: None)
+        assert vram._probe_nvidia() is None
