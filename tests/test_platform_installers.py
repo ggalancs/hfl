@@ -75,3 +75,26 @@ class TestMacOSWorkflow:
         job = self.cfg["jobs"]["build-dmg"]
         run_lines = " ".join(step.get("run", "") for step in job["steps"] if "run" in step)
         assert "create-dmg" in run_lines
+
+
+class TestInstallersOnABranch:
+    """A dispatch on a branch (the pre-release test on main) must end green:
+    the DMG's "Attach to release" ran there and failed with "GitHub Releases
+    requires a tag" (run 36491151024), while the MSI already skipped it."""
+
+    WORKFLOWS = {".github/workflows/macos-dmg.yml": "build-dmg",
+                 ".github/workflows/windows-msi.yml": "build-msi"}  # fmt: skip
+
+    def _steps(self, rel: str) -> list[dict]:
+        return yaml.safe_load(_read(rel))["jobs"][self.WORKFLOWS[rel]]["steps"]
+
+    def test_the_release_is_attached_only_from_a_tag(self):
+        for rel in self.WORKFLOWS:
+            attach = [s for s in self._steps(rel) if "action-gh-release" in s.get("uses", "")]
+            assert attach, rel
+            for step in attach:
+                assert "startsWith(github.ref, 'refs/tags/')" in step.get("if", ""), rel
+
+    def test_the_build_is_kept_as_an_artifact_anyway(self):
+        for rel in self.WORKFLOWS:
+            assert any("upload-artifact" in s.get("uses", "") for s in self._steps(rel)), rel
