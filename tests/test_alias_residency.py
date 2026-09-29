@@ -87,3 +87,27 @@ def test_a_keep_alive_sent_with_the_alias_reaches_the_model(server) -> None:
             "options": {"num_predict": 1}}  # fmt: skip
     assert server.post("/api/generate", json=body).status_code == 200
     assert get_state().keep_alive_duration_for("qwen2.5-0.5b-q4") == timedelta(minutes=42)
+
+
+def _resident_names() -> list[str]:
+    from hfl.api.state import get_state
+
+    return sorted(r.name for r in get_state().resident_models())
+
+
+def test_keep_alive_zero_sent_with_the_alias_unloads_the_model(server) -> None:
+    """``keep_alive: 0`` looked the resident up by the alias and found
+    nothing: the model stayed loaded (measured on a real server)."""
+    _ask(server, "coder")
+    body = {"model": "chat", "prompt": "hi", "stream": False, "keep_alive": 0,
+            "options": {"num_predict": 1}}  # fmt: skip
+    assert server.post("/api/generate", json=body).status_code == 200
+    assert _resident_names() == ["qwen2.5-coder-1.5b-q4"]  # only chat's model left
+
+
+def test_stop_by_alias_unloads_the_model(server) -> None:
+    _ask(server, "chat")
+    _ask(server, "coder")
+    out = server.post("/api/stop", json={"model": "chat"}).json()
+    assert out["status"] == "stopped", out
+    assert _resident_names() == ["qwen2.5-coder-1.5b-q4"]

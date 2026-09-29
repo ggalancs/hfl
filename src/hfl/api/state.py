@@ -259,8 +259,23 @@ class ServerState:
         """Loaded LLMs, most recently used first."""
         return sorted(self._residents.values(), key=lambda r: r.last_used, reverse=True)
 
+    def _resident_name(self, name: str) -> str:
+        """``name`` as residents are keyed: an alias ("chat") resolves to its
+        model's registered name, the key ``_sync_pointer`` files it under.
+        Without this, ``keep_alive: 0`` or ``/api/stop`` sent with an alias
+        found nothing to unload."""
+        if name in self._residents:
+            return name
+        from hfl.core import get_registry
+
+        try:
+            entry = get_registry().get(name)
+        except Exception:  # an unreadable registry: keep the name as given
+            return name
+        return str(entry.name) if entry is not None else name
+
     def resident(self, name: str) -> ResidentModel | None:
-        return self._residents.get(name)
+        return self._residents.get(self._resident_name(name))
 
     def bind_request(self, name: str) -> ResidentModel | None:
         """Make ``name`` this request's model and lease it.
@@ -385,6 +400,7 @@ class ServerState:
 
     async def evict(self, name: str, reason: str = "requested") -> bool:
         """Unload one resident LLM by name. False when it is not loaded."""
+        name = self._resident_name(name)
         resident = self._residents.get(name)
         if resident is None:
             return False
