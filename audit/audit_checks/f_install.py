@@ -48,10 +48,33 @@ def f3(a: Audit) -> str:
     vLLM brings, broke the load's stderr silencing): CI caught it at release."""
     if shutil.which("docker") is None:
         raise Uncheckable("docker not installed")
+    pruned = _prune_build_cache()
     part = Parts()
     for extras in ("llama", "all"):
         part(f"{extras} image", lambda extras=extras: _image(a, extras))
-    return part.verdict()
+    return f"{part.verdict()}; {pruned}"
+
+
+def _prune_build_cache() -> str:
+    """Free Docker's build cache first: the ``all`` image needs ~19 GB of it,
+    and with the Docker disk full F3 failed with "No space left on device"
+    (twice, 2026-09-27 and 2026-09-29). Only the build cache — never images,
+    containers or volumes. ``AUDIT_KEEP_BUILD_CACHE=1`` keeps it."""
+    import os
+
+    if os.environ.get("AUDIT_KEEP_BUILD_CACHE", "").strip() == "1":
+        return "build cache kept (AUDIT_KEEP_BUILD_CACHE=1)"
+    done = subprocess.run(
+        ["docker", "builder", "prune", "-f"], capture_output=True, text=True, timeout=1800
+    )
+    if done.returncode != 0:
+        return f"build cache NOT pruned: {(done.stderr or done.stdout).strip()[-120:]}"
+    total = next(
+        (line.split(":", 1)[1].strip() for line in done.stdout.splitlines()
+         if line.startswith("Total:")),
+        "0B",
+    )  # fmt: skip
+    return f"build cache pruned first ({total} freed)"
 
 
 def _image(a: Audit, extras: str) -> None:
