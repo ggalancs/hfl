@@ -138,6 +138,12 @@ class TestStaticPyprojectPins:
         pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["coqui"], "coqui-tts")
         assert "[codec]" in pin, pin
 
+    def test_stt_keeps_a_pyav_faster_whisper_can_call(self):
+        """PyAV 19 dropped av.open(metadata_errors=...), which faster-whisper
+        1.2.1 passes: every transcription failed (local audit B32/B54/E8)."""
+        pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["stt"], "av")
+        assert "<19" in pin.replace(" ", ""), pin
+
     def test_llama_cpp_python_pin_supports_gemma4(self):
         """The ``[llama]`` extra must require a llama-cpp-python build
         that recognises the ``gemma4`` GGUF architecture.

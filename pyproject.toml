@@ -198,6 +198,11 @@ structured = ["llguidance>=1.7.0,<2.0"]
 # faster-whisper (CPU+GPU); openai-whisper stays as a fallback.
 stt = [
     "faster-whisper>=1.0.0,<2.0",
+    # PyAV 19.0.0 (2026-09-29) dropped av.open's `metadata_errors`, which
+    # faster-whisper 1.2.1 passes to decode every file: each transcription
+    # failed with a TypeError (local audit B32/B54/E8, on an L4). faster-whisper
+    # asks only av>=11; capped until a release of it works with 19.
+    "av>=11,<19",
 ]
 
 # Image generation (SDXL / FLUX) — Phase 16 / V2 row 17. Heavy: a

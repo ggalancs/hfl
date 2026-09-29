@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Speech-to-text broke with PyAV 19.0.0**, released 2026-09-29: it dropped
+  `av.open(metadata_errors=...)`, which faster-whisper 1.2.1 passes, and
+  every transcription failed with a TypeError. `[stt]` caps PyAV below 19
+  until faster-whisper supports it.
 - **vLLM could not load any model through HFL** (first checked on a real
   NVIDIA GPU, an L4 on Modal). HFL passed its own load options (`n_ctx`,
   adapters, DRAFT) to vLLM, which refused them; `n_ctx` is now vLLM's
