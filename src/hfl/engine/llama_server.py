@@ -123,6 +123,7 @@ def _speculative_args(exe: str, draft: Any, gpu_layers: int) -> list[str]:
         return []
     if draft == "prompt-lookup":
         if "ngram-simple" in _help_text(exe):
+            logger.info("speculative decoding: DRAFT prompt-lookup (n-gram lookup)")
             return ["--spec-type", "ngram-simple"]
         logger.warning("DRAFT prompt-lookup: this llama-server has no n-gram lookup; ignored")
         return []
@@ -130,6 +131,7 @@ def _speculative_args(exe: str, draft: Any, gpu_layers: int) -> list[str]:
         logger.warning("DRAFT %s: llama-server takes a GGUF file as its draft; ignored", draft)
         return []
     args = ["-md", draft, "-ngld", str(gpu_layers)]
+    logger.info("speculative decoding: DRAFT %s", Path(draft).name)
     # Builds with --spec-type default it to none: the draft is loaded and
     # never used (measured: same eval time, no acceptance in the log).
     if "draft-simple" in _help_text(exe):
@@ -224,6 +226,38 @@ def _multi_gpu_args() -> list[str]:
     if config.gpu_split_mode:
         args += ["--split-mode", config.gpu_split_mode]
     return args
+
+
+def _flash_attention_args(requested: Any) -> list[str]:
+    """``-fa`` as llama-cpp-python gets it: a per-load ``flash_attn``, else
+    ``HFL_FLASH_ATTENTION`` / ``OLLAMA_FLASH_ATTENTION``; unset leaves
+    llama-server's own choice (``auto``)."""
+    if isinstance(requested, bool):
+        on: bool | None = requested
+    else:
+        raw = (
+            os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get("OLLAMA_FLASH_ATTENTION") or ""
+        ).strip()
+        on = raw.lower() in ("1", "true", "yes", "on") if raw else None
+    if on is None:
+        return []
+    logger.info("llama-server: flash attention %s", "on" if on else "off")
+    return ["-fa", "on" if on else "off"]
+
+
+def _kv_cache_args(requested: Any) -> list[str]:
+    """``HFL_KV_CACHE_TYPE`` (or a per-load ``kv_cache_type``) for keys and
+    values, as llama-cpp-python applies it; ``f16`` is the default."""
+    from hfl.config import config
+
+    kv_type = str(requested or getattr(config, "kv_cache_type", "f16") or "f16").lower()
+    if kv_type == "f16":
+        return []
+    if kv_type not in ("q4_0", "q8_0", "f32"):
+        logger.warning("kv_cache_type=%r unsupported by llama-server, falling back to f16", kv_type)
+        return []
+    logger.info("KV cache quantised to %s", kv_type)
+    return ["-ctk", kv_type, "-ctv", kv_type]
 
 
 def _gpu_layers(requested: Any) -> int:
@@ -431,6 +465,9 @@ class LlamaServerEngine(InferenceEngine):
         self._timeout = 600.0
         # Where this process keeps its slots' KV between runs (None: off).
         self._cache_dir: Path | None = None
+        # Its --slot-save-path when the prompt cache is off: where snapshots
+        # pass through (created by this engine, removed when empty).
+        self._work_dir: Path | None = None
 
     # ------------------------------------------------------------------ life
 
@@ -485,6 +522,8 @@ class LlamaServerEngine(InferenceEngine):
             "-ngl",
             str(_gpu_layers(kwargs.get("n_gpu_layers"))),
             *_multi_gpu_args(),
+            *_flash_attention_args(kwargs.get("flash_attn")),
+            *_kv_cache_args(kwargs.get("kv_cache_type")),
             "--jinja",
             "--reasoning-format",
             "none",
@@ -527,11 +566,76 @@ class LlamaServerEngine(InferenceEngine):
     def _launch(self, base_argv: list[str], model_path: str, timeout: float) -> None:
         assert self._log_path is not None
         self._cache_dir = _prompt_cache_dir(base_argv, model_path)
-        if self._cache_dir is not None:
-            base_argv = [*base_argv, "--slot-save-path", str(self._cache_dir)]
+        # Always a place for slot files: the prompt cache's, or a work folder
+        # of this engine's own (KV snapshots go through it).
+        base_argv = [*base_argv, "--slot-save-path", str(self._slot_dir(model_path))]
         self._proc, self._client = start_server(base_argv, model_path, self._log_path, timeout)
         if self._cache_dir is not None:
             self._restore_slots(_argv_slots(base_argv))
+
+    def _slot_dir(self, model_path: str = "") -> Path:
+        """Where llama-server reads and writes slot files."""
+        if self._cache_dir is not None:
+            return self._cache_dir
+        if self._work_dir is None or not self._work_dir.is_dir():
+            import tempfile
+
+            root = _prompt_cache_root().parent / "llama-server-work"
+            root.mkdir(parents=True, exist_ok=True)
+            self._work_dir = Path(
+                tempfile.mkdtemp(
+                    prefix=f"{Path(model_path or self._model_path or 'model').stem}-", dir=root
+                )
+            )
+        return self._work_dir
+
+    # ------------------------------------------------------------ snapshots
+
+    # KV snapshots are its slots' files (``hfl.engine.snapshot``).
+    kv_snapshots_as_slot_files = True
+
+    def save_slots_to(self, dest: Path) -> int:
+        """Every slot's KV into ``dest`` as ``slot-N.bin`` (empty slots are
+        left out); the tokens saved. For ``/api/snapshot/save``: the caller
+        holds this model's queue exclusively, so no slot is generating."""
+        import shutil
+
+        slot_dir, total = self._slot_dir(), 0
+        for slot in range(self._slots or _argv_slots(self._argv)):
+            name = f"hfl-snapshot-{slot}.bin"
+            done = self._http().post(
+                f"/slots/{slot}?action=save", json={"filename": name}, timeout=600
+            )
+            done.raise_for_status()
+            tokens = int(done.json().get("n_saved", 0))
+            written = slot_dir / name
+            if tokens and written.is_file():
+                shutil.move(str(written), str(dest / f"slot-{slot}.bin"))
+                total += tokens
+            else:
+                written.unlink(missing_ok=True)
+        return total
+
+    def load_slots_from(self, src: Path) -> int:
+        """The slots saved by :meth:`save_slots_to` back in; tokens restored."""
+        import shutil
+
+        slot_dir, total = self._slot_dir(), 0
+        for slot in range(self._slots or _argv_slots(self._argv)):
+            saved = src / f"slot-{slot}.bin"
+            if not saved.is_file():
+                continue
+            name = f"hfl-snapshot-{slot}.bin"
+            shutil.copyfile(saved, slot_dir / name)
+            try:
+                done = self._http().post(
+                    f"/slots/{slot}?action=restore", json={"filename": name}, timeout=600
+                )
+                done.raise_for_status()
+                total += int(done.json().get("n_restored", 0))
+            finally:
+                (slot_dir / name).unlink(missing_ok=True)
+        return total
 
     # --------------------------------------------------- prompt cache on disk
 
@@ -653,6 +757,11 @@ class LlamaServerEngine(InferenceEngine):
                 self._client.close()
                 self._client = None
         self._stop()
+        if self._work_dir is not None:
+            try:
+                self._work_dir.rmdir()  # only when empty: it holds nothing kept
+            except OSError:
+                pass
 
     # ------------------------------------------------------------- requests
 
@@ -807,7 +916,24 @@ class LlamaServerEngine(InferenceEngine):
         result = self._result(data.get("content") or "", data, started, stop, None)
         if cfg.logprobs is not None:
             result.logprobs = _logprob_entries(data.get("completion_probabilities"), cfg.logprobs)
+        if cfg.keep_context:
+            result.context_tokens = self._context_tokens(body["prompt"] + result.text)
         return result
+
+    def _context_tokens(self, text: str) -> list[int]:
+        """Ollama's ``context``: prompt and reply as tokens, the way the
+        completion read them (special tokens parsed, BOS as the model wants)."""
+        try:
+            done = self._http().post(
+                "/tokenize",
+                json={"content": text, "add_special": True, "parse_special": True},
+                timeout=60,
+            )
+            done.raise_for_status()
+            return [int(t) for t in done.json()["tokens"]]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            logger.warning("keep_context requested but /tokenize failed", exc_info=True)
+            return []
 
     def generate_stream(self, prompt: str, config: GenerationConfig | None = None) -> Iterator[str]:
         cfg = config or GenerationConfig()

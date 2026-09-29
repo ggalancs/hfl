@@ -104,6 +104,10 @@ class SnapshotMeta:
     """HMAC-SHA256 of the pickled state blob, keyed by the
     per-installation snapshot key. Verified before unpickling to stop a
     tampered / planted ``.state`` file from executing code on load."""
+    kind: str = "state"
+    """``state``: a llama-cpp-python state blob (``<name>.state``).
+    ``slots``: llama-server slot files (``<name>.slots/slot-N.bin``),
+    one per parallel slot that held a prompt; the MAC covers them all."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -123,6 +127,66 @@ def _state_path(name: str) -> Path:
 
 def _meta_path(name: str) -> Path:
     return _snapshot_dir() / f"{name}.meta.json"
+
+
+def _takes_slots(engine: Any) -> bool:
+    """Whether ``engine`` keeps its KV as llama-server slots. ``is True``:
+    a mock (any attribute exists) must not pass for one."""
+    return getattr(engine, "kv_snapshots_as_slot_files", False) is True
+
+
+def _slots_path(name: str) -> Path:
+    return _snapshot_dir() / f"{name}.slots"
+
+
+def _slots_mac(folder: Path) -> str:
+    """HMAC over every slot file, names included, in order."""
+    mac = hmac.new(_snapshot_key(), digestmod=hashlib.sha256)
+    for path in sorted(folder.glob("slot-*.bin")):
+        mac.update(path.name.encode() + b"\0")
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                mac.update(chunk)
+    return mac.hexdigest()
+
+
+def _remove_slots(folder: Path) -> None:
+    """A snapshot's slot folder: only the files HFL writes there, then it."""
+    if not folder.is_dir():
+        return
+    for path in folder.glob("slot-*.bin"):
+        path.unlink()
+    folder.rmdir()
+
+
+def _save_slots_snapshot(engine: Any, name: str, model_name: str) -> SnapshotMeta:
+    """llama-server: its slots' KV files, written through the engine."""
+    final = _slots_path(name)
+    staging = _snapshot_dir() / f".{name}.slots.tmp"
+    _remove_slots(staging)
+    staging.mkdir()
+    try:
+        tokens = int(engine.save_slots_to(staging))
+    except Exception as exc:
+        _remove_slots(staging)
+        logger.exception("llama-server slot save failed for snapshot %r", name)
+        raise RuntimeError("llama-server could not save its slots") from exc
+    # Replace an older snapshot of the same name only once this one is whole.
+    _remove_slots(final)
+    _state_path(name).unlink(missing_ok=True)
+    staging.rename(final)
+    meta = SnapshotMeta(
+        name=name,
+        model=model_name,
+        tokens=tokens,
+        created_at=time.time(),
+        bytes=sum(p.stat().st_size for p in final.glob("slot-*.bin")),
+        mac=_slots_mac(final),
+        kind="slots",
+    )
+    with _meta_path(name).open("w") as f:
+        json.dump(meta.to_json(), f, indent=2)
+    return meta
 
 
 def _validate_name(name: str) -> None:
@@ -194,6 +258,9 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     """
     _validate_name(name)
 
+    if _takes_slots(engine):
+        return _save_slots_snapshot(engine, name, model_name)
+
     # llama-cpp-python's high-level Llama exposes save_state() at
     # the top level; some HFL wrappers proxy ``_model.save_state``.
     save_fn = getattr(engine, "save_state", None)
@@ -246,11 +313,16 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
 
     meta_p = _meta_path(name)
     state_p = _state_path(name)
-    if not meta_p.exists() or not state_p.exists():
+    if not meta_p.exists():
         raise FileNotFoundError(f"snapshot {name!r} not found")
-
     with meta_p.open() as f:
         meta_data = json.load(f)
+    kind = meta_data.get("kind", "state")
+    if kind == "slots":
+        if not _slots_path(name).is_dir():
+            raise FileNotFoundError(f"snapshot {name!r} not found")
+    elif not state_p.exists():
+        raise FileNotFoundError(f"snapshot {name!r} not found")
     if meta_data.get("model") != model_name:
         raise ValueError(
             f"snapshot {name!r} was taken from model {meta_data.get('model')!r}, not {model_name!r}"
@@ -265,6 +337,28 @@ def load_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
             f"snapshot {name!r} was written with format version "
             f"{found_version}, this process expects {SNAPSHOT_FORMAT_VERSION}"
         )
+
+    takes_slots = _takes_slots(engine)
+    if (kind == "slots") != takes_slots:
+        raise ValueError(
+            f"snapshot {name!r} was saved by "
+            f"{'llama-server' if kind == 'slots' else 'llama-cpp-python'}; "
+            "this model is served by the other engine"
+        )
+    if kind == "slots":
+        folder = _slots_path(name)
+        expected = str(meta_data.get("mac") or "")
+        if not expected or not hmac.compare_digest(_slots_mac(folder), expected):
+            raise SnapshotIntegrityError(
+                f"snapshot {name!r} failed its integrity check — refusing to load "
+                "possibly-tampered slot files."
+            )
+        try:
+            getattr(engine, "load_slots_from")(folder)
+        except Exception as exc:
+            logger.exception("llama-server slot restore failed for snapshot %r", name)
+            raise RuntimeError("llama-server could not restore its slots") from exc
+        return SnapshotMeta(**meta_data)
 
     load_fn = getattr(engine, "load_state", None)
     if load_fn is None:
@@ -326,5 +420,9 @@ def delete_snapshot(name: str) -> bool:
         deleted = True
     if meta_p.exists():
         meta_p.unlink()
+        deleted = True
+    slots = _slots_path(name)
+    if slots.is_dir():
+        _remove_slots(slots)
         deleted = True
     return deleted

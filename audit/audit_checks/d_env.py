@@ -568,7 +568,10 @@ def _queue(a: Audit, env: dict) -> str:
 
 @probe("D39", "HFL_QUEUE_ACQUIRE_TIMEOUT")
 def d39(a: Audit) -> str:
-    with a.server(env={"HFL_QUEUE_ACQUIRE_TIMEOUT": "0.1", "HFL_QUEUE_MAX_SIZE": "8"}) as base:
+    # One request at a time, so the others queue (with the default's 4
+    # llama-server slots, 3 requests never wait).
+    env = {"HFL_QUEUE_ACQUIRE_TIMEOUT": "0.1", "HFL_QUEUE_MAX_SIZE": "8", "HFL_NUM_PARALLEL": "1"}
+    with a.server(env=env) as base:
         _chat(base, num_predict=2)
         with concurrent.futures.ThreadPoolExecutor(3) as pool:
             codes = list(pool.map(lambda _: _long(base, 300).status_code, range(3)))

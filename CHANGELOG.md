@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The audit checks it: E16 serves with the defaults and runs the benchmark
   with floors (GPU 1.5x / 1.2x, CPU 1.1x / 0.8x); E1 keeps checking
   llama-cpp-python in process with `HFL_NUM_PARALLEL=1`.
+- **llama-server does what llama-cpp-python did.** With llama-server now
+  the default for GGUF, the local audit found what it had lacked, each now
+  served by it: KV snapshots (`/api/snapshot`, `hfl snapshot`: each slot's
+  KV saved and restored through llama-server, integrity-checked like the
+  in-process ones; a snapshot from the other engine is refused by name);
+  Ollama's `context` on `/api/generate`; `HFL_FLASH_ATTENTION` (`-fa`) and
+  `HFL_KV_CACHE_TYPE` (`-ctk`/`-ctv`), which were ignored; the MLX hint on
+  Apple Silicon; and a log line when a Modelfile DRAFT is used.
 - **Two llama.cpp models answer at the same time.** Every in-process model
   shared one queue of one slot, so a request to one model waited for another
   model's reply. Each llama.cpp model now has its own queue (still one call
@@ -38,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`keep_alive: 0` sent with an alias left the model loaded.** Resident
+  models are kept under their registered name (since the alias fix below),
+  and the unload looked them up by the alias. Unload and eviction resolve
+  aliases now (found by the local audit, D54/D55).
 - **A model asked for by alias was loaded again on every switch.**
   Resident models were kept under the alias ("chat"); loading another model
   re-filed the first under its manifest name, and every later "chat" loaded

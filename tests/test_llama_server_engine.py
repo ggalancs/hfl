@@ -78,6 +78,16 @@ class H(BaseHTTPRequestHandler):
             kwargs = body.get("chat_template_kwargs") or {}
             words += ["<nothink>"] if kwargs.get("enable_thinking") is False else []
             return self._send(200, {"prompt": " ".join(words)})
+        if self.path.startswith("/slots/"):  # slot 1 holds a prompt, the others none
+            slot = int(self.path.split("/")[2].split("?")[0])
+            where = os.path.join(args[args.index("--slot-save-path") + 1], body["filename"])
+            if "action=save" in self.path:
+                data = b"KV1" * 10 if slot == 1 else b""
+                with open(where, "wb") as out:
+                    out.write(data)
+                return self._send(200, {"n_saved": len(data) // 3})
+            with open(where, "rb") as saved:
+                return self._send(200, {"n_restored": len(saved.read()) // 3})
         with open(os.environ["FAKE_ARGV_OUT"] + ".body", "w") as out:  # the last request
             json.dump(body, out)
         usage = {"prompt_tokens": 7, "completion_tokens": 2}
@@ -750,3 +760,74 @@ def test_counting_a_prompt_renders_and_tokenizes_it_as_chat_would(engine, fake_s
     assert engine.count_prompt_tokens(two) == 2
     assert engine.count_prompt_tokens(two, tools=[tool]) == 3
     assert engine.count_prompt_tokens(two, GenerationConfig(reasoning="off")) == 3
+
+
+class _PickledState:
+    n_tokens = 3
+
+
+class TestParityWithInProcess:
+    """What llama-cpp-python did that the default llama-server path had lost
+    (the local audit found each: A35, B14, B26-B29, D13, D18)."""
+
+    def test_flash_attention_and_kv_cache_type_reach_the_command_line(
+        self, fake_server, monkeypatch
+    ):
+        from hfl.config import config
+
+        monkeypatch.setenv("HFL_FLASH_ATTENTION", "0")
+        monkeypatch.setattr(config, "kv_cache_type", "q8_0")
+        eng = _loaded(fake_server)
+        try:
+            argv = _launches(fake_server)[-1]
+            assert argv[argv.index("-fa") + 1] == "off"
+            assert argv[argv.index("-ctk") + 1] == argv[argv.index("-ctv") + 1] == "q8_0"
+        finally:
+            eng.unload()
+
+    def test_unset_they_leave_llama_server_its_own_defaults(self, engine, fake_server):
+        argv = _launches(fake_server)[-1]
+        assert "-fa" not in argv and "-ctk" not in argv
+
+    def test_generate_returns_ollama_context_when_asked(self, engine):
+        out = engine.generate("one two", GenerationConfig(keep_context=True))
+        # The fake counts words: prompt and reply as one text, "one twoab".
+        assert out.context_tokens == [64, 64]
+        assert engine.generate("one two").context_tokens is None
+
+    def test_a_snapshot_saves_and_restores_the_slots(self, engine, temp_config):
+        from hfl.engine.snapshot import (
+            delete_snapshot,
+            list_snapshots,
+            load_snapshot,
+            save_snapshot,
+        )
+
+        meta = save_snapshot(engine, name="warm", model_name="m")
+        assert (meta.kind, meta.tokens) == ("slots", 10)
+        folder = temp_config.home_dir / "snapshots" / "warm.slots"
+        assert sorted(p.name for p in folder.iterdir()) == ["slot-1.bin"]  # empty slots left out
+        assert load_snapshot(engine, name="warm", model_name="m").tokens == 10
+        assert [m.name for m in list_snapshots()] == ["warm"]
+        assert delete_snapshot("warm") and not folder.exists()
+        # Nothing left behind in llama-server's own slot folder.
+        assert not any(engine._slot_dir().iterdir())
+
+    def test_tampered_slot_files_are_refused(self, engine, temp_config):
+        from hfl.engine.snapshot import SnapshotIntegrityError, load_snapshot, save_snapshot
+
+        save_snapshot(engine, name="warm", model_name="m")
+        (temp_config.home_dir / "snapshots" / "warm.slots" / "slot-1.bin").write_bytes(b"x")
+        with pytest.raises(SnapshotIntegrityError):
+            load_snapshot(engine, name="warm", model_name="m")
+
+    def test_a_snapshot_from_the_other_engine_is_refused_clearly(self, engine, temp_config):
+        from unittest.mock import MagicMock
+
+        from hfl.engine.snapshot import load_snapshot, save_snapshot
+
+        in_process = MagicMock(spec=["save_state", "load_state"])
+        in_process.save_state = MagicMock(return_value=_PickledState())
+        save_snapshot(in_process, name="old", model_name="m")
+        with pytest.raises(ValueError, match="other engine"):
+            load_snapshot(engine, name="old", model_name="m")

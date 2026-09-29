@@ -236,6 +236,9 @@ def select_engine(
             # that is not GGUF keeps its own backend.
             forced = None
         if forced is not None:
+            if forced == "llama-server":
+                # llama-server runs the same llama.cpp: the same advice.
+                _advise_mlx_alternative(model_path)
             return _create_engine(forced)
     elif backend != "auto":
         return _create_engine(backend)
