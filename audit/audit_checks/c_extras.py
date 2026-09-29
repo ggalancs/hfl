@@ -101,6 +101,10 @@ def _extra(a: Audit, extra: str) -> str:
         else f"import {m}"
         for m in modules
     )
+    # After `import hfl`, as HFL's own process imports them: HFL loads torch
+    # before a CUDA llama.cpp (hfl.engine.native_order). A bare
+    # `import llama_cpp, torch` failed on an L4 with system NCCL.
+    code = "import hfl; " + code
     if extra == "coqui":
         # As HFL imports it: coqui-tts needs the helper HFL's coqui engine
         # supplies under transformers 5 (a bare `import TTS` fails there).
