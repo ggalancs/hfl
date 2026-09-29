@@ -2,7 +2,7 @@
 
 HFL speaks the Ollama, OpenAI and Anthropic APIs on one port, so a tool that
 supports any of them can use it. Each recipe below was **run for real** on
-2026-09-28 (HFL 0.22.1 + fixes, macOS on Apple Silicon, Docker Desktop):
+2026-09-28 (the code released as HFL 0.23.0, macOS on Apple Silicon, Docker Desktop):
 what is written was checked, and what was not is said.
 
 Start HFL first:

@@ -6,9 +6,10 @@ maintainer's step: each one goes out under the maintainer's name.
 ## Homebrew — `homebrew/hfl.rb`
 
 A tap formula: HFL and its Python dependencies in a virtualenv, GGUF models
-served by Homebrew's `llama.cpp` (without llama-cpp-python, HFL falls back to
-`llama-server`; that fallback ships after 0.21.0, so the formula serves GGUF
-from the next release on).
+served by Homebrew's `llama.cpp` (without llama-cpp-python, HFL serves GGUF
+through `llama-server`, since 0.22.0). The formula points at the 0.23.0 sdist
+on PyPI (sha256 checked against a download); its dependency resources are
+unchanged from 0.21.0 and within 0.23.0's ranges.
 
 Verified locally on 2026-09-25 (macOS 26, Apple Silicon): `brew install
 --build-from-source`, `brew test` and `brew audit --strict --online` pass from
@@ -26,11 +27,13 @@ To publish:
    resources first with `brew update-python-resources` — at least a day after
    the PyPI upload: Homebrew ignores packages younger than that.
 
-## winget — `winget/manifests/g/ggalancs/HFL/0.21.0/`
+## winget — `winget/manifests/g/ggalancs/HFL/0.23.0/`
 
-Manifests for the 0.21.0 MSI of the GitHub release (sha256 computed from the
-published file). Validated against winget's 1.9.0 JSON schemas; not run
-through `winget validate` / `winget install`, which need Windows.
+Manifests for the 0.23.0 MSI of the GitHub release (sha256 computed from the
+published file, and equal to the one GitHub reports for it). Validated
+against winget's 1.9.0 JSON schemas; not run through `winget validate` /
+`winget install`, which need Windows. The MSI itself ran a model on
+GitHub's Windows runner before it was published.
 
 To publish: on Windows, `winget validate` and `winget install --manifest` the
 folder, then open a pull request adding it to
