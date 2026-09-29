@@ -145,11 +145,8 @@ class TestMetrics:
             rejected_full_total = 0
             rejected_timeout_total = 0
 
-        class _FakeDispatcher:
-            def snapshot(self):
-                return _FakeSnapshot()
-
-        monkeypatch.setattr("hfl.core.get_dispatcher", lambda: _FakeDispatcher())
+        # Every queue added up (the global one and each model's).
+        monkeypatch.setattr("hfl.core.dispatcher_totals", lambda: _FakeSnapshot())
 
         output = metrics.export_prometheus()
         assert "hfl_inference_concurrency_max 7" in output

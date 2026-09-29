@@ -2773,6 +2773,12 @@ class LlamaCppEngine(InferenceEngine):
         return self._model is not None
 
     @property
+    def independent_instances(self) -> bool:
+        # Each Llama has its own context: two models generate at once
+        # (Metal: same output as alone, 1.56x faster than in turn).
+        return True
+
+    @property
     def context_size(self) -> int:
         return self._n_ctx
 

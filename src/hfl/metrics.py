@@ -363,9 +363,9 @@ class Metrics:
             # /healthz uses. Read-only — exporting these every scrape
             # is cheap because ``DispatcherSnapshot`` is just six ints.
             try:
-                from hfl.core import get_dispatcher
+                from hfl.core import dispatcher_totals
 
-                snap = get_dispatcher().snapshot()
+                snap = dispatcher_totals()
                 lines.append("")
                 lines.append(
                     "# HELP hfl_inference_concurrency_max "

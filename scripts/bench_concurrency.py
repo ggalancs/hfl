@@ -11,16 +11,18 @@ Three measurements, each the median of ``--runs``:
 
 - ``one``: a single request to ``--model``;
 - ``parallel``: ``--concurrency`` requests to ``--model`` at once, against
-  that many one after another (the speed-up is sequential time over
-  concurrent time: 1.0 means they were served in turn);
+  that many one after another;
 - ``two_models``: one request to ``--model`` and one to ``--other-model`` at
   once, against the two one after another.
 
-Replies have a fixed length (``num_predict`` on a prompt that cannot end
-early) and start with a unique prefix, so neither length nor a cached prompt
-decides the result. Tokens are the server's own counts; the comparison is
-always between runs on the same server. ``--min-*`` turn it into a check:
-exit 1 when a speed-up is below its floor.
+The speed-up is throughput (tokens per second) at once over throughput one
+after another: 1.0 means the requests were served in turn. Throughput, not
+time: a reply can end before ``--tokens``, and comparing times then
+compared different amounts of work. Every prompt starts with a unique
+prefix, so no request reuses another's cached prompt. Tokens are the
+server's own counts; the comparison is always between runs on the same
+server. ``--min-*`` turn it into a check: exit 1 when a speed-up is below
+its floor.
 """
 
 from __future__ import annotations
@@ -36,7 +38,9 @@ from pathlib import Path
 
 import httpx
 
-PROMPT = "Count from 1 to 1000, separated by commas, and nothing else."
+# Long enough to use up ``--tokens`` (a count got "1, 2, 3, ..., 1000" from a
+# small model: 24 tokens).
+PROMPT = "Write a long, detailed story about a lighthouse keeper and a storm."
 
 
 def _ask(base: str, model: str, tokens: int) -> int:
@@ -100,16 +104,21 @@ def measure(base: str, model: str, other: str | None, n: int, tokens: int, runs:
             "tokens_per_second": med([t / s for s, t in par]),
         },
     }
+    out["parallel"]["sequential_tokens_per_second"] = med([t / s for s, t in seq])
     out["parallel"]["speedup"] = round(
-        out["parallel"]["sequential_seconds"] / out["parallel"]["concurrent_seconds"], 2
+        out["parallel"]["tokens_per_second"] / out["parallel"]["sequential_tokens_per_second"], 2
     )
     if other:
         out["two_models"] = {
             "sequential_seconds": med([s for s, _ in two_seq]),
             "concurrent_seconds": med([s for s, _ in two]),
+            "sequential_tokens_per_second": med([t / s for s, t in two_seq]),
+            "tokens_per_second": med([t / s for s, t in two]),
         }
         out["two_models"]["speedup"] = round(
-            out["two_models"]["sequential_seconds"] / out["two_models"]["concurrent_seconds"], 2
+            out["two_models"]["tokens_per_second"]
+            / out["two_models"]["sequential_tokens_per_second"],
+            2,
         )
     return out
 

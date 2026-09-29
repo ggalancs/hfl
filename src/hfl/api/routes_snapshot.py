@@ -73,10 +73,12 @@ async def api_snapshot_save(req: SnapshotRequest, request: Request) -> dict[str,
     # stream for the whole duration) and must NOT race inference / a model swap
     # on the shared non-reentrant model. Drain the dispatcher (exclusive() also
     # blocks set_llm_engine, which uses the same barrier) and run off-loop.
-    from hfl.core import get_dispatcher
+    from hfl.core import dispatcher_for
 
     try:
-        async with get_dispatcher().exclusive():
+        # This model's queue: with a queue per model, the global one would
+        # drain nothing while this model generates.
+        async with dispatcher_for(engine).exclusive():
             meta = await asyncio.to_thread(
                 save_snapshot, engine, name=req.name, model_name=req.model
             )
@@ -119,10 +121,12 @@ async def api_snapshot_load(req: SnapshotRequest, request: Request) -> dict[str,
     # RES/CON: load_state() WRITES KV tensors into the model — it must run
     # off-loop and with inference + swaps drained, or it corrupts the model
     # mid-generation. Same exclusive()-drain + to_thread as the save path.
-    from hfl.core import get_dispatcher
+    from hfl.core import dispatcher_for
 
     try:
-        async with get_dispatcher().exclusive():
+        # This model's queue: with a queue per model, the global one would
+        # drain nothing while this model generates.
+        async with dispatcher_for(engine).exclusive():
             meta = await asyncio.to_thread(
                 load_snapshot, engine, name=req.name, model_name=req.model
             )

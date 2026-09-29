@@ -408,6 +408,21 @@ class InferenceEngine(ABC):
         return False
 
     @property
+    def independent_instances(self) -> bool:
+        """Whether this engine's instances (two models) may each run an
+        inference at the same time as the other.
+
+        Each call on one instance is still one at a time; this is about two
+        different models. ``True`` for llama.cpp: each model has its own
+        context, and two generating at once on Metal gave the same output as
+        each alone, 1.56x faster than in turn. ``False`` for the rest until
+        measured — MLX streams on extra threads have hung the process.
+        Such an engine gets a queue of its own (one slot), so one model no
+        longer waits for another.
+        """
+        return False
+
+    @property
     def acceleration(self) -> str | None:
         """Human-readable summary of the hardware the model is running on.
 

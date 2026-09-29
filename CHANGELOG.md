@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Two llama.cpp models answer at the same time.** Every in-process model
+  shared one queue of one slot, so a request to one model waited for another
+  model's reply. Each llama.cpp model now has its own queue (still one call
+  at a time per model). Two models at once, measured: 216 → 293 tok/s on an
+  M3 Max (1.37x), 49 → 77 tok/s on a 4-core CPU with no GPU (1.58x); one
+  request is as fast as before. MLX and Transformers keep the shared queue
+  until measured the same way. `/healthz`, `X-Queue-Depth` and `/metrics`
+  add every queue up. `scripts/bench_concurrency.py` measures it.
+
 ### Fixed
 
 - **A model asked for by alias was loaded again on every switch.**

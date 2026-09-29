@@ -91,9 +91,9 @@ class RequestLogger(BaseHTTPMiddleware):
         # monitoring dashboards and agent clients can trivially observe
         # live backpressure state.
         try:
-            from hfl.core import get_dispatcher
+            from hfl.core import dispatcher_totals
 
-            snap = get_dispatcher().snapshot()
+            snap = dispatcher_totals()
             response.headers["X-Queue-Depth"] = str(snap.depth)
             response.headers["X-Queue-In-Flight"] = str(snap.in_flight)
             response.headers["X-Queue-Max-Inflight"] = str(snap.max_inflight)

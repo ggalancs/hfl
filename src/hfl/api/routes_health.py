@@ -59,9 +59,9 @@ async def healthz() -> JSONResponse:
     queue_depth = 0
     queue_in_flight = 0
     try:
-        from hfl.core import get_dispatcher
+        from hfl.core import dispatcher_totals
 
-        snap = get_dispatcher().snapshot()
+        snap = dispatcher_totals()
         queue_depth = snap.depth
         queue_in_flight = snap.in_flight
     except Exception:  # pragma: no cover — defensive
