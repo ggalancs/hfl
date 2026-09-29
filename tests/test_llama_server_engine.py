@@ -52,6 +52,7 @@ if "--lora-scaled" in args and "bad" in args[args.index("--lora-scaled") + 1]:
     sys.exit(1)  # as llama-server does with an adapter it cannot load
 
 class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"  # keeps connections open, as llama-server does
     def log_message(self, *a): pass
     def _send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
@@ -70,6 +71,8 @@ class H(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != f"Bearer {key}":
             return self._send(401, {"error": "bad key"})
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        with open(os.environ["FAKE_ARGV_OUT"] + ".ports", "a") as out:  # each connection
+            out.write(f"{self.client_address[1]}\n")
         if self.path == "/tokenize":
             bos = [1] if body.get("add_special") and ADDS_BOS else []
             return self._send(200, {"tokens": bos + [64] * max(1, len(body["content"].split()))})
@@ -760,6 +763,16 @@ def test_counting_a_prompt_renders_and_tokenizes_it_as_chat_would(engine, fake_s
     assert engine.count_prompt_tokens(two) == 2
     assert engine.count_prompt_tokens(two, tools=[tool]) == 3
     assert engine.count_prompt_tokens(two, GenerationConfig(reasoning="off")) == 3
+
+
+def test_each_request_opens_its_own_connection(engine, fake_server):
+    """llama-server closes kept-alive connections on its own; a request on
+    one it had just closed failed (2 of 12 on Linux). No connection is
+    reused."""
+    engine.generate("one")
+    engine.generate("two")
+    ports = Path(str(fake_server[1]) + ".ports").read_text().split()
+    assert len(ports) >= 2 and len(set(ports[-2:])) == 2, ports
 
 
 class _PickledState:

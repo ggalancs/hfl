@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A request to llama-server could fail with "Server disconnected without
+  sending a response"** (HTTP 500). llama-server closes kept-alive
+  connections on its own, and HFL sent the next request on one it had just
+  closed: 2 of 12 streamed requests on Linux. HFL opens a new local
+  connection per request now (0 of 40). Found by the local audit (E16).
 - **`keep_alive: 0` sent with an alias left the model loaded.** Resident
   models are kept under their registered name (since the alias fix below),
   and the unload looked them up by the alias. Unload and eviction resolve

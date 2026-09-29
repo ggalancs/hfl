@@ -423,6 +423,12 @@ def start_server(
         base_url=base,
         headers={"Authorization": f"Bearer {key}"},
         timeout=httpx.Timeout(None, connect=10.0),
+        # A new connection per request. llama-server closes kept-alive
+        # connections on its own, and a request sent on one it just closed
+        # fails with "Server disconnected without sending a response"
+        # (measured on Linux: 2 of 12 streamed requests; 0 of 40 without
+        # keep-alive). A local connection costs next to nothing.
+        limits=httpx.Limits(max_keepalive_connections=0),
     )
     return proc, client
 
