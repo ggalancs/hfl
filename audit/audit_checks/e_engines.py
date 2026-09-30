@@ -26,6 +26,7 @@ from local_audit import (
     expect,
     need_apple_silicon,
     need_llama_server,
+    venv_exe,
 )
 
 from audit_checks.c_extras import EXTRA_ID
@@ -606,7 +607,7 @@ def e6(a: Audit) -> str:
         # The install without llama-cpp-python (as Homebrew's) embeds GGUF
         # through llama-server: ``--setup``'s ``venv-core``.
         need_llama_server()
-        core = a.work / "venv-core" / "bin" / "hfl"
+        core = venv_exe(a.work / "venv-core", "hfl")
         if not core.exists():
             raise Uncheckable("no <work>/venv-core: run with --setup")
         saved, a.hfl = a.hfl, str(core)
@@ -695,7 +696,7 @@ COQUI_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"  # Apache-2.0, as its hifig
 def e12(a: Audit) -> str:
     """Speech from coqui-tts, in the [coqui] extra's own venv (section C built
     it). Importing was not enough: it imported nothing under transformers 5."""
-    python = a.work / "extras" / "coqui" / "bin" / "python"
+    python = venv_exe(a.work / "extras" / "coqui", "python")
     if not python.exists():
         raise Uncheckable("the [coqui] extra's venv is missing (its C check did not install it)")
     code = (

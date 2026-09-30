@@ -19,6 +19,14 @@ import subprocess
 import sys
 
 
+def _kill_tree(proc: subprocess.Popen, sig: int) -> None:
+    """Every process the command started, not only the command."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        os.killpg(proc.pid, sig)
+
+
 def main() -> int:
     if "--" not in sys.argv or len(sys.argv) < 5:
         print(__doc__, file=sys.stderr)
@@ -26,17 +34,19 @@ def main() -> int:
     seconds, log = float(sys.argv[1]), sys.argv[2]
     command = sys.argv[sys.argv.index("--") + 1 :]
     with open(log, "ab", buffering=0) as out:
-        proc = subprocess.Popen(
-            command, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
-        )
+        if os.name == "nt":  # no process groups: a group of its own, killed as a tree
+            group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        else:
+            group = {"start_new_session": True}
+        proc = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, **group)
         try:
             code = proc.wait(timeout=seconds)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGTERM)
+            _kill_tree(proc, signal.SIGTERM)
             try:
                 proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
+                _kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
             out.write(f"\nWATCHDOG: killed after {seconds:.0f}s\n".encode())
             code = 124
         out.write(f"\nexit {code}\n".encode())

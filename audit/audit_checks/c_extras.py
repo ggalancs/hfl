@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 
-from local_audit import APPLE_SILICON, Audit, Uncheckable, check, expect
+from local_audit import APPLE_SILICON, Audit, Uncheckable, check, expect, venv_exe
 
 MODULES = {
     "all": ["llama_cpp", "transformers", "mlx_lm", "faster_whisper", "diffusers", "mcp", "vllm"],
@@ -67,7 +67,7 @@ def _extra(a: Audit, extra: str) -> str:
             "--reinstall-package",
             "hfl",
             "--python",
-            str(venv / "bin" / "python"),
+            str(venv_exe(venv, "python")),
             f"{wheel}[{extra}]",
         ],
         capture_output=True,
@@ -110,11 +110,11 @@ def _extra(a: Audit, extra: str) -> str:
         # supplies under transformers 5 (a bare `import TTS` fails there).
         code = "from hfl.engine.coqui_engine import _transformers5_compat as c; c(); " + code
     imported = subprocess.run(
-        [str(venv / "bin" / "python"), "-c", code], capture_output=True, text=True, timeout=300
+        [str(venv_exe(venv, "python")), "-c", code], capture_output=True, text=True, timeout=300
     )
     expect(imported.returncode == 0, f"installed, but: {imported.stderr.strip()[-300:]}")
     version = subprocess.run(
-        [str(venv / "bin" / "hfl"), "version"], capture_output=True, text=True, timeout=120
+        [str(venv_exe(venv, "hfl")), "version"], capture_output=True, text=True, timeout=120
     )
     expect(version.returncode == 0, version.stderr[-200:])
     return f"installs; {', '.join(modules)} import; hfl runs"

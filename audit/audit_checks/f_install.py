@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import httpx
-from local_audit import Audit, Parts, Uncheckable, check, expect
+from local_audit import WINDOWS, Audit, Parts, Uncheckable, check, expect, venv_exe
 
 from audit_checks.c_extras import EXTRA_ID
 
@@ -94,7 +94,14 @@ def _image(a: Audit, extras: str) -> None:
             timeout=2400,
             env={
                 **a.env,
-                "PATH": f"{Path(a.python).parent}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+                "PATH": os.pathsep.join(
+                    [str(Path(a.python).parent)]
+                    + (
+                        [os.environ.get("PATH", "")]
+                        if WINDOWS
+                        else ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"]
+                    )
+                ),
             },
         )
         lines = [x for x in check_.stdout.splitlines() if x[:3] in ("OK ", "BAD")]
@@ -169,7 +176,7 @@ def f6(a: Audit) -> str:
     PATH. ``version`` alone passed for the 0.22.0 executables and DMG, which
     could not run any model (llama.cpp's libraries were not bundled)."""
     venv = a.work / "extras" / "llama"
-    python = venv / "bin" / "python"
+    python = venv_exe(venv, "python")
     if not python.exists():
         raise Uncheckable("run section C first (the [llama] extra's venv)")
     added = subprocess.run(
@@ -182,7 +189,7 @@ def f6(a: Audit) -> str:
     out_dir = a.work / "pyi"
     build = subprocess.run(
         [
-            str(venv / "bin" / "pyinstaller"),
+            str(venv_exe(venv, "pyinstaller")),
             "--noconfirm",
             "--clean",
             "--distpath",

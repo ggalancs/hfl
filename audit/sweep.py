@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from local_audit import QUESTION, Audit, Broken  # noqa: E402
+from local_audit import QUESTION, Audit, Broken, venv_exe  # noqa: E402
 
 HUB = "https://huggingface.co/api/models"
 LICENSES = {"license:apache-2.0", "license:mit"}
@@ -218,7 +218,7 @@ def main() -> int:
         for item in items:
             print(json.dumps(item))
         return 0
-    hfl = work / "venv" / "bin" / "hfl"
+    hfl = venv_exe(work / "venv", "hfl")
     if not hfl.exists():
         raise SystemExit(f"{hfl} does not exist: run audit/local_audit.py --setup first")
     store = work / "sweep.json"

@@ -64,6 +64,15 @@ OK, BROKEN, UNCHECKABLE, PERMISSION = "OK", "ROTO", "NO COMPROBABLE AQUÍ", "REQ
 ENGINE_SWITCH = re.compile(r"could not be loaded by \w+: [^\n]*; trying \w+")
 
 
+WINDOWS = os.name == "nt"
+
+
+def venv_exe(venv: Path, name: str) -> Path:
+    """A program installed in ``venv``: ``bin/<name>`` on macOS and Linux,
+    ``Scripts\\<name>.exe`` on Windows."""
+    return venv / "Scripts" / f"{name}.exe" if WINDOWS else venv / "bin" / name
+
+
 class Broken(AssertionError):
     """A check's finding: what it saw instead of what it expected."""
 
@@ -153,7 +162,7 @@ def _port() -> int:
 class Audit:
     def __init__(self, hfl: Path, work: Path) -> None:
         self.hfl = str(hfl)
-        self.python = str(hfl.with_name("python"))
+        self.python = str(hfl.with_name("python.exe" if WINDOWS else "python"))
         self.work = work
         self.home = work / "home"
         self.scratch = work / "scratch"
@@ -518,9 +527,9 @@ def setup(work: Path, python: str) -> None:
     (work / "wheel.txt").write_text(str(wheel))
     installs = ((work / "venv", f"{wheel}[{SETUP_EXTRAS}]"), (work / "venv-core", str(wheel)))
     for venv, spec in installs:
-        if not (venv / "bin" / "python").exists():
+        if not venv_exe(venv, "python").exists():
             subprocess.run(["uv", "venv", "-q", "--python", python, str(venv)], check=True)
-        python_bin = str(venv / "bin" / "python")
+        python_bin = str(venv_exe(venv, "python"))
         # --reinstall-package: a rebuilt wheel keeps its version number, and
         # uv would otherwise keep the copy already installed.
         subprocess.run(
@@ -533,7 +542,7 @@ def setup(work: Path, python: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--work", type=Path, required=True, help="where everything it makes goes")
-    parser.add_argument("--hfl", type=Path, help="the hfl to audit (default: <work>/venv/bin/hfl)")
+    parser.add_argument("--hfl", type=Path, help="the hfl to audit (default: <work>/venv's)")
     parser.add_argument(
         "--setup", action="store_true", help="build + install HFL into <work>, stop"
     )
@@ -552,7 +561,7 @@ def main() -> int:
         for item in checks:
             print(item.cid, item.title)
         return 0
-    hfl = (args.hfl or work / "venv" / "bin" / "hfl").expanduser().resolve()
+    hfl = (args.hfl or venv_exe(work / "venv", "hfl")).expanduser().resolve()
     if not hfl.exists():
         raise SystemExit(f"{hfl} does not exist: run with --setup first, or pass --hfl")
     audit = Audit(hfl, work)
