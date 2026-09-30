@@ -99,6 +99,7 @@ los ejecuta:
 | Cómo | Comando |
 |---|---|
 | **pip** (recomendado) | `pip install "hfl[llama,mlx]"` |
+| **pip en Windows** | `winget install ggml.llamacpp` y después `pip install hfl` (GGUF con llama-server; `hfl[llama]` necesita las C++ Build Tools de Visual Studio) |
 | **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (solo esta máquina; para abrirlo a la red, publica `-p 11434:11434` con `-e HFL_API_KEY=…`) |
 | **Instaladores** | `.dmg`, `.msi` y binarios independientes en la [página de releases](https://github.com/ggalancs/hfl/releases) |
 | **Desde el código** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
@@ -116,7 +117,7 @@ los ejecuta:
 | `tts` / `coqui` | Texto a voz (Bark, SpeechT5 / Coqui XTTS, VITS) |
 | `stt` | Voz a texto (Whisper) |
 | `mcp` | Cliente y servidor de Model Context Protocol |
-| `all` | Todo lo anterior |
+| `all` | Todo lo anterior (en Windows sin `llama`: ver la tabla de instalación) |
 
 Convertir safetensors a GGUF descarga la primera vez el conversor de llama.cpp
 (Python) y cuantiza con un `llama-quantize` que ya esté en la máquina: el de
@@ -461,8 +462,9 @@ cubre los módulos, la selección del motor, el proceso de conversión y cada en
 - [Guía de arquitectura](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html)
 - [Registro de cambios](CHANGELOG.md)
 
-**Estado:** beta, con más de 4.000 tests y ~90 % de cobertura. Hay builds e
-instaladores para Windows, pero Windows está menos probado que macOS y Linux.
+**Estado:** beta, con más de 4.000 tests y ~90 % de cobertura. La auditoría
+local completa (`audit/`) se ejecuta en macOS, Linux y Windows 10; los
+instaladores de Windows (MSI, winget) están menos probados que el resto.
 
 ## Contribuir
 

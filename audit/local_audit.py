@@ -511,7 +511,10 @@ def report(work: Path, results: dict[str, dict]) -> Path:
 # Silicon, ``vllm`` off Linux). It was once a hand-written list without
 # ``vllm`` and ``coqui``: on Linux vLLM brings dill, dill (imported by torch)
 # made every llama-cpp-python load fail, and no check had dill installed.
-SETUP_EXTRAS = "all,otel"
+# On Windows ``all`` leaves out ``llama`` (no wheel; see pyproject.toml): it
+# is added so the in-process llama.cpp checks still run where the Build
+# Tools are installed. C checks ``[all]`` alone, without it.
+SETUP_EXTRAS = "all,otel,llama" if WINDOWS else "all,otel"
 
 
 def setup(work: Path, python: str) -> None:

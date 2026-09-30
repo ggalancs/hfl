@@ -95,6 +95,7 @@ is left to you. HFL fetches only the files a model needs and runs them:
 | How | Command |
 |---|---|
 | **pip** (recommended) | `pip install "hfl[llama,mlx]"` |
+| **pip on Windows** | `winget install ggml.llamacpp` then `pip install hfl` (GGUF through llama-server; `hfl[llama]` needs Visual Studio's C++ Build Tools) |
 | **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`) |
 | **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases) |
 | **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
@@ -112,7 +113,7 @@ is left to you. HFL fetches only the files a model needs and runs them:
 | `tts` / `coqui` | Text-to-speech (Bark, SpeechT5 / Coqui XTTS, VITS) |
 | `stt` | Speech-to-text (Whisper) |
 | `mcp` | Model Context Protocol client and server |
-| `all` | Everything above |
+| `all` | Everything above (on Windows without `llama`: see the install table) |
 
 Converting safetensors to GGUF fetches llama.cpp's converter (Python) the
 first time and quantizes with a `llama-quantize` already on the machine:
@@ -455,8 +456,9 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 - [Architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)
 - [Changelog](https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md)
 
-**Status:** beta — 4,000+ tests at ~90% coverage. Windows builds and installers
-are published, but Windows is less tested than macOS and Linux.
+**Status:** beta — 4,000+ tests at ~90% coverage. The full local audit
+(`audit/`) runs on macOS, Linux and Windows 10; the Windows installers
+(MSI, winget) are less tested than the rest.
 
 ## Contributing
 

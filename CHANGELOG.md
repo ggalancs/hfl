@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`hfl[all]` installs on Windows without a compiler.** It no longer
+  includes llama-cpp-python there: PyPI has no Windows wheel for it, so
+  `pip install "hfl[all]"` failed on a clean Windows 10 without Visual
+  Studio's C++ Build Tools. On Windows HFL serves GGUF with llama.cpp's own
+  llama-server (`winget install ggml.llamacpp`). `hfl[llama]` still builds
+  llama-cpp-python for anyone who has the Build Tools. Every other platform
+  is unchanged.
 - **llama.cpp in process uses every physical core on a CPU without GPU**
   (it used half, llama-cpp-python's default). On a 4-core CPU, one request
   42.1 → 72.5 tok/s; two models take turns on the cores, as with

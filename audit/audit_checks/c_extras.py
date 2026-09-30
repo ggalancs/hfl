@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 
-from local_audit import APPLE_SILICON, Audit, Uncheckable, check, expect, venv_exe
+from local_audit import APPLE_SILICON, WINDOWS, Audit, Uncheckable, check, expect, venv_exe
 
 MODULES = {
     "all": ["llama_cpp", "transformers", "mlx_lm", "faster_whisper", "diffusers", "mcp", "vllm"],
@@ -87,7 +87,11 @@ def _extra(a: Audit, extra: str) -> str:
         m
         for m in MODULES[extra]
         # [mlx] installs nothing off Apple Silicon, its llguidance included.
-        if (APPLE_SILICON or (m != "mlx_lm" and extra != "mlx")) and (linux or m != "vllm")
+        if (APPLE_SILICON or (m != "mlx_lm" and extra != "mlx"))
+        and (linux or m != "vllm")
+        # [all] leaves llama-cpp-python out on Windows (no wheel: it needed
+        # the C++ Build Tools); checked below that it really is left out.
+        and not (WINDOWS and extra == "all" and m == "llama_cpp")
     ]
     if not modules:  # a platform marker installs nothing here
         why = "vLLM is a Linux backend" if extra == "vllm" else "MLX is macOS on Apple Silicon only"
@@ -113,6 +117,11 @@ def _extra(a: Audit, extra: str) -> str:
         [str(venv_exe(venv, "python")), "-c", code], capture_output=True, text=True, timeout=300
     )
     expect(imported.returncode == 0, f"installed, but: {imported.stderr.strip()[-300:]}")
+    if WINDOWS and extra == "all":
+        absent = subprocess.run(
+            [str(venv_exe(venv, "python")), "-c", "import llama_cpp"], capture_output=True
+        )
+        expect(absent.returncode != 0, "hfl[all] installed llama-cpp-python on Windows")
     version = subprocess.run(
         [str(venv_exe(venv, "hfl")), "version"], capture_output=True, text=True, timeout=120
     )

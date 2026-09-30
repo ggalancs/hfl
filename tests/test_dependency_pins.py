@@ -240,3 +240,26 @@ class TestTransformersImportChain:
             )
         else:
             pytest.fail(f"unexpected transformers major: {tx_major}")
+
+
+def test_all_leaves_llama_cpp_python_out_on_windows() -> None:
+    """PyPI has no Windows wheel for llama-cpp-python: `pip install
+    "hfl[all]"` failed on a clean Windows 10 without the C++ Build Tools.
+    Everywhere else ``all`` still brings it, at [llama]'s own pin.
+
+    Named directly: written as ``"hfl[llama]; <marker>"`` hatchling expanded
+    the self-reference and dropped the marker, and the built wheel still
+    required llama-cpp-python on Windows (seen in its METADATA)."""
+    from packaging.requirements import Requirement
+
+    deps = _load_pyproject()["project"]["optional-dependencies"]
+    entries = [Requirement(r) for r in deps["all"]]
+    assert not any(r.name == "hfl" and "llama" in r.extras for r in entries), deps["all"]
+    llama = [r for r in entries if r.name == "llama-cpp-python"]
+    assert len(llama) == 1 and llama[0].marker is not None, deps["all"]
+    marker = llama[0].marker
+    assert not marker.evaluate({"sys_platform": "win32", "extra": ""})
+    for platform in ("linux", "darwin"):
+        assert marker.evaluate({"sys_platform": platform, "extra": ""}), platform
+    (own,) = (Requirement(r) for r in deps["llama"] if r.startswith("llama-cpp-python"))
+    assert llama[0].specifier == own.specifier, (llama[0], own)
