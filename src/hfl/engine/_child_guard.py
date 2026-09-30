@@ -20,7 +20,34 @@ import subprocess
 import sys
 
 
-def _parent_gone(parent: int) -> bool:
+def _windows_watch(parent: int) -> int:
+    """A handle to the parent that signals once it exits (0: already gone).
+
+    Windows has no ``kill(pid, 0)``: signal 0 is ``CTRL_C_EVENT``, so asking
+    whether HFL lived sent Ctrl+C to the console group, and llama-server
+    shut down a second after every load. A handle also cannot confuse the
+    parent with a later process given the same PID."""
+    import ctypes
+
+    synchronize = 0x00100000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    return int(kernel32.OpenProcess(synchronize, False, parent) or 0)
+
+
+def _windows_parent_gone(handle: int) -> bool:
+    import ctypes
+
+    if not handle:
+        return True
+    wait_object_0 = 0
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    return bool(kernel32.WaitForSingleObject(ctypes.c_void_p(handle), 0) == wait_object_0)
+
+
+def _parent_gone(parent: int, handle: int = 0) -> bool:
+    if os.name == "nt":
+        return _windows_parent_gone(handle)
     if os.getppid() != parent:  # re-parented: the parent has exited
         return True
     try:
@@ -47,6 +74,7 @@ def main(argv: list[str]) -> int:
         print("usage: _child_guard <parent-pid> -- <command> [args...]", file=sys.stderr)
         return 2
     parent = int(argv[1])
+    handle = _windows_watch(parent) if os.name == "nt" else 0
     child = subprocess.Popen(argv[3:])
 
     def forward(signum: int, _frame: object) -> None:
@@ -61,7 +89,7 @@ def main(argv: list[str]) -> int:
             break
         except subprocess.TimeoutExpired:
             pass
-        if _parent_gone(parent):
+        if _parent_gone(parent, handle):
             _stop(child)
             break
     return child.returncode if child.returncode is not None and child.returncode >= 0 else 0

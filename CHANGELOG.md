@@ -83,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`hfl serve` serves GGUF models on Windows.** Found on a real Windows 10
+  machine. The guard that stops llama-server when HFL dies checked whether
+  HFL was alive with `os.kill(pid, 0)`. On Windows, signal 0 is Ctrl+C, so
+  llama-server shut down a second after every load. The guard now watches
+  a handle to HFL's process instead. Stopping a model on Windows also left
+  llama-server running with the model still in memory, because SIGTERM
+  ended the guard alone; HFL now ends the whole process tree.
 - **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
   They had drifted: the server downloaded model types HFL cannot serve and
   registered no model type; the CLI logged no provenance and could take an

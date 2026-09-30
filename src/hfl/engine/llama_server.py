@@ -436,6 +436,14 @@ def start_server(
 def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
     """Stop a llama-server started by ``start_server`` (SIGTERM, then kill)."""
     if proc is not None and proc.poll() is None:
+        if os.name == "nt":
+            # SIGTERM is TerminateProcess there: it ends the guard alone,
+            # and its llama-server would outlive it holding the model.
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30
+            )
+            proc.wait(timeout=10)
+            return
         proc.send_signal(signal.SIGTERM)
         try:
             proc.wait(timeout=30)
