@@ -493,7 +493,10 @@ def _offloads_to_gpu(n_gpu_layers: Any) -> bool:
     try:
         from llama_cpp import llama_cpp as _lcpp
 
-        return bool(_lcpp.llama_supports_gpu_offload())
+        # Asking initialises the backend, which prints its device dump:
+        # silenced as the load silences it (it leaked into `hfl run`'s chat).
+        with _suppress_stderr():
+            return bool(_lcpp.llama_supports_gpu_offload())
     except Exception:  # an old build without the call: assume it can
         return True
 

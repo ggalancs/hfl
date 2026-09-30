@@ -385,3 +385,18 @@ class TestThreadsOnTheCpu:
 
     def test_zero_gpu_layers_is_the_cpu(self):
         assert engine_module._offloads_to_gpu(0) is False
+
+
+def test_asking_about_gpu_offload_prints_nothing():
+    """The probe initialises llama.cpp's backend, which dumps its devices to
+    stderr: it leaked 16 lines into `hfl run`'s chat on a Mac."""
+    import subprocess
+    import sys
+
+    pytest.importorskip("llama_cpp")
+    done = subprocess.run(
+        [sys.executable, "-c",
+         "from hfl.engine.llama_cpp import _offloads_to_gpu; _offloads_to_gpu(-1)"],
+        capture_output=True, text=True, timeout=120,
+    )  # fmt: skip
+    assert done.returncode == 0 and "ggml_" not in done.stderr, done.stderr[-300:]
