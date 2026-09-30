@@ -234,6 +234,9 @@ class Audit:
         self._logs.append((log_path, 0))
         proc = subprocess.Popen(
             [self.hfl, "serve", "--port", str(port), *args],
+            # A server as a service runs: nobody on its stdin (the harness's
+            # own may be a hidden console on Windows, where a prompt waits).
+            stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
             env={**self.env, **(env or {})},

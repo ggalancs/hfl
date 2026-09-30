@@ -350,6 +350,7 @@
     "download_failed": "Download failed",
     "error_resolving": "Error resolving model",
     "model_not_found": "Model not found",
+    "model_in_use": "{name} is in use by another process (a running `hfl serve` that has it loaded?). Nothing was deleted: stop it, or unload the model with `hfl stop {name}`, then run `hfl rm` again.",
     "use_list_to_see": "Use 'hfl list' to see available models.",
     "missing_dependency": "Missing dependency",
     "cannot_convert_gguf": "Cannot convert to GGUF",

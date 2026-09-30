@@ -190,6 +190,11 @@ def main() -> int:
         )
         outdated = run.hfl("outdated", timeout=120)
         run.check("hfl outdated", outdated.returncode == 0, outdated.stdout.strip()[-200:])
+        # Unloaded first, as a user does: on Windows a file a running
+        # server has open cannot be deleted, and `hfl rm` refuses (nothing
+        # deleted) instead of failing halfway.
+        stopped = run.hfl("stop", "embed", "--port", str(port), timeout=60)
+        run.check("hfl stop", stopped.returncode == 0, stopped.stdout.strip()[-120:])
         removed = run.hfl("rm", "embed", "--yes", timeout=60)
         files = list((home / "models").rglob("*nomic*.gguf"))
         run.check("hfl rm", removed.returncode == 0 and not files, removed.stdout.strip()[-120:])

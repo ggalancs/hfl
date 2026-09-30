@@ -106,6 +106,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `torch.compile`, which needs MSVC's `cl` on PATH. Outside a Visual Studio
   prompt, every `format` request returned a 500. HFL applies the token mask
   with plain torch.
+- **`HFL_ACCEPT_NETWORK_EXPOSURE` is consent at a terminal too.** It was
+  honoured only without a TTY, so where a console exists that nobody reads
+  (a Windows scheduled task), `hfl serve --host 0.0.0.0` waited forever at
+  "Continue?" even with the variable set.
+- **`hfl stop` and `DELETE /api/delete` unload embedding models.** They
+  reached only LLMs and TTS, so an embedding model stayed in memory after
+  being stopped or deleted.
+- **`hfl rm` of a model that is in use deletes all of it or nothing.** On
+  Windows, a file a running server has open cannot be deleted. `hfl rm`
+  died with a traceback partway through the folder, and llama.cpp's files
+  could be renamed but not deleted, so the next `hfl rm` dropped the entry
+  and left the file on disk. Now nothing is touched, the message says to
+  `hfl stop` the model first, and `/api/delete` answers 409.
 - **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
   They had drifted: the server downloaded model types HFL cannot serve and
   registered no model type; the CLI logged no provenance and could take an

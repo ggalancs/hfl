@@ -60,6 +60,37 @@ router = APIRouter(tags=["Embeddings"])
 _embed_lock = asyncio.Lock()
 
 
+async def unload_embedding(name: str | None = None) -> str | None:
+    """Unload the embedding engine if it serves ``name`` (by any of the
+    model's names; None: whichever it serves). The name it served, or None.
+
+    ``hfl stop`` and ``/api/delete`` reached only the LLMs and TTS: an
+    embedding model stayed loaded, and on Windows, where a file a process
+    has open cannot be deleted, ``hfl rm`` could never remove it. Under
+    the embed lock, so no call is still running on the engine."""
+    from hfl.api.state import get_state
+    from hfl.models.registry import get_registry
+
+    state = get_state()
+    if state._embed_engine is None:
+        return None
+    registry = get_registry()
+
+    def canonical(n: str) -> str:
+        found = registry.get(n)
+        return found.name if found is not None else n
+
+    async with _embed_lock:
+        engine, current = state._embed_engine, state._embed_model_name
+        if engine is None or current is None:
+            return None
+        if name is not None and canonical(current) != canonical(name):
+            return None
+        state._embed_engine = state._embed_model_name = None
+        await asyncio.to_thread(engine.unload)
+    return canonical(current)
+
+
 async def _embed_on(model_name: str, call: "Any") -> tuple[Any, int]:
     """Load (or reuse) ``model_name``'s engine and run ``call(engine)`` on it,
     off the event loop and bounded by the generation timeout: the result and

@@ -156,3 +156,121 @@ class TestTheRoute:
         )
         assert response.status_code == 403
         assert path.exists()
+
+
+def _held_open(monkeypatch):
+    """Windows' refusal to move or delete a file another process has open
+    (WinError 32 / 5, measured on a real Windows 10 with a mapped model)."""
+    from pathlib import Path
+
+    def refuse(self, target):
+        raise PermissionError(32, "The process cannot access the file")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+
+
+class TestInUse:
+    """A running ``hfl serve`` maps the model it serves; on Windows ``hfl rm``
+    died in rmtree with a traceback, part of the folder already deleted."""
+
+    def test_nothing_is_deleted_and_the_entry_stays(self, temp_config, monkeypatch):
+        from hfl.models.registry import get_registry
+        from hfl.models.removal import ModelInUse, remove_model
+
+        folder = temp_config.models_dir / "org--m"
+        path = _gguf(folder)
+        (folder / "README.md").write_text("card")
+        manifest = _register(temp_config, "m", folder)
+        _held_open(monkeypatch)
+        with pytest.raises(ModelInUse):
+            remove_model(get_registry(), manifest)
+        assert path.exists() and (folder / "README.md").exists()
+        assert get_registry().get("m") is not None
+
+    def test_the_cli_says_so_without_a_traceback(self, temp_config, monkeypatch):
+        from typer.testing import CliRunner
+
+        from hfl.cli.main import app
+
+        _register(temp_config, "m", _gguf(temp_config.models_dir / "org--m"))
+        _held_open(monkeypatch)
+        result = CliRunner().invoke(app, ["rm", "m", "--yes"])
+        assert result.exit_code == 1 and "hfl stop m" in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+    def test_the_route_answers_409(self, owner, temp_config, monkeypatch):
+        _register(temp_config, "m", _gguf(temp_config.models_dir / "org--m"))
+        _held_open(monkeypatch)
+        response = owner.request("DELETE", "/api/delete", json={"model": "m"})
+        assert response.status_code == 409 and "in use" in response.text
+
+
+def test_a_file_renamed_but_not_deleted_goes_back(temp_config, monkeypatch):
+    """llama.cpp opens a model so Windows lets it be renamed, not deleted
+    (measured). The next `hfl rm` then found nothing under its name, dropped
+    the entry and left the renamed file on disk for good."""
+    from pathlib import Path
+
+    from hfl.models.registry import get_registry
+    from hfl.models.removal import ModelInUse, remove_model
+
+    path = _gguf(temp_config.models_dir / "org--m")
+    manifest = _register(temp_config, "m", path)
+
+    def refuse(self, missing_ok=False):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    with pytest.raises(ModelInUse):
+        remove_model(get_registry(), manifest)
+    assert path.exists() and [p.name for p in path.parent.iterdir()] == [path.name]
+    assert get_registry().get("m") is not None
+
+
+class _Embedder:
+    is_loaded = True
+
+    def __init__(self) -> None:
+        self.unloaded = False
+
+    def unload(self) -> None:
+        self.unloaded = True
+
+
+def _serving_embeddings(temp_config, name: str) -> _Embedder:
+    from hfl.api.state import get_state
+
+    _register(temp_config, name, _gguf(temp_config.models_dir / "org--e"))
+    state, engine = get_state(), _Embedder()
+    state._embed_engine, state._embed_model_name = engine, name
+    return engine
+
+
+class TestEmbeddingModels:
+    """``hfl stop`` and ``/api/delete`` reached only LLMs and TTS: an
+    embedding model stayed loaded (found on Windows, where it then could
+    not be deleted)."""
+
+    def test_stop_by_name_unloads_it(self, owner, temp_config):
+        from hfl.api.state import get_state
+
+        engine = _serving_embeddings(temp_config, "nomic-embed")
+        out = owner.post("/api/stop", json={"model": "nomic-embed"}).json()
+        assert out["status"] == "stopped" and engine.unloaded
+        assert get_state()._embed_engine is None
+
+    def test_stop_all_unloads_it(self, owner, temp_config):
+        engine = _serving_embeddings(temp_config, "nomic-embed")
+        out = owner.post("/api/stop", json={}).json()
+        assert out["status"] == "stopped" and engine.unloaded
+
+    def test_another_name_leaves_it_loaded(self, owner, temp_config):
+        engine = _serving_embeddings(temp_config, "nomic-embed")
+        _register(temp_config, "other", _gguf(temp_config.models_dir / "org--o"))
+        owner.post("/api/stop", json={"model": "other"})
+        assert not engine.unloaded
+
+    def test_delete_unloads_it_first(self, owner, temp_config):
+        engine = _serving_embeddings(temp_config, "nomic-embed")
+        response = owner.request("DELETE", "/api/delete", json={"model": "nomic-embed"})
+        assert response.status_code == 200 and engine.unloaded

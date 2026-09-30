@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 from hfl.exceptions import ModelNotFoundError
@@ -51,13 +51,15 @@ class DeleteRequest(BaseModel):
         200: {"description": "Deleted."},
         403: {"description": "Not a loopback caller, or called from a web page."},
         404: {"description": "Model not found."},
+        409: {"description": "Its files are open in another process (Windows)."},
     },
 )
 async def delete_model(req: DeleteRequest, request: Request) -> dict[str, str]:
     """Ollama-compatible ``DELETE /api/delete``."""
     from hfl.api.admin_guard import require_local_owner
+    from hfl.api.routes_embed import unload_embedding
     from hfl.api.state import get_state
-    from hfl.models.removal import remove_model
+    from hfl.models.removal import ModelInUse, remove_model
 
     require_local_owner(request, "delete")
     registry = get_registry()
@@ -65,7 +67,14 @@ async def delete_model(req: DeleteRequest, request: Request) -> dict[str, str]:
     if manifest is None:
         raise ModelNotFoundError(req.model)
     await get_state().evict(manifest.name, reason="deleted")
-    result = remove_model(registry, manifest)
+    await unload_embedding(manifest.name)
+    try:
+        result = remove_model(registry, manifest)
+    except ModelInUse as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{manifest.name} is in use by another process; nothing was deleted",
+        ) from exc
     if result.kept_outside is not None:
         logger.info("deleted %s; its file is outside HFL's models folder and was kept", result.name)
     elif result.shared_with:

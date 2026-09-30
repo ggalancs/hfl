@@ -113,6 +113,20 @@ class TestServeCommand:
             assert result.exit_code == 0
             mock_start.assert_called_once()
 
+    def test_the_opt_in_is_not_asked_again_at_a_terminal(self, monkeypatch):
+        """A hidden console (a Windows scheduled task) is a terminal nobody
+        reads: with the opt-in set, "Continue?" waited there forever."""
+        monkeypatch.setenv("HFL_ACCEPT_NETWORK_EXPOSURE", "true")
+        monkeypatch.setattr("hfl.cli.main.stdin_is_terminal", lambda: True)
+        with (
+            patch("hfl.api.server.start_server") as mock_start,
+            patch("typer.confirm", side_effect=AssertionError("asked")),
+        ):
+            result = runner.invoke(app, ["serve", "--host", "0.0.0.0"])
+
+            assert result.exit_code == 0, result.output
+            mock_start.assert_called_once()
+
     @pytest.mark.parametrize("host", ["::", "192.168.1.10"])
     def test_serve_refuses_other_public_binds_too(self, host):
         """The check used to match only the literal '0.0.0.0'."""

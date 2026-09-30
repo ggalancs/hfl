@@ -808,6 +808,11 @@ def _speech_file(a: Audit) -> Path:
         speak = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            # An English voice: the default follows the system's language,
+            # and Whisper heard a Spanish voice's English as Dutch.
+            "$en = $s.GetInstalledVoices() | Where-Object "
+            "{ $_.VoiceInfo.Culture.Name -like 'en-*' } | Select-Object -First 1; "
+            "if ($en) { $s.SelectVoice($en.VoiceInfo.Name) }; "
             f"$s.SetOutputToWaveFile('{wav}'); $s.Speak('{SENTENCE}'); $s.Dispose()"
         )
         subprocess.run(["powershell", "-NoProfile", "-Command", speak], check=True, timeout=120)

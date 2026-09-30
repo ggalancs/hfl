@@ -108,6 +108,7 @@ async def stop_model(
     for.
     """
     from hfl.api.admin_guard import require_owner
+    from hfl.api.routes_embed import unload_embedding
 
     require_owner(request, "stop")
     state = get_state()
@@ -137,6 +138,9 @@ async def stop_model(
         if current_tts is not None:
             background_tasks.add_task(_unload_tts)
             evicted.append(current_tts.name)
+        embedding = await unload_embedding()
+        if embedding is not None:
+            evicted.append(embedding)
         if not evicted:
             return {"status": "nothing_loaded", "model": None}
         return {"status": "stopped", "model": ",".join(evicted)}
@@ -150,6 +154,9 @@ async def stop_model(
         return {"status": "stopped", "model": req.model}
     if current_tts is not None and current_tts.name == req.model:
         background_tasks.add_task(_unload_tts)
+        return {"status": "stopped", "model": req.model}
+    # Unloaded before answering: `hfl rm` right after must find it closed.
+    if await unload_embedding(req.model) is not None:
         return {"status": "stopped", "model": req.model}
 
     return {"status": "not_loaded", "model": req.model}

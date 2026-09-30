@@ -1159,18 +1159,22 @@ def _confirm_exposure(host: str, api_key: str | None) -> None:
         # key (the exposure is authenticated, and someone set the key), or a
         # container (where the bind reaches only as far as the ports its
         # operator published). The container image used to stop here, every
-        # time: nobody can answer a prompt in one.
-        if not stdin_is_terminal():
-            opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            )
-            if not (opted_in or api_key or _in_container()):
+        # time: nobody can answer a prompt in one. The opt-in is consent
+        # with a terminal too: a hidden console (a Windows scheduled task)
+        # is a terminal nobody reads, and the question waited there forever.
+        opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if opted_in:
+            pass
+        elif not stdin_is_terminal():
+            if not (api_key or _in_container()):
                 console.print(f"[red]{t('warnings.refuse_unattended_bind', host=host)}[/]")
                 raise typer.Exit(1)
-            if _in_container() and not (opted_in or api_key):
+            if _in_container() and not api_key:
                 console.print(f"[yellow]{t('warnings.container_bind')}[/]")
         elif not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
@@ -2049,9 +2053,13 @@ def rm(
     # Same rule as DELETE /api/delete (hfl.models.removal): only files inside
     # HFL's models folder are deleted, and a blob another entry shares
     # (``hfl cp`` is zero-copy) is kept so ``cp a b; rm a`` leaves ``b``.
-    from hfl.models.removal import remove_model
+    from hfl.models.removal import ModelInUse, remove_model
 
-    result = remove_model(registry, manifest)
+    try:
+        result = remove_model(registry, manifest)
+    except ModelInUse:
+        console.print(f"[red]{escape_markup(t('errors.model_in_use', name=manifest.name))}[/]")
+        raise typer.Exit(1) from None
     if result.shared_with:
         names = ", ".join(result.shared_with)
         console.print(f"[yellow]{t('messages.blob_shared', names=names)}[/]")
