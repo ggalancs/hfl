@@ -24,6 +24,10 @@ permissions:
 jobs:
   build-msi:
     runs-on: windows-latest
+    # Whether code signing is configured, as a job-level flag: GitHub
+    # documents that secrets cannot be referenced directly in `if:`.
+    env:
+      CAN_SIGN: ${{ secrets.WINDOWS_CODE_SIGN_CERT != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -96,7 +100,7 @@ jobs:
              -out dist\hfl-${{ steps.ver.outputs.version }}.msi dist\hfl.wixobj
 
       - name: Decode code-sign certificate
-        if: ${{ env.WINDOWS_CODE_SIGN_CERT != '' }}
+        if: env.CAN_SIGN == 'true'
         env:
           WINDOWS_CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGN_CERT }}
         run: |
@@ -104,7 +108,7 @@ jobs:
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
 
       - name: Sign MSI
-        if: ${{ env.WINDOWS_CODE_SIGN_CERT != '' }}
+        if: env.CAN_SIGN == 'true'
         env:
           WINDOWS_CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGN_CERT }}
           WINDOWS_CODE_SIGN_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PASSWORD }}
@@ -113,6 +117,13 @@ jobs:
              sign /fd sha256 /tr http://timestamp.sectigo.com /td sha256 `
              /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:WINDOWS_CODE_SIGN_PASSWORD `
              dist\hfl-${{ steps.ver.outputs.version }}.msi
+
+      - name: Verify the signature
+        # With a certificate configured, an unsigned MSI must not ship.
+        if: env.CAN_SIGN == 'true'
+        run: |
+          $sig = Get-AuthenticodeSignature dist\hfl-${{ steps.ver.outputs.version }}.msi
+          if ($sig.Status -ne 'Valid') { throw "MSI signature: $($sig.Status)" }
 
       - name: Upload artefact
         uses: actions/upload-artifact@v7

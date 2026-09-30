@@ -27,6 +27,14 @@ permissions:
 jobs:
   build-dmg:
     runs-on: macos-14
+    # Whether signing and notarising are configured, as job-level flags:
+    # GitHub documents that secrets cannot be referenced directly in `if:`,
+    # and recommends job-level environment variables. The step-level `env`
+    # these steps used was not the documented way, and every run so far
+    # skipped signing (no secret was set, so it was never put to the test).
+    env:
+      CAN_SIGN: ${{ secrets.MACOS_DEVELOPER_ID_P12 != '' }}
+      CAN_NOTARISE: ${{ secrets.MACOS_APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -85,7 +93,7 @@ jobs:
           PLIST
 
       - name: Import Developer ID certificate
-        if: ${{ env.MACOS_DEVELOPER_ID_P12 != '' }}
+        if: env.CAN_SIGN == 'true'
         env:
           MACOS_DEVELOPER_ID_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12 }}
           MACOS_DEVELOPER_ID_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_PASSWORD }}
@@ -98,7 +106,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
 
       - name: Sign app bundle
-        if: ${{ env.MACOS_DEVELOPER_ID_P12 != '' }}
+        if: env.CAN_SIGN == 'true'
         env:
           MACOS_DEVELOPER_ID_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12 }}
         run: |
@@ -118,7 +126,7 @@ jobs:
             build/HFL.app
 
       - name: Notarise DMG
-        if: ${{ env.MACOS_APPLE_ID != '' }}
+        if: env.CAN_NOTARISE == 'true'
         env:
           MACOS_APPLE_ID: ${{ secrets.MACOS_APPLE_ID }}
           MACOS_APPLE_ID_PASSWORD: ${{ secrets.MACOS_APPLE_ID_PASSWORD }}
@@ -130,6 +138,16 @@ jobs:
               --team-id "$MACOS_TEAM_ID" \
               --wait
           xcrun stapler staple dist/hfl-${{ steps.ver.outputs.version }}.dmg
+
+      - name: Verify the signature
+        # With a certificate configured, an unsigned (or badly signed) DMG
+        # must not ship: signing that is skipped or fails quietly stops here.
+        if: env.CAN_SIGN == 'true'
+        run: |
+          codesign --verify --deep --strict --verbose=2 build/HFL.app
+          if [ "$CAN_NOTARISE" = "true" ]; then
+            xcrun stapler validate dist/hfl-${{ steps.ver.outputs.version }}.dmg
+          fi
 
       - name: Upload artefact
         uses: actions/upload-artifact@v7

@@ -50,7 +50,8 @@ class TestWindowsWorkflow:
     def test_signing_gated_on_secret(self):
         build = self.cfg["jobs"]["build-msi"]
         sign_step = next(s for s in build["steps"] if s.get("name") == "Sign MSI")
-        assert "WINDOWS_CODE_SIGN_CERT" in sign_step["if"]
+        assert sign_step["if"] == "env.CAN_SIGN == 'true'"
+        assert "secrets.WINDOWS_CODE_SIGN_CERT" in build["env"]["CAN_SIGN"]
 
     def test_attaches_msi_to_release(self):
         steps = self.cfg["jobs"]["build-msi"]["steps"]
@@ -69,7 +70,8 @@ class TestMacOSWorkflow:
     def test_notarisation_gated_on_secret(self):
         job = self.cfg["jobs"]["build-dmg"]
         notary = next(s for s in job["steps"] if s.get("name") == "Notarise DMG")
-        assert "MACOS_APPLE_ID" in notary["if"]
+        assert notary["if"] == "env.CAN_NOTARISE == 'true'"
+        assert "secrets.MACOS_APPLE_ID" in job["env"]["CAN_NOTARISE"]
 
     def test_builds_dmg_with_create_dmg(self):
         job = self.cfg["jobs"]["build-dmg"]
@@ -98,3 +100,37 @@ class TestInstallersOnABranch:
     def test_the_build_is_kept_as_an_artifact_anyway(self):
         for rel in self.WORKFLOWS:
             assert any("upload-artifact" in s.get("uses", "") for s in self._steps(rel)), rel
+
+
+class TestSigningCannotBeSkippedQuietly:
+    """GitHub documents that secrets cannot be referenced directly in `if:`
+    and recommends job-level environment variables. The signing steps
+    tested variables set in their own step `env`, not the documented way;
+    and nothing failed if a binary went out unsigned with a certificate
+    configured."""
+
+    WORKFLOWS = {".github/workflows/macos-dmg.yml": "build-dmg",
+                 ".github/workflows/windows-msi.yml": "build-msi"}  # fmt: skip
+
+    def _job(self, rel: str) -> dict:
+        return yaml.safe_load(_read(rel))["jobs"][self.WORKFLOWS[rel]]
+
+    def test_every_condition_reads_a_job_level_flag(self):
+        import re
+
+        for rel in self.WORKFLOWS:
+            job = self._job(rel)
+            flags = set(job.get("env", {}))
+            for step in job["steps"]:
+                cond = str(step.get("if", ""))
+                for name in re.findall(r"env\.(\w+)", cond):
+                    assert name in flags, f"{rel}: {step.get('name')} tests {name}, not job-level"
+                assert "secrets." not in cond, f"{rel}: {step.get('name')} tests a secret"
+
+    def test_a_signed_build_is_verified_before_it_ships(self):
+        for rel in self.WORKFLOWS:
+            steps = self._job(rel)["steps"]
+            names = [s.get("name") for s in steps]
+            verify = steps[names.index("Verify the signature")]
+            assert verify["if"] == "env.CAN_SIGN == 'true'", rel
+            assert names.index("Verify the signature") < names.index("Upload artefact"), rel
