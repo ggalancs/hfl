@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a handle to HFL's process instead. Stopping a model on Windows also left
   llama-server running with the model still in memory, because SIGTERM
   ended the guard alone; HFL now ends the whole process tree.
+- **LoRA adapters apply on Windows with llama-server.** HFL passed each
+  adapter as `--lora-scaled PATH:SCALE`, which llama-server splits at every
+  colon, so the `C:` in a Windows path broke it and `hfl lora apply` was
+  refused. HFL now loads adapters with `--lora` and sets each scale through
+  llama-server's `/lora-adapters` once it has started. This also fixes any
+  path with a colon on macOS or Linux.
 - **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
   They had drifted: the server downloaded model types HFL cannot serve and
   registered no model type; the CLI logged no provenance and could take an

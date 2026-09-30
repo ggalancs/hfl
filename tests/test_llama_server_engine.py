@@ -48,7 +48,7 @@ if "--chat-template-file" in args:
     TEMPLATE = open(args[args.index("--chat-template-file") + 1]).read()
 TOOLS = os.environ.get("FAKE_SUPPORTS_TOOLS", "1") == "1"
 ADDS_BOS = os.environ.get("FAKE_ADDS_BOS", "0") == "1"
-if "--lora-scaled" in args and "bad" in args[args.index("--lora-scaled") + 1]:
+if "--lora" in args and "bad" in args[args.index("--lora") + 1]:
     sys.exit(1)  # as llama-server does with an adapter it cannot load
 
 class H(BaseHTTPRequestHandler):
@@ -73,6 +73,10 @@ class H(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         with open(os.environ["FAKE_ARGV_OUT"] + ".ports", "a") as out:  # each connection
             out.write(f"{self.client_address[1]}\n")
+        if self.path == "/lora-adapters":  # each launch's scales, in order
+            with open(os.environ["FAKE_ARGV_OUT"] + ".scales", "a") as out:
+                out.write(json.dumps(body) + "\n")
+            return self._send(200, {"success": True})
         if self.path == "/tokenize":
             bos = [1] if body.get("add_special") and ADDS_BOS else []
             return self._send(200, {"tokens": bos + [64] * max(1, len(body["content"].split()))})
@@ -699,7 +703,14 @@ class TestVision:
 
 
 def _adapters(argv: list[str]) -> str | None:
-    return argv[argv.index("--lora-scaled") + 1] if "--lora-scaled" in argv else None
+    return argv[argv.index("--lora") + 1] if "--lora" in argv else None
+
+
+def _scales(fake_server) -> list[list[dict]]:
+    """Every POST /lora-adapters the fake received, in order."""
+    _, out = fake_server
+    path = Path(str(out) + ".scales")
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
 class TestLora:
@@ -710,7 +721,8 @@ class TestLora:
         eng = LlamaServerEngine()
         eng.load(str(model), lora_paths=["/h/a.gguf", "/h/b.gguf"])
         eng.unload()
-        assert _adapters(_launches(fake_server)[0]) == "/h/a.gguf:1.0,/h/b.gguf:1.0"
+        assert _adapters(_launches(fake_server)[0]) == "/h/a.gguf,/h/b.gguf"
+        assert _scales(fake_server) == []  # all at 1: nothing to set
 
     def test_applied_and_removed_by_starting_it_again(self, engine, fake_server, tmp_path):
         first, second = tmp_path / "a.gguf", tmp_path / "b.gguf"
@@ -722,9 +734,14 @@ class TestLora:
         launches = _launches(fake_server)
         assert [_adapters(argv) for argv in launches] == [
             None,
-            f"{first}:0.5",
-            f"{first}:0.5,{second}:1.0",
-            f"{second}:1.0",
+            f"{first}",
+            f"{first},{second}",
+            f"{second}",
+        ]
+        # --lora loads each at 1; the 0.5 is set once it has started.
+        assert _scales(fake_server) == [
+            [{"id": 0, "scale": 0.5}],
+            [{"id": 0, "scale": 0.5}, {"id": 1, "scale": 1.0}],
         ]
         chat = engine.chat([ChatMessage(role="user", content="hi")])  # served again
         assert chat.text == "Hello hi"
@@ -749,7 +766,7 @@ class TestLora:
         eng.apply_lora(str(adapter), 1.0)
         eng.unload()
         last = _launches(fake_server)[-1]
-        assert "--chat-template-file" in last and _adapters(last) == f"{adapter}:1.0"
+        assert "--chat-template-file" in last and _adapters(last) == f"{adapter}"
 
     def test_what_it_refuses_before_starting_anything(self, engine, fake_server, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -858,3 +875,13 @@ class TestParityWithInProcess:
         save_snapshot(in_process, name="old", model_name="m")
         with pytest.raises(ValueError, match="other engine"):
             load_snapshot(engine, name="old", model_name="m")
+
+
+def test_a_windows_path_reaches_llama_server_whole(engine, fake_server, tmp_path):
+    """``--lora-scaled FNAME:SCALE`` splits at every colon: ``C:\\...`` broke
+    it on Windows ("lora-scaled format: FNAME:SCALE"). No colon is added."""
+    adapter = tmp_path / "a.gguf"
+    adapter.write_bytes(b"GGUF")
+    engine.apply_lora(str(adapter), 0.25)
+    last = _launches(fake_server)[-1]
+    assert "--lora-scaled" not in last and _adapters(last) == str(adapter)

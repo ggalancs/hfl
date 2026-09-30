@@ -152,7 +152,9 @@ def _prompt_cache_root() -> Path:
     return Path(config.home_dir) / "cache" / "llama-server"
 
 
-def _prompt_cache_dir(argv: list[str], model_path: str) -> Path | None:
+def _prompt_cache_dir(
+    argv: list[str], model_path: str, lora_scales: list[float] | None = None
+) -> Path | None:
     """The folder for this exact process's slots, or None when the prompt
     cache is not kept on disk. Keyed by everything that shapes the KV —
     the model file (path, size, mtime), its LoRA files, context, slots,
@@ -171,13 +173,11 @@ def _prompt_cache_dir(argv: list[str], model_path: str) -> Path | None:
             return [path]
         return [path, info.st_size, info.st_mtime_ns]
 
-    loras: list[str] = []
-    if "--lora-scaled" in argv:
-        spec = argv[argv.index("--lora-scaled") + 1]
-        loras = [item.rsplit(":", 1)[0] for item in spec.split(",")]
-    identity = json.dumps(
-        [argv[1:], stat(model_path), [stat(p) for p in loras]], sort_keys=True, default=str
-    )
+    loras = argv[argv.index("--lora") + 1].split(",") if "--lora" in argv else []
+    parts: list[Any] = [argv[1:], stat(model_path), [stat(p) for p in loras]]
+    if lora_scales:  # set after the start, so not in argv
+        parts.append(lora_scales)
+    identity = json.dumps(parts, sort_keys=True, default=str)
     digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
     folder = _prompt_cache_root() / f"{Path(model_path).stem}-{digest}"
     folder.mkdir(parents=True, exist_ok=True)
@@ -578,11 +578,12 @@ class LlamaServerEngine(InferenceEngine):
 
     def _launch(self, base_argv: list[str], model_path: str, timeout: float) -> None:
         assert self._log_path is not None
-        self._cache_dir = _prompt_cache_dir(base_argv, model_path)
+        self._cache_dir = _prompt_cache_dir(base_argv, model_path, self._lora_scales())
         # Always a place for slot files: the prompt cache's, or a work folder
         # of this engine's own (KV snapshots go through it).
         base_argv = [*base_argv, "--slot-save-path", str(self._slot_dir(model_path))]
         self._proc, self._client = start_server(base_argv, model_path, self._log_path, timeout)
+        self._set_lora_scales()
         if self._cache_dir is not None:
             self._restore_slots(_argv_slots(base_argv))
 
@@ -1135,13 +1136,38 @@ class LlamaServerEngine(InferenceEngine):
     @staticmethod
     def _check_adapter_path(path: str) -> None:
         if "," in path:
-            # ``--lora-scaled`` lists adapters separated by commas.
+            # ``--lora`` lists adapters separated by commas.
             raise ValueError(f"a LoRA adapter path cannot contain a comma: {path}")
 
     def _lora_args(self) -> list[str]:
+        # ``--lora``, each at scale 1, then ``_set_lora_scales``: the
+        # ``--lora-scaled FNAME:SCALE`` form splits at every colon, and a
+        # Windows path has one after its drive letter (``C:\...``).
         if not self._loras:
             return []
-        return ["--lora-scaled", ",".join(f"{path}:{scale}" for _, path, scale in self._loras)]
+        return ["--lora", ",".join(path for _, path, _ in self._loras)]
+
+    def _lora_scales(self) -> list[float]:
+        """Each adapter's scale, in order; empty when all are 1."""
+        scales = [scale for _, _, scale in self._loras]
+        return scales if any(scale != 1.0 for scale in scales) else []
+
+    def _set_lora_scales(self) -> None:
+        scales = self._lora_scales()
+        if not scales:
+            return
+        try:
+            done = self._http().post(
+                "/lora-adapters",
+                json=[{"id": i, "scale": scale} for i, scale in enumerate(scales)],
+                timeout=30,
+            )
+            done.raise_for_status()
+        except httpx.HTTPError as exc:
+            self._http().close()
+            self._client = None
+            self._stop()
+            raise RuntimeError(f"llama-server did not take the LoRA scales: {exc}") from exc
 
     def _relaunch(self) -> None:
         self.unload()

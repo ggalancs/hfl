@@ -36,8 +36,10 @@ def test_one_folder_per_exact_model_and_configuration(persist, tmp_path) -> None
     assert first is not None and first == ls._prompt_cache_dir(ARGV, str(model))
     other_ctx = ARGV[:4] + ["4096"] + ARGV[5:]
     assert ls._prompt_cache_dir(other_ctx, str(model)) != first
-    with_lora = [*ARGV, "--lora-scaled", f"{tmp_path / 'a.gguf'}:1.0"]
+    with_lora = [*ARGV, "--lora", str(tmp_path / "a.gguf")]
     assert ls._prompt_cache_dir(with_lora, str(model)) != first
+    scaled = ls._prompt_cache_dir(with_lora, str(model), [0.5])
+    assert scaled not in (first, ls._prompt_cache_dir(with_lora, str(model)))
     model.write_bytes(b"GGUF22")  # the file changed: its old KV must not come back
     os.utime(model, ns=(1, 1))
     assert ls._prompt_cache_dir(ARGV, str(model)) != first
