@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
+  They had drifted: the server downloaded model types HFL cannot serve and
+  registered no model type; the CLI logged no provenance and could take an
+  alias another model used. Now both refuse an unsupported type (before
+  downloading when the Hub says so), record the model type and its
+  provenance, keep an alias across a re-pull, and never take one in use.
 - **Qwen2.5-Coder's tool calls are fixed at the source.** Its GGUF template
   shows the model the tool-call format with doubled braces (`{{"name": ...}}`)
   and the model copies them. HFL corrects that line of the template on both

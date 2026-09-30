@@ -68,6 +68,185 @@ def _root(
     pass
 
 
+def _resolve_or_exit(model: str, quantize: str, revision: str | None) -> Any:
+    """``model`` resolved on the Hub; exits 1 saying why when it cannot be."""
+    from hfl.hub.resolver import resolve
+
+    console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
+    try:
+        resolved = resolve(model, quantization=quantize, revision=revision)
+    except (ValueError, Exception) as e:
+        error_msg = str(e)
+        if "Repo id must" in error_msg or "repo_name" in error_msg:
+            console.print(f"[red]{t('errors.format_error')}[/]")
+            console.print(f"\n[yellow]{t('errors.supported_formats')}[/]")
+            console.print(f"  - {t('errors.format_org_model')}")
+            console.print(f"  - {t('errors.format_org_model_quant')}")
+            console.print(f"  - {t('errors.format_model_name')}")
+            console.print(f"\n[dim]{t('errors.input_received')}:[/] {model}")
+            console.print(f"[dim]{t('errors.detail')}:[/] {e}")
+        elif "not found" in error_msg.lower() or "No se encontró" in error_msg:
+            console.print(f"[red]Error:[/] {e}")
+            console.print(f"[dim]{t('errors.check_name_or_search')}[/]")
+        elif _hub_unreachable(e):
+            _print_hub_unreachable()
+        else:
+            console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
+        raise typer.Exit(1) from e
+    return resolved
+
+
+def _show_resolved_or_exit(resolved: Any) -> None:
+    """What will be fetched; exits 1 for a model type HFL cannot serve."""
+    from hfl.converter.formats import (
+        get_model_type_display_name,
+        is_model_type_supported,
+        model_type_from_pipeline_tag,
+    )
+
+    resolved_model_type = model_type_from_pipeline_tag(resolved.pipeline_tag)
+
+    console.print(f"  {t('messages.repo')}: {resolved.repo_id}")
+    console.print(f"  {t('messages.format')}: {resolved.format}")
+    if resolved.filename:
+        console.print(f"  {t('messages.file')}: {resolved.filename}")
+    # Show the pinned revision + the immutable commit it resolved to, so the
+    # user can see (and later reproduce) exactly what was fetched.
+    if resolved.revision and resolved.revision != "main":
+        console.print(f"  {t('messages.revision')}: {resolved.revision}")
+    if resolved.commit_sha:
+        console.print(f"  {t('messages.commit')}: {resolved.commit_sha[:12]}")
+    if resolved_model_type:
+        type_name = get_model_type_display_name(resolved_model_type)
+        console.print(f"  {t('messages.type')}: {type_name}")
+
+        # Check if model type is supported
+        if not is_model_type_supported(resolved_model_type):
+            console.print(f"\n[red]{t('errors.unsupported_model_type')}[/]")
+            console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
+            raise typer.Exit(1)
+
+
+def _license_or_exit(repo_id: str, skip_license: bool) -> tuple[Any, str | None]:
+    """The model's license, accepted by the user (and when); exits 0 when
+    they decline."""
+    from datetime import datetime
+
+    from hfl.hub.license_checker import check_model_license, require_user_acceptance
+
+    license_info = None
+    license_accepted_at = None
+    if not skip_license:
+        try:
+            license_info = check_model_license(repo_id)
+            if not require_user_acceptance(license_info, repo_id):
+                console.print(f"[yellow]{t('warnings.download_cancelled')}[/]")
+                raise typer.Exit(0)
+            license_accepted_at = datetime.now().isoformat()
+        except Exception as e:
+            console.print(f"[yellow]{t('warnings.could_not_verify_license')}:[/] {e}")
+            if not typer.confirm(t("warnings.continue_without_license"), default=False):
+                raise typer.Exit(0) from e
+    return license_info, license_accepted_at
+
+
+def _download_or_exit(resolved: Any) -> Any:
+    """The download's local path; exits 1 saying why when it fails."""
+    from huggingface_hub.utils import GatedRepoError
+
+    from hfl.exceptions import DownloadIntegrityError
+    from hfl.hub.downloader import pull_model
+    from hfl.utils.retry import RetryExhausted
+
+    try:
+        local_path = pull_model(resolved)
+    except GatedRepoError as e:
+        # Gated repo: HF access control is separate from our local license
+        # acceptance — the user must request access on the Hub and provide a
+        # token. Show a clean, actionable message instead of a traceback.
+        console.print(f"\n[red]{t('errors.gated_model')}[/]")
+        console.print(f"[yellow]{t('errors.gated_model_hint', repo=resolved.repo_id)}[/]")
+        raise typer.Exit(1) from e
+    except RetryExhausted as e:
+        # Network/transport failure that exhausted retries — surface the real
+        # underlying cause (RetryExhausted carries it), not just the wrapper.
+        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.last_exception or e}")
+        raise typer.Exit(1) from e
+    except DownloadIntegrityError as e:
+        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.details}")
+        raise typer.Exit(1) from e
+    console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
+    return local_path
+
+
+def _print_ready(manifest: Any, detected_type: Any) -> None:
+    """The model is ready: its name, and how to use it by its alias."""
+    from hfl.converter.formats import ModelType
+
+    alias = manifest.alias
+    ready_msg = f"{t('messages.model_ready')}: {manifest.name} ({manifest.display_size})"
+    if alias:
+        console.print(f"\n[bold green]{ready_msg}[/]")
+        console.print(f"[cyan]{t('messages.alias_label')}:[/] {alias}")
+        # What the model is for: chat, embeddings over the API, or speech.
+        if detected_type == ModelType.EMBEDDING:
+            hint = t("messages.use_embed", name=alias)
+        elif detected_type == ModelType.TTS:
+            hint = f'hfl tts {alias} "..."'
+        else:
+            hint = f"hfl run {alias}"
+        console.print(f"[dim]{t('messages.use_command')}:[/] {hint}")
+    else:
+        console.print(f"\n[bold green]{ready_msg}[/]")
+
+
+def _print_pull_step_error(e: Any, repo_id: str) -> None:
+    """A pull step that could not go on, said as ``hfl pull`` always said it."""
+    if e.key == "errors.unsupported_model_type":
+        type_name = e.values.get("type", "")
+        console.print(f"\n[red]{t('errors.unsupported_model_type')}:[/] {type_name}")
+        console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
+    elif e.key == "errors.cannot_convert_gguf":
+        console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {e.values['reason']}")
+        console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
+        console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
+        console.print(f"  hfl search {repo_id.split('/')[-1]} --gguf\n")
+    else:
+        console.print(f"\n[red]{t('errors.conversion_failed')}:[/] {e.values.get('reason', '')}")
+        console.print(f"[dim]{t('errors.model_downloaded_but')}[/]")
+
+
+def _print_kept(finished: Any, quantize: str) -> None:
+    """What was done with a download that is not a GGUF."""
+    from hfl.hub.pull_service import Kept
+
+    kept = finished.kept
+    if kept == Kept.AS_IS and finished.model_type.value != "llm":
+        console.print(f"[dim]{t('messages.no_conversion_needed')}[/]")
+    elif kept == Kept.MLX_NATIVE:
+        console.print(
+            "[cyan]MLX pre-quantized model detected — serving natively with the MLX backend.[/]"
+        )
+    elif kept == Kept.MLX_ELSEWHERE:
+        console.print(
+            "[yellow]MLX pre-quantized model detected.[/] This repo is not convertible to "
+            "GGUF. To serve it you need Apple Silicon with the MLX backend: "
+            "`pip install 'hfl[mlx]'`."
+        )
+    elif kept == Kept.FOR_MLX:
+        console.print(
+            "[cyan]Apple Silicon + MLX available — keeping safetensors for the MLX backend.[/]"
+        )
+    if "template_recovered" in finished.notes:
+        console.print("[dim]Recovered missing chat_template from the base repo.[/]")
+    if "template_missing" in finished.notes:
+        console.print(
+            "[yellow]Warning:[/] this repo's tokenizer has no chat_template and none could "
+            "be recovered. Chat endpoints will fail until you add ``chat_template.jinja`` "
+            "manually."
+        )
+
+
 @app.command()
 def pull(
     model: str = typer.Argument(help=t("commands.pull.args.model")),
@@ -97,23 +276,13 @@ def pull(
     yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
 ):
     """Download a model from HuggingFace Hub."""
-    from datetime import datetime
-
-    from huggingface_hub.utils import GatedRepoError
-
-    from hfl.converter.formats import ModelFormat, detect_format
-    from hfl.exceptions import DownloadIntegrityError
-    from hfl.hub.downloader import pull_model
-    from hfl.hub.license_checker import check_model_license, require_user_acceptance
 
     # 0. A short name (``qwen3-coder``, ``qwen3:8b``) is chosen on the Hub
     # first and remembered as an alias. ``yes is True``: called as a plain
     # function the option holds Typer's (truthy) default, never a yes.
-    from hfl.hub.resolver import parse_model_spec, resolve
+    from hfl.hub.resolver import parse_model_spec
     from hfl.hub.shortname import is_short_name
-    from hfl.models.manifest import ModelManifest
     from hfl.models.registry import ModelRegistry
-    from hfl.utils.retry import RetryExhausted
 
     if parse_model_spec(model).repo_id is None and is_short_name(model):
         from hfl.hub.shortname import alias_for
@@ -126,310 +295,55 @@ def pull(
             alias = alias_for(model)
         model, quantize = choice.reference, choice.quantization
 
-    # 1. Resolve model
-    console.print(f"[bold]{t('messages.resolving')}[/] {model}...")
+    # 1. Resolve, show what was resolved, refuse a type HFL cannot serve
+    resolved = _resolve_or_exit(model, quantize, revision)
+    _show_resolved_or_exit(resolved)
+
+    # 2. License (R1 - legal audit), 3. download
+    license_info, license_accepted_at = _license_or_exit(resolved.repo_id, skip_license)
+    local_path = _download_or_exit(resolved)
+
+    # 4. Its type, and — an LLM that is not a GGUF — MLX or a conversion
+    from hfl.hub.pull_service import PullStepError, finish_download, register_pulled
+
     try:
-        resolved = resolve(model, quantization=quantize, revision=revision)
-    except (ValueError, Exception) as e:
-        error_msg = str(e)
-        if "Repo id must" in error_msg or "repo_name" in error_msg:
-            console.print(f"[red]{t('errors.format_error')}[/]")
-            console.print(f"\n[yellow]{t('errors.supported_formats')}[/]")
-            console.print(f"  - {t('errors.format_org_model')}")
-            console.print(f"  - {t('errors.format_org_model_quant')}")
-            console.print(f"  - {t('errors.format_model_name')}")
-            console.print(f"\n[dim]{t('errors.input_received')}:[/] {model}")
-            console.print(f"[dim]{t('errors.detail')}:[/] {e}")
-        elif "not found" in error_msg.lower() or "No se encontró" in error_msg:
-            console.print(f"[red]Error:[/] {e}")
-            console.print(f"[dim]{t('errors.check_name_or_search')}[/]")
-        elif _hub_unreachable(e):
-            _print_hub_unreachable()
-        else:
-            console.print(f"[red]{t('errors.error_resolving')}:[/] {e}")
+        finished = finish_download(
+            resolved,
+            local_path,
+            requested_format=format,
+            quantize=quantize,
+            on_convert=lambda: console.print(
+                f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]"
+            ),
+        )
+    except PullStepError as e:
+        _print_pull_step_error(e, resolved.repo_id)
         raise typer.Exit(1) from e
+    _print_kept(finished, quantize)
+    detected_type = finished.model_type
 
-    # Detect model type from pipeline_tag (before download)
-    from hfl.converter.formats import (
-        ModelType,
-        get_model_type_display_name,
-        is_model_type_supported,
-        model_type_from_pipeline_tag,
-    )
-
-    resolved_model_type = model_type_from_pipeline_tag(resolved.pipeline_tag)
-
-    console.print(f"  {t('messages.repo')}: {resolved.repo_id}")
-    console.print(f"  {t('messages.format')}: {resolved.format}")
-    if resolved.filename:
-        console.print(f"  {t('messages.file')}: {resolved.filename}")
-    # Show the pinned revision + the immutable commit it resolved to, so the
-    # user can see (and later reproduce) exactly what was fetched.
-    if resolved.revision and resolved.revision != "main":
-        console.print(f"  {t('messages.revision')}: {resolved.revision}")
-    if resolved.commit_sha:
-        console.print(f"  {t('messages.commit')}: {resolved.commit_sha[:12]}")
-    if resolved_model_type:
-        type_name = get_model_type_display_name(resolved_model_type)
-        console.print(f"  {t('messages.type')}: {type_name}")
-
-        # Check if model type is supported
-        if not is_model_type_supported(resolved_model_type):
-            console.print(f"\n[red]{t('errors.unsupported_model_type')}[/]")
-            console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
-            raise typer.Exit(1)
-
-    # 2. Verify license (R1 - Legal Audit)
-    license_info = None
-    license_accepted_at = None
-    if not skip_license:
-        try:
-            license_info = check_model_license(resolved.repo_id)
-            if not require_user_acceptance(license_info, resolved.repo_id):
-                console.print(f"[yellow]{t('warnings.download_cancelled')}[/]")
-                raise typer.Exit(0)
-            license_accepted_at = datetime.now().isoformat()
-        except Exception as e:
-            console.print(f"[yellow]{t('warnings.could_not_verify_license')}:[/] {e}")
-            if not typer.confirm(t("warnings.continue_without_license"), default=False):
-                raise typer.Exit(0) from e
-
-    # 3. Download
-    try:
-        local_path = pull_model(resolved)
-    except GatedRepoError as e:
-        # Gated repo: HF access control is separate from our local license
-        # acceptance — the user must request access on the Hub and provide a
-        # token. Show a clean, actionable message instead of a traceback.
-        console.print(f"\n[red]{t('errors.gated_model')}[/]")
-        console.print(f"[yellow]{t('errors.gated_model_hint', repo=resolved.repo_id)}[/]")
-        raise typer.Exit(1) from e
-    except RetryExhausted as e:
-        # Network/transport failure that exhausted retries — surface the real
-        # underlying cause (RetryExhausted carries it), not just the wrapper.
-        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.last_exception or e}")
-        raise typer.Exit(1) from e
-    except DownloadIntegrityError as e:
-        console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.details}")
-        raise typer.Exit(1) from e
-    console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
-
-    # 4. Detect model type and convert if necessary
-    fmt = detect_format(local_path)
-    final_path = local_path
-
-    # Use pipeline_tag from resolver if available, fallback to local detection
-    from hfl.converter.formats import detect_model_type
-
-    if resolved_model_type:
-        detected_type = resolved_model_type
-    else:
-        detected_type = detect_model_type(local_path)
-
-        # Check if model type is supported (only when detected locally after download)
-        if detected_type != ModelType.LLM and not is_model_type_supported(detected_type):
-            type_name = get_model_type_display_name(detected_type)
-            console.print(f"\n[red]{t('errors.unsupported_model_type')}:[/] {type_name}")
-            console.print(f"[dim]{t('errors.unsupported_model_type_hint', type=type_name)}[/]")
-            # Clean up downloaded files
-            import shutil
-
-            if local_path.exists():
-                shutil.rmtree(local_path) if local_path.is_dir() else local_path.unlink()
-            raise typer.Exit(1)
-
-    # Only attempt GGUF conversion for LLM models
-    if fmt != ModelFormat.GGUF and format != "safetensors":
-        # Non-LLM models (TTS, STT, etc.) don't need GGUF conversion
-        if detected_type != ModelType.LLM:
-            console.print(f"[dim]{t('messages.no_conversion_needed')}[/]")
-            # Keep as safetensors - no conversion needed
-        else:
-            from hfl.converter.formats import is_mlx_quantized_repo
-            from hfl.engine.selector import _mlx_preferred
-
-            # MLX pre-quantized repos (mlx-community/*, *-MLX-4bit, etc.)
-            # cannot be converted to GGUF — llama.cpp's
-            # convert_hf_to_gguf.py rejects the packed architecture.
-            # The MLXEngine serves them natively on Apple Silicon.
-            if is_mlx_quantized_repo(resolved.repo_id, local_path):
-                if _mlx_preferred():
-                    console.print(
-                        "[cyan]MLX pre-quantized model detected — "
-                        "serving natively with the MLX backend.[/]"
-                    )
-                else:
-                    console.print(
-                        "[yellow]MLX pre-quantized model detected.[/] "
-                        "This repo is not convertible to GGUF. To serve it you "
-                        "need Apple Silicon with the MLX backend: "
-                        "`pip install 'hfl[mlx]'`."
-                    )
-                # Many MLX quantisation pipelines drop the chat_template
-                # when they re-emit the tokenizer. Without it
-                # apply_chat_template() blows up at first /api/chat.
-                # Best-effort fetch from the upstream base repo.
-                from hfl.hub.chat_template_repair import (
-                    ensure_chat_template,
-                    has_chat_template,
-                )
-
-                if not has_chat_template(local_path):
-                    if ensure_chat_template(local_path, resolved.repo_id):
-                        console.print("[dim]Recovered missing chat_template from the base repo.[/]")
-                    else:
-                        console.print(
-                            "[yellow]Warning:[/] this repo's tokenizer has no "
-                            "chat_template and none could be recovered. "
-                            "Chat endpoints will fail until you add "
-                            "``chat_template.jinja`` manually."
-                        )
-                # Keep as safetensors — no GGUF conversion.
-            elif _mlx_preferred() and format != "gguf":
-                # Apple Silicon with mlx-lm available. Safetensors LLMs
-                # are served by MLX directly; skipping the GGUF detour
-                # saves both time and disk. An explicit ``--format gguf``
-                # is still honoured: it used to be ignored here, and so
-                # was ``-q``.
-                console.print(
-                    "[cyan]Apple Silicon + MLX available — "
-                    "keeping safetensors for the MLX backend.[/]"
-                )
-                # Keep as safetensors — no GGUF conversion.
-            else:
-                # LLM model on a platform without MLX - attempt GGUF conversion
-                import subprocess
-
-                from hfl.converter.gguf_converter import (
-                    GGUFConverter,
-                    check_model_convertibility,
-                )
-                from hfl.exceptions import ConversionError
-
-                is_convertible, reason = check_model_convertibility(local_path)
-
-                if not is_convertible:
-                    console.print(f"\n[yellow]{t('errors.cannot_convert_gguf')}:[/] {reason}")
-                    console.print(f"\n[dim]{t('errors.model_downloaded_but')}[/]")
-                    console.print(f"[dim]{t('errors.consider_searching_gguf')}[/]")
-                    console.print(f"  hfl search {resolved.repo_id.split('/')[-1]} --gguf\n")
-                    raise typer.Exit(1)
-
-                console.print(f"[yellow]{t('messages.converting_to_gguf', quantize=quantize)}[/]")
-                converter = GGUFConverter()
-                output_name = resolved.repo_id.replace("/", "--")
-                output_path = local_path.parent / output_name
-                try:
-                    final_path = converter.convert(local_path, output_path, quantize)
-                except (ConversionError, subprocess.CalledProcessError) as exc:
-                    # A missing build tool or a failed build step: say which,
-                    # not a traceback. The download itself is kept.
-                    reason = (
-                        (exc.details or exc.message)
-                        if isinstance(exc, ConversionError)
-                        else str(exc)
-                    )
-                    console.print(f"\n[red]{t('errors.conversion_failed')}:[/] {reason}")
-                    console.print(f"[dim]{t('errors.model_downloaded_but')}[/]")
-                    raise typer.Exit(1) from exc
-
-    # 4. Register
-    size = sum(
-        f.stat().st_size
-        for f in (final_path.rglob("*") if final_path.is_dir() else [final_path])
-        if f.is_file()
-    )
-
-    # A quantization label only for what IS quantized that way: a GGUF as
-    # downloaded, or the GGUF the conversion just produced. A safetensors
-    # repo kept as is (MLX, transformers) carries the requested level only as
-    # a conversion target that never ran — labelling it "Q4_K_M" named an
-    # MLX 4-bit build after a llama.cpp format it is not.
-    final_is_gguf = detect_format(final_path) == ModelFormat.GGUF
-    quant_label = (resolved.quantization or quantize) if final_is_gguf else None
-    short_name = resolved.repo_id.split("/")[-1].lower()
-    if quant_label:
-        short_name += f"-{quant_label.lower()}"
-
-    manifest = ModelManifest(
-        name=short_name,
-        repo_id=resolved.repo_id,
-        revision=resolved.revision,
-        commit_sha=resolved.commit_sha,
+    # 5. Register (with its provenance)
+    manifest = register_pulled(
+        resolved,
+        finished,
+        registry=ModelRegistry(),
+        license_info=license_info,
+        accepted_at=license_accepted_at,
         alias=alias,
-        local_path=str(final_path),
-        format=detect_format(final_path).value,
-        size_bytes=size,
-        quantization=quant_label,
-        model_type=detected_type.value,
-        # R1 - License information
-        license=license_info.license_id if license_info else None,
-        license_name=license_info.license_name if license_info else None,
-        license_url=license_info.url if license_info else None,
-        license_restrictions=license_info.restrictions if license_info else [],
-        gated=license_info.gated if license_info else False,
-        license_accepted_at=license_accepted_at,
+        quantize=quantize,
+        source="hfl pull",
     )
-
-    registry = ModelRegistry()
-    previous = registry.get(manifest.name)
-    if not alias and previous is not None and previous.name == manifest.name:
-        # Pulled again (an update): the entry is replaced, its alias is not
-        # lost — clients that use it would stop finding the model.
-        manifest.alias = alias = previous.alias
-    registry.add(manifest)
-
-    # Show result with alias if defined
-    ready_msg = f"{t('messages.model_ready')}: {manifest.name} ({manifest.display_size})"
-    if alias:
-        console.print(f"\n[bold green]{ready_msg}[/]")
-        console.print(f"[cyan]{t('messages.alias_label')}:[/] {alias}")
-        # What the model is for: chat, embeddings over the API, or speech.
-        if detected_type == ModelType.EMBEDDING:
-            hint = t("messages.use_embed", name=alias)
-        elif detected_type == ModelType.TTS:
-            hint = f'hfl tts {alias} "..."'
-        else:
-            hint = f"hfl run {alias}"
-        console.print(f"[dim]{t('messages.use_command')}:[/] {hint}")
-    else:
-        console.print(f"\n[bold green]{ready_msg}[/]")
+    _print_ready(manifest, detected_type)
 
 
-@app.command()
-def run(
-    model: str = typer.Argument(help=t("commands.run.args.model")),
-    backend: str = typer.Option("auto", "--backend", "-b", help=t("commands.run.options.backend")),
-    ctx: int = typer.Option(0, "--ctx", "-c", help=t("commands.run.options.ctx")),
-    system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
-    session: str = typer.Option(None, "--session", help=t("commands.run.options.session")),
-    yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help=t("commands.run.options.verbose"),
-    ),
-):
-    """Start an interactive chat with a model."""
-    from pathlib import Path
-
+def _check_chat_model(manifest: Any, model: str) -> None:
+    """Exit with the reason when ``manifest`` is not a text-generation model."""
     from hfl.converter.formats import (
         ModelType,
         get_model_type_display_name,
         is_model_type_supported,
     )
-    from hfl.engine.base import ChatMessage
-    from hfl.engine.selector import MissingDependencyError, select_engine
-    from hfl.models.registry import ModelRegistry
 
-    manifest = _local_or_pulled(model, ModelRegistry, assume_yes=yes)
-    if not manifest:
-        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
-        console.print(t("errors.use_list_to_see"))
-        raise typer.Exit(1)
-
-    # Check if model type is supported for chat
     model_type = get_model_type(manifest)
     if model_type != ModelType.LLM:
         type_name = get_model_type_display_name(model_type)
@@ -446,7 +360,13 @@ def run(
             console.print(f"\n[dim]{t('errors.use_tts_command')}[/]")
         raise typer.Exit(1)
 
-    _memory_check_or_exit(manifest, ctx)
+
+def _load_for_chat(manifest: Any, backend: str, ctx: int, verbose: bool) -> Any:
+    """The engine for ``manifest``, loaded; exits when a dependency is missing."""
+    from pathlib import Path
+
+    from hfl.engine.selector import MissingDependencyError, select_engine
+
     console.print(f"[cyan]{t('messages.loading')}[/] {manifest.name}...")
     try:
         from hfl.api.model_loader import load_kwargs_for
@@ -457,14 +377,18 @@ def run(
         console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
         raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.model_loaded')}[/]\n")
+    return engine
 
-    # R9 - Legal disclaimer before starting chat
-    console.print(f"[dim]{t('legal.ai_disclaimer')}[/]\n")
+
+def _open_session(session: str | None, model: str, system: str | None) -> tuple[list[Any], Any]:
+    """The conversation so far, and the saved session it lives in (None
+    without ``--session``)."""
+    from hfl.engine.base import ChatMessage
 
     messages: list[ChatMessage] = []
     chat_session = None
     if session:
-        from hfl.core.sessions import ChatSession, load_session, save_session
+        from hfl.core.sessions import ChatSession, load_session
 
         try:
             chat_session = load_session(session)
@@ -476,40 +400,12 @@ def run(
             console.print(
                 f"[dim]{t('messages.session_resumed', name=session, count=len(messages))}[/]"
             )
+    return messages, chat_session
 
-    # A created model's Modelfile: SYSTEM unless --system, MESSAGE exemplars
-    # to open a new conversation, PARAMETER for every reply.
-    from hfl.api.modelfile_defaults import (
-        apply_parameters,
-        baked_messages,
-        default_system,
-        splice_baked,
-    )
-    from hfl.engine.base import GenerationConfig
 
-    system_prompt = default_system(manifest, system)
-    if system_prompt and not any(m.role == "system" for m in messages):
-        messages.append(ChatMessage(role="system", content=system_prompt))
-    if all(m.role == "system" for m in messages):
-        messages[:] = splice_baked(messages, baked_messages(manifest))
-    gen_config = GenerationConfig()
-    apply_parameters(manifest, gen_config, ())
-
-    def _persist() -> None:
-        """Write after every exchange, not once at exit.
-
-        The feature exists to survive a restart, and the restarts worth
-        surviving are the ones nobody planned — a crash, a Ctrl-C, an OOM
-        kill. Saving only on a clean exit would lose exactly the sessions
-        the user wanted back. A chat session is a few KB of JSON, so the
-        write costs nothing next to a token.
-        """
-        if chat_session is None:
-            return
-        chat_session.messages = [{"role": m.role, "content": m.content} for m in messages]
-        chat_session.model = model
-        chat_session.touch()
-        save_session(chat_session)
+def _chat_loop(engine: Any, messages: list[Any], gen_config: Any, persist: Any) -> None:
+    """Read a line, stream the reply, save; until /exit, EOF or Ctrl-C."""
+    from hfl.engine.base import ChatMessage
 
     while True:
         try:
@@ -540,7 +436,82 @@ def run(
         console.print()  # New line at the end
 
         messages.append(ChatMessage(role="assistant", content="".join(full_response)))
-        _persist()
+        persist()
+
+
+@app.command()
+def run(
+    model: str = typer.Argument(help=t("commands.run.args.model")),
+    backend: str = typer.Option("auto", "--backend", "-b", help=t("commands.run.options.backend")),
+    ctx: int = typer.Option(0, "--ctx", "-c", help=t("commands.run.options.ctx")),
+    system: str = typer.Option(None, "--system", "-s", help=t("commands.run.options.system")),
+    session: str = typer.Option(None, "--session", help=t("commands.run.options.session")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=t("commands.run.options.verbose"),
+    ),
+):
+    """Start an interactive chat with a model."""
+
+    from hfl.engine.base import ChatMessage
+    from hfl.models.registry import ModelRegistry
+
+    manifest = _local_or_pulled(model, ModelRegistry, assume_yes=yes)
+    if not manifest:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {model}")
+        console.print(t("errors.use_list_to_see"))
+        raise typer.Exit(1)
+
+    _check_chat_model(manifest, model)
+
+    _memory_check_or_exit(manifest, ctx)
+    engine = _load_for_chat(manifest, backend, ctx, verbose)
+
+    # R9 - Legal disclaimer before starting chat
+    console.print(f"[dim]{t('legal.ai_disclaimer')}[/]\n")
+
+    messages, chat_session = _open_session(session, model, system)
+
+    # A created model's Modelfile: SYSTEM unless --system, MESSAGE exemplars
+    # to open a new conversation, PARAMETER for every reply.
+    from hfl.api.modelfile_defaults import (
+        apply_parameters,
+        baked_messages,
+        default_system,
+        splice_baked,
+    )
+    from hfl.engine.base import GenerationConfig
+
+    system_prompt = default_system(manifest, system)
+    if system_prompt and not any(m.role == "system" for m in messages):
+        messages.append(ChatMessage(role="system", content=system_prompt))
+    if all(m.role == "system" for m in messages):
+        messages[:] = splice_baked(messages, baked_messages(manifest))
+    gen_config = GenerationConfig()
+    apply_parameters(manifest, gen_config, ())
+
+    def _persist() -> None:
+        """Write after every exchange, not once at exit.
+
+        The feature exists to survive a restart, and the restarts worth
+        surviving are the ones nobody planned — a crash, a Ctrl-C, an OOM
+        kill. Saving only on a clean exit would lose exactly the sessions
+        the user wanted back. A chat session is a few KB of JSON, so the
+        write costs nothing next to a token.
+        """
+        if chat_session is None:
+            return
+        from hfl.core.sessions import save_session
+
+        chat_session.messages = [{"role": m.role, "content": m.content} for m in messages]
+        chat_session.model = model
+        chat_session.touch()
+        save_session(chat_session)
+
+    _chat_loop(engine, messages, gen_config, _persist)
 
     _persist()
     engine.unload()
@@ -1106,6 +1077,132 @@ def _is_public_bind(host: str) -> bool:
         return True
 
 
+def _apply_sandbox(sandbox: str | None) -> None:
+    # Process hardening, before anything is served. Restrictions that drop
+    # privileges only hold if they are applied before the first request, and
+    # ``apply_sandbox`` never raises: an unsupported platform logs a warning
+    # and serves unhardened, because "opt-in hardening" that refuses to boot
+    # is a denial of service the operator did not ask for. The flag falls
+    # back to HFL_SANDBOX so a container can set it without changing its
+    # command line.
+    import os as _os
+
+    from hfl.core.sandbox import apply_sandbox
+
+    _sandbox_result = apply_sandbox(sandbox or _os.environ.get("HFL_SANDBOX"))
+    if _sandbox_result.mode != "none" and not _sandbox_result.applied:
+        console.print(
+            f"[yellow]Sandbox '{_sandbox_result.mode}' requested but not applied: "
+            f"{_sandbox_result.reason}[/]"
+        )
+
+
+def _run_tray(
+    host: str, port: int, api_key: str | None, model: str | None, log_level: str, json_logs: bool
+) -> None:
+    """``serve --tray``: the server under a system tray icon."""
+    # On a Linux with no desktop session (a server, SSH, a container)
+    # pystray fails as it is imported, reaching for an X display: that
+    # was a DisplayNameError traceback. Say what is missing instead.
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/]")
+        raise typer.Exit(1)
+    try:
+        from hfl.tray.icon import run_tray
+
+        run_tray(
+            host=host,
+            port=port,
+            api_key=api_key,
+            model=model,
+            log_level=log_level,
+            json_logs=json_logs,
+            auto_start=True,
+        )
+        return
+    except ImportError:
+        console.print(
+            "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
+            "Install with: [cyan]pip install hfl[tray][/]"
+        )
+        raise typer.Exit(1) from None
+    except Exception as exc:
+        # DISPLAY set but no X server answering it (Xlib's errors).
+        if not type(exc).__module__.startswith("Xlib"):
+            raise
+        console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/] ({exc})")
+        raise typer.Exit(1) from None
+
+
+def _confirm_exposure(host: str, api_key: str | None) -> None:
+    """Warn — and, unattended, refuse unless decided — when ``host`` is not
+    a loopback address."""
+    # R6 - Privacy warning when exposing to the network.
+    #
+    # SEC: this used to test ``host == "0.0.0.0"`` literally, so `--host ::`
+    # (every IPv6 interface) and `--host 192.168.1.10` (a LAN address)
+    # exposed the server with no warning at all. Anything that is not a
+    # loopback address is an exposure; an unparseable value is treated as
+    # one too, because guessing in the permissive direction is what this
+    # check exists to prevent.
+    if _is_public_bind(host):
+        console.print(f"[yellow]Warning:[/] {t('warnings.network_exposure')}")
+        if api_key:
+            console.print(f"[green]{t('messages.api_key_enabled')}[/]")
+        else:
+            console.print(f"[yellow]{t('warnings.no_api_key')}[/]")
+        # Without a TTY (systemd, Docker, launchd) ``typer.confirm`` cannot
+        # ask anyone — and those are exactly the deployments where an
+        # accidental exposure matters most. An unattended start exposes the
+        # server only when someone decided it: the explicit opt-in, an API
+        # key (the exposure is authenticated, and someone set the key), or a
+        # container (where the bind reaches only as far as the ports its
+        # operator published). The container image used to stop here, every
+        # time: nobody can answer a prompt in one.
+        if not sys.stdin.isatty():
+            opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+            if not (opted_in or api_key or _in_container()):
+                console.print(f"[red]{t('warnings.refuse_unattended_bind', host=host)}[/]")
+                raise typer.Exit(1)
+            if _in_container() and not (opted_in or api_key):
+                console.print(f"[yellow]{t('warnings.container_bind')}[/]")
+        elif not typer.confirm(t("warnings.continue_question"), default=True):
+            raise typer.Exit(0)
+
+
+def _preload(model: str, ctx: int, state: Any) -> None:
+    """``serve --model``: the model loaded before the first request."""
+    from pathlib import Path
+
+    from hfl.engine.selector import MissingDependencyError, select_engine
+    from hfl.models.registry import ModelRegistry
+
+    manifest = _local_or_pulled(model, ModelRegistry)
+    if manifest is None:
+        console.print(f"[red]{t('errors.model_not_found')}:[/] {escape_markup(model)}")
+        raise typer.Exit(1)
+    if manifest:
+        _memory_check_or_exit(manifest, ctx if ctx > 0 else 0)
+        console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
+        try:
+            n_ctx = ctx if ctx > 0 else 0  # 0 = auto-detect from model
+            from hfl.api.model_loader import load_kwargs_for
+
+            state.engine = select_engine(Path(manifest.local_path))
+            state.engine.load(manifest.local_path, **load_kwargs_for(manifest, n_ctx))
+            state.current_model = manifest
+        except MissingDependencyError as e:
+            console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+            raise typer.Exit(1) from e
+
+
 @app.command()
 def serve(
     host: str | None = typer.Option(None, "--host", help=t("commands.serve.options.host")),
@@ -1147,23 +1244,7 @@ def serve(
     # Initialize structured logging
     configure_logging(level=log_level, json_format=json_logs)
 
-    # Process hardening, before anything is served. Restrictions that drop
-    # privileges only hold if they are applied before the first request, and
-    # ``apply_sandbox`` never raises: an unsupported platform logs a warning
-    # and serves unhardened, because "opt-in hardening" that refuses to boot
-    # is a denial of service the operator did not ask for. The flag falls
-    # back to HFL_SANDBOX so a container can set it without changing its
-    # command line.
-    import os as _os
-
-    from hfl.core.sandbox import apply_sandbox
-
-    _sandbox_result = apply_sandbox(sandbox or _os.environ.get("HFL_SANDBOX"))
-    if _sandbox_result.mode != "none" and not _sandbox_result.applied:
-        console.print(
-            f"[yellow]Sandbox '{_sandbox_result.mode}' requested but not applied: "
-            f"{_sandbox_result.reason}[/]"
-        )
+    _apply_sandbox(sandbox)
 
     # Host resolution: --host wins, then HFL_HOST / OLLAMA_HOST via config,
     # then the loopback default. The flag's default used to be the literal
@@ -1181,78 +1262,11 @@ def serve(
 
         host = _cfg.host
 
-    # Tray mode: launch system tray icon with server control
     if tray:
-        # On a Linux with no desktop session (a server, SSH, a container)
-        # pystray fails as it is imported, reaching for an X display: that
-        # was a DisplayNameError traceback. Say what is missing instead.
-        if sys.platform.startswith("linux") and not (
-            os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
-        ):
-            console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/]")
-            raise typer.Exit(1)
-        try:
-            from hfl.tray.icon import run_tray
+        _run_tray(host, port, api_key, model, log_level, json_logs)
+        return
 
-            run_tray(
-                host=host,
-                port=port,
-                api_key=api_key,
-                model=model,
-                log_level=log_level,
-                json_logs=json_logs,
-                auto_start=True,
-            )
-            return
-        except ImportError:
-            console.print(
-                "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
-                "Install with: [cyan]pip install hfl[tray][/]"
-            )
-            raise typer.Exit(1) from None
-        except Exception as exc:
-            # DISPLAY set but no X server answering it (Xlib's errors).
-            if not type(exc).__module__.startswith("Xlib"):
-                raise
-            console.print(f"[red]{escape_markup(t('errors.tray_no_display'))}[/] ({exc})")
-            raise typer.Exit(1) from None
-
-    # R6 - Privacy warning when exposing to the network.
-    #
-    # SEC: this used to test ``host == "0.0.0.0"`` literally, so `--host ::`
-    # (every IPv6 interface) and `--host 192.168.1.10` (a LAN address)
-    # exposed the server with no warning at all. Anything that is not a
-    # loopback address is an exposure; an unparseable value is treated as
-    # one too, because guessing in the permissive direction is what this
-    # check exists to prevent.
-    if _is_public_bind(host):
-        console.print(f"[yellow]Warning:[/] {t('warnings.network_exposure')}")
-        if api_key:
-            console.print(f"[green]{t('messages.api_key_enabled')}[/]")
-        else:
-            console.print(f"[yellow]{t('warnings.no_api_key')}[/]")
-        # Without a TTY (systemd, Docker, launchd) ``typer.confirm`` cannot
-        # ask anyone — and those are exactly the deployments where an
-        # accidental exposure matters most. An unattended start exposes the
-        # server only when someone decided it: the explicit opt-in, an API
-        # key (the exposure is authenticated, and someone set the key), or a
-        # container (where the bind reaches only as far as the ports its
-        # operator published). The container image used to stop here, every
-        # time: nobody can answer a prompt in one.
-        if not sys.stdin.isatty():
-            opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            )
-            if not (opted_in or api_key or _in_container()):
-                console.print(f"[red]{t('warnings.refuse_unattended_bind', host=host)}[/]")
-                raise typer.Exit(1)
-            if _in_container() and not (opted_in or api_key):
-                console.print(f"[yellow]{t('warnings.container_bind')}[/]")
-        elif not typer.confirm(t("warnings.continue_question"), default=True):
-            raise typer.Exit(0)
+    _confirm_exposure(host, api_key)
 
     # Store context size override in state for lazy-load path
     state = get_state()
@@ -1261,28 +1275,7 @@ def serve(
     _choose_backend(backend, parallel)
 
     if model:
-        from pathlib import Path
-
-        from hfl.engine.selector import MissingDependencyError, select_engine
-        from hfl.models.registry import ModelRegistry
-
-        manifest = _local_or_pulled(model, ModelRegistry)
-        if manifest is None:
-            console.print(f"[red]{t('errors.model_not_found')}:[/] {escape_markup(model)}")
-            raise typer.Exit(1)
-        if manifest:
-            _memory_check_or_exit(manifest, ctx if ctx > 0 else 0)
-            console.print(f"[cyan]{t('messages.pre_loading')}[/] {manifest.name}...")
-            try:
-                n_ctx = ctx if ctx > 0 else 0  # 0 = auto-detect from model
-                from hfl.api.model_loader import load_kwargs_for
-
-                state.engine = select_engine(Path(manifest.local_path))
-                state.engine.load(manifest.local_path, **load_kwargs_for(manifest, n_ctx))
-                state.current_model = manifest
-            except MissingDependencyError as e:
-                console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
-                raise typer.Exit(1) from e
+        _preload(model, ctx, state)
 
     console.print(f"[bold green]{t('messages.server_at', host=host, port=port)}[/]")
     console.print("  OpenAI:    POST /v1/chat/completions")
@@ -1780,58 +1773,18 @@ def _print_memory_summary(memory: Any) -> None:
         )
 
 
-@app.command()
-def search(
-    query: str = typer.Argument(help=t("commands.search.args.query")),
-    limit: int = typer.Option(100, "--limit", "-l", help=t("commands.search.options.limit")),
-    page_size: int = typer.Option(
-        10, "--page-size", "-n", help=t("commands.search.options.page_size")
-    ),
-    gguf_only: bool = typer.Option(
-        False, "--gguf", "-g", help=t("commands.search.options.gguf_only")
-    ),
-    max_params: float = typer.Option(
-        None,
-        "--max-params",
-        "-p",
-        help=t("commands.search.options.max_params"),
-    ),
-    min_params: float = typer.Option(
-        None, "--min-params", help=t("commands.search.options.min_params")
-    ),
-    sort: str = typer.Option(
-        "downloads",
-        "--sort",
-        "-s",
-        help=t("commands.search.options.sort"),
-    ),
-    literal: bool = typer.Option(False, "--literal", help=t("commands.search.options.literal")),
-):
-    """Search models on HuggingFace Hub with interactive pagination."""
-    from huggingface_hub import HfApi
-
-    from hfl.hub.query import describe, hub_queries, parse
-
-    # Validate minimum length
-    if len(query.strip()) < 3:
-        console.print(f"[red]Error:[/] {t('errors.search_min_chars')}")
-        raise typer.Exit(1)
-
-    api = HfApi()
-
-    # "coding assistant 7b" means a coding model of about 7B, not repos whose
-    # name contains that phrase (the Hub's search matches ids: it found five,
-    # the best with 7 downloads). Read the query; say how it was read.
-    intent = parse(query)
-    searches: list[dict] = [{"search": query}]
-    if not literal and intent.interpreted:
-        searches = hub_queries(intent)
-        gguf_only = gguf_only or intent.gguf
-        size_range = intent.size_range()
-        if size_range is not None and max_params is None and min_params is None:
-            min_params, max_params = size_range
-        console.print(f"[dim]{t('messages.search_interpreted', reading=describe(intent))}[/]")
-
+def _search_hub(
+    api: Any,
+    query: str,
+    searches: list[dict],
+    sort: str,
+    limit: int,
+    gguf_only: bool,
+    max_params: float | None,
+    min_params: float | None,
+) -> list[Any]:
+    """The Hub's models for ``searches`` (one, or several for a query read
+    as an intent), merged; exits 1 when the Hub cannot be reached."""
     try:
         # Search models with progress spinner
         with progress_spinner(t("messages.searching", query=query)):
@@ -1864,11 +1817,18 @@ def search(
         else:
             console.print(f"[red]{t('errors.error_searching')}:[/] {e}")
         raise typer.Exit(1) from e
+    return models
 
-    if not models:
-        console.print(f"[yellow]{t('errors.no_models_found', query=query)}[/]")
-        return
 
+def _filter_search(
+    models: list[Any],
+    query: str,
+    gguf_only: bool,
+    max_params: float | None,
+    min_params: float | None,
+) -> list[Any] | None:
+    """``models`` kept to GGUF repos and a size range, as asked; None (and
+    said why) when nothing is left."""
     # Filter by GGUF if requested
     if gguf_only:
         models = [
@@ -1880,7 +1840,7 @@ def search(
         ]
         if not models:
             console.print(f"[yellow]{t('errors.no_gguf_models_found', query=query)}[/]")
-            return
+            return None
 
     # Filter by number of parameters
     if max_params is not None or min_params is not None:
@@ -1905,10 +1865,13 @@ def search(
             filter_str = " and ".join(filter_desc)
             msg = t("errors.no_models_params_found", filter=filter_str, query=query)
             console.print(f"[yellow]{msg}[/]")
-            return
+            return None
+    return models
 
-    models = models[:limit]
 
+def _page_through(models: list[Any], query: str, page_size: int) -> None:
+    """``models`` a page at a time: a digit pulls one, SPACE shows the next
+    page, ``p`` the previous one, ``q`` stops."""
     total = len(models)
     total_pages = (total + page_size - 1) // page_size
     current_page = 0
@@ -1995,6 +1958,72 @@ def search(
     # Show help at the end
     console.print()
     console.print(f"[dim]{t('messages.to_download')}[/]")
+
+
+@app.command()
+def search(
+    query: str = typer.Argument(help=t("commands.search.args.query")),
+    limit: int = typer.Option(100, "--limit", "-l", help=t("commands.search.options.limit")),
+    page_size: int = typer.Option(
+        10, "--page-size", "-n", help=t("commands.search.options.page_size")
+    ),
+    gguf_only: bool = typer.Option(
+        False, "--gguf", "-g", help=t("commands.search.options.gguf_only")
+    ),
+    max_params: float = typer.Option(
+        None,
+        "--max-params",
+        "-p",
+        help=t("commands.search.options.max_params"),
+    ),
+    min_params: float = typer.Option(
+        None, "--min-params", help=t("commands.search.options.min_params")
+    ),
+    sort: str = typer.Option(
+        "downloads",
+        "--sort",
+        "-s",
+        help=t("commands.search.options.sort"),
+    ),
+    literal: bool = typer.Option(False, "--literal", help=t("commands.search.options.literal")),
+):
+    """Search models on HuggingFace Hub with interactive pagination."""
+    from huggingface_hub import HfApi
+
+    from hfl.hub.query import describe, hub_queries, parse
+
+    # Validate minimum length
+    if len(query.strip()) < 3:
+        console.print(f"[red]Error:[/] {t('errors.search_min_chars')}")
+        raise typer.Exit(1)
+
+    api = HfApi()
+
+    # "coding assistant 7b" means a coding model of about 7B, not repos whose
+    # name contains that phrase (the Hub's search matches ids: it found five,
+    # the best with 7 downloads). Read the query; say how it was read.
+    intent = parse(query)
+    searches: list[dict] = [{"search": query}]
+    if not literal and intent.interpreted:
+        searches = hub_queries(intent)
+        gguf_only = gguf_only or intent.gguf
+        size_range = intent.size_range()
+        if size_range is not None and max_params is None and min_params is None:
+            min_params, max_params = size_range
+        console.print(f"[dim]{t('messages.search_interpreted', reading=describe(intent))}[/]")
+
+    models = _search_hub(api, query, searches, sort, limit, gguf_only, max_params, min_params)
+    if not models:
+        console.print(f"[yellow]{t('errors.no_models_found', query=query)}[/]")
+        return
+
+    filtered = _filter_search(models, query, gguf_only, max_params, min_params)
+    if filtered is None:
+        return
+    models = filtered
+    models = models[:limit]
+
+    _page_through(models, query, page_size)
 
 
 @app.command()

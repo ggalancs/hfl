@@ -104,6 +104,15 @@ class TestPullStreaming:
             "success",
         ]
 
+    def test_a_type_hfl_cannot_serve_is_refused_before_downloading(self, client, mock_pull):
+        """As ``hfl pull`` does: the server used to download it anyway."""
+        m_resolve, m_pull, _, _ = mock_pull
+        m_resolve.return_value.pipeline_tag = "image-segmentation"
+        response = client.post("/api/pull", json={"model": "acme/test-model", "stream": True})
+        events = _parse_ndjson(response.content)
+        assert events[-1]["status"] == "error" and events[-1].get("code") == "unsupported"
+        assert not m_pull.called
+
     def test_downloading_events_carry_digest_and_counters(self, client, mock_pull):
         response = client.post("/api/pull", json={"model": "acme/test-model", "stream": True})
         events = _parse_ndjson(response.content)

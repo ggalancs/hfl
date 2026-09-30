@@ -39,6 +39,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from fastapi import APIRouter, Request
@@ -194,65 +195,30 @@ def _record_server_pull(
     policy: str,
     alias: str | None = None,
 ) -> None:
-    """Register the pulled model + log provenance for legal traceability.
-
-    Best-effort: the server pull path historically registered nothing, so
-    a failure here must never fail an otherwise-successful download. The
-    caller wraps this in ``asyncio.to_thread`` and swallows exceptions.
+    """Register the pulled model and log its provenance, through the steps
+    ``hfl pull`` uses too (:mod:`hfl.hub.pull_service`): the model type is
+    recorded, a re-pull keeps its alias, an alias in use is never taken.
+    The server's own registry: a fresh ModelRegistry() wrote the file, but
+    the one /api/tags and every load read kept its old view until restart.
+    Raises :class:`~hfl.hub.pull_service.PullStepError` for a model type
+    HFL cannot serve (its download removed).
     """
     from datetime import datetime
+    from pathlib import Path
 
-    from hfl.converter.formats import detect_format
     from hfl.core.container import get_registry
-    from hfl.models.manifest import ModelManifest
-    from hfl.models.provenance import log_conversion
+    from hfl.hub.pull_service import finish_download, register_pulled
 
-    fmt = detect_format(local_path)
-    if local_path.is_file():
-        size = local_path.stat().st_size
-    else:
-        size = sum(f.stat().st_size for f in local_path.rglob("*") if f.is_file())
-
-    short_name = resolved.repo_id.split("/")[-1].lower()
-    # Only a GGUF is quantized at the level the resolver reports; for a
-    # safetensors repo that value is just the level that was asked for.
-    from hfl.converter.formats import ModelFormat
-
-    quant = getattr(resolved, "quantization", None) if fmt == ModelFormat.GGUF else None
-    if quant:
-        short_name += f"-{quant.lower()}"
-
-    accepted_at = datetime.now().isoformat()
-    manifest = ModelManifest(
-        name=short_name,
-        repo_id=resolved.repo_id,
-        local_path=str(local_path),
-        format=fmt.value,
-        size_bytes=size,
-        revision=getattr(resolved, "revision", None),
-        commit_sha=getattr(resolved, "commit_sha", None),
-        quantization=quant,
-        license=license_info.license_id,
-        license_name=license_info.license_name,
-        license_url=license_info.url,
-        license_restrictions=license_info.restrictions,
-        gated=license_info.gated,
-        license_accepted_at=accepted_at,
-    )
-    # The server's own registry: a fresh ModelRegistry() wrote the file, but
-    # the one /api/tags and every load read kept its old view until restart.
-    registry = get_registry()
-    if alias and registry.get(alias) is None:  # never steal a name in use
-        manifest.alias = alias
-    registry.add(manifest)
-
-    log_conversion(
-        source_repo=resolved.repo_id,
-        source_format=fmt.value,
-        target_path=str(local_path),
-        original_license=license_info.license_id,
-        license_accepted=True,
-        notes=f"server /api/pull; owner license policy '{policy}'",
+    finished = finish_download(resolved, Path(local_path), convert=False)
+    register_pulled(
+        resolved,
+        finished,
+        registry=get_registry(),
+        license_info=license_info,
+        accepted_at=datetime.now().isoformat(),
+        alias=alias,
+        quantize=None,
+        source=f"server /api/pull; owner license policy '{policy}'",
     )
 
 
@@ -277,16 +243,31 @@ async def iter_pull_events(
         yield line
 
 
-async def _run_pull_streaming(
-    req: PullRequest, *, quantization: str | None = None
-) -> AsyncIterator[str]:
-    """Async NDJSON stream mirroring Ollama's pull progress shape.
+@dataclass
+class _PullState:
+    """What each stage of a server pull hands to the next."""
 
-    The heavy lifting (network I/O + disk writes) runs in a worker
-    thread via :func:`asyncio.to_thread` so the event loop stays free
-    to emit progress events.
-    """
-    from hfl.hub.downloader import pull_model
+    resolved: Any = None
+    alias: str | None = None
+    local_path: Any = None
+
+
+def _bytes_on_disk(local_path: Any) -> int:
+    """The download's size on disk (0 if it cannot be read)."""
+    try:
+        if local_path.is_file():
+            return int(local_path.stat().st_size)
+        return sum(f.stat().st_size for f in local_path.rglob("*") if f.is_file())
+    except OSError:  # pragma: no cover - stat failure is rare and non-fatal
+        return 0
+
+
+async def _resolve_stage(
+    req: PullRequest, quantization: str | None, state: "_PullState"
+) -> AsyncIterator[str]:
+    """Phase 1: the reference resolved on the Hub (a short name first chosen
+    as the best GGUF build, and kept as an alias). ``state.resolved`` stays
+    None when it failed; the error event says why."""
     from hfl.hub.resolver import resolve
 
     # --- Phase 1: resolve manifest ----------------------------------
@@ -342,6 +323,86 @@ async def _run_pull_streaming(
         detail = log_internal_failure(logger, f"resolving {req.model!r}", exc)
         yield _event("error", error=detail)
         return
+    state.resolved, state.alias = resolved, alias
+
+
+async def _download_stage(
+    resolved: Any, digest_label: str, progress: Any, state: "_PullState"
+) -> AsyncIterator[str]:
+    """Phase 2: the blocking download in a worker, with a heartbeat every
+    2 s carrying the bytes on disk so far, so a client (Open WebUI) keeps
+    its progress bar alive. ``state.local_path`` stays None when it failed."""
+    from hfl.hub.downloader import pull_model
+
+    # --- Phase 2: download ------------------------------------------
+    # We run the blocking hf_hub_download in a worker; meanwhile a
+    # heartbeat coroutine keeps the stream alive so Open WebUI
+    # doesn't think the connection stalled.
+    download_task = asyncio.create_task(asyncio.to_thread(pull_model, resolved))
+
+    while not download_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(download_task), timeout=2.0)
+        except asyncio.TimeoutError:
+            # 2 s since the last heartbeat — emit another, with the bytes
+            # on disk so far, so the client keeps the progress bar alive.
+            yield _event("downloading", digest=digest_label, **await asyncio.to_thread(progress))
+        except asyncio.CancelledError:  # pragma: no cover — client disconnect
+            download_task.cancel()
+            raise
+        except Exception:
+            # The download failed — re-raise on the awaited task below.
+            break
+
+    try:
+        local_path = await download_task
+    except Exception as exc:
+        if is_network_error(exc):
+            logger.info(
+                "pull of %r: Hub unreachable mid-download (%s)",
+                resolved.repo_id,
+                type(exc).__name__,
+            )
+            yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
+            return
+        from hfl.exceptions import DownloadIntegrityError
+
+        if isinstance(exc, DownloadIntegrityError):
+            # Says which file and what to expect; no paths in it.
+            yield _event("error", error=f"{exc.message}: {exc.details}", code="integrity")
+            return
+        detail = log_internal_failure(logger, "download", exc)
+        yield _event("error", error=detail)
+        return
+    state.local_path = local_path
+
+
+async def _run_pull_streaming(
+    req: PullRequest, *, quantization: str | None = None
+) -> AsyncIterator[str]:
+    """Async NDJSON stream mirroring Ollama's pull progress shape.
+
+    The heavy lifting (network I/O + disk writes) runs in a worker
+    thread via :func:`asyncio.to_thread` so the event loop stays free
+    to emit progress events.
+    """
+    # --- Phase 1: resolve manifest ----------------------------------
+    state = _PullState()
+    async for line in _resolve_stage(req, quantization, state):
+        yield line
+    if state.resolved is None:
+        return
+    resolved, alias = state.resolved, state.alias
+
+    from hfl.hub.pull_service import PullStepError, unsupported_type
+
+    unsupported = unsupported_type(resolved)
+    if unsupported is not None:
+        # Known from the Hub: refused before a byte is downloaded, as the CLI does.
+        yield _event(
+            "error", error=f"{unsupported} models are not supported by HFL", code="unsupported"
+        )
+        return
 
     # --- License gate: owner policy, no human in the loop here ----------
     # Classify + apply HFL_LICENSE_POLICY. A license the owner has not
@@ -371,58 +432,15 @@ async def _run_pull_streaming(
 
     yield _event("downloading", digest=digest_label, **progress())
 
-    # --- Phase 2: download ------------------------------------------
-    # We run the blocking hf_hub_download in a worker; meanwhile a
-    # heartbeat coroutine keeps the stream alive so Open WebUI
-    # doesn't think the connection stalled.
-    download_task = asyncio.create_task(asyncio.to_thread(pull_model, resolved))
-
-    while not download_task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(download_task), timeout=2.0)
-        except asyncio.TimeoutError:
-            # 2 s since the last heartbeat — emit another, with the bytes
-            # on disk so far, so the client keeps the progress bar alive.
-            yield _event("downloading", digest=digest_label, **await asyncio.to_thread(progress))
-        except asyncio.CancelledError:  # pragma: no cover — client disconnect
-            download_task.cancel()
-            raise
-        except Exception:
-            # The download failed — re-raise on the awaited task below.
-            break
-
-    try:
-        local_path = await download_task
-    except Exception as exc:
-        if is_network_error(exc):
-            logger.info(
-                "pull of %r: Hub unreachable mid-download (%s)", req.model, type(exc).__name__
-            )
-            yield _event("error", error=HUB_UNREACHABLE_MESSAGE, code="hub_unreachable")
-            return
-        from hfl.exceptions import DownloadIntegrityError
-
-        if isinstance(exc, DownloadIntegrityError):
-            # Says which file and what to expect; no paths in it.
-            yield _event("error", error=f"{exc.message}: {exc.details}", code="integrity")
-            return
-        detail = log_internal_failure(logger, "download", exc)
-        yield _event("error", error=detail)
+    async for line in _download_stage(resolved, digest_label, progress, state):
+        yield line
+    if state.local_path is None:
         return
+    local_path = state.local_path
 
-    # Measure the actual on-disk size so the final event reports a
-    # concrete number (clients use it to render "100%").
-    total_bytes = 0
-    try:
-        if local_path.is_file():
-            total_bytes = local_path.stat().st_size
-        else:
-            for f in local_path.rglob("*"):
-                if f.is_file():
-                    total_bytes += f.stat().st_size
-    except OSError:  # pragma: no cover — stat failure is rare and non-fatal
-        pass
-
+    # The size on disk, so the final event reports a concrete number
+    # (clients use it to render "100%").
+    total_bytes = _bytes_on_disk(local_path)
     yield _event(
         "downloading",
         digest=digest_label,
@@ -445,6 +463,12 @@ async def _run_pull_streaming(
         await asyncio.to_thread(
             _record_server_pull, resolved, local_path, license_info, policy, alias
         )
+    except PullStepError as exc:
+        # A type HFL cannot serve, found only once downloaded: removed.
+        yield _event(
+            "error", error=f"{exc.values.get('type')} models are not supported", code="unsupported"
+        )
+        return
     except Exception as exc:  # pragma: no cover — defensive; recording is non-critical
         logger.warning("server pull bookkeeping failed for %s: %s", resolved.repo_id, exc)
 

@@ -147,7 +147,19 @@ class TestPersistenceHappensEveryTurn:
 
         from hfl.cli import main
 
-        tree = ast.parse(textwrap.dedent(inspect.getsource(main.run)))
+        # run() hands the loop to _chat_loop with its _persist (split to keep
+        # run() short): the loop must call what it was handed, every turn.
+        run_tree = ast.parse(textwrap.dedent(inspect.getsource(main.run)))
+        handed = [
+            n
+            for n in ast.walk(run_tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_chat_loop"
+            and any(isinstance(a, ast.Name) and a.id == "_persist" for a in n.args)
+        ]
+        assert handed, "run() does not hand _persist to the chat loop"
+        tree = ast.parse(textwrap.dedent(inspect.getsource(main._chat_loop)))
         loops = [n for n in ast.walk(tree) if isinstance(n, ast.While)]
         assert loops, "the chat loop disappeared"
 
@@ -155,7 +167,7 @@ class TestPersistenceHappensEveryTurn:
             return any(
                 isinstance(sub, ast.Call)
                 and isinstance(sub.func, ast.Name)
-                and sub.func.id == "_persist"
+                and sub.func.id == "persist"
                 for sub in ast.walk(node)
             )
 

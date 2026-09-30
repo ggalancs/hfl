@@ -29,7 +29,7 @@ import textwrap
 import pytest
 from typer.testing import CliRunner
 
-from hfl.cli.main import app, serve
+from hfl.cli.main import _apply_sandbox, app, serve
 from hfl.core.sandbox import SUPPORTED_MODES, apply_sandbox
 
 runner = CliRunner()
@@ -51,24 +51,34 @@ class TestOrdering:
     """A sandbox applied after the first request protects nothing."""
 
     @staticmethod
-    def _serve_tree() -> ast.Module:
-        return ast.parse(textwrap.dedent(inspect.getsource(serve)))
+    def _tree(fn) -> ast.Module:
+        return ast.parse(textwrap.dedent(inspect.getsource(fn)))
 
-    def test_apply_sandbox_runs_before_start_server(self):
-        tree = self._serve_tree()
+    @staticmethod
+    def _calls(tree: ast.Module) -> dict[str, int]:
         positions: dict[str, int] = {}
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name in ("apply_sandbox", "start_server"):
-                positions.setdefault(name, node.lineno)
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name:
+                    positions.setdefault(name, node.lineno)
+        return positions
 
-        assert "apply_sandbox" in positions, "serve() never applies the sandbox"
-        assert "start_server" in positions
-        assert positions["apply_sandbox"] < positions["start_server"], (
+    def _serve_tree(self) -> ast.Module:
+        # serve() hands the hardening to _apply_sandbox (split to keep it
+        # short); the guards below follow it there.
+        return self._tree(_apply_sandbox)
+
+    def test_apply_sandbox_runs_before_start_server(self):
+        in_serve = self._calls(self._tree(serve))
+        assert "_apply_sandbox" in in_serve, "serve() never applies the sandbox"
+        assert "start_server" in in_serve
+        assert in_serve["_apply_sandbox"] < in_serve["start_server"], (
             "the sandbox is applied after the server starts serving, which "
             "hardens nothing that matters"
+        )
+        assert "apply_sandbox" in self._calls(self._tree(_apply_sandbox)), (
+            "_apply_sandbox() never calls apply_sandbox"
         )
 
     def test_the_env_var_is_consulted(self):
@@ -139,7 +149,7 @@ class TestTheOperatorIsTold:
         Linux' and 'seccomp unavailable in this kernel' need different
         responses from the operator.
         """
-        source = inspect.getsource(serve)
+        source = inspect.getsource(_apply_sandbox)
         assert "not applied" in source or "_sandbox_result.reason" in source, (
             "serve() applies the sandbox but never reports a failure, so an "
             "operator who asked for hardening cannot tell whether they got it"
