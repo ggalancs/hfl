@@ -39,6 +39,8 @@ from hfl.engine.base import (
 # imported and exercised in environments without llama-cpp-python (CI
 # default, doc generators, type checkers).
 if TYPE_CHECKING:
+    from pathlib import Path
+
     # Keep the real ``Llama`` type visible to type checkers regardless of
     # whether the optional backend is installed in the checking env.
     from llama_cpp import Llama
@@ -236,6 +238,240 @@ _DEVICE_BUFFER_RE = re.compile(
 )
 # ``ggml_metal_device_init: GPU name:   MTL0 (Apple M3 Max)``
 _GPU_NAME_RE = re.compile(r"GPU name:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _validated_gguf_path(model_path: str) -> "Path":
+    """``model_path`` resolved, when it is an existing ``.gguf`` file."""
+    from pathlib import Path
+
+    path = Path(model_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    if not path.is_file():
+        raise ValueError(f"Model path is not a file: {model_path}")
+    if not path.suffix.lower() == ".gguf":
+        raise ValueError(f"Model file must be a .gguf file, got: {path.suffix}")
+    return path
+
+
+def _choose_chat_format(
+    kwargs: dict[str, Any], architecture: str | None, gguf_info: dict | None
+) -> str | None:
+    """The chat format to open the model with:
+
+    1. Explicit ``chat_format=`` from the caller — always wins.
+    2. GGUF ships an embedded ``tokenizer.chat_template`` — ``None``, so
+       llama-cpp-python uses the embedded Jinja template (any well-packaged
+       GGUF: bartowski, unsloth, lmstudio-community, official exports).
+    3. Static override from ``_ARCHITECTURE_CHAT_FORMAT`` — only as a last
+       resort, for community GGUFs that forgot to embed the template (else
+       llama-cpp-python's Llama-2 ``[INST]`` fallback ruins chat quality).
+
+    Overriding it when the GGUF has a Jinja template is worse than leaving
+    it alone: llama-cpp-python's static presets are frozen at Gemma 2 and
+    don't know Gemma 4's ``<|turn>`` / ``<|channel>`` delimiters.
+    """
+    chat_format = kwargs.get("chat_format")
+    has_embedded_template = bool(gguf_info and gguf_info.get("has_chat_template"))
+    if chat_format is None and architecture is not None and not has_embedded_template:
+        chat_format = _ARCHITECTURE_CHAT_FORMAT.get(architecture)
+        if chat_format is not None:
+            logger.info(
+                "Detected GGUF architecture %r with no embedded "
+                "chat_template → using static chat_format=%r",
+                architecture,
+                chat_format,
+            )
+    elif has_embedded_template:
+        logger.debug(
+            "GGUF for architecture %r ships an embedded "
+            "tokenizer.chat_template; deferring to it instead of "
+            "the static _ARCHITECTURE_CHAT_FORMAT override.",
+            architecture,
+        )
+
+    return chat_format
+
+
+def _choose_flash_attn(kwargs: dict[str, Any], architecture: str | None) -> bool:
+    """Whether to use flash-attention, which has been crash-prone for new
+    architectures in llama-cpp-python. Resolution order:
+
+    1. Per-load ``flash_attn=`` kwarg (e.g. from a Modelfile).
+    2. ``HFL_FLASH_ATTENTION`` / ``OLLAMA_FLASH_ATTENTION`` (``1``/``0``,
+       ``true``/``false``): falsy forces it off everywhere; truthy still
+       keeps the per-architecture safety list.
+    3. Architecture-aware default (off for known-unsafe arches, else on).
+    """
+    global_flash_env = os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get(
+        "OLLAMA_FLASH_ATTENTION"
+    )
+    global_flash: bool | None
+    if global_flash_env is None or global_flash_env == "":
+        global_flash = None
+    else:
+        global_flash = global_flash_env.strip().lower() in ("1", "true", "yes", "on")
+
+    if "flash_attn" in kwargs:
+        flash_attn = kwargs["flash_attn"]
+    elif global_flash is False:
+        flash_attn = False
+    elif architecture in _ARCHITECTURE_NO_FLASH_ATTN:
+        logger.info(
+            "Disabling flash_attn for architecture %r "
+            "(known unsafe in current llama-cpp-python). "
+            "Pass flash_attn=True to override.",
+            architecture,
+        )
+        flash_attn = False
+    else:
+        flash_attn = True
+
+    return bool(flash_attn)
+
+
+def _kv_cache_kwargs(kv_type: str | None) -> dict[str, Any]:
+    """KV cache quantisation: ``"q4_0"`` / ``"q8_0"`` as llama-cpp's
+    ``type_k`` / ``type_v`` integer enum. ``"f16"`` (the default) leaves the
+    fields unset so the library picks its own default."""
+    out: dict[str, Any] = {}
+    if kv_type and kv_type != "f16":
+        # Import under a second name and assign: binding the
+        # *annotated* name directly from an ``import`` is a
+        # redefinition for mypy when llama_cpp is absent (the CI
+        # venv omits the [llama] extra), while the annotation is
+        # what lets the ``except`` branch assign ``None`` when it
+        # is present. Splitting the two satisfies both.
+        _lcpp: Any
+        try:
+            from llama_cpp import llama_cpp as _lcpp_module
+
+            _lcpp = _lcpp_module
+        except Exception:
+            _lcpp = None
+        type_map = {}
+        if _lcpp is not None:
+            type_map = {
+                "q4_0": getattr(_lcpp, "GGML_TYPE_Q4_0", None),
+                "q8_0": getattr(_lcpp, "GGML_TYPE_Q8_0", None),
+                "f32": getattr(_lcpp, "GGML_TYPE_F32", None),
+                "f16": getattr(_lcpp, "GGML_TYPE_F16", None),
+            }
+        code = type_map.get(kv_type.lower())
+        if code is not None:
+            out["type_k"] = code
+            out["type_v"] = code
+            logger.info("KV cache quantised to %s", kv_type)
+        else:
+            logger.warning(
+                "kv_cache_type=%r unsupported by this llama-cpp build, falling back to f16",
+                kv_type,
+            )
+    return out
+
+
+def _vision_handler(
+    clip_model_path: str | None, path: "Path", architecture: str | None, verbose: bool
+) -> Any:
+    """The multimodal chat handler for a vision GGUF, or None. Its CLIP
+    projector (usually ``mmproj-*.gguf``) is the caller's, or one found
+    next to the model; with it ``create_chat_completion`` takes images."""
+    if clip_model_path is None:
+        from hfl.engine.projector import find_projector
+
+        candidate = find_projector(path)
+        if candidate is not None:
+            clip_model_path = str(candidate)
+            logger.info("Auto-detected CLIP projector: %s", candidate.name)
+    if not clip_model_path:
+        return None
+    return _build_vision_chat_handler(
+        architecture=architecture,
+        clip_model_path=clip_model_path,
+        verbose=verbose,
+    )
+
+
+def _speculative_draft(
+    draft_spec: Any, n_ctx: int, n_gpu_layers: Any, verbose: bool
+) -> tuple[Any, Any]:
+    """Speculative decoding: ``(draft Llama or None, draft_model or None)``.
+
+    ``"prompt-lookup"``: llama-cpp-python's ``LlamaPromptLookupDecoding`` —
+    no VRAM, 1.3-2x on repetitive prompts (RAG, code, structured output).
+    A GGUF path: a second small ``Llama`` behind
+    :class:`_LlamaModelDraftAdapter`, only safe with the same tokenizer
+    family as the target; benchmark before relying on it (the Python
+    ``draft_model`` callback's overhead can cancel the savings).
+    """
+    draft_llama: Llama | None = None
+    # Either a prompt-lookup decoder or a draft-model adapter,
+    # both duck-typed as llama-cpp's ``draft_model``.
+    draft_callable: Any = None
+    if draft_spec == "prompt-lookup":
+        try:
+            from llama_cpp.llama_speculative import (
+                LlamaPromptLookupDecoding,
+            )
+
+            draft_callable = LlamaPromptLookupDecoding(num_pred_tokens=10, max_ngram_size=2)
+            logger.info("Speculative decoding: prompt-lookup mode")
+        except Exception as exc:
+            logger.warning(
+                "prompt-lookup decoding unavailable (%s); continuing without speculation",
+                exc,
+            )
+    elif draft_spec:
+        logger.info("Loading speculative-decoding draft: %s", draft_spec)
+        try:
+            draft_llama = Llama(
+                model_path=str(draft_spec),
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                verbose=verbose,
+            )
+            draft_callable = _LlamaModelDraftAdapter(draft_llama)
+        except Exception as exc:
+            logger.warning(
+                "draft model load failed (%s); continuing without speculative decoding",
+                exc,
+            )
+            draft_llama = None
+    return draft_llama, draft_callable
+
+
+def _threads_for(requested: Any, cpu_only: bool) -> int | None:
+    """Threads to generate with: the caller's, else on a CPU without GPU
+    offload every physical core, else llama-cpp-python's own default.
+
+    Its default is half the cores: on a 4-core CPU 44.8 tok/s where all four
+    gave 89.0. Two such models at once would fight over the cores (53 tok/s
+    together), so they take turns (``generates_on_all_cpu_cores``), as
+    llama-server's do.
+    """
+    if requested:
+        return int(requested)
+    return _physical_cores() if cpu_only else None
+
+
+def _normalised_tool_calls(tool_calls: Any) -> list[dict] | None:
+    """llama-cpp-python's tool calls (``arguments`` a JSON string) as HFL's:
+    ``[{"function": {"name", "arguments": dict}}]``; None when there are none."""
+    if not tool_calls:
+        return None
+    import json as _json
+
+    out: list[dict] = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = _json.loads(args)
+            except (ValueError, TypeError):
+                args = {}
+        out.append({"function": {"name": fn.get("name", ""), "arguments": args or {}}})
+    return out
 
 
 def _physical_cores() -> int:
@@ -1698,22 +1934,8 @@ class LlamaCppEngine(InferenceEngine):
             FileNotFoundError: If the model file does not exist.
             ValueError: If the path is invalid or not a GGUF file.
         """
-        from pathlib import Path
-
-        # Validate model path for security and correctness
-        path = Path(model_path).resolve()
-
-        if not path.exists():
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-
-        if not path.is_file():
-            raise ValueError(f"Model path is not a file: {model_path}")
-
-        if not path.suffix.lower() == ".gguf":
-            raise ValueError(f"Model file must be a .gguf file, got: {path.suffix}")
-
-        # Use resolved path to prevent path traversal issues
-        model_path = str(path)
+        path = _validated_gguf_path(model_path)
+        model_path = str(path)  # resolved: no path traversal
 
         if Llama is None:
             raise RuntimeError(
@@ -1729,114 +1951,22 @@ class LlamaCppEngine(InferenceEngine):
         # at runtime, but mypy can't carry that narrowing through the
         # separate boolean — cast to the runtime-correct ``int``.
         n_ctx: int = cast(int, user_n_ctx if explicit_n_ctx else hfl_config.default_ctx_size)
-        # Phase 11 P1 — V2 row 13 VRAM auto-sizing moved *after* the
-        # architecture cap below so that arch-specific safe defaults
-        # (Gemma's 8192 cap) always take precedence. We only reach
-        # the VRAM path when neither the caller nor the architecture
-        # pinned a value.
         n_gpu_layers = kwargs.get("n_gpu_layers", hfl_config.default_n_gpu_layers)
 
-        # Read the GGUF header once and use it for BOTH chat-format
-        # detection AND the memory-safety gates below. This replaces the
-        # old ``_detect_chat_format_from_gguf`` call site — that helper
-        # is kept around for its own unit tests, but the load path now
-        # reads the header through a single shared probe.
+        # The GGUF header, read once, for the chat format and the memory
+        # gates. The architecture cap comes before VRAM auto-sizing (both
+        # in ``resolve_n_ctx``), so arch-specific safe defaults win.
         gguf_info = _read_gguf_model_info(model_path)
         architecture = gguf_info.get("architecture") if gguf_info else None
-
-        # Chat format selection: the decision tree is
-        #
-        #   1. Explicit ``chat_format=`` from the caller — always wins.
-        #   2. GGUF ships an embedded ``tokenizer.chat_template`` — leave
-        #      ``chat_format=None`` so llama-cpp-python uses the embedded
-        #      Jinja template. This is the correct path for any well-
-        #      packaged GGUF (bartowski, unsloth, lmstudio-community,
-        #      official Google exports, …).
-        #   3. Static override from ``_ARCHITECTURE_CHAT_FORMAT`` — only
-        #      as a last resort, for community GGUFs that forgot to
-        #      embed the template (which otherwise downgrade to
-        #      llama-cpp-python's Llama-2 ``[INST]`` fallback and
-        #      silently ruin chat quality).
-        #
-        # Overriding ``chat_format`` when the GGUF already has a Jinja
-        # template is worse than leaving it alone: the static presets
-        # llama-cpp-python ships are frozen at Gemma 2 and don't know
-        # about Gemma 4's ``<|turn>`` / ``<|channel>`` delimiter
-        # scheme, so forcing them breaks the prompt side of the chat.
-        chat_format = kwargs.get("chat_format")
-        has_embedded_template = bool(gguf_info and gguf_info.get("has_chat_template"))
-        if chat_format is None and architecture is not None and not has_embedded_template:
-            chat_format = _ARCHITECTURE_CHAT_FORMAT.get(architecture)
-            if chat_format is not None:
-                logger.info(
-                    "Detected GGUF architecture %r with no embedded "
-                    "chat_template → using static chat_format=%r",
-                    architecture,
-                    chat_format,
-                )
-        elif has_embedded_template:
-            logger.debug(
-                "GGUF for architecture %r ships an embedded "
-                "tokenizer.chat_template; deferring to it instead of "
-                "the static _ARCHITECTURE_CHAT_FORMAT override.",
-                architecture,
-            )
-
+        chat_format = _choose_chat_format(kwargs, architecture, gguf_info)
         n_ctx = resolve_n_ctx(model_path, gguf_info, n_ctx, explicit_n_ctx)
+        flash_attn = _choose_flash_attn(kwargs, architecture)
 
-        # Flash-attention is not safe for every architecture: llama-cpp-
-        # python's flash-attn path has been historically crash-prone for
-        # new arches. Force-disable for known-bad arches unless the
-        # caller explicitly opted in.
-        #
-        # Resolution order:
-        #   1. Per-load ``flash_attn=`` kwarg (e.g. from a Modelfile).
-        #   2. Global server toggle ``HFL_FLASH_ATTENTION`` /
-        #      ``OLLAMA_FLASH_ATTENTION`` — accepts ``"1"``/``"0"``,
-        #      ``"true"``/``"false"`` (case-insensitive). When set to a
-        #      falsy value, flash-attn is forced off across the board.
-        #      When truthy, the per-architecture safety list still
-        #      applies — operators turning the global on don't get
-        #      crashes on known-bad arches for free.
-        #   3. Architecture-aware default (False for known-unsafe arches,
-        #      True otherwise).
-        global_flash_env = os.environ.get("HFL_FLASH_ATTENTION") or os.environ.get(
-            "OLLAMA_FLASH_ATTENTION"
-        )
-        global_flash: bool | None
-        if global_flash_env is None or global_flash_env == "":
-            global_flash = None
-        else:
-            global_flash = global_flash_env.strip().lower() in ("1", "true", "yes", "on")
-
-        if "flash_attn" in kwargs:
-            flash_attn = kwargs["flash_attn"]
-        elif global_flash is False:
-            flash_attn = False
-        elif architecture in _ARCHITECTURE_NO_FLASH_ATTN:
-            logger.info(
-                "Disabling flash_attn for architecture %r "
-                "(known unsafe in current llama-cpp-python). "
-                "Pass flash_attn=True to override.",
-                architecture,
-            )
-            flash_attn = False
-        else:
-            flash_attn = True
-
-        # Preflight memory check: refuse to load when we can already
-        # tell the model + KV cache won't fit. When n_ctx is still 0
-        # at this point we're letting llama-cpp auto-detect from the
-        # GGUF metadata max — use that same value for the estimate so
-        # we catch oversized auto-detected contexts too.
-        preflight_ctx = n_ctx
-        if preflight_ctx <= 0 and gguf_info is not None:
-            preflight_ctx = gguf_info.get("max_context") or 0
+        # Refuse now when the model + KV cache already cannot fit. With n_ctx
+        # still 0 llama-cpp uses the GGUF's advertised maximum: that is checked.
+        preflight_ctx = n_ctx if n_ctx > 0 else (gguf_info or {}).get("max_context") or 0
         _preflight_memory_check(
-            model_path=model_path,
-            info=gguf_info,
-            n_ctx=preflight_ctx,
-            architecture=architecture,
+            model_path=model_path, info=gguf_info, n_ctx=preflight_ctx, architecture=architecture
         )
 
         logger.info("Loading GGUF model: %s", path.name)
@@ -1850,43 +1980,13 @@ class LlamaCppEngine(InferenceEngine):
             flash_attn,
             architecture,
         )
+        chat_handler = _vision_handler(kwargs.get("clip_model_path"), path, architecture, verbose)
 
-        # Phase 4 P0-6: vision / multimodal. Vision-capable GGUF
-        # models ship a paired CLIP/vision projector file (usually
-        # ``mmproj-*.gguf``). When the caller passes one — either as
-        # an explicit ``clip_model_path`` kwarg or as a path
-        # adjacent to ``model_path`` — build the matching multimodal
-        # chat handler so ``create_chat_completion`` accepts
-        # ``images`` in its messages.
-        clip_model_path: str | None = kwargs.get("clip_model_path")
-        if clip_model_path is None:
-            from hfl.engine.projector import find_projector
-
-            candidate = find_projector(path)
-            if candidate is not None:
-                clip_model_path = str(candidate)
-                logger.info("Auto-detected CLIP projector: %s", candidate.name)
-
-        chat_handler = None
-        if clip_model_path:
-            chat_handler = _build_vision_chat_handler(
-                architecture=architecture,
-                clip_model_path=clip_model_path,
-                verbose=verbose,
-            )
-
-        threads = kwargs.get("n_threads", hfl_config.default_threads) or None
         self._cpu_only = not _offloads_to_gpu(n_gpu_layers)
-        if threads is None and self._cpu_only:
-            # llama-cpp-python's default is half the cores: on a 4-core CPU
-            # 44.8 tok/s where all four gave 89.0. Two such models at once
-            # would fight over the cores (53 tok/s together), so they take
-            # turns (``generates_on_all_cpu_cores``), as llama-server does.
-            threads = _physical_cores()
+        threads = _threads_for(kwargs.get("n_threads", hfl_config.default_threads), self._cpu_only)
 
         start_time = time.perf_counter()
         try:
-            # Suppress Metal/CUDA initialization messages if verbose=False
             # Capture llama.cpp's loader dump instead of discarding it, so the
             # acceleration summary can be logged at INFO. With verbose=True the
             # user already sees everything on the terminal, so we don't capture.
@@ -1902,195 +2002,109 @@ class LlamaCppEngine(InferenceEngine):
                     "flash_attn": flash_attn,
                     "chat_format": chat_format,
                     **multi_gpu_kwargs(hfl_config),
+                    **_kv_cache_kwargs(kwargs.get("kv_cache_type") or hfl_config.kv_cache_type),
                 }
-                # Phase 11 P1: KV cache quantisation. Maps
-                # ``"q4_0"`` / ``"q8_0"`` strings to llama-cpp's
-                # ``type_k`` / ``type_v`` integer enum. ``"f16"`` is
-                # the default and leaves the fields unset so the
-                # library picks its own default.
-                kv_type = kwargs.get("kv_cache_type") or hfl_config.kv_cache_type
-                if kv_type and kv_type != "f16":
-                    # Import under a second name and assign: binding the
-                    # *annotated* name directly from an ``import`` is a
-                    # redefinition for mypy when llama_cpp is absent (the CI
-                    # venv omits the [llama] extra), while the annotation is
-                    # what lets the ``except`` branch assign ``None`` when it
-                    # is present. Splitting the two satisfies both.
-                    _lcpp: Any
-                    try:
-                        from llama_cpp import llama_cpp as _lcpp_module
-
-                        _lcpp = _lcpp_module
-                    except Exception:
-                        _lcpp = None
-                    type_map = {}
-                    if _lcpp is not None:
-                        type_map = {
-                            "q4_0": getattr(_lcpp, "GGML_TYPE_Q4_0", None),
-                            "q8_0": getattr(_lcpp, "GGML_TYPE_Q8_0", None),
-                            "f32": getattr(_lcpp, "GGML_TYPE_F32", None),
-                            "f16": getattr(_lcpp, "GGML_TYPE_F16", None),
-                        }
-                    code = type_map.get(kv_type.lower())
-                    if code is not None:
-                        llama_kwargs["type_k"] = code
-                        llama_kwargs["type_v"] = code
-                        logger.info("KV cache quantised to %s", kv_type)
-                    else:
-                        logger.warning(
-                            "kv_cache_type=%r unsupported by this llama-cpp build, "
-                            "falling back to f16",
-                            kv_type,
-                        )
                 if chat_handler is not None:
-                    # When a multimodal chat_handler is supplied,
-                    # ``chat_format`` must be None so llama-cpp-python
-                    # doesn't try to install a conflicting text-only
-                    # template.
+                    # A multimodal handler: no text-only template beside it.
                     llama_kwargs["chat_handler"] = chat_handler
                     llama_kwargs.pop("chat_format", None)
-                # Phase 8 P3-2: LoRA adapters (a Modelfile's ADAPTER lines)
-                # are applied after the load, all of them, through the same
-                # list as hot-applied ones (``apply_lora``): llama.cpp sets
-                # a context's adapters as one set, so an adapter handed to
+                # LoRA adapters (a Modelfile's ADAPTER lines) are applied after
+                # the load, with hot-applied ones (``apply_lora``): llama.cpp
+                # sets a context's adapters as one set, so one handed to
                 # ``Llama(lora_path=...)`` would be dropped by the first
                 # hot-apply.
                 lora_paths = list(kwargs.get("lora_paths") or [])
-                # V4 F5 — speculative decoding.
-                #
-                # Two modes are supported through the same kwarg:
-                #
-                #   draft_model_path = "prompt-lookup"
-                #       Use llama-cpp-python's
-                #       ``LlamaPromptLookupDecoding``. Zero VRAM cost,
-                #       reliable 1.3-2× speedup on prompts with
-                #       repetitive patterns (RAG, code, structured
-                #       output). The default for ``HFL_DRAFT_DEFAULT=
-                #       lookup``.
-                #
-                #   draft_model_path = "<path/to/draft.gguf>"
-                #       Load a second small ``Llama`` and route it
-                #       through :class:`_LlamaModelDraftAdapter`. Only
-                #       safe with a draft from the SAME tokenizer
-                #       family as the target (Qwen3-14B ↔ Qwen3-0.6B,
-                #       Llama-3.1-70B ↔ Llama-3.2-1B). Acceptance
-                #       rates and net speedup are workload-dependent —
-                #       benchmark before relying on it. The
-                #       per-callback overhead of llama-cpp-python's
-                #       Python ``draft_model`` API can in some cases
-                #       cancel out the savings; use prompt-lookup as
-                #       a known-good baseline.
-                draft_spec = kwargs.get("draft_model_path") or None
-                draft_llama: Llama | None = None
-                # Either a prompt-lookup decoder or a draft-model adapter,
-                # both duck-typed as llama-cpp's ``draft_model``.
-                draft_callable: Any = None
-                if draft_spec == "prompt-lookup":
-                    try:
-                        from llama_cpp.llama_speculative import (
-                            LlamaPromptLookupDecoding,
-                        )
-
-                        draft_callable = LlamaPromptLookupDecoding(
-                            num_pred_tokens=10, max_ngram_size=2
-                        )
-                        logger.info("Speculative decoding: prompt-lookup mode")
-                    except Exception as exc:
-                        logger.warning(
-                            "prompt-lookup decoding unavailable (%s); "
-                            "continuing without speculation",
-                            exc,
-                        )
-                elif draft_spec:
-                    logger.info("Loading speculative-decoding draft: %s", draft_spec)
-                    try:
-                        draft_llama = Llama(
-                            model_path=str(draft_spec),
-                            n_ctx=n_ctx,
-                            n_gpu_layers=n_gpu_layers,
-                            verbose=verbose,
-                        )
-                        draft_callable = _LlamaModelDraftAdapter(draft_llama)
-                    except Exception as exc:
-                        logger.warning(
-                            "draft model load failed (%s); continuing without speculative decoding",
-                            exc,
-                        )
-                        draft_llama = None
+                draft_llama, draft_callable = _speculative_draft(
+                    kwargs.get("draft_model_path") or None, n_ctx, n_gpu_layers, verbose
+                )
                 if draft_callable is not None:
                     llama_kwargs["draft_model"] = draft_callable
                 self._model = Llama(**llama_kwargs)
                 # Track the draft so ``unload`` releases its memory too.
                 self._draft_model = draft_llama
-            self._model_path = model_path
-            _LIVE.add(self)
-            self._architecture = architecture
-            # ``n_ctx`` may still be 0 here when the caller left it to
-            # llama-cpp-python's own metadata default — read back what
-            # the library actually opened so ``context_size`` never
-            # reports a value the model isn't running with.
-            try:
-                self._n_ctx = int(self._model.n_ctx())
-            except Exception:  # pragma: no cover — defensive
-                self._n_ctx = n_ctx
-            # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
-            # preference so downstream ``tokenize()`` calls don't
-            # double-prepend BOS on Gemma 4 and friends. Default True
-            # mirrors llama-cpp-python's old behaviour.
-            self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
-            self._is_multimodal = chat_handler is not None
-            self._loras = []
-            for index, lora in enumerate(lora_paths):
-                logger.info("Loading LoRA adapter: %s", lora)
-                self.apply_lora(lora, 1.0, adapter_id=f"modelfile-{index}")
-            self._formatters = []
-            if chat_handler is None:
-                self._formatters, added_bos = _install_template_formatters(self._model)
-                if added_bos:
-                    logger.info("Chat template does not start with BOS; HFL adds it")
-                if (
-                    chat_format is None
-                    and self._formatters
-                    and "chat_template.default" in self._model._chat_handlers
-                ):
-                    # The GGUF's own template, through HFL's formatter — not
-                    # the built-in format llama-cpp-python swaps in when it
-                    # recognises the template (Mistral's): that one dropped
-                    # system messages, the tools HFL wrote there with them,
-                    # and bypassed the BOS fix and the reasoning switch.
-                    self._model.chat_format = "chat_template.default"
-            # A vision chat handler has its own fixed format, never tools.
-            template = (getattr(self._model, "metadata", None) or {}).get(
-                "tokenizer.chat_template", ""
+            self._finish_load(
+                model_path, architecture, gguf_info, n_ctx, chat_handler, chat_format, lora_paths
             )
-            if not isinstance(template, str) or chat_handler is not None or chat_format:
-                template = ""  # a static format or a vision handler is used instead
-            self._chat_template = template
-            self._template_knows_tools = chat_handler is None and _template_renders_tools(
-                template, chat_format
-            )
-            self._template_takes_system = _template_takes_system(template)
             elapsed = time.perf_counter() - start_time
             mm_note = " (multimodal)" if self._is_multimodal else ""
             logger.info("Model loaded in %.2fs%s: %s", elapsed, mm_note, path.name)
-
-            # Report what the load actually did with the hardware. Without
-            # this the only way to know whether Metal/CUDA picked up the
-            # weights was to re-run with verbose=True and read llama.cpp's
-            # raw dump — so a fully accelerated load was indistinguishable
-            # from a CPU-only one.
-            self._acceleration = _summarize_acceleration("".join(captured))
-            if self._acceleration:
-                logger.info("Acceleration: %s", self._acceleration)
-            elif not verbose:
-                logger.info(
-                    "Acceleration: no GPU offload reported by llama.cpp "
-                    "(running on CPU). Check 'hfl doctor'."
-                )
-            _warn_if_on_battery()
+            self._report_acceleration("".join(captured), verbose)
         except Exception as e:
             logger.error("Failed to load model %s: %s", path.name, e)
             raise
+
+    def _finish_load(
+        self,
+        model_path: str,
+        architecture: str | None,
+        gguf_info: dict | None,
+        n_ctx: int,
+        chat_handler: Any,
+        chat_format: str | None,
+        lora_paths: list[str],
+    ) -> None:
+        """What a load sets once llama.cpp has the model: the context it
+        really opened, the BOS preference, adapters, template, formatters."""
+        self._model_path = model_path
+        _LIVE.add(self)
+        self._architecture = architecture
+        # ``n_ctx`` may still be 0 here when the caller left it to
+        # llama-cpp-python's own metadata default — read back what
+        # the library actually opened so ``context_size`` never
+        # reports a value the model isn't running with.
+        try:
+            self._n_ctx = int(self._model.n_ctx())
+        except Exception:  # pragma: no cover — defensive
+            self._n_ctx = n_ctx
+        # Phase 11 P1 — V2 row 39. Remember the tokenizer's BOS
+        # preference so downstream ``tokenize()`` calls don't
+        # double-prepend BOS on Gemma 4 and friends. Default True
+        # mirrors llama-cpp-python's old behaviour.
+        self._tokenizer_add_bos: bool = bool((gguf_info or {}).get("add_bos_token", True))
+        self._is_multimodal = chat_handler is not None
+        self._loras = []
+        for index, lora in enumerate(lora_paths):
+            logger.info("Loading LoRA adapter: %s", lora)
+            self.apply_lora(lora, 1.0, adapter_id=f"modelfile-{index}")
+        self._formatters = []
+        if chat_handler is None:
+            self._formatters, added_bos = _install_template_formatters(self._model)
+            if added_bos:
+                logger.info("Chat template does not start with BOS; HFL adds it")
+            if (
+                chat_format is None
+                and self._formatters
+                and "chat_template.default" in self._model._chat_handlers
+            ):
+                # The GGUF's own template, through HFL's formatter — not
+                # the built-in format llama-cpp-python swaps in when it
+                # recognises the template (Mistral's): that one dropped
+                # system messages, the tools HFL wrote there with them,
+                # and bypassed the BOS fix and the reasoning switch.
+                self._model.chat_format = "chat_template.default"
+        # A vision chat handler has its own fixed format, never tools.
+        template = (getattr(self._model, "metadata", None) or {}).get("tokenizer.chat_template", "")
+        if not isinstance(template, str) or chat_handler is not None or chat_format:
+            template = ""  # a static format or a vision handler is used instead
+        self._chat_template = template
+        self._template_knows_tools = chat_handler is None and _template_renders_tools(
+            template, chat_format
+        )
+        self._template_takes_system = _template_takes_system(template)
+
+    def _report_acceleration(self, loader_log: str, verbose: bool) -> None:
+        """What the load did with the hardware. Without it, a fully
+        accelerated load was indistinguishable from a CPU-only one unless
+        re-run with verbose=True and llama.cpp's raw dump read."""
+        self._acceleration = _summarize_acceleration(loader_log)
+        if self._acceleration:
+            logger.info("Acceleration: %s", self._acceleration)
+        elif not verbose:
+            logger.info(
+                "Acceleration: no GPU offload reported by llama.cpp "
+                "(running on CPU). Check 'hfl doctor'."
+            )
+        _warn_if_on_battery()
 
     def _holding(self, chunks: Iterator[str]) -> Iterator[str]:
         """``chunks`` read with the model held (``hfl.engine.base.held``)."""
@@ -2604,23 +2618,7 @@ class LlamaCppEngine(InferenceEngine):
 
         penalty = repeat_penalty_for(cfg, messages, tools)
         if cfg.logprobs is not None:
-            if cfg.response_format is not None:
-                raise NotImplementedError("logprobs together with a response format")
-            start_ns = time.monotonic_ns()
-            prompt, tools, markers = self._template_prompt(messages, cfg, tools)
-            text, entries, n_gen, finish = self._sample_with_logprobs(
-                prompt, cfg, penalty, special=markers
-            )
-            total_ns = time.monotonic_ns() - start_ns
-            return GenerationResult(
-                text=text,
-                tokens_generated=n_gen,
-                tokens_prompt=len(prompt),
-                tokens_per_second=n_gen / (total_ns / 1e9) if total_ns else 0,
-                stop_reason=finish,
-                total_duration=total_ns,
-                logprobs=entries,
-            )
+            return self._chat_with_logprobs(messages, cfg, tools, penalty)
         msgs, tools, markers = self._tool_messages(messages, tools)
         # Set on every request, so one never inherits the last one's.
         for formatter in self._formatters:
@@ -2657,19 +2655,7 @@ class LlamaCppEngine(InferenceEngine):
         # See generate(): zero the per-context perf counters first.
         _perf_reset(self._model)
         start_ns = time.monotonic_ns()
-        _render_special_tokens(self._model, markers)
-        try:
-            output = self._model.create_chat_completion(**kwargs)
-        except TypeError:
-            # Older llama-cpp-python without ``tools`` / ``response_format``
-            # support — strip them and retry so the caller's text-based
-            # parser can still extract calls.
-            kwargs.pop("tools", None)
-            kwargs.pop("response_format", None)
-            kwargs.pop("grammar", None)
-            output = self._model.create_chat_completion(**kwargs)
-        finally:
-            _render_special_tokens(self._model, False)
+        output = self._chat_completion(kwargs, markers)
         total_ns = time.monotonic_ns() - start_ns
         elapsed = total_ns / 1e9  # seconds, for the tokens/s ratio
 
@@ -2684,32 +2670,7 @@ class LlamaCppEngine(InferenceEngine):
         # route layer can separate reasoning from answer.
         if self._architecture in _ARCHITECTURE_CHANNEL_FILTER and not cfg.expose_reasoning:
             text = _strip_channel_markers(text, self._architecture)
-        tool_calls = message.get("tool_calls")
-
-        # Normalise tool_calls shape: llama-cpp-python may return
-        # [{"id": ..., "type": "function", "function": {"name", "arguments"}}]
-        # with ``arguments`` as a JSON string. We want a parsed dict.
-        normalised_tool_calls: list[dict] | None = None
-        if tool_calls:
-            import json as _json
-
-            normalised_tool_calls = []
-            for tc in tool_calls:
-                fn = tc.get("function", {})
-                args = fn.get("arguments")
-                if isinstance(args, str):
-                    try:
-                        args = _json.loads(args)
-                    except (ValueError, TypeError):
-                        args = {}
-                normalised_tool_calls.append(
-                    {
-                        "function": {
-                            "name": fn.get("name", ""),
-                            "arguments": args or {},
-                        }
-                    }
-                )
+        normalised_tool_calls = _normalised_tool_calls(message.get("tool_calls"))
 
         usage = output.get("usage", {})
         n_gen = usage.get("completion_tokens", 0)
@@ -2737,6 +2698,47 @@ class LlamaCppEngine(InferenceEngine):
             prompt_eval_duration=prompt_eval_ns,
             eval_duration=eval_ns,
         )
+
+    def _chat_with_logprobs(
+        self,
+        messages: list[ChatMessage],
+        cfg: GenerationConfig,
+        tools: list[dict] | None,
+        penalty: float,
+    ) -> GenerationResult:
+        """A chat reply sampled token by token, for its logprobs."""
+        if cfg.response_format is not None:
+            raise NotImplementedError("logprobs together with a response format")
+        start_ns = time.monotonic_ns()
+        prompt, tools, markers = self._template_prompt(messages, cfg, tools)
+        text, entries, n_gen, finish = self._sample_with_logprobs(
+            prompt, cfg, penalty, special=markers
+        )
+        total_ns = time.monotonic_ns() - start_ns
+        return GenerationResult(
+            text=text,
+            tokens_generated=n_gen,
+            tokens_prompt=len(prompt),
+            tokens_per_second=n_gen / (total_ns / 1e9) if total_ns else 0,
+            stop_reason=finish,
+            total_duration=total_ns,
+            logprobs=entries,
+        )
+
+    def _chat_completion(self, kwargs: dict, markers: bool) -> Any:
+        """``create_chat_completion`` with special tokens rendered as the
+        template needs; an older llama-cpp-python without ``tools`` /
+        ``response_format`` gets the call again without them, so the
+        caller's text-based parser can still extract calls."""
+        _render_special_tokens(self._model, markers)
+        try:
+            return self._model.create_chat_completion(**kwargs)
+        except TypeError:
+            for key in ("tools", "response_format", "grammar"):
+                kwargs.pop(key, None)
+            return self._model.create_chat_completion(**kwargs)
+        finally:
+            _render_special_tokens(self._model, False)
 
     def chat_stream(
         self,
