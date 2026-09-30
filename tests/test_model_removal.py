@@ -274,3 +274,43 @@ class TestEmbeddingModels:
         engine = _serving_embeddings(temp_config, "nomic-embed")
         response = owner.request("DELETE", "/api/delete", json={"model": "nomic-embed"})
         assert response.status_code == 200 and engine.unloaded
+
+
+class TestDownloadFolder:
+    """``hfl rm`` of a GGUF left its repo folder behind, holding only the
+    Hub's download bookkeeping (``.cache/huggingface/download/*.metadata``)."""
+
+    def _pulled(self, temp_config, *names):
+        folder = temp_config.models_dir / "org--repo"
+        meta = folder / ".cache" / "huggingface" / "download"
+        meta.mkdir(parents=True)
+        paths = []
+        for name in names:
+            paths.append(_gguf(folder, name))
+            (meta / f"{name}.metadata").write_text("etag")
+        return folder, paths
+
+    def test_the_folder_goes_with_its_last_file(self, temp_config):
+        from hfl.models.registry import get_registry
+        from hfl.models.removal import remove_model
+
+        folder, (path,) = self._pulled(temp_config, "m.Q4_K_M.gguf")
+        remove_model(get_registry(), _register(temp_config, "m", path))
+        assert not folder.exists() and temp_config.models_dir.exists()
+
+    def test_another_quantization_keeps_it(self, temp_config):
+        from hfl.models.registry import get_registry
+        from hfl.models.removal import remove_model
+
+        folder, (q4, q8) = self._pulled(temp_config, "m.Q4_K_M.gguf", "m.Q8_0.gguf")
+        _register(temp_config, "m8", q8)
+        remove_model(get_registry(), _register(temp_config, "m4", q4))
+        assert not q4.exists() and q8.exists() and (folder / ".cache").exists()
+
+    def test_a_file_straight_in_the_models_folder_leaves_it(self, temp_config):
+        from hfl.models.registry import get_registry
+        from hfl.models.removal import remove_model
+
+        path = _gguf(temp_config.models_dir, "loose.gguf")
+        remove_model(get_registry(), _register(temp_config, "loose", path))
+        assert temp_config.models_dir.exists()

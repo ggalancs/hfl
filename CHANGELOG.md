@@ -126,6 +126,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could be renamed but not deleted, so the next `hfl rm` dropped the entry
   and left the file on disk. Now nothing is touched, the message says to
   `hfl stop` the model first, and `/api/delete` answers 409.
+- **`hfl rm` of a GGUF no longer leaves its repo folder behind.** Removing
+  a single-file model left `models/<repo>/.cache/huggingface/…`, the Hub's
+  download bookkeeping, for good. The folder now goes with its last model
+  file. Another quantization of the same repo keeps it.
 - **The Windows executable stops when its launcher is stopped.** A one-file
   `hfl.exe` is two processes, and stopping the launcher (TerminateProcess,
   Task Manager, a supervisor) left `hfl.exe serve` serving on its own,

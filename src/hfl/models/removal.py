@@ -59,6 +59,21 @@ def _delete(path: Path) -> None:
         raise ModelInUse(str(path)) from exc
 
 
+def _drop_download_folder(folder: Path, models_dir: Path) -> None:
+    """The folder a single-file model came in, once only the Hub's download
+    bookkeeping (``.cache``) is left in it. ``hfl rm`` of a GGUF left
+    ``models/<repo>/.cache/huggingface/…`` behind for good. Another file
+    in it (another quantization of the same repo) keeps it."""
+    if not _inside(folder, models_dir):
+        return
+    try:
+        left = {entry.name for entry in folder.iterdir()}
+    except OSError:
+        return
+    if left <= {".cache"}:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def _resolved(path: Path) -> Path:
     try:
         return path.resolve()
@@ -89,7 +104,10 @@ def remove_model(registry: Any, manifest: ModelManifest) -> Removal:
         if not _inside(path, config.models_dir):
             result.kept_outside = path
         elif path.is_dir() or path.is_file():
+            was_file = path.is_file()
             _delete(path)
             result.deleted = True
+            if was_file:
+                _drop_download_folder(path.parent, config.models_dir)
     registry.remove(manifest.name)
     return result
