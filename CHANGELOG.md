@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp in process uses every physical core on a CPU without GPU**
+  (it used half, llama-cpp-python's default). On a 4-core CPU, one request
+  42.1 → 72.5 tok/s; two models take turns on the cores, as with
+  llama-server, and do 81.7 tok/s together (74.7 before). With a GPU, and
+  with an explicit thread count, nothing changes.
 - **Checked on real NVIDIA GPUs for the first time** (L4s on Modal): the
   engine and extras sections of the local audit pass on one L4 — llama.cpp
   with CUDA in process and as llama-server, Transformers, vLLM, speech,

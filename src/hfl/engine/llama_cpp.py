@@ -238,6 +238,30 @@ _DEVICE_BUFFER_RE = re.compile(
 _GPU_NAME_RE = re.compile(r"GPU name:\s*(.+?)\s*$", re.MULTILINE)
 
 
+def _physical_cores() -> int:
+    """Physical cores (hyperthreads slow llama.cpp down), else all of them."""
+    try:
+        import psutil
+
+        count = psutil.cpu_count(logical=False)
+    except Exception:  # psutil absent or failing
+        count = None
+    return max(1, int(count or os.cpu_count() or 1))
+
+
+def _offloads_to_gpu(n_gpu_layers: Any) -> bool:
+    """Whether this load puts layers on a GPU: some are asked for and this
+    llama-cpp-python build can offload at all."""
+    if isinstance(n_gpu_layers, int) and n_gpu_layers == 0:
+        return False
+    try:
+        from llama_cpp import llama_cpp as _lcpp
+
+        return bool(_lcpp.llama_supports_gpu_offload())
+    except Exception:  # an old build without the call: assume it can
+        return True
+
+
 def _summarize_acceleration(log_text: str) -> str | None:
     """Turn llama.cpp's loader dump into one human-readable INFO line.
 
@@ -1616,6 +1640,8 @@ class LlamaCppEngine(InferenceEngine):
         # One-line summary of what the load did with the hardware, mined
         # from llama.cpp's loader output. ``None`` = unknown / CPU-only.
         self._acceleration: str | None = None
+        # Loaded on the CPU alone (no GPU offload): see ``load``.
+        self._cpu_only = False
         # V4 F5 — companion draft model for speculative decoding.
         # Held here so ``unload()`` can free its memory alongside
         # the target.
@@ -1843,6 +1869,15 @@ class LlamaCppEngine(InferenceEngine):
                 verbose=verbose,
             )
 
+        threads = kwargs.get("n_threads", hfl_config.default_threads) or None
+        self._cpu_only = not _offloads_to_gpu(n_gpu_layers)
+        if threads is None and self._cpu_only:
+            # llama-cpp-python's default is half the cores: on a 4-core CPU
+            # 44.8 tok/s where all four gave 89.0. Two such models at once
+            # would fight over the cores (53 tok/s together), so they take
+            # turns (``generates_on_all_cpu_cores``), as llama-server does.
+            threads = _physical_cores()
+
         start_time = time.perf_counter()
         try:
             # Suppress Metal/CUDA initialization messages if verbose=False
@@ -1856,7 +1891,7 @@ class LlamaCppEngine(InferenceEngine):
                     "model_path": model_path,
                     "n_ctx": n_ctx,
                     "n_gpu_layers": n_gpu_layers,
-                    "n_threads": kwargs.get("n_threads", hfl_config.default_threads) or None,
+                    "n_threads": threads,
                     "verbose": verbose,
                     "flash_attn": flash_attn,
                     "chat_format": chat_format,
@@ -2777,6 +2812,11 @@ class LlamaCppEngine(InferenceEngine):
         # Each Llama has its own context: two models generate at once
         # (Metal: same output as alone, 1.56x faster than in turn).
         return True
+
+    @property
+    def generates_on_all_cpu_cores(self) -> bool:
+        # CPU only: every physical core (see ``load``); models take turns.
+        return bool(getattr(self, "_cpu_only", False)) and self._model is not None
 
     @property
     def context_size(self) -> int:

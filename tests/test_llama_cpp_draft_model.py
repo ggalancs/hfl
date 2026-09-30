@@ -349,3 +349,39 @@ class TestLlamaModelDraftAdapter:
         # the target falls back to plain decoding.
         assert out.dtype == np.intc
         assert len(out) == 0
+
+
+class TestThreadsOnTheCpu:
+    """llama-cpp-python's default is half the cores: 44.8 tok/s on a 4-core
+    CPU where all four gave 89.0. On the CPU alone HFL asks for every
+    physical core and the model takes turns with others; with a GPU the
+    default stays."""
+
+    def test_cpu_only_uses_every_physical_core_and_takes_turns(
+        self, monkeypatch, stub_llama_capture, gguf_path
+    ):
+        _stub_memory(monkeypatch)
+        monkeypatch.setattr(engine_module, "_offloads_to_gpu", lambda layers: False)
+        monkeypatch.setattr(engine_module, "_physical_cores", lambda: 6)
+        engine = engine_module.LlamaCppEngine()
+        engine.load(gguf_path, verbose=True)
+        assert stub_llama_capture[-1]["n_threads"] == 6
+        assert engine.generates_on_all_cpu_cores is True
+
+    def test_with_a_gpu_the_default_stays(self, monkeypatch, stub_llama_capture, gguf_path):
+        _stub_memory(monkeypatch)
+        monkeypatch.setattr(engine_module, "_offloads_to_gpu", lambda layers: True)
+        engine = engine_module.LlamaCppEngine()
+        engine.load(gguf_path, verbose=True)
+        assert stub_llama_capture[-1]["n_threads"] is None
+        assert engine.generates_on_all_cpu_cores is False
+
+    def test_an_explicit_thread_count_wins(self, monkeypatch, stub_llama_capture, gguf_path):
+        _stub_memory(monkeypatch)
+        monkeypatch.setattr(engine_module, "_offloads_to_gpu", lambda layers: False)
+        engine = engine_module.LlamaCppEngine()
+        engine.load(gguf_path, n_threads=3, verbose=True)
+        assert stub_llama_capture[-1]["n_threads"] == 3
+
+    def test_zero_gpu_layers_is_the_cpu(self):
+        assert engine_module._offloads_to_gpu(0) is False
