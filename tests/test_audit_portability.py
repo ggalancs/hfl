@@ -63,5 +63,19 @@ def test_the_watchdog_kills_the_whole_tree(tmp_path):
     assert done.returncode == 124 and time.monotonic() - started < 40
     child = int(marker.read_text())
     time.sleep(0.5)
-    alive = subprocess.run(["ps", "-p", str(child)], capture_output=True).returncode == 0
-    assert not alive, "the child outlived the watchdog"
+    assert not _alive(child), "the child outlived the watchdog"
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` runs; a zombie waiting for its parent does not. By
+    the OS itself: a slim Linux image has no ``ps``."""
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    stat = Path(f"/proc/{pid}/stat")
+    if stat.exists():  # Linux: state is the field after the name in parens
+        return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    return True

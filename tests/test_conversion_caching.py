@@ -244,6 +244,10 @@ class TestConvertResumeSupport:
 
         converter = GGUFConverter()
         converter.ensure_tools = MagicMock()
+        # A quantizer found, whatever this machine has on its PATH: without
+        # llama-quantize there, finding one runs a probe subprocess, and the
+        # counts below differed on a clean Linux (the extras CI replica).
+        converter._quantizer = MagicMock(return_value=["llama-quantize"])
         converter._verify_output = MagicMock()
 
         # Make subprocess.run create the final file for quantize step
@@ -274,6 +278,10 @@ class TestConvertResumeSupport:
 
         converter = GGUFConverter()
         converter.ensure_tools = MagicMock()
+        # A quantizer found, whatever this machine has on its PATH: without
+        # llama-quantize there, finding one runs a probe subprocess, and the
+        # counts below differed on a clean Linux (the extras CI replica).
+        converter._quantizer = MagicMock(return_value=["llama-quantize"])
         converter._verify_output = MagicMock()
 
         # The converter now runs an env-probe subprocess
@@ -315,6 +323,10 @@ class TestConvertResumeSupport:
 
         converter = GGUFConverter()
         converter.ensure_tools = MagicMock()
+        # A quantizer found, whatever this machine has on its PATH: without
+        # llama-quantize there, finding one runs a probe subprocess, and the
+        # counts below differed on a clean Linux (the extras CI replica).
+        converter._quantizer = MagicMock(return_value=["llama-quantize"])
         converter._verify_output = MagicMock()
 
         convert_step = 0
@@ -352,6 +364,10 @@ class TestConvertResumeSupport:
 
         converter = GGUFConverter()
         converter.ensure_tools = MagicMock()
+        # A quantizer found, whatever this machine has on its PATH: without
+        # llama-quantize there, finding one runs a probe subprocess, and the
+        # counts below differed on a clean Linux (the extras CI replica).
+        converter._quantizer = MagicMock(return_value=["llama-quantize"])
         converter._verify_output = MagicMock()
 
         result = converter.convert(model_path, output_path, "F16")

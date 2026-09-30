@@ -1,0 +1,38 @@
+name: Tests with extras
+
+# The suite with the [llama], [structured] and [transformers] extras. The
+# main Tests workflow installs [dev] only, so every test that needs
+# llama-cpp-python, llguidance or transformers is skipped there:
+# constrained decoding (engine/constrained.py, which needs llguidance AND
+# transformers) showed 12 % coverage. torch from its CPU-only index. Mirrored locally, for free,
+# by scripts/ci-extras-local.sh — run it before starting this.
+
+on:
+  workflow_dispatch:  # Solo ejecución manual
+
+jobs:
+  test-extras:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install with extras
+        # llama-cpp-python from its project's CPU wheels, as HFL's Docker
+        # image: building it from source would add ~10 minutes of runner time.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary=llama-cpp-python \
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            -e ".[dev,structured,llama,transformers]"
+
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=hfl --cov-report=term-missing --cov-fail-under=80
+          python -m coverage report --include="src/hfl/engine/constrained.py,src/hfl/engine/llama_cpp.py"
