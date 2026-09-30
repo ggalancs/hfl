@@ -254,6 +254,13 @@
         "model_missing": "{model} is not a local model. A Hub reference (org/model[:QUANT]) downloads it.",
         "parallel_ignored": "{url} is already running; it keeps its own settings (start it with `hfl serve --parallel N` for parallel requests)."
       }
+    },
+    "start": {
+      "description": "First run: a model that fits this machine, downloaded, and a chat",
+      "options": {
+        "yes": "Take the first suggestion without asking",
+        "chat": "Open a chat when the model is ready"
+      }
     }
   },
   "messages": {
@@ -321,7 +328,13 @@
     "run_pulling": "{model} is not on this machine yet — pulling it first.",
     "parallel_on": "Parallel requests: {slots} at once per GGUF model (llama-server); other formats keep their usual backend.",
     "search_interpreted": "Reading the query as: {reading} (--literal to search the text as written)",
-    "parallel_default": "Serving GGUF models through llama-server with 4 parallel slots (HFL_NUM_PARALLEL=1 for one request at a time)."
+    "parallel_default": "Serving GGUF models through llama-server with 4 parallel slots (HFL_NUM_PARALLEL=1 for one request at a time).",
+    "start_host": "This machine: {os}/{arch}, {ram} GB of RAM, GPU: {gpu}.",
+    "start_have": "You already have {name}. Starting a chat with it (Ctrl-D to leave).",
+    "start_offer": "Models that fit this machine (Apache-2.0, no sign-up):",
+    "start_choose": "Pick one [1]",
+    "start_none": "None of the suggested models could be found on the Hugging Face Hub right now.",
+    "start_ready": "Ready. Chat with it any time: hfl run {alias}"
   },
   "errors": {
     "format_error": "Format error: The model name is invalid.",

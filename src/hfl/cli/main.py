@@ -2944,6 +2944,116 @@ def discover(
     console.print(table)
 
 
+# The first model offered, by the RAM it needs (GB): Apache-2.0 and not
+# gated, so nobody has to sign up or accept terms; small first, so the
+# first answer comes in minutes, not after a 15 GB download.
+_FIRST_MODELS: tuple[tuple[float, str], ...] = (
+    (0, "qwen2.5:1.5b"),
+    (16, "qwen2.5:7b"),
+    (0, "qwen2.5:0.5b"),
+    (32, "qwen2.5:14b"),
+)
+
+
+@app.command("start", help=t("commands.start.description"))
+def start(
+    yes: bool = typer.Option(False, "--yes", "-y", help=t("commands.start.options.yes")),
+    chat: bool = typer.Option(True, "--chat/--no-chat", help=t("commands.start.options.chat")),
+) -> None:
+    """First run: a model that fits this machine, downloaded, and a chat."""
+    from hfl.hub.hw_profile import get_hw_profile
+    from hfl.hub.shortname import alias_for
+
+    profile = get_hw_profile()
+    host = t(
+        "messages.start_host",
+        os=profile.os,
+        arch=profile.arch,
+        ram=round(profile.system_ram_gb),
+        gpu=profile.gpu_kind,
+    )
+    console.print(f"[dim]{host}[/]")
+    have = _a_chat_model()
+    if have is not None:
+        console.print(t("messages.start_have", name=have))
+        if chat is True:
+            _chat_with(have)
+        return
+    offers = _first_model_offers(profile.system_ram_gb)
+    if not offers:
+        console.print(f"[yellow]{t('messages.start_none')}[/]")
+        raise typer.Exit(1)
+    console.print(t("messages.start_offer"))
+    for number, (name, match) in enumerate(offers, 1):
+        size = f"{match.size_bytes / 1e9:.1f} GB"
+        console.print(f"  {number}. {name}  [dim]{match.repo_id} · {size}[/]")
+    name = offers[(1 if yes is True else _pick(len(offers))) - 1][0]
+    pull(
+        model=name,
+        quantize="Q4_K_M",
+        format="auto",
+        revision=None,
+        alias=None,
+        skip_license=False,
+        yes=True,
+    )
+    alias = alias_for(name)
+    console.print(f"[green]{t('messages.start_ready', alias=alias)}[/]")
+    if chat is True:
+        _chat_with(alias)
+
+
+def _chat_with(model: str) -> None:
+    # None where Typer would pass None for an option left unset.
+    run(
+        model=model,
+        backend="auto",
+        ctx=0,
+        system=None,  # type: ignore[arg-type]
+        session=None,  # type: ignore[arg-type]
+        yes=True,
+        verbose=False,
+    )
+
+
+def _a_chat_model() -> str | None:
+    """A text model already here (its alias, else its name), or None."""
+    from hfl.models.registry import ModelRegistry
+
+    for manifest in ModelRegistry().list_all():
+        if (manifest.model_type or "llm") == "llm":
+            return str(manifest.alias or manifest.name)
+    return None
+
+
+def _first_model_offers(ram_gb: float) -> list[tuple[str, Any]]:
+    """Up to three short names that fit ``ram_gb``, with the GGUF build each
+    resolves to (size, repo); those the Hub cannot answer for are left out."""
+    from hfl.hub.shortname import find
+
+    names = [name for need, name in _FIRST_MODELS if ram_gb <= 0 or ram_gb >= need][:3]
+    offers = []
+    with progress_spinner(t("messages.searching", query="qwen2.5")):
+        for name in names:
+            try:
+                match = find(name)
+            except Exception:  # offline: said below when nothing is found
+                continue
+            if match is not None:
+                offers.append((name, match))
+    return offers
+
+
+def _pick(count: int) -> int:
+    """The number the user typed (Enter: 1)."""
+    while True:
+        answer = console.input(f"{t('messages.start_choose')}: ").strip()
+        if not answer:
+            return 1
+        if answer.isdigit() and 1 <= int(answer) <= count:
+            return int(answer)
+
+
 @app.command(help=t("commands.recommend.description"))
 def recommend(
     task: str | None = typer.Option(

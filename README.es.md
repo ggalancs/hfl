@@ -26,10 +26,14 @@ con OpenAI, Ollama y Anthropic. Sin cuenta. Sin nube propia, por diseño.
 ```bash
 pip install "hfl[llama,mlx]"        # la parte MLX solo se instala en Apple Silicon
 
-hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+hfl start                            # propone un modelo que cabe en este equipo y abre un chat
+hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M   # o cualquier modelo del Hub
 ```
 
-El modelo se descarga la primera vez y después se reutiliza desde el disco. Para servirlo como API:
+`hfl start` mira este equipo, ofrece hasta tres modelos pequeños con licencia
+Apache-2.0 que caben (sin registro ni condiciones que aceptar), descarga el que
+elijas y abre un chat: de cero a la primera respuesta en unos 30 segundos en un
+Mac. Cualquier modelo se descarga la primera vez y después se reutiliza desde el disco. Para servirlo como API:
 
 ```bash
 hfl serve --model hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M

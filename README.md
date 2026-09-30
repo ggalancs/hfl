@@ -26,10 +26,14 @@ Ollama- and Anthropic-compatible API. No account. No cloud of its own — by des
 ```bash
 pip install "hfl[llama,mlx]"        # the MLX part installs only on Apple Silicon
 
-hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+hfl start                            # suggests a model that fits this machine, then chats
+hfl run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M   # or any model on the Hub
 ```
 
-The model is downloaded the first time and reused from disk after that. To serve it instead:
+`hfl start` looks at this machine, offers up to three small Apache-2.0 models
+that fit (no sign-up, no terms to accept), downloads the one you pick and opens
+a chat: from nothing to a first answer in about 30 seconds on a Mac. Any model is
+downloaded the first time and reused from disk after that. To serve it instead:
 
 ```bash
 hfl serve --model hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M

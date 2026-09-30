@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`hfl start`: a guided first run.** It shows this machine, offers up to
+  three small Apache-2.0 models that fit its RAM (no sign-up, no terms),
+  downloads the one picked as the best GGUF build for this machine, and
+  opens a chat; with a chat model already here it opens that one. From an
+  empty HFL home to the first answer: 29 s on an M3 Max (Qwen2.5 1.5B).
+
 ### Changed
 
 - **llama.cpp in process uses every physical core on a CPU without GPU**
