@@ -54,6 +54,10 @@ REACHED_OTHERWISE: dict[str, str] = {
         "starts llama-server through it; never imported."
     ),
     "plugins": "Loaded through importlib at runtime, by design.",
+    "training.hf_lora_run": (
+        "run as `python -m hfl.training.hf_lora_run` by training.hf_lora, which "
+        "trains and merges in a process of its own; never imported."
+    ),
 }
 
 # The inventory is empty as of 2026-09-23, and that is the point: every

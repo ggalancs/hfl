@@ -559,6 +559,12 @@
         "summary": "Trazas OpenTelemetry",
         "description": "Exporta una traza por inferencia a un colector OTLP cuando HFL_OTEL_ENABLED=true.",
         "check_module": "opentelemetry.sdk"
+      },
+      "train": {
+        "name": "train",
+        "summary": "Entrenamiento LoRA fuera de Apple Silicon",
+        "description": "`hfl train` con Transformers y PEFT donde no hay MLX (NVIDIA, o la CPU): los mismos datos y opciones, y el adaptador fusionado en un modelo propio. Incluye [transformers].",
+        "check_module": "peft"
       }
     }
   },

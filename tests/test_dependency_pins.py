@@ -138,6 +138,14 @@ class TestStaticPyprojectPins:
         pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["coqui"], "coqui-tts")
         assert "[codec]" in pin, pin
 
+    def test_train_brings_peft_for_transformers_5(self):
+        """`hfl train` outside Apple Silicon trains with PEFT; 0.17+ is what
+        works with transformers 5 (resolved with it: peft 0.21.1)."""
+        deps = _load_pyproject()["project"]["optional-dependencies"]
+        pin = _find_pin(deps["train"], "peft")
+        assert ">=0.17" in pin.replace(" ", "") and "<1.0" in pin.replace(" ", ""), pin
+        assert "train" in deps["all"][0], deps["all"]
+
     def test_stt_keeps_a_pyav_faster_whisper_can_call(self):
         """PyAV 19 dropped av.open(metadata_errors=...), which faster-whisper
         1.2.1 passes: every transcription failed (local audit B32/B54/E8)."""

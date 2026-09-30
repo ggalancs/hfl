@@ -297,7 +297,8 @@ curl http://localhost:11434/api/tts -H "Content-Type: application/json" \
 - `hfl snapshot save|load|list|delete` — persist the KV cache to disk for warm starts.
 - `hfl draft-recommend` — pick a small Hub sibling for speculative decoding.
 - `hfl train <model> --data data.jsonl` — train a LoRA adapter on a local safetensors model
-  (Apple Silicon, `[mlx]`); the result is a model of its own. `--fuse` merges it, `--gguf Q4_K_M`
+  (MLX on Apple Silicon, `[mlx]`; Transformers + PEFT elsewhere, `[train]` — there the
+  adapter comes merged); the result is a model of its own. `--fuse` merges it, `--gguf Q4_K_M`
   also exports it for llama.cpp. Also `POST /api/train` (owner, on the host).
 - `hfl mcp serve` / `hfl mcp connect` — run as a Model Context Protocol server, or use MCP tools.
 - `hfl compliance-dashboard` — license risk across your local models.

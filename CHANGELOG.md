@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`hfl train` outside Apple Silicon.** Where MLX is not available, LoRA
+  training runs with Transformers + PEFT (`pip install 'hfl[train]'`; in
+  `[all]` too): the same data formats, options and progress as with MLX, the
+  answer-only loss of `--mask-prompt`, and a merged model registered under
+  the chosen name (the Transformers engine loads no separate adapter);
+  `--gguf` exports it. `--backend` picks one explicitly; `/api/train`
+  chooses the same way. On an NVIDIA L4: 60 iterations on Qwen2.5-0.5B in
+  41 s, and the trained model answered a fact the base did not know.
 - **`hfl start`: a guided first run.** It shows this machine, offers up to
   three small Apache-2.0 models that fit its RAM (no sign-up, no terms),
   downloads the one picked as the best GGUF build for this machine, and

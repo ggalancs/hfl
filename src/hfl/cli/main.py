@@ -2266,8 +2266,14 @@ def train(
     gguf: str | None = typer.Option(
         None, "--gguf", help="Also export the merged model as GGUF at this quantization"
     ),
+    backend: str = typer.Option(
+        "auto",
+        "--backend",
+        help="auto (MLX on Apple Silicon, else Transformers), mlx, transformers",
+    ),
 ) -> None:
-    """Train a LoRA adapter with mlx-lm and register the result as a model.
+    """Train a LoRA adapter (mlx-lm on Apple Silicon, Transformers + PEFT
+    elsewhere) and register the result as a model.
 
     The data is JSONL in one of mlx-lm's formats: {"messages": [...]},
     {"prompt": ..., "completion": ...} or {"text": ...}. Without a
@@ -2278,8 +2284,13 @@ def train(
 
     from hfl.config import config as hfl_config
     from hfl.core.container import get_registry
-    from hfl.training import mlx_lora as trainer
+    from hfl.training import hf_lora, mlx_lora
 
+    if backend not in ("auto", "mlx", "transformers"):
+        console.print(f"[red]--backend: auto, mlx or transformers, not {escape(backend)}[/]")
+        raise typer.Exit(2)
+    use_mlx = backend == "mlx" or (backend == "auto" and mlx_lora.available() is None)
+    trainer: Any = mlx_lora if use_mlx else hf_lora
     why_not = trainer.available()
     if why_not:
         console.print(f"[yellow]{escape(why_not)}[/]")
@@ -2343,6 +2354,9 @@ def train(
     except trainer.TrainingError as exc:
         console.print(f"[red]{escape(str(exc))}[/] [dim]({log})[/]")
         raise typer.Exit(1) from None
+    if trainer is hf_lora:
+        _finish_transformers_training(base, target, adapter, log, gguf)
+        return
     trainer.register(base, target, adapter)
     console.print(f"[green]{escape(t('train.done', name=target, adapter=adapter))}[/]")
     if fuse or gguf:
@@ -2358,6 +2372,28 @@ def train(
         except Exception as exc:  # the trained adapter stands either way
             console.print(f"[red]{escape(str(exc))}[/] [dim]({log})[/]")
             raise typer.Exit(1) from None
+
+
+def _finish_transformers_training(
+    base: Any, target: str, adapter: Path, log: Path, gguf: str | None
+) -> None:
+    """The Transformers engine does not load a separate adapter: the trained
+    model is the adapter merged into a copy of the base (``--fuse`` is
+    implied), and ``--gguf`` exports that."""
+    from rich.markup import escape
+
+    from hfl.training import hf_lora
+
+    console.print(t("train.fusing"))
+    try:
+        merged = hf_lora.register(base, target, adapter, log)
+        console.print(f"[green]{escape(t('train.done', name=target, adapter=adapter))}[/]")
+        if gguf:
+            hf_lora.to_gguf(base, f"{target}-gguf", Path(merged.local_path), gguf.upper())
+            console.print(f"[green]{escape(t('train.gguf', name=f'{target}-gguf'))}[/]")
+    except Exception as exc:  # the trained adapter stands either way
+        console.print(f"[red]{escape(str(exc))}[/] [dim]({log})[/]")
+        raise typer.Exit(1) from None
 
 
 @app.command(name="mcp")

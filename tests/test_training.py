@@ -175,7 +175,7 @@ def test_names_are_folder_safe(name) -> None:
 
 def test_elsewhere_it_says_what_to_use(monkeypatch) -> None:
     monkeypatch.setattr(trainer.sys, "platform", "linux")
-    assert "Unsloth" in (trainer.available() or "")
+    assert "hfl[train]" in (trainer.available() or "")
 
 
 def test_mlx_takes_one_mlx_adapter(tmp_path) -> None:
@@ -215,9 +215,12 @@ def test_api_refusals(api, monkeypatch) -> None:
         api.post("/api/train", json={"model": "q05", "data": "/d", "name": "../x"}).status_code
         == 400
     )
+    from hfl.training import hf_lora
+
     monkeypatch.setattr(trainer, "available", lambda: trainer.ELSEWHERE)
+    monkeypatch.setattr(hf_lora, "available", lambda: hf_lora.MISSING)
     refused = api.post("/api/train", json={"model": "q05", "data": "/d"})
-    assert refused.status_code == 501 and "Unsloth" in refused.json()["error"]
+    assert refused.status_code == 501 and "hfl[train]" in refused.json()["error"]
 
 
 def test_api_streams_the_run(api, monkeypatch, tmp_path) -> None:
@@ -242,3 +245,67 @@ def test_api_reports_a_failed_run(api, monkeypatch, tmp_path) -> None:
         "/api/train", json={"model": "q05", "data": str(data), "name": "t2", "stream": False}
     )
     assert last.status_code == 400 and "out of memory" in last.json()["error"]
+
+
+# -- outside Apple Silicon: Transformers + PEFT ----------------------------------
+
+
+def test_its_progress_reads_as_mlx_lms() -> None:
+    """hf_lora_run prints mlx-lm's words, so one parser reads both."""
+    line = "Iter 10: Train loss 2.345, Tokens/sec 812.5, Peak mem 1.250 GB"
+    assert trainer.parse_line(line) == {
+        "iteration": 10, "train_loss": 2.345, "tokens_per_sec": 812.5, "peak_memory_gb": 1.25,
+    }  # fmt: skip
+    assert trainer.parse_line("Iter 30: Val loss 1.500") == {"iteration": 30, "val_loss": 1.5}
+
+
+def test_the_transformers_command_line(tmp_path) -> None:
+    from hfl.training import hf_lora
+
+    data = trainer.Data(folder=tmp_path, format="completions", train=3, valid=1)
+    argv = hf_lora.command("/m", data, tmp_path / "a", trainer.Options(batch_size=8, resume=True))
+    assert argv[1:4] == ["-m", "hfl.training.hf_lora_run", "train"]
+    assert argv[argv.index("--format") + 1] == "completions"
+    assert argv[argv.index("--batch-size") + 1] == "3" and "--resume" in argv
+
+
+def test_without_peft_it_says_what_to_install(monkeypatch) -> None:
+    import importlib.util
+
+    from hfl.training import hf_lora
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name, *a: None if name == "peft" else real(name, *a)
+    )
+    assert "hfl[train]" in (hf_lora.available() or "")
+
+
+def test_the_trained_model_is_merged_then_registered(tmp_path, monkeypatch) -> None:
+    """The Transformers engine loads no separate adapter."""
+    from hfl.training import hf_lora
+
+    ran, registered = [], []
+    monkeypatch.setattr(hf_lora, "run", lambda argv, log, on_event: ran.append(argv))
+    monkeypatch.setattr(
+        hf_lora, "register_fused", lambda base, name, out: registered.append((name, out)) or out
+    )
+    base = ModelManifest(name="q05", repo_id="o/q", local_path="/models/q05", format="safetensors")
+    adapter = tmp_path / "adapters" / "mine"
+    hf_lora.register(base, "mine", adapter, tmp_path / "log")
+    assert ran[0][3:4] == ["merge"] and ran[0][ran[0].index("--model") + 1] == "/models/q05"
+    assert registered == [("mine", tmp_path / "models" / "mine")]
+
+
+def test_the_cli_backend_can_be_chosen(monkeypatch, tmp_path) -> None:
+    from typer.testing import CliRunner
+
+    from hfl.cli import main
+    from hfl.training import hf_lora
+
+    monkeypatch.setattr(hf_lora, "available", lambda: "HF-CHOSEN")
+    monkeypatch.setattr(trainer, "available", lambda: None)
+    out = CliRunner().invoke(
+        main.app, ["train", "q05", "--data", str(tmp_path), "--backend", "transformers"]
+    )
+    assert out.exit_code == 1 and "HF-CHOSEN" in out.output

@@ -35,10 +35,9 @@ from pathlib import Path
 from typing import Any
 
 ELSEWHERE = (
-    "Training runs on macOS with Apple Silicon and the [mlx] extra "
-    "(pip install 'hfl[mlx]'). Elsewhere, train a LoRA adapter with Unsloth, "
-    "Axolotl or TRL, then use it with an ADAPTER line in a Modelfile "
-    "(hfl create) — a GGUF adapter on the llama.cpp backend."
+    "Training with MLX runs on macOS with Apple Silicon and the [mlx] extra "
+    "(pip install 'hfl[mlx]'); elsewhere HFL trains with Transformers and "
+    "PEFT (pip install 'hfl[train]')."
 )
 
 FORMATS = ("chat", "completions", "text")
@@ -264,7 +263,9 @@ def run(
         raise TrainingError("stopped; `--resume` continues from the last saved adapter")
     if proc.returncode != 0:
         detail = next((line for line in reversed(tail) if line.strip()), "")
-        raise TrainingError(f"mlx_lm lora failed (exit {proc.returncode}): {detail[-300:]}")
+        # "mlx_lm lora", "hfl.training.hf_lora_run train": the step that failed.
+        step = " ".join(argv[2:4]) if argv[1:2] == ["-m"] else Path(argv[0]).name
+        raise TrainingError(f"{step} failed (exit {proc.returncode}): {detail[-300:]}")
 
 
 def register(base: Any, name: str, adapter: Path) -> Any:
@@ -386,9 +387,12 @@ def events_of(
     options: Options,
     home: Path,
     stop: threading.Event | None = None,
+    *,
+    backend: Any = None,
 ) -> Iterator[dict[str, Any]]:
     """The whole run as events (for the API's NDJSON stream): checking,
-    each progress line, and the registered model or an error."""
+    each progress line, and the registered model or an error. ``backend``
+    is the trainer module (this one when None; ``hf_lora`` elsewhere)."""
     import queue
 
     events: queue.Queue[dict[str, Any] | None] = queue.Queue()
@@ -400,9 +404,14 @@ def events_of(
             data = prepare_data(data_source, home / "training" / name / "data")
             events.put({"status": "data", "format": data.format, "train": data.train,
                         "valid": data.valid})  # fmt: skip
-            argv = command(str(base.local_path), data, adapter, options)
-            run(argv, home / "logs" / f"train-{name}.log", events.put, stop)
-            register(base, name, adapter)
+            log = home / "logs" / f"train-{name}.log"
+            if backend is None:
+                run(command(str(base.local_path), data, adapter, options), log, events.put, stop)
+                register(base, name, adapter)
+            else:
+                argv = backend.command(str(base.local_path), data, adapter, options)
+                run(argv, log, events.put, stop)
+                backend.register(base, name, adapter, log)
         except BaseException as exc:  # noqa: BLE001 — reported as an event
             failure.append(exc)
         finally:

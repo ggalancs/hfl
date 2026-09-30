@@ -55,14 +55,18 @@ async def train_route(req: TrainRequest, request: Request) -> StreamingResponse 
     from hfl.api.admin_guard import require_local_owner
     from hfl.config import config
     from hfl.core.container import get_registry
+    from hfl.training import hf_lora
     from hfl.training import mlx_lora as trainer
+
+    # MLX on Apple Silicon, Transformers + PEFT elsewhere (as `hfl train`).
+    backend = None if trainer.available() is None else hf_lora
 
     require_local_owner(request, "train")
 
     def refuse(message: str, status: int = 400) -> JSONResponse:
         return JSONResponse({"error": message, "code": "train_refused"}, status_code=status)
 
-    why_not = trainer.available()
+    why_not = (backend or trainer).available()
     if why_not:
         return refuse(why_not, 501)
     base = get_registry().get(req.model)
@@ -89,7 +93,9 @@ async def train_route(req: TrainRequest, request: Request) -> StreamingResponse 
         resume=req.resume,
     )
     stop = threading.Event()
-    events = trainer.events_of(base, name, Path(req.data), options, Path(config.home_dir), stop)
+    events = trainer.events_of(
+        base, name, Path(req.data), options, Path(config.home_dir), stop, backend=backend
+    )
 
     async def stream() -> AsyncIterator[str]:
         try:

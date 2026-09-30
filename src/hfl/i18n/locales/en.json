@@ -559,6 +559,12 @@
         "summary": "OpenTelemetry tracing",
         "description": "Exports a span per inference to an OTLP collector when HFL_OTEL_ENABLED=true.",
         "check_module": "opentelemetry.sdk"
+      },
+      "train": {
+        "name": "train",
+        "summary": "LoRA training outside Apple Silicon",
+        "description": "`hfl train` with Transformers and PEFT where MLX is not available (NVIDIA, or the CPU): the same data and options, and the adapter merged into a model of its own. Brings [transformers].",
+        "check_module": "peft"
       }
     }
   },
