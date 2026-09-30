@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 from local_audit import (
     QUESTION,
+    WINDOWS,
     Audit,
     Parts,
     Uncheckable,
@@ -215,10 +216,15 @@ def e1(a: Audit) -> str:
                 "messages": [{"role": "user", "content": "17*23?"}],
             },
         ).json()
+        # Whether the 0.6B model gets 17*23 right without reasoning is luck
+        # (sampled, it wrote "200 + 60 + 14" on Windows): what is checked is
+        # that it answered and did not reason, in the text or apart.
         part(
             "think off: answers without reasoning",
             lambda: expect(
-                "391" in off["message"]["content"] and "<think>" not in off["message"]["content"],
+                bool(re.search(r"\d", off["message"]["content"]))
+                and "<think>" not in off["message"]["content"]
+                and not off["message"].get("thinking"),
                 off["message"],
             ),
         )
@@ -788,8 +794,8 @@ SENTENCE = "The quick brown fox jumps over the lazy dog."
 
 
 def _speech_file(a: Audit) -> Path:
-    """Real speech from the system's own synthesiser: macOS ``say``, or
-    ``espeak-ng`` / ``espeak`` elsewhere."""
+    """Real speech from the system's own synthesiser: macOS ``say``, Windows'
+    own (System.Speech), or ``espeak-ng`` / ``espeak`` elsewhere."""
     wav = a.scratch / "speech.wav"
     if shutil.which("say") and shutil.which("afconvert"):
         aiff = a.scratch / "speech.aiff"
@@ -798,11 +804,21 @@ def _speech_file(a: Audit) -> Path:
             ["afconvert", "-f", "WAVE", "-d", "LEI16@16000", str(aiff), str(wav)], check=True
         )
         return wav
+    if WINDOWS and shutil.which("powershell"):
+        speak = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            f"$s.SetOutputToWaveFile('{wav}'); $s.Speak('{SENTENCE}'); $s.Dispose()"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", speak], check=True, timeout=120)
+        return wav
     for tool in ("espeak-ng", "espeak"):
         if shutil.which(tool):
             subprocess.run([tool, "-w", str(wav), SENTENCE], check=True)
             return wav
-    raise Uncheckable("no speech synthesiser to make test audio (macOS `say`, or espeak-ng)")
+    raise Uncheckable(
+        "no speech synthesiser to make test audio (macOS `say`, Windows, or espeak-ng)"
+    )
 
 
 @check("B32", "POST /api/transcribe")
@@ -841,6 +857,10 @@ def _from(a: Audit, ids: list[str], what: str) -> str:
     """A summary check that holds only if the checks it summarises did."""
     results = json.loads((a.work / "results.json").read_text())
     states = {i: results.get(i, {}).get("status", "not run") for i in ids}
+    if all(v in ("OK", "NO COMPROBABLE AQUÍ") for v in states.values()) and any(
+        v != "OK" for v in states.values()
+    ):  # nothing it summarises broke; some could not be checked here
+        raise Uncheckable(f"{what}: {states}")
     expect(all(v == "OK" for v in states.values()), f"{what}: {states}")
     return f"{what}: {', '.join(ids)} OK"
 

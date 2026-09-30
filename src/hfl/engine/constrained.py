@@ -155,6 +155,26 @@ def mlx_processor(tokenizer: Any, response_format: Any) -> Any:
     return process
 
 
+def mask_scores(scores: Any, mask: Any) -> None:
+    """Set to -inf, in place, every token ``mask`` (llguidance's int32
+    bitmask, one bit per token, batch of one) does not allow.
+
+    llguidance's own torch helper runs through ``torch.compile``, which
+    needs a C++ compiler at run time: on Windows outside a Visual Studio
+    prompt (no ``cl`` on PATH) every ``format`` request to the Transformers
+    engine failed with an InductorError. Plain torch needs none."""
+    import numpy as np
+    import torch
+
+    bits = np.ascontiguousarray(mask, dtype="<i4").reshape(1, -1).view(np.uint8)
+    allowed = np.unpackbits(bits, axis=-1, bitorder="little").astype(bool)
+    vocab = int(scores.shape[-1])
+    keep = torch.zeros(vocab, dtype=torch.bool)
+    width = min(vocab, allowed.shape[-1])
+    keep[:width] = torch.from_numpy(allowed[0, :width])
+    scores.masked_fill_(~keep.to(scores.device), float("-inf"))
+
+
 def torch_processor(tokenizer: Any, response_format: Any, eos: list[int] | None) -> Any:
     """A Transformers ``LogitsProcessor`` for one request (batch of one)."""
     from transformers import LogitsProcessor
@@ -166,14 +186,11 @@ def torch_processor(tokenizer: Any, response_format: Any, eos: list[int] | None)
             self.started = False
 
         def __call__(self, input_ids: Any, scores: Any) -> Any:
-            import torch
-            from llguidance.torch import apply_token_bitmask_inplace
-
             last = int(input_ids[0, -1]) if self.started else None
             self.started = True
             mask = guide.mask(last, int(scores.shape[-1]))
             if mask is not None:
-                apply_token_bitmask_inplace(scores, torch.from_numpy(mask).to(scores.device))
+                mask_scores(scores, mask)
             return scores
 
     return _Guided()

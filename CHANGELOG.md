@@ -96,6 +96,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused. HFL now loads adapters with `--lora` and sets each scale through
   llama-server's `/lora-adapters` once it has started. This also fixes any
   path with a colon on macOS or Linux.
+- **An unattended `hfl serve --host 0.0.0.0` on Windows refuses unless
+  allowed.** Windows reports `NUL` (services, scheduled tasks, `< NUL`) as
+  a terminal, so HFL asked "Continue?" where it should refuse a network
+  exposure that nobody opted into. HFL now also requires a real console
+  (`GetConsoleMode`). The short-name picker in `hfl pull` uses the same check.
+- **`format` (JSON and schemas) works with the Transformers engine on
+  Windows.** llguidance's torch helper compiles its kernel with
+  `torch.compile`, which needs MSVC's `cl` on PATH. Outside a Visual Studio
+  prompt, every `format` request returned a 500. HFL applies the token mask
+  with plain torch.
 - **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
   They had drifted: the server downloaded model types HFL cannot serve and
   registered no model type; the CLI logged no provenance and could take an

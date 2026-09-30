@@ -204,13 +204,14 @@ def f6(a: Audit) -> str:
         cwd=REPO,
     )
     expect(build.returncode == 0, build.stderr[-300:])
-    binary = next((p for p in (out_dir / "dist").rglob("hfl") if p.is_file()), None)
+    name = "hfl.exe" if WINDOWS else "hfl"
+    binary = next((p for p in (out_dir / "dist").rglob(name) if p.is_file()), None)
     expect(binary, "no executable built")
     # PATH without llama-server: the executable must run the model itself.
     path = os.pathsep.join(
         d
         for d in os.environ.get("PATH", "").split(os.pathsep)
-        if d and not (Path(d) / "llama-server").exists()
+        if d and not any((Path(d) / n).exists() for n in ("llama-server", "llama-server.exe"))
     )
     checked = subprocess.run(
         [

@@ -35,6 +35,7 @@ from hfl.cli.commands._utils import (
     progress_spinner,
 )
 from hfl.i18n import t
+from hfl.utils.terminal import stdin_is_terminal
 
 app = typer.Typer(
     name="hfl",
@@ -788,8 +789,6 @@ def _choose_short_name(name: str, assume_yes: bool) -> Any:
     reference is printed instead, so a script never pulls gigabytes on a
     guess.
     """
-    import sys
-
     from hfl.hub.shortname import find_options
 
     console.print(f"[dim]{escape_markup(t('shortname.searching', name=name))}[/]")
@@ -811,7 +810,7 @@ def _choose_short_name(name: str, assume_yes: bool) -> Any:
         )
     if assume_yes:
         return options[0]
-    if not sys.stdin.isatty():
+    if not stdin_is_terminal():
         console.print(
             escape_markup(
                 t("shortname.not_interactive", command=f"hfl pull {options[0].reference}")
@@ -1161,7 +1160,7 @@ def _confirm_exposure(host: str, api_key: str | None) -> None:
         # container (where the bind reaches only as far as the ports its
         # operator published). The container image used to stop here, every
         # time: nobody can answer a prompt in one.
-        if not sys.stdin.isatty():
+        if not stdin_is_terminal():
             opted_in = os.environ.get("HFL_ACCEPT_NETWORK_EXPOSURE", "").strip().lower() in (
                 "1",
                 "true",
