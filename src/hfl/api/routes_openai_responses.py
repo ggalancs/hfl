@@ -27,7 +27,6 @@ persist a ``response_id`` chain.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import time
@@ -42,7 +41,6 @@ from hfl.api.chat_core import resolve_chat_output
 from hfl.api.errors import structured_output_unsupported
 from hfl.api.helpers import prepare_stream_response, run_dispatched
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
-from hfl.api.thinking import ThinkingSplitter
 from hfl.engine.base import ChatMessage, GenerationConfig
 
 if TYPE_CHECKING:
@@ -392,7 +390,208 @@ def _render_response(
     return _envelope(response_id, model, output, tokens_input, tokens_output)
 
 
-async def _stream_response(
+class _ResponsesStream:
+    """The Responses API's SSE events for a streamed turn
+    (``hfl.api.chat_stream``): ``response.created``, deltas as items open
+    (reasoning in its own ``reasoning`` item, before the message, never as
+    answer text), ``response.completed`` with structured ``function_call``
+    items when tools fired. With tools declared nothing streams until the
+    end, so a raw ``<tool_call>`` marker never leaks as text."""
+
+    log_label = "responses"
+
+    def __init__(
+        self,
+        response_id: str,
+        model: str,
+        extra: dict[str, Any] | None,
+        on_done: Callable[[list[dict[str, Any]]], None] | None,
+    ) -> None:
+        self.response_id, self.model, self.extra, self.on_done = response_id, model, extra, on_done
+        self.seq = iter(range(1_000_000))
+        self.msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        self.rs_id = f"rs_{uuid.uuid4().hex[:24]}"
+        self.next_index, self.open = 0, ""
+        self.texts: dict[str, list[str]] = {"reasoning": [], "answer": []}
+        self.index_of: dict[str, int] = {}
+        self.output: list[dict[str, Any]] = []
+
+    def _event(self, kind: str, **fields: Any) -> str:
+        payload = {"type": kind, "sequence_number": next(self.seq), **fields}
+        return f"data: {json.dumps(payload)}\n\n"
+
+    def not_loaded(self) -> str:
+        err = {
+            "type": "response.failed",
+            "error": {"code": "engine_unavailable", "message": "Model not loaded"},
+        }
+        return f"data: {json.dumps(err)}\n\n"
+
+    def failed(self) -> str:
+        err = {
+            "type": "response.failed",
+            "error": {"code": "stream_error", "message": "Internal server error during streaming."},
+        }
+        return f"data: {json.dumps(err)}\n\n"
+
+    def start(self, turn: Any) -> str:
+        in_progress = {
+            "id": self.response_id,
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "in_progress",
+            "model": self.model,
+            "output": [],
+        }
+        return self._event("response.created", response=in_progress) + self._event(
+            "response.in_progress", response=in_progress
+        )
+
+    def _reasoning_item(self, text: str | None) -> dict[str, Any]:
+        summary = [{"type": "summary_text", "text": text}] if text else []
+        return {"type": "reasoning", "id": self.rs_id, "summary": summary}
+
+    def _opened(self, kind: str) -> str:
+        out = self._closed()
+        at = self.index_of[kind] = self.next_index
+        self.next_index += 1
+        self.open = kind
+        if kind == "reasoning":
+            return (
+                out
+                + self._event(
+                    "response.output_item.added", output_index=at, item=self._reasoning_item(None)
+                )
+                + self._event(
+                    "response.reasoning_summary_part.added",
+                    item_id=self.rs_id,
+                    output_index=at,
+                    summary_index=0,
+                    part={"type": "summary_text", "text": ""},
+                )
+            )
+        return (
+            out
+            + self._event(
+                "response.output_item.added",
+                output_index=at,
+                item=_message_item(self.msg_id, "", status="in_progress"),
+            )
+            + self._event(
+                "response.content_part.added",
+                item_id=self.msg_id,
+                output_index=at,
+                content_index=0,
+                part={"type": "output_text", "text": "", "annotations": []},
+            )
+        )
+
+    def _closed(self) -> str:
+        kind, self.open = self.open, ""
+        if not kind:
+            return ""
+        at = self.index_of[kind]
+        text = "".join(self.texts[kind])
+        if kind == "reasoning":
+            self.output.append(self._reasoning_item(text))
+            part = {"type": "summary_text", "text": text}
+            ids = {"item_id": self.rs_id, "output_index": at, "summary_index": 0}
+            return (
+                self._event("response.reasoning_summary_text.done", **ids, text=text)
+                + self._event("response.reasoning_summary_part.done", **ids, part=part)
+                + self._event(
+                    "response.output_item.done", output_index=at, item=self._reasoning_item(text)
+                )
+            )
+        item = _message_item(self.msg_id, text)
+        self.output.append(item)
+        text_part = {"type": "output_text", "text": text, "annotations": []}
+        ids = {"item_id": self.msg_id, "output_index": at, "content_index": 0}
+        return (
+            self._event("response.output_text.done", **ids, text=text)
+            + self._event("response.content_part.done", **ids, part=text_part)
+            + self._event("response.output_item.done", output_index=at, item=item)
+        )
+
+    def _written(self, kind: str, text: str) -> str:
+        if not text:
+            return ""
+        out = "" if self.open == kind else self._opened(kind)
+        self.texts[kind].append(text)
+        at = self.index_of[kind]
+        if kind == "reasoning":
+            return out + self._event(
+                "response.reasoning_summary_text.delta",
+                item_id=self.rs_id,
+                output_index=at,
+                summary_index=0,
+                delta=text,
+            )
+        return out + self._event(
+            "response.output_text.delta",
+            item_id=self.msg_id,
+            output_index=at,
+            content_index=0,
+            delta=text,
+        )
+
+    def _split(self, turn: Any, answer: str, reasoning: str) -> str:
+        shown = reasoning if turn.config.reasoning != "off" else ""
+        return self._written("reasoning", shown) + self._written("answer", answer)
+
+    def token(self, turn: Any, token: str) -> str:
+        return "" if turn.tool_aware else self._split(turn, *turn.splitter.feed(token))
+
+    def _function_calls(self, calls: list[dict[str, Any]]) -> str:
+        out = ""
+        for item in _function_call_items(calls):
+            index = self.next_index
+            self.next_index += 1
+            added = {**item, "arguments": "", "status": "in_progress"}
+            out += self._event("response.output_item.added", output_index=index, item=added)
+            out += self._event(
+                "response.function_call_arguments.delta",
+                item_id=item["id"],
+                output_index=index,
+                delta=item["arguments"],
+            )
+            out += self._event(
+                "response.function_call_arguments.done",
+                item_id=item["id"],
+                output_index=index,
+                arguments=item["arguments"],
+            )
+            out += self._event("response.output_item.done", output_index=index, item=item)
+            self.output.append(item)
+        return out
+
+    def done(self, turn: Any) -> str:
+        if turn.tool_aware:
+            resolved = turn.resolved()
+            answer, reasoning = resolved.content, resolved.reasoning or ""
+            tool_calls = resolved.tool_calls
+        else:
+            answer, reasoning = turn.splitter.flush()
+            tool_calls = []
+        out = self._split(turn, "" if tool_calls else answer, reasoning)
+        if not tool_calls and "answer" not in self.index_of:
+            out += self._opened("answer")  # every turn without a call has a message
+        out += self._closed() + self._function_calls(tool_calls)
+        prompt_n, generated = turn.counts()
+        completed = _envelope(
+            self.response_id,
+            self.model,
+            self.output,
+            prompt_n or 0,
+            generated if generated is not None else turn.emitted,
+        )
+        completed.update(self.extra or {})
+        if self.on_done is not None:
+            self.on_done(self.output)
+        return out + self._event("response.completed", response=completed) + "data: [DONE]\n\n"
+
+
+def _stream_response(
     response_id: str,
     model: str,
     messages: list[ChatMessage],
@@ -403,275 +602,21 @@ async def _stream_response(
     extra: dict[str, Any] | None = None,
     on_done: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> AsyncIterator[str]:
-    """SSE stream that re-emits chat tokens as Responses events.
+    """SSE stream that re-emits chat tokens as Responses events, on the
+    dispatcher slot held in ``slot_cm`` for the whole stream (the shared
+    model is non-reentrant) and released whatever happens; the engine's
+    iterator is closed on a client disconnect (CON-3)."""
+    from hfl.api.chat_stream import run_chat_stream
 
-    Event grammar (subset of OpenAI's spec — what the SDK actually
-    keys on):
-
-      response.created
-      response.output_text.delta  (one per token chunk; suppressed when
-                                   ``tools`` are declared so a raw
-                                   ``<tool_call>`` marker never leaks as text)
-      response.completed          (final envelope, incl. structured
-                                   ``function_call`` items when tools fired)
-
-    The engine is driven through ``stream_with_backpressure`` so the work
-    runs on the dispatcher slot held in ``slot_cm`` for the whole stream —
-    serialising against every other inference request, since the shared
-    llama.cpp / transformers model is non-reentrant and concurrent use
-    corrupts its KV cache — and the sync iterator is closed on teardown
-    (client disconnect) instead of leaking its worker thread until GC
-    (CON-3). ``slot_cm`` is released in ``finally`` regardless of outcome.
-    """
-    from hfl.api.streaming import stream_with_backpressure
-
-    try:
-        state = _get_state()
-        if state.engine is None:
-            err = {
-                "type": "response.failed",
-                "error": {"code": "engine_unavailable", "message": "Model not loaded"},
-            }
-            yield f"data: {json.dumps(err)}\n\n"
-            return
-
-        seq = iter(range(1_000_000))
-
-        def event(kind: str, **fields: Any) -> str:
-            payload = {"type": kind, "sequence_number": next(seq), **fields}
-            return f"data: {json.dumps(payload)}\n\n"
-
-        in_progress = {
-            "id": response_id,
-            "object": "response",
-            "created_at": int(time.time()),
-            "status": "in_progress",
-            "model": model,
-            "output": [],
-        }
-        yield event("response.created", response=in_progress)
-        yield event("response.in_progress", response=in_progress)
-
-        tool_aware = bool(tools)
-        accumulated: list[str] = []
-        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-        rs_id = f"rs_{uuid.uuid4().hex[:24]}"
-        # Reasoning goes in its own ``reasoning`` item, before the message,
-        # never as answer text; items open as their text arrives, and each
-        # takes the next output_index.
-        splitter = ThinkingSplitter()
-        show_reasoning = cfg.reasoning != "off"
-        items: dict[str, Any] = {"next": 0, "open": "", "reasoning": [], "answer": []}
-        index_of: dict[str, int] = {}
-        output: list[dict[str, Any]] = []
-
-        def summary(text: str) -> dict[str, Any]:
-            return {"type": "summary_text", "text": text}
-
-        def reasoning_item(text: str | None) -> dict[str, Any]:
-            return {"type": "reasoning", "id": rs_id, "summary": [summary(text)] if text else []}
-
-        def opened(kind: str) -> str:
-            out = closed()
-            index_of[kind] = items["next"]
-            items["next"] += 1
-            items["open"] = kind
-            at = index_of[kind]
-            if kind == "reasoning":
-                return (
-                    out
-                    + event(
-                        "response.output_item.added", output_index=at, item=reasoning_item(None)
-                    )
-                    + event(
-                        "response.reasoning_summary_part.added",
-                        item_id=rs_id,
-                        output_index=at,
-                        summary_index=0,
-                        part=summary(""),
-                    )
-                )
-            return (
-                out
-                + event(
-                    "response.output_item.added",
-                    output_index=at,
-                    item=_message_item(msg_id, "", status="in_progress"),
-                )
-                + event(
-                    "response.content_part.added",
-                    item_id=msg_id,
-                    output_index=at,
-                    content_index=0,
-                    part={"type": "output_text", "text": "", "annotations": []},
-                )
-            )
-
-        def closed() -> str:
-            kind, items["open"] = items["open"], ""
-            if not kind:
-                return ""
-            at = index_of[kind]
-            if kind == "reasoning":
-                text = "".join(items["reasoning"])
-                output.append(reasoning_item(text))
-                return (
-                    event(
-                        "response.reasoning_summary_text.done",
-                        item_id=rs_id,
-                        output_index=at,
-                        summary_index=0,
-                        text=text,
-                    )
-                    + event(
-                        "response.reasoning_summary_part.done",
-                        item_id=rs_id,
-                        output_index=at,
-                        summary_index=0,
-                        part=summary(text),
-                    )
-                    + event("response.output_item.done", output_index=at, item=reasoning_item(text))
-                )
-            text = "".join(items["answer"])
-            output.append(_message_item(msg_id, text))
-            part = {"type": "output_text", "text": text, "annotations": []}
-            return (
-                event(
-                    "response.output_text.done",
-                    item_id=msg_id,
-                    output_index=at,
-                    content_index=0,
-                    text=text,
-                )
-                + event(
-                    "response.content_part.done",
-                    item_id=msg_id,
-                    output_index=at,
-                    content_index=0,
-                    part=part,
-                )
-                + event(
-                    "response.output_item.done", output_index=at, item=_message_item(msg_id, text)
-                )
-            )
-
-        def written(kind: str, text: str) -> str:
-            if not text:
-                return ""
-            out = "" if items["open"] == kind else opened(kind)
-            items[kind].append(text)
-            if kind == "reasoning":
-                return out + event(
-                    "response.reasoning_summary_text.delta",
-                    item_id=rs_id,
-                    output_index=index_of[kind],
-                    summary_index=0,
-                    delta=text,
-                )
-            return out + event(
-                "response.output_text.delta",
-                item_id=msg_id,
-                output_index=index_of[kind],
-                content_index=0,
-                delta=text,
-            )
-
-        def split(answer: str, reasoning: str) -> str:
-            shown = reasoning if show_reasoning else ""
-            return written("reasoning", shown) + written("answer", answer)
-
-        def format_item(token: str) -> str:
-            accumulated.append(token)
-            # Tool-aware turns buffer everything and emit nothing until done,
-            # so a raw tool-call marker is never streamed verbatim as text.
-            if tool_aware:
-                return ""
-            return split(*splitter.feed(token))
-
-        def format_done() -> str:
-            if tool_aware:
-                resolved = resolve_chat_output("".join(accumulated), model, tools)
-                answer, reasoning = resolved.content, resolved.reasoning or ""
-                tool_calls = resolved.tool_calls
-            else:
-                answer, reasoning = splitter.flush()
-                tool_calls = []
-            out = split("" if tool_calls else answer, reasoning)
-            if not tool_calls and "answer" not in index_of:
-                # Every turn without a call has a message, if an empty one.
-                out += opened("answer")
-            out += closed()
-            for item in _function_call_items(tool_calls):
-                index = items["next"]
-                items["next"] += 1
-                out += event(
-                    "response.output_item.added",
-                    output_index=index,
-                    item={**item, "arguments": "", "status": "in_progress"},
-                )
-                out += event(
-                    "response.function_call_arguments.delta",
-                    item_id=item["id"],
-                    output_index=index,
-                    delta=item["arguments"],
-                )
-                out += event(
-                    "response.function_call_arguments.done",
-                    item_id=item["id"],
-                    output_index=index,
-                    arguments=item["arguments"],
-                )
-                out += event("response.output_item.done", output_index=index, item=item)
-                output.append(item)
-            from hfl.engine.base import stream_counts
-
-            prompt_n, generated = stream_counts(sync_iter)
-            completed = _envelope(
-                response_id,
-                model,
-                output,
-                prompt_n or 0,
-                generated if generated is not None else len(accumulated),
-            )
-            completed.update(extra or {})
-            if on_done is not None:
-                on_done(output)
-            return out + event("response.completed", response=completed) + "data: [DONE]\n\n"
-
-        if tool_aware:
-            try:
-                sync_iter = state.engine.chat_stream(messages, cfg, tools=tools)
-            except TypeError:
-                sync_iter = state.engine.chat_stream(messages, cfg)
-        else:
-            sync_iter = state.engine.chat_stream(messages, cfg)
-
-        try:
-            async for chunk in stream_with_backpressure(
-                sync_iterator=sync_iter,
-                format_item=format_item,
-                format_done=format_done,
-            ):
-                yield chunk
-        except Exception:
-            logger.exception("responses stream failed")
-            yield (
-                "data: "
-                + json.dumps(
-                    {
-                        "type": "response.failed",
-                        "error": {
-                            "code": "stream_error",
-                            "message": "Internal server error during streaming.",
-                        },
-                    }
-                )
-                + "\n\n"
-            )
-    finally:
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
+    return run_chat_stream(
+        _ResponsesStream(response_id, model, extra, on_done),
+        engine=_get_state().engine,
+        model=model,
+        messages=messages,
+        config=cfg,
+        tools=tools,
+        slot_cm=slot_cm,
+    )
 
 
 # --- Endpoint ---------------------------------------------------------------

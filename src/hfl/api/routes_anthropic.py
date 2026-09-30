@@ -10,7 +10,6 @@ Implemented endpoints:
   POST /v1/messages  - Create a message (streaming and non-streaming)
 """
 
-import contextlib
 import json
 import logging
 import uuid
@@ -29,8 +28,7 @@ from hfl.api.helpers import (
 )
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
-from hfl.api.thinking import ThinkingSplitter
-from hfl.engine.base import ChatMessage, stream_counts
+from hfl.engine.base import ChatMessage
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -417,7 +415,147 @@ async def create_message(
     }
 
 
-async def _stream_messages(
+class _AnthropicStream:
+    """Anthropic's SSE events for a streamed turn (``hfl.api.chat_stream``).
+
+    Plain turns stream into blocks opened as their text arrives — the
+    reasoning's ``thinking`` block (only when the client enabled thinking;
+    otherwise dropped, never sent as text), then the answer's ``text``
+    block. Tool-aware turns buffer the reply and parse it into structured
+    ``tool_use`` blocks (``stop_reason: tool_use``) instead of leaking text.
+    """
+
+    log_label = "/v1/messages"
+
+    def __init__(self, model: str, echo_model: str | None) -> None:
+        self.model, self.echo_model = model, echo_model
+        self.index, self.kind, self.had_text = -1, "", False  # the open block
+
+    def not_loaded(self) -> str:
+        err = {"type": "error", "error": {"type": "server_error", "message": "Model not loaded"}}
+        return f"event: error\ndata: {json.dumps(err)}\n\n"
+
+    def failed(self) -> str:
+        err = {
+            "type": "error",
+            "error": {"type": "server_error", "message": "Internal server error during streaming."},
+        }
+        return f"event: error\ndata: {json.dumps(err)}\n\n"
+
+    def start(self, turn: Any) -> str:
+        message: dict[str, Any] = {
+            "id": f"msg_{uuid.uuid4().hex[:24]}",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            # API-14: the client's model string verbatim (any provider prefix).
+            "model": self.echo_model or self.model,
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+        return _sse("message_start", {"type": "message_start", "message": message}) + _sse(
+            "ping", {"type": "ping"}
+        )
+
+    def _open(self, kind: str) -> str:
+        out = self._close()
+        self.index += 1
+        self.kind = kind
+        self.had_text = self.had_text or kind == "text"
+        empty = _thinking_block("") if kind == "thinking" else {"type": "text", "text": ""}
+        start = {"type": "content_block_start", "index": self.index, "content_block": empty}
+        return out + _sse("content_block_start", start)
+
+    def _close(self) -> str:
+        if not self.kind:
+            return ""
+        self.kind = ""
+        return _sse("content_block_stop", {"type": "content_block_stop", "index": self.index})
+
+    def _write(self, kind: str, text: str) -> str:
+        if not text:
+            return ""
+        out = "" if self.kind == kind else self._open(kind)
+        if kind == "thinking":
+            delta = {"type": "thinking_delta", "thinking": text}
+        else:
+            delta = {"type": "text_delta", "text": text}
+        body = {"type": "content_block_delta", "index": self.index, "delta": delta}
+        return out + _sse("content_block_delta", body)
+
+    def _split(self, turn: Any, answer: str, reasoning: str) -> str:
+        shown = reasoning if turn.config.expose_reasoning else ""
+        return self._write("thinking", shown) + self._write("text", answer)
+
+    def token(self, turn: Any, token: str) -> str:
+        # Every token counts (buffered ones too): usage.output_tokens and the
+        # max_tokens stop reason are live on the tool-aware path (API-10).
+        return "" if turn.tool_aware else self._split(turn, *turn.splitter.feed(token))
+
+    def _usage(self, turn: Any) -> dict[str, int]:
+        # The engine's own counts when it keeps them, else the chunk counter
+        # — never a whitespace word count (BPE sub-words diverge from it).
+        prompt_n, generated = turn.counts()
+        usage = {"output_tokens": generated if generated is not None else turn.emitted}
+        if prompt_n is not None:
+            usage["input_tokens"] = prompt_n
+        return usage
+
+    def _end(self, turn: Any, stop_reason: str) -> str:
+        delta = {"stop_reason": stop_reason, "stop_sequence": None}
+        body = {"type": "message_delta", "delta": delta, "usage": self._usage(turn)}
+        return _sse("message_delta", body) + _sse("message_stop", {"type": "message_stop"})
+
+    def _plain_stop(self, turn: Any) -> str:
+        # API-10: max_tokens when the cap was hit, else end_turn.
+        cap = turn.config.max_tokens
+        return "max_tokens" if (cap and self._usage(turn)["output_tokens"] >= cap) else "end_turn"
+
+    def done(self, turn: Any) -> str:
+        if not turn.tool_aware:
+            rest = self._split(turn, *turn.splitter.flush())
+            if not self.had_text:
+                rest += self._open("text")  # every reply has a text block
+            return rest + self._close() + self._end(turn, self._plain_stop(turn))
+        resolved = resolve_chat_output(turn.text(), self.model, turn.tools, None)
+        events: list[str] = []
+        index = 0
+        if resolved.reasoning and turn.config.expose_reasoning:
+            events.append(_block(index, _thinking_block(""), "thinking_delta", resolved.reasoning))
+            index += 1
+        text = {"type": "text", "text": ""}
+        if not resolved.has_tool_calls:
+            events.append(_block(index, text, "text_delta", resolved.content))
+            return "".join(events) + self._end(turn, self._plain_stop(turn))
+        if resolved.content:
+            events.append(_block(index, text, "text_delta", resolved.content))
+            index += 1
+        for use in _to_anthropic_tool_use(resolved.tool_calls):
+            head = {"type": "tool_use", "id": use["id"], "name": use["name"], "input": {}}
+            payload = json.dumps(use["input"], ensure_ascii=False)
+            events.append(_block(index, head, "input_json_delta", payload))
+            index += 1
+        return "".join(events) + self._end(turn, "tool_use")
+
+
+def _block(index: int, head: dict, delta_type: str, value: str) -> str:
+    """One whole content block: start, its one delta, stop."""
+    key = {"thinking_delta": "thinking", "text_delta": "text"}.get(delta_type, "partial_json")
+    start = {"type": "content_block_start", "index": index, "content_block": head}
+    delta = {
+        "type": "content_block_delta",
+        "index": index,
+        "delta": {"type": delta_type, key: value},
+    }
+    return (
+        _sse("content_block_start", start)
+        + _sse("content_block_delta", delta)
+        + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+    )
+
+
+def _stream_messages(
     model: str,
     messages: list[ChatMessage],
     config: "GenerationConfig",
@@ -426,263 +564,16 @@ async def _stream_messages(
     *,
     echo_model: str | None = None,
 ) -> AsyncIterator[str]:
-    """Generate Anthropic-compatible SSE streaming responses.
+    """Anthropic-compatible SSE; ``slot_cm`` (the dispatcher slot, spec
+    §5.3) is released whatever happens."""
+    from hfl.api.chat_stream import run_chat_stream
 
-    Plain turns stream text token-by-token. Tool-aware turns (``tools``
-    declared) buffer the whole reply — like the OpenAI route — so a
-    tool-call marker is parsed into structured ``tool_use`` content blocks
-    (``stop_reason: tool_use``) instead of leaking as text.
-
-    ``slot_cm`` is the dispatcher slot held for the entire stream
-    (spec §5.3); it is released in ``finally``.
-    """
-    from hfl.api.streaming import stream_with_backpressure
-
-    state = _get_state()
-    if state.engine is None:
-        err = json.dumps(
-            {"type": "error", "error": {"type": "server_error", "message": "Model not loaded"}}
-        )
-        yield f"event: error\ndata: {err}\n\n"
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
-        return
-
-    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-    tool_aware = bool(tools)
-
-    # event: message_start
-    message_start = {
-        "type": "message_start",
-        "message": {
-            "id": msg_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [],
-            # API-14: echo the client's model string verbatim (incl. any
-            # provider prefix), matching the non-streaming response.
-            "model": echo_model or model,
-            "stop_reason": None,
-            "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": 0},
-        },
-    }
-    yield _sse("message_start", message_start)
-    yield _sse("ping", {"type": "ping"})
-
-    # Plain turns stream into blocks opened as their text arrives — the
-    # reasoning's ``thinking`` block (only when the client enabled thinking;
-    # otherwise it is dropped, never sent as text), then the answer's
-    # ``text`` block. Tool-aware turns emit no blocks until the buffered
-    # reply is parsed in format_done.
-    output_tokens = 0
-    accumulated: list[str] = []
-    splitter = ThinkingSplitter()
-    show_thinking = config.expose_reasoning
-    blocks: dict[str, Any] = {"index": -1, "kind": "", "text": False}  # open block
-
-    def _open(kind: str) -> str:
-        out = _close()
-        blocks["index"] += 1
-        blocks["kind"] = kind
-        blocks["text"] = blocks["text"] or kind == "text"
-        empty = _thinking_block("") if kind == "thinking" else {"type": "text", "text": ""}
-        start = {"type": "content_block_start", "index": blocks["index"], "content_block": empty}
-        return out + _sse("content_block_start", start)
-
-    def _close() -> str:
-        if not blocks["kind"]:
-            return ""
-        blocks["kind"] = ""
-        stop = {"type": "content_block_stop", "index": blocks["index"]}
-        return _sse("content_block_stop", stop)
-
-    def _write(kind: str, text: str) -> str:
-        if not text:
-            return ""
-        out = "" if blocks["kind"] == kind else _open(kind)
-        if kind == "thinking":
-            delta = {"type": "thinking_delta", "thinking": text}
-        else:
-            delta = {"type": "text_delta", "text": text}
-        body = {"type": "content_block_delta", "index": blocks["index"], "delta": delta}
-        return out + _sse("content_block_delta", body)
-
-    def _split(answer: str, reasoning: str) -> str:
-        return _write("thinking", reasoning if show_thinking else "") + _write("text", answer)
-
-    def format_delta(token: str) -> str:
-        nonlocal output_tokens
-        # Count every token (incl. buffered tool-aware ones) so the
-        # usage.output_tokens and the max_tokens stop-reason detection
-        # (_plain_stop_reason) are live on the tool-aware path too (API-10).
-        output_tokens += 1
-        if tool_aware:
-            accumulated.append(token)
-            return ""
-        return _split(*splitter.feed(token))
-
-    def _text_block(index: int, text: str) -> str:
-        return (
-            _sse(
-                "content_block_start",
-                {
-                    "type": "content_block_start",
-                    "index": index,
-                    "content_block": {"type": "text", "text": ""},
-                },
-            )
-            + _sse(
-                "content_block_delta",
-                {
-                    "type": "content_block_delta",
-                    "index": index,
-                    "delta": {"type": "text_delta", "text": text},
-                },
-            )
-            + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
-        )
-
-    def _thought_block(index: int, text: str) -> str:
-        empty = _thinking_block("")
-        start = {"type": "content_block_start", "index": index, "content_block": empty}
-        delta = {"type": "thinking_delta", "thinking": text}
-        return (
-            _sse("content_block_start", start)
-            + _sse(
-                "content_block_delta",
-                {"type": "content_block_delta", "index": index, "delta": delta},
-            )
-            + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
-        )
-
-    stream = state.engine.chat_stream(messages, config, tools)
-
-    def _usage() -> dict[str, int]:
-        # The engine's own counts when it keeps them (llama.cpp,
-        # llama-server); otherwise the live chunk counter.
-        prompt_n, generated = stream_counts(stream)
-        usage = {"output_tokens": generated if generated is not None else output_tokens}
-        if prompt_n is not None:
-            usage["input_tokens"] = prompt_n
-        return usage
-
-    def _plain_stop_reason() -> str:
-        # API-10: report max_tokens when the cap was hit, else end_turn.
-        return (
-            "max_tokens"
-            if (config.max_tokens and _usage()["output_tokens"] >= config.max_tokens)
-            else "end_turn"
-        )
-
-    def format_done() -> str:
-        if not tool_aware:
-            rest = _split(*splitter.flush())
-            if not blocks["text"]:
-                # Every reply has a text block, if an empty one (all of it
-                # reasoning, or nothing at all).
-                rest += _open("text")
-            return (
-                rest
-                + _close()
-                + _sse(
-                    "message_delta",
-                    {
-                        "type": "message_delta",
-                        "delta": {"stop_reason": _plain_stop_reason(), "stop_sequence": None},
-                        "usage": _usage(),
-                    },
-                )
-                + _sse("message_stop", {"type": "message_stop"})
-            )
-
-        # Tool-aware: parse the buffered reply into structured blocks.
-        raw = "".join(accumulated)
-        resolved = resolve_chat_output(raw, model, tools, None)
-        events: list[str] = []
-        index = 0
-        if resolved.reasoning and show_thinking:
-            events.append(_thought_block(index, resolved.reasoning))
-            index += 1
-        if resolved.has_tool_calls:
-            if resolved.content:
-                events.append(_text_block(index, resolved.content))
-                index += 1
-            for block in _to_anthropic_tool_use(resolved.tool_calls):
-                events.append(
-                    _sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": index,
-                            "content_block": {
-                                "type": "tool_use",
-                                "id": block["id"],
-                                "name": block["name"],
-                                "input": {},
-                            },
-                        },
-                    )
-                    + _sse(
-                        "content_block_delta",
-                        {
-                            "type": "content_block_delta",
-                            "index": index,
-                            "delta": {
-                                "type": "input_json_delta",
-                                "partial_json": json.dumps(block["input"], ensure_ascii=False),
-                            },
-                        },
-                    )
-                    + _sse("content_block_stop", {"type": "content_block_stop", "index": index})
-                )
-                index += 1
-            stop_reason = "tool_use"
-        else:
-            events.append(_text_block(index, resolved.content))
-            stop_reason = _plain_stop_reason()
-
-        events.append(
-            _sse(
-                "message_delta",
-                {
-                    "type": "message_delta",
-                    "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                    # Real token counts (as the plain path and the stop-reason
-                    # logic use), never a whitespace word count, which diverges
-                    # from real tokenisation for sub-word/BPE tokens.
-                    "usage": _usage(),
-                },
-            )
-        )
-        events.append(_sse("message_stop", {"type": "message_stop"}))
-        return "".join(events)
-
-    try:
-        async for chunk in stream_with_backpressure(
-            sync_iterator=stream,
-            format_item=format_delta,
-            format_done=format_done,
-        ):
-            yield chunk
-    except Exception:
-        # Never emit ``str(exc)`` on a stream — the exception repr
-        # can leak internal paths / library names (CodeQL
-        # ``py/stack-trace-exposure``). Full traceback lands in the
-        # server log via ``logger.exception``.
-        logger.exception("/v1/messages stream failed")
-        error_payload = json.dumps(
-            {
-                "type": "error",
-                "error": {
-                    "type": "server_error",
-                    "message": "Internal server error during streaming.",
-                },
-            }
-        )
-        yield f"event: error\ndata: {error_payload}\n\n"
-    finally:
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
+    return run_chat_stream(
+        _AnthropicStream(model, echo_model),
+        engine=_get_state().engine,
+        model=model,
+        messages=messages,
+        config=config,
+        tools=tools,
+        slot_cm=slot_cm,
+    )

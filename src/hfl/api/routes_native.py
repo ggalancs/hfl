@@ -752,152 +752,116 @@ async def api_chat(
     return envelope
 
 
-async def _stream_chat(
+class _OllamaChatStream:
+    """Ollama's NDJSON for a streamed chat turn (``hfl.api.chat_stream``).
+
+    Tool calls go out once, complete, on the final chunk (spec rule C5):
+    re-parsed and attached to every chunk, a client collecting them across
+    chunks, as Ollama's own libraries let you, got each call several times —
+    and cut-off ones such as GLM-4.7's ``get`` with no arguments (measured).
+    With tools declared the content is withheld while it streams (a
+    ``<tool_call>`` marker must not leak as text) and the cleaned narration
+    flushed at the end (API-7). Reasoning never goes out inside the answer:
+    with ``think`` in ``message.thinking``, as Ollama sends it, else dropped
+    (DeepSeek-R1 streamed its ``<think>`` block as content either way).
+    """
+
+    log_label = "ollama"
+
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+        self.created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def _line(self, body: dict[str, Any]) -> str:
+        return json.dumps(body) + "\n"
+
+    def not_loaded(self) -> str:
+        return self._line({"model": self.model_name, "error": "Model not loaded", "done": True})
+
+    def failed(self) -> str:
+        return self._line(
+            {
+                "model": self.model_name,
+                "error": "Internal server error during streaming.",
+                "done": True,
+            }
+        )
+
+    def start(self, turn: Any) -> str:
+        return ""
+
+    def token(self, turn: Any, token: str) -> str:
+        answer, thinking = turn.splitter.feed(token)
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": "" if turn.tool_aware else answer,
+            "tool_calls": None,
+        }
+        if thinking and turn.config.expose_reasoning:
+            message["thinking"] = thinking
+        return self._line(
+            {
+                "model": self.model_name,
+                "created_at": self.created_at,
+                "message": message,
+                "done": False,
+            }
+        )
+
+    def done(self, turn: Any) -> str:
+        cleaned, calls = parse_tool_calls(turn.text(), self.model_name, turn.tools)
+        answer, thinking = turn.splitter.flush()
+        message: dict = {
+            "role": "assistant",
+            "content": "" if turn.tool_aware else answer,
+            "tool_calls": calls or [],
+        }
+        if thinking and turn.config.expose_reasoning:
+            message["thinking"] = thinking
+        if not calls and turn.tool_aware:
+            message["content"] = cleaned  # no tool call after all (API-7)
+        ft = turn.first_token_ns
+        prompt_n, generated = _counts(turn.stream, turn.emitted)
+        return self._line(
+            {
+                "model": self.model_name,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "message": message,
+                "done": True,
+                # API-5: the non-streaming envelope's keys and units (ns).
+                "done_reason": "length"
+                if (turn.config.max_tokens and generated >= turn.config.max_tokens)
+                else "stop",
+                "total_duration": time.monotonic_ns() - turn.start_ns,
+                "load_duration": 0,
+                "prompt_eval_count": prompt_n,
+                "prompt_eval_duration": (ft - turn.start_ns) if ft else 0,
+                "eval_count": generated,
+                "eval_duration": time.monotonic_ns() - (ft or turn.start_ns),
+            }
+        )
+
+
+def _stream_chat(
     model_name: str,
     messages: list[ChatMessage],
     config: GenerationConfig,
     tools: list[dict] | None = None,
     slot_cm: Any | None = None,
 ) -> AsyncIterator[str]:
-    """Stream chat in Ollama NDJSON format with backpressure.
+    """Stream chat in Ollama NDJSON format with backpressure; ``slot_cm``
+    (an entered dispatcher slot) is released whatever happens (spec §5.3)."""
+    from hfl.api.chat_stream import run_chat_stream
 
-    The full generated text is accumulated so that the final ``done: true``
-    chunk can emit structured ``tool_calls`` extracted from the assembled
-    output (spec rule C5). Intermediate chunks keep ``tool_calls: null``.
-
-    ``slot_cm`` is an already-entered dispatcher slot context manager
-    from :func:`_acquire_stream_slot`; it is released in ``finally``
-    regardless of outcome (spec §5.3 — a hung stream must not leak
-    capacity).
-    """
-    from hfl.api.streaming import stream_with_backpressure
-
-    state = _get_state()
-    if state.engine is None:
-        error = {"model": model_name, "error": "Model not loaded", "done": True}
-        yield json.dumps(error) + "\n"
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
-        return
-
-    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    accumulated: list[str] = []
-    tool_aware = bool(tools)  # API-7: buffer content when tools are declared
-    # Reasoning never goes out inside the answer (the non-streamed reply
-    # strips it too): with ``think`` it goes in ``message.thinking``, as
-    # Ollama sends it, and without it is dropped. DeepSeek-R1 streamed its
-    # ``<think>`` block as content either way (measured).
-    from hfl.api.thinking import ThinkingSplitter
-
-    splitter = ThinkingSplitter()
-    show_thinking = config.expose_reasoning
-    # API-5: monotonic clock + emitted-chunk counter (see _stream_generate).
-    start_ns = time.monotonic_ns()
-    first_token_ns: list[int | None] = [None]
-    emitted = [0]
-
-    def format_chunk(token: str) -> str:
-        accumulated.append(token)
-        emitted[0] += 1
-        if first_token_ns[0] is None:
-            first_token_ns[0] = time.monotonic_ns()
-
-        # Tool calls go out once, complete, on the final chunk. (They used
-        # to be re-parsed from the text so far and attached to every chunk:
-        # a client collecting ``tool_calls`` across chunks, as Ollama's own
-        # libraries let you, got each call several times — and cut-off ones
-        # such as GLM-4.7's ``get`` with no arguments. Measured.)
-
-        # API-7: when tools are declared, never stream the raw token as
-        # content — a <tool_call>{...}</tool_call> marker would otherwise
-        # leak as visible text. Withhold content (emit "") while still
-        # surfacing partial tool_calls; the cleaned narration is flushed once
-        # in format_done. Plain turns (no tools) stream content verbatim.
-        answer, thinking = splitter.feed(token)
-        message: dict[str, Any] = {
-            "role": "assistant",
-            "content": "" if tool_aware else answer,
-            "tool_calls": None,
-        }
-        if thinking and show_thinking:
-            message["thinking"] = thinking
-        chunk = {
-            "model": model_name,
-            "created_at": created_at,
-            "message": message,
-            "done": False,
-        }
-        return json.dumps(chunk) + "\n"
-
-    def format_done() -> str:
-        full_text = "".join(accumulated)
-        cleaned, calls = parse_tool_calls(full_text, model_name, tools)
-        final_message: dict = {"role": "assistant", "content": "", "tool_calls": []}
-        answer, thinking = splitter.flush()
-        final_message["content"] = "" if tool_aware else answer
-        if thinking and show_thinking:
-            final_message["thinking"] = thinking
-        if calls:
-            final_message["tool_calls"] = calls
-        elif tool_aware:
-            # No tool call after all — flush the cleaned narration that was
-            # withheld during the stream (API-7).
-            final_message["content"] = cleaned
-
-        ft = first_token_ns[0]
-        prompt_n, generated = _counts(sync_iterator, emitted[0])
-        chunk = {
-            "model": model_name,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "message": final_message,
-            "done": True,
-            # API-5: mirror the non-streaming envelope's keys/units (ns).
-            "done_reason": "length"
-            if (config.max_tokens and generated >= config.max_tokens)
-            else "stop",
-            "total_duration": time.monotonic_ns() - start_ns,
-            "load_duration": 0,
-            "prompt_eval_count": prompt_n,
-            "prompt_eval_duration": (ft - start_ns) if ft else 0,
-            "eval_count": generated,
-            "eval_duration": time.monotonic_ns() - (ft or start_ns),
-        }
-        return json.dumps(chunk) + "\n"
-
-    # Obtain the sync token iterator, tolerating engines without ``tools``
-    # support by falling back to the 2-arg signature.
-    if tools is not None:
-        try:
-            sync_iterator = state.engine.chat_stream(messages, config, tools=tools)
-        except TypeError:
-            sync_iterator = state.engine.chat_stream(messages, config)
-    else:
-        sync_iterator = state.engine.chat_stream(messages, config)
-
-    try:
-        async for chunk in stream_with_backpressure(
-            sync_iterator=sync_iterator,
-            format_item=format_chunk,
-            format_done=format_done,
-        ):
-            yield chunk
-    except Exception:
-        # Never forward ``str(exc)`` to the client — it may reveal
-        # paths, library class names, or line numbers (CodeQL
-        # ``py/stack-trace-exposure``). Full traceback goes to the
-        # server log via ``logger.exception``.
-        logger.exception("ollama stream failed for model %s", model_name)
-        error = {
-            "model": model_name,
-            "error": "Internal server error during streaming.",
-            "done": True,
-        }
-        yield json.dumps(error) + "\n"
-    finally:
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
+    return run_chat_stream(
+        _OllamaChatStream(model_name),
+        engine=_get_state().engine,
+        model=model_name,
+        messages=messages,
+        config=config,
+        tools=tools,
+        slot_cm=slot_cm,
+    )
 
 
 @router.get("/api/tags", tags=["Ollama"], summary="List local models")

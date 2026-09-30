@@ -30,7 +30,6 @@ from hfl.api.modelfile_defaults import (
     explicit_fields,
 )
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
-from hfl.api.thinking import ThinkingSplitter
 from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
@@ -343,100 +342,75 @@ def _include_usage(req: Any) -> bool:
     return bool(isinstance(options, dict) and options.get("include_usage"))
 
 
-async def _stream_chat(
-    model: str,
-    messages: list[ChatMessage],
-    config: GenerationConfig,
-    tools: list[dict] | None = None,
-    slot_cm: Any | None = None,
-    include_usage: bool = False,
-) -> AsyncIterator[str]:
-    """Generate OpenAI-compatible SSE responses with backpressure.
+class _OpenAIChatStream:
+    """OpenAI's SSE for a streamed chat turn (``hfl.api.chat_stream``).
 
-    Plain chat (``tools`` is falsy) streams token-by-token as content
-    deltas. When ``tools`` are declared the full generation is buffered so
-    the per-family parser can lift tool-call markers out of the text into a
-    single structured ``tool_calls`` delta (finish_reason ``tool_calls``) —
-    this keeps the raw ``<tool_call>`` JSON from ever leaking to the client
-    as content (spec rules C4/C5).
-
-    ``slot_cm`` is the dispatcher slot held for the entire stream
-    (spec §5.3). It is released in ``finally`` regardless of outcome.
+    Plain chat streams token by token as content deltas, reasoning apart in
+    ``reasoning_content``. With tools declared the whole reply is buffered
+    so the per-family parser lifts tool-call markers into one structured
+    ``tool_calls`` delta (finish_reason ``tool_calls``): raw ``<tool_call>``
+    JSON never reaches the client as content (spec rules C4/C5).
     """
-    from hfl.api.streaming import stream_with_backpressure
 
-    state = _get_state()
-    if state.engine is None:
-        err = json.dumps(
-            {
-                "error": "Model not loaded",
-                "code": "SERVICE_UNAVAILABLE",
-            }
-        )
-        yield f"data: {err}\n\n"
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
-        return
+    log_label = "openai"
 
-    chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-    created = int(time.time())  # Consistent timestamp across all chunks
-    first_chunk = True
-    tool_aware = bool(tools)
-    accumulated: list[str] = []
-    emitted = [0]  # API-13: token count → report finish_reason "length" on cap
-    # Reasoning streams apart from the answer, in ``reasoning_content``.
-    splitter = ThinkingSplitter()
-    show_reasoning = config.reasoning != "off"
+    def __init__(self, model: str, include_usage: bool) -> None:
+        self.model, self.include_usage = model, include_usage
+        self.chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        self.created = int(time.time())  # one timestamp for every chunk
+        self.first_chunk = True
 
-    def _chunk_json(delta: dict, finish_reason: str | None) -> str:
+    def not_loaded(self) -> str:
+        err = {"error": "Model not loaded", "code": "SERVICE_UNAVAILABLE"}
+        return f"data: {json.dumps(err)}\n\n"
+
+    def failed(self) -> str:
+        err = {"error": "Internal server error during streaming.", "code": "STREAM_ERROR"}
+        return f"data: {json.dumps(err)}\n\n"
+
+    def start(self, turn: Any) -> str:
+        return ""
+
+    def _chunk(self, delta: dict, finish_reason: str | None) -> str:
         chunk = {
-            "id": chat_id,
+            "id": self.chat_id,
             "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
+            "created": self.created,
+            "model": self.model,
             "system_fingerprint": None,  # OpenAI compatibility
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
         }
         return f"data: {json.dumps(chunk)}\n\n"
 
-    def format_chunk(token: str) -> str:
-        nonlocal first_chunk
-        emitted[0] += 1
-        # Tool-aware turns buffer everything; emit nothing until done so a
-        # tool-call marker is never streamed verbatim as content.
-        if tool_aware:
-            accumulated.append(token)
-            return ""
-        return _deltas(*splitter.feed(token))
-
-    def _deltas(answer: str, reasoning: str) -> str:
-        nonlocal first_chunk
+    def _deltas(self, turn: Any, answer: str, reasoning: str) -> str:
+        show = turn.config.reasoning != "off"
         out = ""
-        for key, text in (("reasoning_content", reasoning if show_reasoning else ""),
+        for key, text in (("reasoning_content", reasoning if show else ""),
                           ("content", answer)):  # fmt: skip
             if not text:
                 continue
             delta: dict[str, str] = {key: text}
-            if first_chunk:
+            if self.first_chunk:
                 delta["role"] = "assistant"
-                first_chunk = False
-            out += _chunk_json(delta, None)
+                self.first_chunk = False
+            out += self._chunk(delta, None)
         return out
 
-    stream = state.engine.chat_stream(messages, config, tools)
+    def token(self, turn: Any, token: str) -> str:
+        # Tool-aware turns emit nothing until done.
+        return "" if turn.tool_aware else self._deltas(turn, *turn.splitter.feed(token))
 
-    def _usage_chunk() -> str:
+    def _usage(self, turn: Any) -> str:
         # ``stream_options.include_usage``: one last chunk, empty choices,
         # with the tokens the engine counted — none when it cannot count.
-        prompt_n, generated = stream_counts(stream)
-        if not include_usage or prompt_n is None or generated is None:
+        prompt_n, generated = turn.counts()
+        if not self.include_usage or prompt_n is None or generated is None:
             return ""
         chunk = {
-            "id": chat_id,
+            "id": self.chat_id,
             "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
+            "created": self.created,
+            "model": self.model,
             "system_fingerprint": None,
             "choices": [],
             "usage": {
@@ -447,71 +421,47 @@ async def _stream_chat(
         }
         return f"data: {json.dumps(chunk)}\n\n"
 
-    def format_done() -> str:
-        # API-13: report "length" when generation hit the token cap, else
-        # "stop" (real OpenAI distinguishes them; the stream only exposes the
-        # emitted-token count, so this is best-effort but accurate at the cap).
-        generated = stream_counts(stream)[1]
-        count = generated if generated is not None else emitted[0]
-        stop_finish = "length" if (config.max_tokens and count >= config.max_tokens) else "stop"
-        if not tool_aware:
-            return (
-                _deltas(*splitter.flush())
-                + _chunk_json({}, stop_finish)
-                + _usage_chunk()
-                + "data: [DONE]\n\n"
-            )
-
-        resolved = resolve_chat_output("".join(accumulated), model, tools)
-        thought = _deltas("", resolved.reasoning or "")
+    def done(self, turn: Any) -> str:
+        # API-13: "length" when generation hit the token cap, else "stop".
+        stop = "length" if turn.hit_cap() else "stop"
+        end = self._usage(turn) + "data: [DONE]\n\n"
+        if not turn.tool_aware:
+            return self._deltas(turn, *turn.splitter.flush()) + self._chunk({}, stop) + end
+        resolved = turn.resolved()
+        thought = self._deltas(turn, "", resolved.reasoning or "")
         if resolved.has_tool_calls:
             calls = _to_openai_tool_calls(resolved.tool_calls)
             delta = {
                 "role": "assistant",
                 "tool_calls": [{"index": i, **tc} for i, tc in enumerate(calls)],
             }
-            return (
-                thought
-                + _chunk_json(delta, None)
-                + _chunk_json({}, "tool_calls")
-                + _usage_chunk()
-                + "data: [DONE]\n\n"
-            )
-        # No tool call after all — surface the cleaned text as one delta.
-        return (
-            thought
-            + _chunk_json({"role": "assistant", "content": resolved.content}, None)
-            + _chunk_json({}, stop_finish)
-            + _usage_chunk()
-            + "data: [DONE]\n\n"
-        )
+            return thought + self._chunk(delta, None) + self._chunk({}, "tool_calls") + end
+        # No tool call after all: the cleaned text as one delta.
+        content = {"role": "assistant", "content": resolved.content}
+        return thought + self._chunk(content, None) + self._chunk({}, stop) + end
 
-    try:
-        async for chunk in stream_with_backpressure(
-            sync_iterator=stream,
-            format_item=format_chunk,
-            format_done=format_done,
-        ):
-            yield chunk
-    except Exception:
-        # Don't emit ``str(exc)`` on the stream — it may leak paths
-        # or class names (CodeQL ``py/stack-trace-exposure``). Full
-        # traceback is in the server log.
-        logger.exception("openai stream failed")
-        yield (
-            "data: "
-            + json.dumps(
-                {
-                    "error": "Internal server error during streaming.",
-                    "code": "STREAM_ERROR",
-                }
-            )
-            + "\n\n"
-        )
-    finally:
-        if slot_cm is not None:
-            with contextlib.suppress(Exception):
-                await slot_cm.__aexit__(None, None, None)
+
+def _stream_chat(
+    model: str,
+    messages: list[ChatMessage],
+    config: GenerationConfig,
+    tools: list[dict] | None = None,
+    slot_cm: Any | None = None,
+    include_usage: bool = False,
+) -> AsyncIterator[str]:
+    """OpenAI-compatible SSE with backpressure; ``slot_cm`` (the dispatcher
+    slot, spec §5.3) is released whatever happens."""
+    from hfl.api.chat_stream import run_chat_stream
+
+    return run_chat_stream(
+        _OpenAIChatStream(model, include_usage),
+        engine=_get_state().engine,
+        model=model,
+        messages=messages,
+        config=config,
+        tools=tools,
+        slot_cm=slot_cm,
+    )
 
 
 @router.post(

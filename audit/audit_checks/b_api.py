@@ -176,7 +176,8 @@ def api_chat(a: Audit) -> str:
 def api_generate(a: Audit) -> str:
     """Every part checked, each failure listed (not only the first)."""
     c = _c(a)
-    body = {"model": "chat", "prompt": QUESTION, "stream": False}
+    # Greedy: sampled, the 0.5B model answered "England" once in five runs.
+    body = {"model": "chat", "prompt": QUESTION, "stream": False, "options": {"temperature": 0}}
     problems, fine = [], []
 
     def part(name: str, ok: bool, detail: object) -> None:
