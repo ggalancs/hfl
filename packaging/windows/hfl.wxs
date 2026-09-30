@@ -5,9 +5,10 @@
 
   WiX (Windows Installer XML) recipe for HFL (Phase 17 — V2 row 30).
 
-  Produces a signed MSI that installs HFL into Program Files, puts
-  ``hfl.exe`` on PATH, and registers the service under its Ollama-
-  compatible port (11434).
+  Produces an MSI (signed when windows-msi.yml has a certificate) that
+  installs HFL into Program Files for all users and puts ``hfl.exe`` on
+  the system PATH. It registers no service: ``hfl serve`` is started by
+  the user. Checked without installing by the local audit (F7).
 
   The ``ProductVersion`` and ``ProductCode`` placeholders are
   patched by ``.github/workflows/windows-msi.yml`` on each v* tag.

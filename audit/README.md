@@ -24,7 +24,11 @@ without the setting) so a check that cannot fail does not pass.
   `llama-server` on `PATH` (`brew install llama.cpp`), Docker, Homebrew,
   a SearXNG instance in `AUDIT_SEARXNG_URL` (a real web search; with none,
   DuckDuckGo usually refuses a scripted client), a speech synthesiser (macOS `say`,
-  or `espeak-ng`), Apple Silicon (MLX), Linux + NVIDIA (vLLM).
+  or `espeak-ng`; on Windows its own voices), Apple Silicon (MLX), Linux +
+  NVIDIA (vLLM), and on Windows WiX v3 for the MSI check (F7): its installer,
+  or the official binaries zip unpacked anywhere with `AUDIT_WIX_BIN` set to
+  that folder. F7 installs nothing: it builds the MSI, extracts it with
+  `msiexec /a` and reads its tables.
 
 ## Run it
 

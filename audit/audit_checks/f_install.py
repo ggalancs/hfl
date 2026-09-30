@@ -233,6 +233,104 @@ def f6(a: Audit) -> str:
     return f"{binary.stat().st_size // 2**20} MB; platform_check.py: {len(lines)} checks passed"
 
 
-@check("F7", "MSI / winget")
+def _wix_bin() -> Path | None:
+    """WiX v3's bin folder: ``AUDIT_WIX_BIN``, or where its installer puts it
+    (the release workflow's). The official binaries zip needs no install."""
+    found = [os.environ.get("AUDIT_WIX_BIN", "")]
+    found += [str(d / "bin") for d in Path(r"C:\Program Files (x86)").glob("WiX Toolset*")]
+    return next((Path(d) for d in found if d and (Path(d) / "candle.exe").exists()), None)
+
+
+# What the MSI registers, read from its own tables (nothing is installed).
+_MSI_TABLES = r"""
+$wi = New-Object -ComObject WindowsInstaller.Installer
+$db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($args[0], 0))
+foreach ($q in @("SELECT Name, Value FROM Environment",
+                 "SELECT Property, Value FROM Property WHERE Property='ALLUSERS'")) {
+  $v = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($q))
+  $v.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $v, $null)
+  while ($r = $v.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $v, $null)) {
+    $r.GetType().InvokeMember('StringData', 'GetProperty', $null, $r, 1) + '=' +
+    $r.GetType().InvokeMember('StringData', 'GetProperty', $null, $r, 2)
+  }
+}
+"""
+
+
+@check("F7", "MSI / winget", needs=("F6",))
 def f7(a: Audit) -> str:
-    raise Uncheckable("Windows installers: needs Windows")
+    """The MSI built as windows-msi.yml builds it, from F6's executable, then
+    opened without installing anything: ``msiexec /a`` extracts it, the
+    extracted hfl.exe must be F6's and run, and its tables must put HFL on
+    the system PATH for all users. The winget manifest is validated too."""
+    if not WINDOWS:
+        raise Uncheckable("Windows installers: needs Windows")
+    wix = _wix_bin()
+    if wix is None:
+        raise Uncheckable("WiX v3 not found (AUDIT_WIX_BIN: a folder with candle.exe)")
+    import hashlib
+    import tempfile
+
+    exe = a.work / "pyi" / "dist" / "hfl.exe"
+    expect(exe.exists(), "F6 built no hfl.exe")
+    build = Path(tempfile.mkdtemp(prefix="msi-", dir=a.work))
+    (build / "dist").mkdir()
+    (build / "packaging" / "windows").mkdir(parents=True)
+    shutil.copyfile(exe, build / "dist" / "hfl.exe")
+    rtf = Path("packaging") / "windows" / "LICENSE.rtf"
+    shutil.copyfile(REPO / rtf, build / rtf)
+    import re
+
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    version = re.search(r'^version = "(.+)"', pyproject, re.M).group(1)  # type: ignore[union-attr]
+    wxs = (REPO / "packaging" / "windows" / "hfl.wxs").read_text(encoding="utf-8")
+    (build / "dist" / "hfl.wxs").write_text(wxs.replace("@HFL_VERSION@", version), encoding="utf-8")
+    msi = build / "dist" / f"hfl-{version}.msi"
+    obj, src = r"dist\hfl.wixobj", r"dist\hfl.wxs"
+    for step in (
+        [str(wix / "candle.exe"), "-nologo", "-arch", "x64", "-out", obj, src],
+        [str(wix / "light.exe"), "-nologo", "-ext", "WixUIExtension", "-out", str(msi), obj],
+    ):
+        done = subprocess.run(step, capture_output=True, text=True, cwd=build, timeout=900)
+        # light runs the ICE validation: a failing one fails the build.
+        expect(done.returncode == 0, f"{Path(step[0]).name}: {(done.stdout + done.stderr)[-300:]}")
+    extract = build / "extract"
+    admin = subprocess.run(
+        ["msiexec", "/a", str(msi), "/qn", f"TARGETDIR={extract}"], capture_output=True, timeout=600
+    )
+    expect(admin.returncode == 0, f"msiexec /a exit {admin.returncode}")
+    inside = extract / "HFL" / "hfl.exe"
+
+    def digest(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    expect(inside.exists() and digest(inside) == digest(exe), "the MSI's hfl.exe is not F6's")
+    runs = subprocess.run(
+        [str(inside), "version"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=a.env,  # PYTHONUTF8: the console's own code page cannot print "·"
+        timeout=120,
+    )
+    expect(runs.returncode == 0 and version in runs.stdout, runs.stdout[-200:] + runs.stderr[-200:])
+    query = build / "tables.ps1"  # -File passes arguments as $args; -Command does not
+    query.write_text(_MSI_TABLES, encoding="utf-8")
+    tables = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(query), str(msi)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    ).stdout.split()
+    expect(any("PATH=" in t and "[INSTALLFOLDER]" in t for t in tables), f"no PATH entry: {tables}")
+    expect("ALLUSERS=1" in tables, f"not for all users: {tables}")
+    manifest = REPO / "packaging" / "winget" / "manifests" / "g" / "ggalancs" / "HFL" / version
+    winget = "winget manifest not checked (no winget here)"
+    if shutil.which("winget") and manifest.is_dir():
+        valid = subprocess.run(
+            ["winget", "validate", "--manifest", str(manifest)], capture_output=True, timeout=300
+        )
+        expect(valid.returncode == 0, f"winget validate exit {valid.returncode}")
+        winget = "winget manifest valid"
+    size = msi.stat().st_size // 2**20
+    return f"{msi.name} {size} MB: ICE passed, extracts F6's hfl.exe, runs, on PATH; {winget}"
