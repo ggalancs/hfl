@@ -205,6 +205,18 @@ def main() -> int:
                 server.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 server.kill()
+            # What was stopped is the launcher, for a one-file executable:
+            # on Windows its program went on serving alone (port and file
+            # held). Nothing may answer any more.
+            gone_by = time.monotonic() + 30
+            answering = True
+            while answering and time.monotonic() < gone_by:
+                try:
+                    httpx.get(f"http://127.0.0.1:{port}/healthz", timeout=2)
+                    time.sleep(1)
+                except httpx.HTTPError:
+                    answering = False
+            run.check("stops when stopped", not answering, f"port {port}")
         if log is not None:
             log.close()
         if args.keep:

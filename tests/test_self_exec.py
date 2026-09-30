@@ -95,3 +95,40 @@ def test_a_onefile_program_stops_when_its_launcher_is_gone(monkeypatch) -> None:
     while not sent and time.monotonic() < deadline:
         pass
     assert sent == [(os.getpid(), signal.SIGTERM)]
+
+
+def test_on_windows_the_program_stops_when_its_launcher_is_gone(monkeypatch) -> None:
+    """Stopping hfl.exe's launcher on Windows left the program serving on
+    its own (found on a real Windows 10: the port held, the file locked).
+    It waits on a handle to the launcher, then signals itself SIGTERM."""
+    import os
+    import signal
+    import time
+
+    monkeypatch.setattr(self_exec, "is_frozen", lambda: True)
+    monkeypatch.setattr(self_exec, "_executable_of", lambda pid: os.path.realpath(sys.executable))
+    monkeypatch.setattr(os, "getppid", lambda: 1000)
+    waited: list[int] = []
+    monkeypatch.setattr(self_exec, "_windows_waiter", lambda pid: lambda: waited.append(pid))
+    raised: list[int] = []
+    monkeypatch.setattr(signal, "raise_signal", raised.append)
+    monkeypatch.setattr(os, "name", "nt")
+    watching = self_exec.watch_onefile_launcher()
+    monkeypatch.setattr(os, "name", "posix")
+    deadline = time.monotonic() + 5
+    while not raised and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert watching is True and waited == [1000] and raised == [signal.SIGTERM]
+
+
+def test_on_windows_a_launcher_it_cannot_open_is_not_watched(monkeypatch) -> None:
+    import os
+
+    monkeypatch.setattr(self_exec, "is_frozen", lambda: True)
+    monkeypatch.setattr(self_exec, "_executable_of", lambda pid: os.path.realpath(sys.executable))
+    monkeypatch.setattr(os, "getppid", lambda: 1000)
+    monkeypatch.setattr(self_exec, "_windows_waiter", lambda pid: None)
+    monkeypatch.setattr(os, "name", "nt")
+    watching = self_exec.watch_onefile_launcher()
+    monkeypatch.setattr(os, "name", "posix")
+    assert watching is False

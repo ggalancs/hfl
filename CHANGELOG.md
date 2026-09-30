@@ -119,6 +119,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could be renamed but not deleted, so the next `hfl rm` dropped the entry
   and left the file on disk. Now nothing is touched, the message says to
   `hfl stop` the model first, and `/api/delete` answers 409.
+- **The Windows executable stops when its launcher is stopped.** A one-file
+  `hfl.exe` is two processes, and stopping the launcher (TerminateProcess,
+  Task Manager, a supervisor) left `hfl.exe serve` serving on its own,
+  holding the port and its own file. The program now waits on a handle to
+  its launcher and shuts down cleanly once it is gone, as it already did on
+  macOS and Linux. Measured with a real `hfl.exe`: the port closes 1.2 s
+  after the launcher stops.
 - **`hfl pull` and `/api/pull` share the same steps** (`hfl.hub.pull_service`).
   They had drifted: the server downloaded model types HFL cannot serve and
   registered no model type; the CLI logged no provenance and could take an
