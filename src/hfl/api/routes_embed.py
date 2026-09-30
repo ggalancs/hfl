@@ -294,7 +294,14 @@ async def _load_embedding_model(model_name: str) -> Any:
         raise ModelTypeMismatchError(model_name, expected="embedding", got=detected.value)
 
     engine = _select_embedding_backend(model_path)
-    await asyncio.to_thread(engine.load, manifest.local_path)
+    from hfl.engine.footprint import estimate_footprint
+
+    estimate = estimate_footprint(model_path).total_bytes
+    await state.admit_other(
+        f"{model_name} (embeddings)",
+        estimate,
+        lambda: asyncio.to_thread(engine.load, manifest.local_path),
+    )
     # Stash on state so the next call reuses.
     state._embed_engine = engine
     state._embed_model_name = model_name

@@ -207,6 +207,34 @@ class TestOneEmbeddingModelAtATime:
         assert made[1].unload.called and get_state()._embed_engine is None
         reset_state()
 
+    def test_the_load_goes_through_memory_admission(self, temp_config, monkeypatch, tmp_path):
+        """With its size, so idle LLMs can make room or the load is refused."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from hfl.api import routes_embed
+        from hfl.api.state import get_state, reset_state
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import get_registry
+
+        reset_state()
+        model = _gguf(tmp_path / "e.gguf", [("general.architecture", 8, "nomic-bert")])
+        get_registry().add(ModelManifest("e", "org/e", str(model), "gguf"))
+        monkeypatch.setattr(
+            routes_embed, "_select_embedding_backend", lambda path: MagicMock(is_loaded=True)
+        )
+        seen = []
+        real = type(get_state()).admit_other
+
+        async def spy(self, name, estimate, load):
+            seen.append((name, estimate))
+            return await real(self, name, estimate, load)
+
+        monkeypatch.setattr(type(get_state()), "admit_other", spy)
+        asyncio.run(routes_embed._embed_on("e", lambda engine: "ok"))
+        assert seen and seen[0][0] == "e (embeddings)" and seen[0][1] > 0
+        reset_state()
+
     def test_a_timed_out_call_keeps_the_lock_until_it_leaves(self, monkeypatch):
         import asyncio
         import threading

@@ -896,3 +896,48 @@ def test_a_hub_reference_reaches_the_local_model_over_http(world):
     assert response.json()["message"]["content"] == "from a"
     # Resident under its local name: the reference and the name share it.
     assert [r.name for r in get_state().resident_models()] == ["a"]
+
+
+def _load_llm_now(name: str) -> None:
+    from hfl.api.model_loader import load_llm
+
+    async def go() -> None:
+        with _lease_scope():
+            await load_llm(name)
+
+    asyncio.run(go())
+
+
+def test_an_embedding_model_makes_room_like_an_llm(world):
+    """Embedding models loaded with no check: beside a model that filled the
+    GPU, one failed inside llama.cpp. Now idle LLMs make room for it."""
+    from hfl.api.state import get_state
+
+    w = world({"big": 60}, others=10)  # 10 + 60 in use of 100, budget 85
+    _load_llm_now("big")
+    loaded = []
+
+    async def load_embed() -> str:
+        loaded.append("embed")
+        return "engine"
+
+    got = asyncio.run(get_state().admit_other("embed (embeddings)", 30 * GB, load_embed))
+    assert got == "engine" and loaded == ["embed"]
+    assert "unload big" in w.events  # 10 + 60 + 30 > 85: the idle LLM went first
+    assert [r.name for r in get_state().resident_models()] == []
+
+
+def test_an_embedding_model_that_cannot_fit_is_refused_and_nothing_goes(world):
+    from hfl.api.state import get_state
+    from hfl.exceptions import MemoryBudgetExceededError
+
+    w = world({"small": 5}, others=10)
+    _load_llm_now("small")
+
+    async def load_embed() -> str:
+        raise AssertionError("must not load")
+
+    with pytest.raises(MemoryBudgetExceededError):
+        asyncio.run(get_state().admit_other("huge (embeddings)", 90 * GB, load_embed))
+    assert "unload small" not in w.events
+    assert [r.name for r in get_state().resident_models()] == ["small"]

@@ -22,7 +22,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -798,6 +798,23 @@ class ServerState:
 
         # Use asyncio.wait_for for cross-platform timeout (works on Python 3.10+)
         return await asyncio.wait_for(_load_with_lock(), timeout=timeout)
+
+    async def admit_other(
+        self, name: str, estimate: int, load: Callable[[], Awaitable[Any]]
+    ) -> Any:
+        """Load a model that is not a resident LLM (an embedding model) under
+        the same admission as LLMs: one at a time, idle LLMs unloaded least
+        recently used first until ``estimate`` bytes fit the budget, busy
+        ones waited for, refused with the numbers when it cannot fit.
+
+        Embedding models used to load with no check: beside a vLLM model on
+        an L4 one failed inside llama.cpp ("Failed to create llama_context")
+        instead of HFL making room or saying why.
+        """
+        async with self._admission_lock:
+            deadline = time.monotonic() + _busy_wait_seconds()
+            await self._make_room(name, estimate, deadline)
+            return await load()
 
     async def _wait_for_release(self, resident: ResidentModel, deadline: float) -> None:
         """Wait until no other request holds ``resident``."""

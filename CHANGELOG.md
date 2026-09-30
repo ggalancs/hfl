@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Embedding models loaded outside the memory budget.** An embedding
+  model now goes through the same admission as chat models: idle ones are
+  unloaded to make room, or the load is refused with the numbers (507)
+  instead of failing inside llama.cpp ("Failed to create llama_context").
 - **On NVIDIA without `pynvml`, every model opened with 4096 tokens.** The
   GPU memory probe that picks the default context (Ollama's tiers: 4k,
   32k from 24 GB, 256k from 48 GB) read only `pynvml`, which `[all]`
