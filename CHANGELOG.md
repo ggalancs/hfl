@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Qwen2.5-Coder's tool calls are fixed at the source.** Its GGUF template
+  shows the model the tool-call format with doubled braces (`{{"name": ...}}`)
+  and the model copies them. HFL corrects that line of the template on both
+  GGUF backends. Measured with the raw output of Qwen2.5-Coder 1.5B, 10
+  samples each: a valid JSON call 0/10 with the shipped template, 9/10 with
+  the corrected one. The tolerant parser stays as a safety net.
 - **Embedding models loaded outside the memory budget.** An embedding
   model now goes through the same admission as chat models: idle ones are
   unloaded to make room, or the load is refused with the numbers (507)

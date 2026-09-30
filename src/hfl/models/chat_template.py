@@ -19,6 +19,29 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# Known mistakes in chat templates shipped inside model files, each with the
+# text that replaces it. Qwen2.5-Coder's GGUF shows the tool-call format as
+# {{"name": ..., "arguments": ...}} — a Python f-string's escaping left in
+# a Jinja string, so the braces reach the model doubled; it copies them and
+# its calls are not JSON (measured: 4 of 10 replies to Open WebUI's request
+# needed HFL's parser to rescue them). Qwen2.5-Instruct's template has the
+# same line with single braces.
+_TEMPLATE_REPAIRS: tuple[tuple[str, str], ...] = (
+    (
+        '{{\\"name\\": <function-name>, \\"arguments\\": <args-json-object>}}',
+        '{\\"name\\": <function-name>, \\"arguments\\": <args-json-object>}',
+    ),
+)
+
+
+def repair_chat_template(template: str) -> str:
+    """``template`` with the known mistakes of shipped templates corrected
+    (``_TEMPLATE_REPAIRS``); unchanged when it has none."""
+    for wrong, right in _TEMPLATE_REPAIRS:
+        template = template.replace(wrong, right)
+    return template
+
+
 def model_template(manifest: Any) -> str:
     """The template requests to ``manifest`` are formatted with: a created
     model's TEMPLATE, else the one its files carry; "" when there is none."""

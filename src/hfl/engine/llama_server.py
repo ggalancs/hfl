@@ -550,9 +550,8 @@ class LlamaServerEngine(InferenceEngine):
         self._launch([*base_argv, *self._lora_args()], model_path, timeout)
         fixed = self._template_with_bos(config.home_dir / "templates", Path(model_path).stem)
         if fixed is not None:
-            # Once more with the template that writes BOS (see
+            # Once more with the corrected template (see
             # ``_template_with_bos``): llama-server reads it only at start.
-            logger.info("Chat template does not start with BOS; HFL adds it")
             self._template_args = ["--chat-template-file", str(fixed)]
             self.unload()
             argv = [*base_argv, *self._template_args, *self._lora_args()]
@@ -708,12 +707,36 @@ class LlamaServerEngine(InferenceEngine):
         ``】,\\n762\\n##...`` (measured). Whether BOS is wanted is asked of
         llama-server itself — its tokenizer, with special tokens on.
         """
+        from hfl.models.chat_template import repair_chat_template
+
         props = self._props()
         template, bos = props.get("chat_template"), props.get("bos_token")
-        if not isinstance(template, str) or not isinstance(bos, str) or not bos:
+        if not isinstance(template, str):
             return None
-        if "bos_token" in template or bos in template:
+        # Also the known mistakes of shipped templates (Qwen2.5-Coder's
+        # doubled braces), corrected in the same copy.
+        repaired = repair_chat_template(template)
+        if repaired != template:
+            logger.info("Chat template has a known mistake; HFL corrects it")
+        needs_bos = (
+            isinstance(bos, str)
+            and bool(bos)
+            and "bos_token" not in template
+            and bos not in template
+            and self._adds_bos()
+        )
+        if needs_bos:
+            logger.info("Chat template does not start with BOS; HFL adds it")
+        if repaired == template and not needs_bos:
             return None
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{stem}.jinja"
+        path.write_text(("{{ bos_token }}" if needs_bos else "") + repaired, encoding="utf-8")
+        return path
+
+    def _adds_bos(self) -> bool:
+        """Whether this vocabulary wants BOS: asked of llama-server's own
+        tokenizer, with special tokens on and off."""
         try:
             with_special = self._http().post(
                 "/tokenize", json={"content": "a", "add_special": True}, timeout=10
@@ -721,15 +744,9 @@ class LlamaServerEngine(InferenceEngine):
             without = self._http().post(
                 "/tokenize", json={"content": "a", "add_special": False}, timeout=10
             )
-            adds_bos = len(with_special.json()["tokens"]) > len(without.json()["tokens"])
+            return len(with_special.json()["tokens"]) > len(without.json()["tokens"])
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            return None
-        if not adds_bos:
-            return None
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{stem}.jinja"
-        path.write_text("{{ bos_token }}" + template, encoding="utf-8")
-        return path
+            return False
 
     def _read_template(self) -> None:
         """What the running template does with tools (llama.cpp's own

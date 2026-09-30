@@ -346,6 +346,17 @@ class TestEngine:
             _, added = _install_template_formatters(self._model(template, adds))
             assert added is False and made == [template]
 
+    def test_qwen_coders_doubled_braces_are_corrected(self, monkeypatch):
+        import jinja2
+
+        from hfl.engine.llama_cpp import _install_template_formatters
+        from tests.chat_templates import DOUBLED_HINT, QWEN_CODER_TOOL_LINE, TOOL_CALL_HINT
+
+        made = self._stub_formatter(monkeypatch)
+        _install_template_formatters(self._model(QWEN_CODER_TOOL_LINE, False))
+        rendered = jinja2.Environment().from_string(made[0]).render()
+        assert TOOL_CALL_HINT in rendered and DOUBLED_HINT not in rendered
+
     def test_the_reasoning_switch_reaches_the_template(self, monkeypatch):
         """``think: false`` used to hide the reasoning only: the template
         never saw ``enable_thinking``, so the model reasoned anyway."""

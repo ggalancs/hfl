@@ -604,6 +604,12 @@ def _install_template_formatters(model: Any) -> tuple[list[Any], bool]:
             continue
         if not isinstance(template, str):
             continue
+        from hfl.models.chat_template import repair_chat_template
+
+        repaired = repair_chat_template(template)
+        if repaired != template:
+            logger.info("Chat template %s has a known mistake; HFL corrects it", key)
+            template = repaired
         if wants_bos and "bos_token" not in template and bos not in template:
             template = "{{ bos_token }}" + template
             added_bos = True

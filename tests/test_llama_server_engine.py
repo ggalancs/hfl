@@ -634,6 +634,21 @@ class TestTemplates:
         _loaded(fake_server).unload()
         assert len(_launches(fake_server)) == 1
 
+    def test_qwen_coders_doubled_braces_are_corrected(self, fake_server, monkeypatch):
+        """Qwen2.5-Coder's template shows the tool call with doubled braces
+        and the model copies them: HFL relaunches with a corrected copy."""
+        import jinja2
+
+        from tests.chat_templates import DOUBLED_HINT, QWEN_CODER_TOOL_LINE, TOOL_CALL_HINT
+
+        monkeypatch.setenv("FAKE_TEMPLATE", QWEN_CODER_TOOL_LINE)
+        _loaded(fake_server).unload()
+        launches = _launches(fake_server)
+        assert len(launches) == 2
+        fixed = Path(launches[1][launches[1].index("--chat-template-file") + 1]).read_text()
+        rendered = jinja2.Environment().from_string(fixed).render()
+        assert TOOL_CALL_HINT in rendered and DOUBLED_HINT not in rendered
+
     def test_gpt_oss_answers_without_its_channels(self, fake_server, monkeypatch):
         """``--reasoning-format none`` leaves gpt-oss's Harmony channels in
         the text; the answer is the ``final`` one."""
