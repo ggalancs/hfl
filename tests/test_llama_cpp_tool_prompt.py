@@ -347,8 +347,7 @@ class TestEngine:
             assert added is False and made == [template]
 
     def test_qwen_coders_doubled_braces_are_corrected(self, monkeypatch):
-        import jinja2
-
+        jinja2 = pytest.importorskip("jinja2")
         from hfl.engine.llama_cpp import _install_template_formatters
         from tests.chat_templates import DOUBLED_HINT, QWEN_CODER_TOOL_LINE, TOOL_CALL_HINT
 

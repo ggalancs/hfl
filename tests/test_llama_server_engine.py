@@ -637,8 +637,7 @@ class TestTemplates:
     def test_qwen_coders_doubled_braces_are_corrected(self, fake_server, monkeypatch):
         """Qwen2.5-Coder's template shows the tool call with doubled braces
         and the model copies them: HFL relaunches with a corrected copy."""
-        import jinja2
-
+        jinja2 = pytest.importorskip("jinja2")
         from tests.chat_templates import DOUBLED_HINT, QWEN_CODER_TOOL_LINE, TOOL_CALL_HINT
 
         monkeypatch.setenv("FAKE_TEMPLATE", QWEN_CODER_TOOL_LINE)

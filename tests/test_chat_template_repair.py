@@ -7,10 +7,13 @@ copies them, and its calls are not JSON (4 of 10 replies needed rescuing)."""
 
 from __future__ import annotations
 
-import jinja2
+import pytest
 
 from hfl.models.chat_template import repair_chat_template
 from tests.chat_templates import DOUBLED_HINT, QWEN_CODER_TOOL_LINE, TOOL_CALL_HINT
+
+# Rendering needs jinja2, which the lean CI venv does not install.
+jinja2 = pytest.importorskip("jinja2")
 
 
 def _render(template: str) -> str:
