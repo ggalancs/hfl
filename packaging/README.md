@@ -7,10 +7,10 @@ maintainer's step: each one goes out under the maintainer's name.
 
 A tap formula: HFL and its Python dependencies in a virtualenv, GGUF models
 served by Homebrew's `llama.cpp` (without llama-cpp-python, HFL serves GGUF
-through `llama-server`, since 0.22.0). The formula points at the 0.24.0 sdist
+through `llama-server`, since 0.22.0). The formula points at the 0.25.0 sdist
 on PyPI (sha256 checked against a download and PyPI's digest); its
-dependency resources are unchanged from 0.21.0 and within 0.24.0's ranges
-(0.24.0 changed no core dependency).
+dependency resources are unchanged from 0.21.0 and within 0.25.0's ranges
+(0.24.0 and 0.25.0 changed no core dependency).
 
 Verified locally on 2026-09-25 (macOS 26, Apple Silicon): `brew install
 --build-from-source`, `brew test` and `brew audit --strict --online` pass from
@@ -28,9 +28,9 @@ To publish:
    resources first with `brew update-python-resources` — at least a day after
    the PyPI upload: Homebrew ignores packages younger than that.
 
-## winget — `winget/manifests/g/ggalancs/HFL/0.24.0/`
+## winget — `winget/manifests/g/ggalancs/HFL/0.25.0/`
 
-Manifests for the 0.24.0 MSI of the GitHub release (sha256 computed from the
+Manifests for the 0.25.0 MSI of the GitHub release (sha256 computed from the
 published file, and equal to the one GitHub reports for it). The same
 manifests passed `winget validate` on a real Windows 10 (local audit F7,
 which also builds the MSI and extracts it without installing); `winget
