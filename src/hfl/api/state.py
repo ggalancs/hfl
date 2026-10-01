@@ -488,6 +488,7 @@ class ServerState:
                 total=memory.total if memory is not None else 0,
                 budget=budget_fraction(),
                 gpu_total=gpu.total if gpu is not None else 0,
+                remedy=_fitting_remedy(name) if plan.reason != "blocked" else None,
             )
 
     async def _reconcile(self, name: str) -> None:
@@ -1006,6 +1007,21 @@ class ServerState:
                 await asyncio.to_thread(embed.unload)
             except Exception:  # pragma: no cover — best effort at shutdown
                 logger.debug("embedding engine unload failed", exc_info=True)
+
+
+def _fitting_remedy(name: str) -> str | None:
+    """For a safetensors model too big for this machine, the command that
+    makes it fit (``hfl.hub.quant_choice.conversion_hint``). Never raises:
+    a hint that cannot be worked out leaves the error as it was."""
+    try:
+        from hfl.core import get_registry
+        from hfl.hub.quant_choice import conversion_hint
+
+        manifest = get_registry().get(name)
+        return conversion_hint(manifest) if manifest is not None else None
+    except Exception:
+        logger.debug("no conversion hint for %s", name, exc_info=True)
+        return None
 
 
 def _measure_safely(manifest: "ModelManifest | None", engine: "InferenceEngine") -> int:

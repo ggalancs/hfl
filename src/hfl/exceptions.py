@@ -261,6 +261,7 @@ class MemoryBudgetExceededError(EngineError):
         total: int,
         budget: float,
         gpu_total: int = 0,
+        remedy: str | None = None,
     ):
         gib = 1024**3
         reason = getattr(plan, "reason", "too_big")
@@ -288,6 +289,8 @@ class MemoryBudgetExceededError(EngineError):
                 f"({100.0 * floor / total:.0f}%), over the HFL_MEMORY_BUDGET of "
                 f"{budget * 100:.0f}% ({limit / gib:.1f} GB)."
             )
+        if remedy:  # a safetensors model: the exact command that makes it fit
+            lines.append(remedy)
         lines.append(
             "Options: a smaller quantization (Q4_K_M, Q3_K_M), a smaller context "
             '("options": {"num_ctx": 8192}), closing other programs, or raising '

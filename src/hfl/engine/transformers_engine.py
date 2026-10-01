@@ -25,6 +25,27 @@ from hfl.engine.base import (
 logger = logging.getLogger(__name__)
 
 
+def _configured_quant() -> str | None:
+    """``HFL_TRANSFORMERS_QUANT`` as the engine takes it: "8bit", "4bit" or
+    None — also None without bitsandbytes, which does the quantizing (the
+    memory planning asks this same function, so both agree)."""
+    import importlib.util
+
+    from hfl.config import config
+
+    value = str(config.transformers_quant or "none").lower()
+    if value not in ("8bit", "4bit"):
+        return None
+    if importlib.util.find_spec("bitsandbytes") is None:
+        logger.warning(
+            "HFL_TRANSFORMERS_QUANT=%s needs bitsandbytes (pip install 'hfl[transformers]' "
+            "on Linux or Windows); loading in the model's own precision",
+            value,
+        )
+        return None
+    return value
+
+
 class TransformersEngine(InferenceEngine):
     """HuggingFace Transformers inference engine."""
 
@@ -55,7 +76,18 @@ class TransformersEngine(InferenceEngine):
 
         from hfl.security import remote_code_allowed
 
-        quant = kwargs.get("quantization")
+        quant = kwargs.get("quantization") or _configured_quant()
+        if quant and not torch.cuda.is_available():
+            # bitsandbytes quantizes on CUDA only.
+            logger.warning(
+                "HFL_TRANSFORMERS_QUANT=%s needs an NVIDIA GPU (bitsandbytes); "
+                "loading %s in its own precision",
+                quant,
+                model_path,
+            )
+            quant = None
+        elif quant:
+            logger.info("Loading %s quantized to %s (bitsandbytes)", model_path, quant)
         # trust_remote_code executes Python shipped in the model repo. Honour
         # the request only when the operator opted in via HFL_ALLOW_REMOTE_CODE,
         # so an untrusted caller can never turn model loading into RCE.

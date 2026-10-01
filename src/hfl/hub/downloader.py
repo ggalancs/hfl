@@ -214,13 +214,25 @@ def _discard(model_dir: Path, name: str) -> None:
     (model_dir / ".cache" / "huggingface" / "download" / f"{name}.metadata").unlink(missing_ok=True)
 
 
+# What a safetensors model needs beside its weights. The index of a sharded
+# model ends in .json, not .safetensors: without it every model split in
+# shards (nearly every one of 7B or more) downloaded but could not load in
+# Transformers ("no file named model.safetensors", measured on an L4).
 _SAFETENSORS_FILES = [
     "*.safetensors",
+    "*.safetensors.index.json",
     "config.json",
     "tokenizer.json",
     "tokenizer_config.json",
     "special_tokens_map.json",
     "tokenizer.model",  # SentencePiece
+    "vocab.json",  # byte-level BPE (Qwen, GPT-2 family)
+    "merges.txt",
+    "added_tokens.json",
+    "chat_template.jinja",  # the chat template, in newer repos
+    "chat_template.json",
+    "preprocessor_config.json",  # vision-language models
+    "processor_config.json",
     "generation_config.json",
 ]
 

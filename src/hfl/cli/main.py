@@ -251,8 +251,8 @@ def _print_kept(finished: Any, quantize: str) -> None:
 @app.command()
 def pull(
     model: str = typer.Argument(help=t("commands.pull.args.model")),
-    quantize: str = typer.Option(
-        "Q4_K_M", "--quantize", "-q", help=t("commands.pull.options.quantize")
+    quantize: str | None = typer.Option(
+        None, "--quantize", "-q", help=t("commands.pull.options.quantize")
     ),
     format: str = typer.Option(
         "auto",
@@ -296,9 +296,16 @@ def pull(
             alias = alias_for(model)
         model, quantize = choice.reference, choice.quantization
 
-    # 1. Resolve, show what was resolved, refuse a type HFL cannot serve
-    resolved = _resolve_or_exit(model, quantize, revision)
+    # 1. Resolve, show what was resolved, refuse a type HFL cannot serve.
+    # No -q: a GGUF repo's file is its Q4_K_M, as always; a conversion gets
+    # the most precise level that fits (``_conversion_level``).
+    if not isinstance(quantize, str) or not quantize:
+        quantize = None
+    resolved = _resolve_or_exit(model, quantize or "Q4_K_M", revision)
     _show_resolved_or_exit(resolved)
+    if quantize is None:
+        quantize, format = _conversion_level(resolved, format, assume_yes=yes is True)
+    _disk_space_or_exit(resolved, quantize if _will_convert(resolved, format) else None)
 
     # 2. License (R1 - legal audit), 3. download
     license_info, license_accepted_at = _license_or_exit(resolved.repo_id, skip_license)
@@ -779,6 +786,132 @@ def _local_or_pulled(
         skip_license=False,
     )
     return registry_cls().find_pulled(spec.repo_id, spec.quantization)
+
+
+def _will_convert(resolved: Any, requested_format: str) -> bool:
+    """Whether this pull will convert to GGUF (as ``finish_download`` decides)."""
+    from hfl.converter.formats import ModelType, model_type_from_pipeline_tag
+    from hfl.engine.selector import _mlx_preferred
+
+    model_type = model_type_from_pipeline_tag(getattr(resolved, "pipeline_tag", None))
+    return (
+        resolved.format == "safetensors"
+        and requested_format != "safetensors"
+        and model_type in (None, ModelType.LLM)
+        and "mlx" not in resolved.repo_id.lower()
+        and not (_mlx_preferred() and requested_format != "gguf")
+    )
+
+
+def _disk_space_or_exit(resolved: Any, convert_to: str | None) -> None:
+    """Refuse, before downloading, a pull the disk cannot hold."""
+    from hfl.config import config
+    from hfl.hub.pull_service import disk_space
+
+    space = disk_space(resolved, convert_to)
+    if space is None or space.fits:
+        return
+    gb = 1e9
+    conversion = (
+        t("errors.no_disk_space_conversion", gb=space.conversion / gb) if space.conversion else ""
+    )
+    message = t(
+        "errors.no_disk_space",
+        name=resolved.repo_id,
+        need=space.needed / gb,
+        download=space.download / gb,
+        conversion=conversion,
+        folder=str(config.models_dir),
+        free=space.free / gb,
+    )
+    console.print(f"[red]{escape_markup(message)}[/]")
+    raise typer.Exit(1)
+
+
+def _conversion_level(resolved: Any, requested_format: str, assume_yes: bool) -> tuple[str, str]:
+    """The GGUF level (and the format) for a pull that did not name one.
+
+    A safetensors LLM is converted to GGUF; it was always at Q4_K_M. The
+    level is now the most precise one that fits this machine, shown with
+    the others and asked for (Enter, ``--yes`` or no terminal: the
+    recommended one), before anything is downloaded. On Apple Silicon a
+    model that fits in its own precision stays for MLX, as before; one that
+    does not is converted. A model that fits at no level is refused.
+    """
+    from hfl.converter.formats import ModelType, model_type_from_pipeline_tag
+    from hfl.engine.selector import _mlx_preferred
+    from hfl.hub.quant_choice import LADDER, LOWEST_RECOMMENDED, choose
+
+    default = "Q4_K_M"
+    model_type = model_type_from_pipeline_tag(getattr(resolved, "pipeline_tag", None))
+    if (
+        resolved.format == "gguf"
+        or requested_format == "safetensors"
+        or (model_type is not None and model_type != ModelType.LLM)
+        or "mlx" in resolved.repo_id.lower()  # already quantized for MLX
+    ):
+        return default, requested_format
+    from huggingface_hub import HfApi
+
+    from hfl.hub.hw_profile import get_hw_profile
+    from hfl.hub.params import estimate_params
+
+    try:
+        params = estimate_params(resolved.repo_id, api=HfApi())
+    except Exception:  # offline, or the Hub would not say: as before
+        params = None
+    name = escape_markup(resolved.repo_id)
+    if params is None or not params.total_b:
+        console.print(f"[dim]{t('quant_choice.unknown_size', name=name, level=default)}[/]")
+        return default, requested_format
+    choice = choose(params.total_b, get_hw_profile(), active_params_b=params.active_b)
+    if choice.total_gb <= 0:  # no memory reading (no psutil): as before
+        console.print(f"[dim]{t('quant_choice.unknown_memory', level=default)}[/]")
+        return default, requested_format
+    if _mlx_preferred() and requested_format != "gguf":
+        if choice.levels[0].fits:  # F16: MLX serves it in its own precision
+            console.print(f"[dim]{t('quant_choice.mlx_fits')}[/]")
+            return default, requested_format
+        requested_format = "gguf"
+    memory = f"~{choice.fast_gb:.0f} GB" + (
+        f" (+ RAM: ~{choice.total_gb:.0f} GB)" if choice.total_gb > choice.fast_gb else ""
+    )
+    console.print(
+        t("quant_choice.size", memory=memory, kind=choice.memory, name=name,
+          params=f"{params.total_b:g}")
+    )  # fmt: skip
+    console.print(f"  [bold]{t('quant_choice.header')}[/]")
+    for row in choice.levels:
+        fits = (
+            t("quant_choice.fits") if row.fits
+            else t("quant_choice.fits_split") if row.fits_split
+            else t("quant_choice.no")
+        )  # fmt: skip
+        best = row.name == choice.recommended
+        mark = f"  [green]← {t('quant_choice.recommended')}[/]" if best else ""
+        console.print(f"  {row.name:<9} {row.size_gb:>6.1f} GB  {fits}{mark}")
+    if choice.recommended is None:
+        refused = t(
+            "quant_choice.nothing_fits",
+            name=name,
+            level=LOWEST_RECOMMENDED,
+            need=choice.needed_gb,
+            have=choice.total_gb,
+        )
+        console.print(f"[red]{refused}[/]")
+        raise typer.Exit(1)
+    if choice.split:
+        console.print(f"[yellow]{t('quant_choice.split_note')}[/]")
+    level = choice.recommended
+    if not assume_yes and stdin_is_terminal():
+        while True:
+            answer = typer.prompt(t("quant_choice.pick"), default=level).strip().upper()
+            if answer in LADDER:
+                level = answer
+                break
+            console.print(t("quant_choice.bad_level", levels=", ".join(LADDER)))
+    console.print(f"[cyan]{t('quant_choice.chosen', level=level)}[/]")
+    return level, requested_format
 
 
 def _choose_short_name(name: str, assume_yes: bool) -> Any:

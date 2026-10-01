@@ -350,6 +350,8 @@
     "download_failed": "Download failed",
     "error_resolving": "Error resolving model",
     "model_not_found": "Model not found",
+    "no_disk_space": "Not enough disk space for {name}: the pull writes ~{need:.1f} GB ({download:.1f} GB downloaded{conversion}) and {folder} has {free:.1f} GB free. Nothing was downloaded.",
+    "no_disk_space_conversion": " + {gb:.1f} GB to convert",
     "model_in_use": "{name} is in use by another process (a running `hfl serve` that has it loaded?). Nothing was deleted: stop it, or unload the model with `hfl stop {name}`, then run `hfl rm` again.",
     "use_list_to_see": "Use 'hfl list' to see available models.",
     "missing_dependency": "Missing dependency",
@@ -638,6 +640,22 @@
     "memory_line": "Memory: {used} of {total} in use · limit {budget} · models {models}",
     "queue_line": "Queue: {busy} generating, {waiting} waiting",
     "disk_total": "Models: {n} · {size} on disk"
+  },
+  "quant_choice": {
+    "size": "This machine: {memory} for the model ({kind}). {name}: ~{params}B parameters.",
+    "header": "Level     Size      Fits",
+    "fits": "yes",
+    "fits_split": "GPU + RAM (slower)",
+    "no": "no",
+    "recommended": "recommended",
+    "split_note": "It does not fit the GPU alone: llama.cpp will put on the GPU the layers that fit and run the rest on the CPU, more slowly.",
+    "nothing_fits": "{name} does not fit this machine at any level: even {level} needs ~{need:.0f} GB, and there are ~{have:.0f} GB. Nothing was downloaded.",
+    "unknown_size": "Could not tell {name}'s size; converting at {level} (choose another with -q).",
+    "unknown_memory": "Could not measure this machine's memory; converting at {level} (choose another with -q).",
+    "pick": "GGUF level",
+    "bad_level": "Choose one of: {levels}",
+    "chosen": "Converting to GGUF at {level}, the most precise level that fits (another with -q).",
+    "mlx_fits": "It fits in its own precision: kept for the MLX backend."
   },
   "shortname": {
     "searching": "“{name}” is not a local model; looking it up on the Hugging Face Hub...",

@@ -46,8 +46,8 @@ class HardwareProfile:
     """Coarse classification of the primary GPU. ``"none"`` if absent."""
 
     gpu_vram_gb: float | None
-    """VRAM budget in GB. ``None`` when undetectable. On Apple Silicon
-    Metal returns the unified memory pool (== system_ram_gb)."""
+    """VRAM budget in GB. ``None`` when undetectable. On Apple Silicon,
+    the GPU's share of the unified memory pool (70% of system_ram_gb)."""
 
     has_mlx: bool
     """``mlx_lm`` importable AND host is Darwin-arm64."""
@@ -60,12 +60,20 @@ class HardwareProfile:
 
 
 def _system_ram_gb() -> float:
+    """The RAM HFL may use: the host's, or a container's limit when lower
+    (psutil reads the host's: a 48 GB container on Modal saw 339.6 GB)."""
+    from hfl.utils.cgroup import limit_bytes
+
     try:
         import psutil
 
-        return round(float(psutil.virtual_memory().total) / (1024**3), 1)
+        total = float(psutil.virtual_memory().total)
     except Exception:  # pragma: no cover — defensive, psutil is in [dev]
         return 0.0
+    limit = limit_bytes()
+    if limit and limit < total:
+        total = float(limit)
+    return round(total / (1024**3), 1)
 
 
 def _has_mlx() -> bool:

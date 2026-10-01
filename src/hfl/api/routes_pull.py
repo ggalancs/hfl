@@ -333,6 +333,22 @@ async def _download_stage(
     2 s carrying the bytes on disk so far, so a client (Open WebUI) keeps
     its progress bar alive. ``state.local_path`` stays None when it failed."""
     from hfl.hub.downloader import pull_model
+    from hfl.hub.pull_service import disk_space
+
+    # A download the disk cannot hold is refused before it starts: it used
+    # to fill the disk (and every other write on it) and fail at the end.
+    space = await asyncio.to_thread(disk_space, resolved, None)
+    if space is not None and not space.fits:
+        gb = 1e9
+        yield _event(
+            "error",
+            error=(
+                f"not enough disk space: the download is ~{space.download / gb:.1f} GB "
+                f"and {space.free / gb:.1f} GB are free"
+            ),
+            code="no_disk_space",
+        )
+        return
 
     # --- Phase 2: download ------------------------------------------
     # We run the blocking hf_hub_download in a worker; meanwhile a

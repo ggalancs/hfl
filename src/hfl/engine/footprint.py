@@ -201,12 +201,31 @@ def _hf_kv_bytes(cfg: dict[str, Any], n_ctx: int) -> int:
     return total
 
 
+# Loaded size of 16-bit weights under HFL_TRANSFORMERS_QUANT (bitsandbytes
+# keeps embeddings and the output head in 16 bits, hence above 8/16, 4/16).
+_BNB_SCALE = {"8bit": 0.6, "4bit": 0.35}
+
+
+def _bnb_scale(directory: Path) -> float:
+    """The share of the files' size the weights take once loaded: below 1
+    only when HFL_TRANSFORMERS_QUANT asks bitsandbytes to quantize them
+    (never for an MLX-quantized folder, which that engine does not serve)."""
+    from hfl.engine.transformers_engine import _configured_quant
+
+    scale = _BNB_SCALE.get(_configured_quant() or "", 1.0)
+    if scale == 1.0:
+        return 1.0
+    quant = _text_config(directory).get("quantization")
+    return 1.0 if isinstance(quant, dict) and "group_size" in quant else scale
+
+
 def _estimate_directory(directory: Path, n_ctx: int) -> Footprint:
     files = _weight_files(directory)
     if not files:
         return _UNKNOWN
     weights = sum(p.stat().st_size for p in files)
     cfg = _text_config(directory)
+    weights = int(weights * _bnb_scale(directory))
     if n_ctx <= 0:
         max_ctx = int(cfg.get("max_position_embeddings") or 0)
         n_ctx = min(DEFAULT_GROWING_CTX, max_ctx) if max_ctx else DEFAULT_GROWING_CTX

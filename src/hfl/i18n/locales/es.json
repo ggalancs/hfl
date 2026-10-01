@@ -350,6 +350,8 @@
     "download_failed": "La descarga falló",
     "error_resolving": "Error resolviendo modelo",
     "model_not_found": "Modelo no encontrado",
+    "no_disk_space": "No hay espacio en disco para {name}: el pull escribe ~{need:.1f} GB ({download:.1f} GB de descarga{conversion}) y en {folder} quedan {free:.1f} GB libres. No se ha descargado nada.",
+    "no_disk_space_conversion": " + {gb:.1f} GB para convertir",
     "model_in_use": "{name} está en uso por otro proceso (¿un `hfl serve` en marcha que lo tiene cargado?). No se ha borrado nada: detenlo, o descarga el modelo con `hfl stop {name}`, y vuelve a ejecutar `hfl rm`.",
     "use_list_to_see": "Usa 'hfl list' para ver los modelos disponibles.",
     "missing_dependency": "Dependencia faltante",
@@ -638,6 +640,22 @@
     "memory_line": "Memoria: {used} de {total} en uso · límite {budget} · modelos {models}",
     "queue_line": "Cola: {busy} generando, {waiting} esperando",
     "disk_total": "Modelos: {n} · {size} en disco"
+  },
+  "quant_choice": {
+    "size": "Esta máquina: {memory} para el modelo ({kind}). {name}: ~{params}B parámetros.",
+    "header": "Nivel     Tamaño    Cabe",
+    "fits": "sí",
+    "fits_split": "GPU + RAM (más lento)",
+    "no": "no",
+    "recommended": "recomendado",
+    "split_note": "No cabe solo en la GPU: llama.cpp pondrá en la GPU las capas que quepan y el resto irá en la CPU, más despacio.",
+    "nothing_fits": "{name} no cabe en esta máquina en ningún nivel: incluso {level} necesita ~{need:.0f} GB y hay ~{have:.0f} GB. No se ha descargado nada.",
+    "unknown_size": "No se pudo saber el tamaño de {name}; se convierte a {level} (elige otro con -q).",
+    "unknown_memory": "No se pudo medir la memoria de esta máquina; se convierte a {level} (elige otro con -q).",
+    "pick": "Nivel GGUF",
+    "bad_level": "Elige uno de: {levels}",
+    "chosen": "Se convierte a GGUF en {level}, el nivel más preciso que cabe (otro con -q).",
+    "mlx_fits": "Cabe en su precisión original: se queda para el backend MLX."
   },
   "shortname": {
     "searching": "“{name}” no es un modelo local; buscándolo en el Hub de Hugging Face...",

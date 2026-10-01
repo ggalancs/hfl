@@ -115,6 +115,9 @@ transformers = [
     "sentencepiece>=0.2.0",
     # A response format (JSON, a schema, a grammar) on this backend.
     "hfl[structured]",
+    # HFL_TRANSFORMERS_QUANT=8bit|4bit: loading quantized on NVIDIA. No CUDA
+    # build for macOS. Resolved with hfl[all] on Linux and Windows (0.50.2).
+    "bitsandbytes>=0.45.0,<1.0; sys_platform != 'darwin'",
 ]
 # Upper bounds on the heavy, fast-moving native deps below: they are the
 # largest vuln/breakage surface and pre-1.0 ones break by minor. Cap at the

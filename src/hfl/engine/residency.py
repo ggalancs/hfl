@@ -157,7 +157,17 @@ def current_memory() -> MemoryView | None:
     except Exception as exc:  # pragma: no cover - platform-specific failure
         logger.debug("memory measurement failed: %s", exc)
         return None
-    return MemoryView(total=int(vm.total), in_use=int(vm.total - vm.available), hfl_rss=int(rss))
+    total, in_use = int(vm.total), int(vm.total - vm.available)
+    # In a container with a memory limit, the limit is the machine: psutil
+    # reads the host's memory, and planning with it admitted models the
+    # kernel then killed the container for.
+    from hfl.utils.cgroup import in_use_bytes, limit_bytes
+
+    limit = limit_bytes()
+    if limit and limit < total:
+        used = in_use_bytes()
+        total, in_use = limit, min(limit, used if used is not None else in_use)
+    return MemoryView(total=total, in_use=in_use, hfl_rss=int(rss))
 
 
 def plan_admission(

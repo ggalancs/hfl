@@ -59,6 +59,71 @@ class Finished:
     notes: list[str] = field(default_factory=list)  # message keys, in order
 
 
+@dataclass
+class DiskSpace:
+    """What a pull will write, against what the disk has, in bytes."""
+
+    download: int
+    conversion: int
+    free: int
+
+    @property
+    def needed(self) -> int:
+        return self.download + self.conversion
+
+    @property
+    def fits(self) -> bool:
+        return self.needed <= self.free
+
+
+def disk_space(resolved: ResolvedModel, convert_to: str | None) -> DiskSpace | None:
+    """The bytes a pull will write — the files it downloads and, converting
+    to ``convert_to``, the F16 intermediate plus the result — and the free
+    space where models go. None when the Hub gives no sizes (the pull goes
+    on as before).
+
+    Nothing checked this: on a 512 GB disk a 235B model's 470 GB download
+    began and filled it, taking every other file write down with it.
+    """
+    import shutil
+    from fnmatch import fnmatch
+
+    from huggingface_hub import HfApi
+
+    from hfl.config import config
+    from hfl.hub.downloader import _SAFETENSORS_FILES
+    from hfl.hub.quant_table import _BITS_PER_WEIGHT
+
+    try:
+        info = HfApi().model_info(
+            resolved.repo_id, revision=getattr(resolved, "revision", None), files_metadata=True
+        )
+    except Exception:  # offline or refused: the download itself will say
+        logger.debug("no file sizes for %s", resolved.repo_id, exc_info=True)
+        return None
+    sizes = {s.rfilename: int(s.size or 0) for s in (info.siblings or [])}
+    if resolved.format == "gguf" and resolved.filename:
+        names = [resolved.filename, *getattr(resolved, "parts", []), resolved.projector]
+        names = [n for n in names if n]
+    elif resolved.format == "safetensors":
+        names = [n for n in sizes if any(fnmatch(n, pattern) for pattern in _SAFETENSORS_FILES)]
+    else:
+        names = list(sizes)
+    download = sum(sizes.get(n, 0) for n in names)
+    if not download:
+        return None
+    conversion = 0
+    if convert_to:
+        weights = sum(sizes.get(n, 0) for n in names if n.endswith(".safetensors"))
+        level = convert_to.lower()
+        # F16 is the intermediate renamed; any other level is written beside it.
+        result = 0 if level == "f16" else int(weights * _BITS_PER_WEIGHT.get(level, 16.0) / 16)
+        conversion = weights + result
+    folder = Path(config.models_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    return DiskSpace(download, conversion, shutil.disk_usage(folder).free)
+
+
 def unsupported_type(resolved: ResolvedModel) -> str | None:
     """The display name of the model type, when HFL cannot serve it (known
     from the Hub before anything is downloaded); else None."""
@@ -199,7 +264,13 @@ def register_pulled(
     fmt = detect_format(final)
     files = final.rglob("*") if final.is_dir() else [final]
     size = sum(f.stat().st_size for f in files if f.is_file())
-    level = getattr(resolved, "quantization", None) or quantize
+    # A conversion's level is the one it ran at: the resolver's is only the
+    # GGUF file it would have picked (they differ since ``hfl pull`` chooses
+    # the level that fits: an F16 conversion was registered as Q4_K_M).
+    if finished.kept == Kept.CONVERTED and quantize:
+        level: str | None = quantize
+    else:
+        level = getattr(resolved, "quantization", None) or quantize
     quant = level if fmt == ModelFormat.GGUF else None
     name = resolved.repo_id.split("/")[-1].lower() + (f"-{quant.lower()}" if quant else "")
 

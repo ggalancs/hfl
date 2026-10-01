@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pull the disk cannot hold is refused before downloading.** Nothing
+  checked the free space. On a 512 GB disk, a 235B model's 470 GB download
+  started, filled the disk and failed at the end, taking every other write
+  on that disk with it. `hfl pull` and `/api/pull` now add up the files they
+  will download (from the Hub's metadata) and, for a conversion, the F16
+  intermediate plus the result. If that exceeds the free space they say so
+  with the numbers (`no_disk_space` on the API). When the Hub gives no sizes
+  they go on as before.
+- **In a container with a memory limit, HFL plans with the limit.** psutil
+  reports the host's memory, so in Docker or Kubernetes with `--memory` set,
+  the residency planner admitted models past the limit until the kernel
+  killed the container, and `hfl pull` sized conversions for memory that
+  was not there. Both now read the cgroup's limit and usage (v2 and v1).
+  Measured in Docker with `--memory=2g`: 2.0 GB, where it saw 3.8 GB before.
+
+### Added
+
+- **`HFL_TRANSFORMERS_QUANT=8bit|4bit`** loads safetensors models served by
+  the Transformers engine on NVIDIA quantized with bitsandbytes. It is for
+  architectures llama.cpp cannot convert to GGUF. Memory planning uses the
+  quantized size. The bitsandbytes loader already existed, but nothing
+  reached it.
+
+### Changed
+
+- **`hfl pull` converts a safetensors model at the most precise GGUF level
+  that fits this machine, and asks first.** It used to convert at a fixed
+  Q4_K_M: a model that fits in F16 lost precision for nothing, and one that
+  fits nowhere was downloaded only to fail at load. Before downloading,
+  `pull` now:
+  - shows every level (F16 down to Q2_K) with its size on this machine and
+    whether it fits;
+  - recommends the most precise one and asks for it (Enter, `--yes` or no
+    terminal: the recommended one);
+  - says when only GPU + RAM together fit (llama.cpp splits the layers,
+    slower);
+  - refuses a model that fits at no level, before downloading it.
+
+  An explicit `-q` is used as given. On Apple Silicon, a model that fits in
+  its own precision stays with MLX as before; one that does not is
+  converted.
+- **The memory error for a safetensors model names the command that makes
+  it fit:** `hfl pull <repo> --format gguf -q <level>` and, on NVIDIA,
+  `HFL_TRANSFORMERS_QUANT`.
+
 ## [0.24.0] - 2026-09-30
 
 ### Added

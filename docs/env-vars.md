@@ -76,6 +76,7 @@ the host string does not.
 > `mmproj-*.gguf` beside it) and non-GGUF models keep their usual backend.
 | `HFL_DISABLE_MLX`    | —                       | `0`     | When truthy, disables the MLX path on Apple Silicon (forces llama-cpp Metal). Useful for benchmarking. |
 | `HFL_KV_CACHE_TYPE`  | `OLLAMA_KV_CACHE_TYPE`  | `f16`   | KV cache dtype: `f16`, `q8_0`, `q4_0`. Halves / quarters VRAM at the cost of accuracy. |
+| `HFL_TRANSFORMERS_QUANT` | — | `none` | Safetensors models the Transformers engine serves on an NVIDIA GPU, loaded quantized with bitsandbytes: `8bit` or `4bit`. Memory planning uses the quantized size. For an architecture llama.cpp cannot convert to GGUF; otherwise `hfl pull <repo> --format gguf -q <level>` is the way to make a model fit (the memory error names both). Ignored, with a warning, without CUDA. |
 | `HFL_FLASH_ATTENTION`| `OLLAMA_FLASH_ATTENTION`| (auto)  | Toggle flash-attention fleet-wide (`1`/`0`). Per-load kwarg wins; per-arch safety list still rejects known-unsafe arches. |
 | `HFL_DEFAULT_CTX_SIZE` | —                     | `0`     | Default `n_ctx`. `0` = auto-detect from GGUF metadata. |
 | `HFL_NO_MLX_HINT`    | —                       | (off)   | Truthy (`1`, `true`, `yes`) silences the log line suggesting an MLX build when a GGUF is served through llama.cpp on Apple Silicon. |

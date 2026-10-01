@@ -263,3 +263,16 @@ def test_all_leaves_llama_cpp_python_out_on_windows() -> None:
         assert marker.evaluate({"sys_platform": platform, "extra": ""}), platform
     (own,) = (Requirement(r) for r in deps["llama"] if r.startswith("llama-cpp-python"))
     assert llama[0].specifier == own.specifier, (llama[0], own)
+
+
+def test_transformers_brings_bitsandbytes_off_macos() -> None:
+    """HFL_TRANSFORMERS_QUANT loads with bitsandbytes, which no extra
+    installed (the loader was unreachable). CUDA only: none on macOS."""
+    from packaging.requirements import Requirement
+
+    deps = _load_pyproject()["project"]["optional-dependencies"]["transformers"]
+    (bnb,) = (Requirement(r) for r in deps if r.startswith("bitsandbytes"))
+    assert bnb.marker is not None and ">=0.45.0" in str(bnb.specifier)
+    assert not bnb.marker.evaluate({"sys_platform": "darwin", "extra": ""})
+    for platform in ("linux", "win32"):
+        assert bnb.marker.evaluate({"sys_platform": platform, "extra": ""}), platform

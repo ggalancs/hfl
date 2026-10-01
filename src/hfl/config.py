@@ -368,6 +368,15 @@ class HFLConfig:
         )
     )
 
+    # ``HFL_TRANSFORMERS_QUANT``: safetensors models the Transformers engine
+    # serves on NVIDIA, loaded quantized with bitsandbytes — ``8bit`` or
+    # ``4bit``; ``none`` (the default) keeps their own precision. For an
+    # architecture llama.cpp cannot convert to GGUF (the usual way to make a
+    # model fit, ``hfl pull --format gguf -q …``); the memory error says when.
+    transformers_quant: str = field(
+        default_factory=lambda: (os.environ.get("HFL_TRANSFORMERS_QUANT") or "none").strip().lower()
+    )
+
     # Default keep-alive duration applied to /api/chat and /api/generate
     # requests that did *not* set ``keep_alive`` themselves. Matches
     # Ollama's ``OLLAMA_KEEP_ALIVE`` (default "5m"). Per-request values
