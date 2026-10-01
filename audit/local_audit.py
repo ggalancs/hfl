@@ -533,8 +533,12 @@ def setup(work: Path, python: str) -> None:
     (work / "wheel.txt").write_text(str(wheel))
     installs = ((work / "venv", f"{wheel}[{SETUP_EXTRAS}]"), (work / "venv-core", str(wheel)))
     for venv, spec in installs:
-        if not venv_exe(venv, "python").exists():
-            subprocess.run(["uv", "venv", "-q", "--python", python, str(venv)], check=True)
+        # Without pyvenv.cfg the folder is no venv: uv takes its python for
+        # the base interpreter and refuses to install into it. macOS's daily
+        # /tmp cleanup removed just that file from a work dir under /tmp.
+        if not venv_exe(venv, "python").exists() or not (venv / "pyvenv.cfg").exists():
+            create = ["uv", "venv", "-q", "--clear", "--python", python, str(venv)]
+            subprocess.run(create, check=True)
         python_bin = str(venv_exe(venv, "python"))
         # --reinstall-package: a rebuilt wheel keeps its version number, and
         # uv would otherwise keep the copy already installed.
