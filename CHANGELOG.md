@@ -51,6 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a deprecation or something new is not recorded.
   (`scripts/stability_surface.py --write` records it.)
 
+- **[docs/production.md](docs/production.md): running HFL as a service.**
+  systemd, launchd, Docker Compose with Caddy for TLS, Kubernetes, nginx in
+  front, the security settings, memory, monitoring, upgrades and a table of
+  what each error means. Each recipe was run as written (systemd in a
+  Debian 13 container with systemd as PID 1, including a `kill -9` and the
+  restart; Compose with Caddy; Kubernetes on k3s 1.31; nginx); the launchd
+  file only passed `plutil -lint`, and Windows has no recipe yet. Running
+  them found three of the fixes below (the proxy headers, `psutil`, the
+  Kubernetes port).
+
 - **`RELEASING.md`**: how a version goes out — every workflow green locally
   before it runs on GitHub, the audits on three platforms, the order of the
   workflows, and the checks of every surface after publishing.
