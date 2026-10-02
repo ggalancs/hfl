@@ -247,3 +247,23 @@ def test_a_bundled_server_extracted_without_its_executable_bit_is_found(monkeypa
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert dist.bundled_binary() == str(server)
     assert os.access(server, os.X_OK)
+
+
+def test_a_link_never_points_out_of_the_folder(offline, tmp_path):
+    """A link's target is cut to a bare name; ``..`` (the parent) is left
+    out — a library link points at a file beside it, nothing else."""
+    path = _archive(tmp_path)
+    out = tmp_path / "with-links.tar.gz"
+    with tarfile.open(path) as src, tarfile.open(out, "w:gz") as dst:
+        for member in src.getmembers():
+            dst.addfile(member, src.extractfile(member) if member.isfile() else None)
+        for name, target in (("libup.so", ".."), ("libdot.so", "."), ("libfar.so", "../../x")):
+            link = tarfile.TarInfo(f"llama-b10964/{name}")
+            link.type, link.linkname = tarfile.SYMTYPE, target
+            dst.addfile(link)
+    target = offline(out)
+    dist.install("test", target=target)
+    assert not (target / "libup.so").exists() and not (target / "libup.so").is_symlink()
+    assert not (target / "libdot.so").is_symlink()
+    far = target / "libfar.so"  # cut to "x": beside it (dangling), not two levels up
+    assert far.is_symlink() and os.readlink(far) == "x"

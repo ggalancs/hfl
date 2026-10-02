@@ -135,6 +135,26 @@ jobs:
         with:
           path: artifacts
 
+      # The SBOM: every Python package a `pip install hfl` of this release
+      # brings, as CycloneDX JSON, attached to the release.
+      - uses: actions/checkout@v7
+        with:
+          path: src
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: SBOM (CycloneDX)
+        run: |
+          python -m venv /tmp/sbom-tool && /tmp/sbom-tool/bin/pip install -q cyclonedx-bom
+          python -m venv /tmp/sbom-target && /tmp/sbom-target/bin/pip install -q ./src
+          mkdir -p artifacts/sbom
+          /tmp/sbom-tool/bin/cyclonedx-py environment --output-format JSON \
+            --output-file "artifacts/sbom/hfl-${{ inputs.version }}.cdx.json" /tmp/sbom-target/bin/python
+          python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['bomFormat']=='CycloneDX' and len(d['components'])>10, d.get('bomFormat')" "artifacts/sbom/hfl-${{ inputs.version }}.cdx.json"
+
       - name: Create checksums
         run: |
           cd artifacts
@@ -152,6 +172,7 @@ jobs:
             artifacts/hfl-macos-x86_64/*
             artifacts/hfl-macos-arm64/*
             artifacts/hfl-windows-x86_64/*
+            artifacts/sbom/*
             artifacts/checksums.txt
           body: |
             ## hfl ${{ inputs.version }}

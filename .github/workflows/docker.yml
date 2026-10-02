@@ -277,6 +277,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Create + push multi-arch manifest
+        id: manifest
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
@@ -298,3 +299,35 @@ jobs:
           done <<< "${TAGS}"
           echo "Stitching ${src_amd64} + ${src_arm64} -> ${tag_args[*]}"
           docker buildx imagetools create "${tag_args[@]}" "${src_amd64}" "${src_arm64}"
+          # The digest of the multi-arch index just pushed: what
+          # `docker pull …:<version>` and `:latest` resolve to.
+          digest="$(docker buildx imagetools inspect "$base" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >>"$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Only the per-arch images were signed: `cosign verify` on the tags
+      # users pull (0.25.0, latest — the multi-arch index) found no
+      # signature (checked 2026-10-03). Sign the index too.
+      - name: Sign the multi-arch image (keyless)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/hfl
+          DIGEST: ${{ steps.manifest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [ -n "$DIGEST" ] || { echo "no digest to sign"; exit 1; }
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Verify the signature of the tags users pull
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            cosign verify "$tag" \
+              --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/docker\.yml@" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+            echo "signed: $tag"
+          done <<< "${TAGS}"

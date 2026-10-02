@@ -70,7 +70,11 @@ local machine.
   `scripts/image_check.py` on it; `latest` must be the slim image and
   `latest-all` the full one.
 - GitHub Release: marked Latest, with the four executables, the DMG, the
-  MSI and the checksums.
+  MSI, the SBOM (`hfl-vX.Y.Z.cdx.json`) and the checksums.
+- The image is signed, the tags users pull included:
+  `cosign verify ghcr.io/ggalancs/hfl:X.Y.Z --certificate-identity-regexp
+  '^https://github.com/ggalancs/hfl/\.github/workflows/docker\.yml@'
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 - Pages answers.
 - **Every version reference in the repository**: `git grep` the previous
   version and update what names the current one — the Homebrew formula

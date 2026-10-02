@@ -81,7 +81,7 @@ async def train_route(req: TrainRequest, request: Request) -> StreamingResponse 
         if get_registry().get(name) is not None and not req.resume:
             raise trainer.TrainingError(f"{name} already exists: another name, or resume")
     except trainer.TrainingError as exc:
-        return refuse(str(exc))
+        return refuse(exc.message)
 
     options = trainer.Options(
         iters=req.iters,

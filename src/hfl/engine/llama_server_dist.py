@@ -216,7 +216,8 @@ def _unpack(archive: Path, into: Path) -> None:
                 continue
             if member.issym():  # libfoo.dylib -> libfoo.0.dylib: keep it a link, by name
                 target = member.linkname.replace("\\", "/").rsplit("/", 1)[-1]
-                links.append((kept, target))
+                if target not in ("", ".", ".."):  # a name beside it, never a folder
+                    links.append((kept, target))
             elif member.isfile():
                 source = tf.extractfile(member)
                 if source is not None:

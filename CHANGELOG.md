@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before it runs on GitHub, the audits on three platforms, the order of the
   workflows, and the checks of every surface after publishing.
 
+- **An SBOM with each release**: `hfl-<version>.cdx.json` (CycloneDX 1.6),
+  every Python package a `pip install hfl` of that release brings, attached
+  to the GitHub Release with its checksum.
+
 - **Audit section G: failures.** Each check breaks something for real and
   passes only when nothing hangs, nothing is left running, the client is
   told and HFL serves again: llama-server killed in the middle of a reply
@@ -101,6 +105,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still part by BF16 rounding, as on llama-server or vLLM.
 
 ### Fixed
+
+- **The Docker image users pull is signed.** Only the per-architecture
+  images were (`…:0.25.0-arm64`, `-amd64`); `cosign verify` on
+  `ghcr.io/ggalancs/hfl:0.25.0` or `:latest` — the multi-architecture index
+  `docker pull` resolves — found no signature (checked 2026-10-03). The
+  workflow now signs the index too and verifies every tag it pushed before
+  finishing.
 
 - **A llama-server that died under a model is started again.** Killed by the
   out-of-memory killer or crashed, its model stayed "loaded": every request

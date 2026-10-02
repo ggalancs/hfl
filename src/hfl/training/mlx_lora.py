@@ -44,7 +44,15 @@ FORMATS = ("chat", "completions", "text")
 
 
 class TrainingError(Exception):
-    """Training cannot start or did not finish; the message says why."""
+    """Training cannot start or did not finish; the message says why.
+
+    The message is HFL's own (it may quote a line of the user's data or the
+    trainer's last output), kept in ``message`` as ``HFLError`` keeps its:
+    what a route returns, rather than ``str()`` of an exception."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 def available() -> str | None:
