@@ -389,6 +389,8 @@
     "unsupported_model_type": "Tipo de modelo no soportado",
     "unsupported_model_type_hint": "HFL aún no soporta modelos {type}. Solo los modelos LLM (generación de texto) están soportados actualmente.",
     "session_not_found": "No hay ninguna sesión llamada '{name}'. Lístalas con: hfl sessions list",
+    "disk_full_during_download": "El disco se llenó durante la descarga: libera espacio en {folder} y vuelve a ejecutar el mismo pull. No se ha registrado nada.",
+    "hub_lost_during_download": "Se perdió la conexión con huggingface.co durante la descarga: vuelve a ejecutar el mismo pull cuando vuelva la red. No se ha registrado nada.",
     "hub_unreachable": "No se puede contactar con huggingface.co — parece que no hay conexión.",
     "hub_unreachable_hint": "Los modelos que ya descargaste siguen funcionando: hfl list, hfl run <modelo>, hfl serve.",
     "memory_refused": "No hay memoria suficiente para {model}: necesita ~{need} GB y la máquina llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%.",

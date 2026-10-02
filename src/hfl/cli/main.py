@@ -151,6 +151,44 @@ def _license_or_exit(repo_id: str, skip_license: bool) -> tuple[Any, str | None]
     return license_info, license_accepted_at
 
 
+def _causes(exc: BaseException) -> list[BaseException]:
+    """``exc`` and what caused it, outermost first."""
+    seen: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in seen:
+        seen.append(current)
+        current = current.__cause__ or current.__context__
+    return seen
+
+
+def _disk_full(exc: BaseException) -> bool:
+    """A full disk anywhere in the chain: ``OSError`` ENOSPC, or hf_xet's
+    RuntimeError, which carries it only as text ("No space left on device
+    (os error 28)")."""
+    import errno
+
+    for cause in _causes(exc):
+        if isinstance(cause, OSError) and cause.errno == errno.ENOSPC:
+            return True
+        text = str(cause)
+        if "No space left on device" in text or "os error 28" in text:
+            return True
+    return False
+
+
+def _hub_lost(exc: BaseException) -> bool:
+    """The Hub unreachable: a transport error anywhere in the chain, or
+    huggingface_hub's LocalEntryNotFoundError (what it raises when the
+    network is gone and the file is not cached)."""
+    import httpx
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    return any(
+        isinstance(cause, (httpx.TransportError, LocalEntryNotFoundError, ConnectionError))
+        for cause in _causes(exc)
+    )
+
+
 def _download_or_exit(resolved: Any) -> Any:
     """The download's local path; exits 1 saying why when it fails."""
     from huggingface_hub.utils import GatedRepoError
@@ -176,6 +214,19 @@ def _download_or_exit(resolved: Any) -> Any:
     except DownloadIntegrityError as e:
         console.print(f"\n[red]{t('errors.download_failed')}:[/] {e.details}")
         raise typer.Exit(1) from e
+    except Exception as e:
+        # A full disk or a lost Hub in the middle of a download ended in a
+        # traceback (audit G2, G3): say what happened and what to do.
+        if _disk_full(e):
+            from hfl.config import config as hfl_config
+
+            folder = str(hfl_config.home_dir)
+            console.print(f"\n[red]{t('errors.disk_full_during_download', folder=folder)}[/]")
+            raise typer.Exit(1) from e
+        if _hub_lost(e):
+            console.print(f"\n[red]{t('errors.hub_lost_during_download')}[/]")
+            raise typer.Exit(1) from e
+        raise
     console.print(f"[green]{t('messages.downloaded_to')}:[/] {local_path}")
     return local_path
 
