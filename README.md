@@ -457,6 +457,7 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 - [Benchmarks](https://github.com/ggalancs/hfl/blob/main/docs/benchmarks.md) — HFL, Ollama and llama-server on the same GGUF, with the script to rerun it
 - [Model compatibility](https://github.com/ggalancs/hfl/blob/main/docs/compatibility.md) — chat, tool calling, reasoning and vision checked for real on 13 families and both GGUF backends
 - [Architecture guide](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-architecture-complete.html)
+- [Stability contract](https://github.com/ggalancs/hfl/blob/main/docs/stability.md) — what is public, and how it changes (deprecation first; SemVer from 1.0)
 - [Changelog](https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md)
 
 **Status:** beta — 4,000+ tests at ~90% coverage. The full local audit

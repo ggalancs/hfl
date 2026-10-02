@@ -43,6 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built on macOS passes `platform_check.py` both ways with no llama-server on
   the PATH.
 
+- **A stability contract** ([docs/stability.md](docs/stability.md)): what is
+  public (commands and options, HTTP routes, documented variables, the
+  registry's fields) and how it changes — deprecation first, and SemVer from
+  1.0. `tests/stability/surface.json` records the surface from the code;
+  `tests/test_stability_contract.py` fails when something recorded goes
+  without a deprecation or something new is not recorded.
+  (`scripts/stability_surface.py --write` records it.)
+
+- **`RELEASING.md`**: how a version goes out — every workflow green locally
+  before it runs on GitHub, the audits on three platforms, the order of the
+  workflows, and the checks of every surface after publishing.
+
 - **Audit: E21 and E22.** E21 runs `hfl install llama-server` on the clean
   pip install with no llama-server on the PATH, then 4 requests at once must
   beat serving them in turn (measured on an M3 Max: 2.13x). E22: the same for

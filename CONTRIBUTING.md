@@ -42,6 +42,14 @@ ruff format src/ tests/
 - Use type hints where practical
 - Write docstrings for public APIs
 
+## Public surface
+
+Commands, options, HTTP routes, documented variables and the registry format
+are a contract ([docs/stability.md](docs/stability.md)). A change that adds
+one records it with `python scripts/stability_surface.py --write`; one that
+removes one deprecates it first. `tests/test_stability_contract.py` holds
+both.
+
 ## Responsible-Use Safeguards
 
 hfl is licensed under Apache-2.0, which imposes no such condition — but as a

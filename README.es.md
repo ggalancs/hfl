@@ -464,6 +464,7 @@ cubre los módulos, la selección del motor, el proceso de conversión y cada en
 - [Benchmarks](docs/benchmarks.md): HFL, Ollama y llama-server con el mismo GGUF, y el script para repetirlo
 - [Compatibilidad de modelos](docs/compatibility.md): chat, herramientas, razonamiento y visión comprobados de verdad en 13 familias y los dos backends GGUF
 - [Guía de arquitectura](https://htmlpreview.github.io/?https://github.com/ggalancs/hfl/blob/main/docs/hfl-arquitectura-completa.html)
+- [Contrato de estabilidad](https://github.com/ggalancs/hfl/blob/main/docs/stability.md) — qué es público y cómo cambia (primero se depreca; SemVer desde 1.0)
 - [Registro de cambios](CHANGELOG.md)
 
 **Estado:** beta, con más de 4.000 tests y ~90 % de cobertura. La auditoría

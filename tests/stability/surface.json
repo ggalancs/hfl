@@ -1,0 +1,401 @@
+{
+  "routes": [
+    "DELETE /api/delete",
+    "DELETE /api/snapshot/{name}",
+    "GET /",
+    "GET /api/compliance/dashboard",
+    "GET /api/discover",
+    "GET /api/draft/recommend",
+    "GET /api/lora",
+    "GET /api/lora/{model}",
+    "GET /api/ps",
+    "GET /api/recommend",
+    "GET /api/snapshot",
+    "GET /api/tags",
+    "GET /api/tts/voices",
+    "GET /api/version",
+    "GET /health",
+    "GET /health/deep",
+    "GET /health/live",
+    "GET /health/ready",
+    "GET /health/sli",
+    "GET /healthz",
+    "GET /metrics",
+    "GET /metrics/json",
+    "GET /v1/audio/models",
+    "GET /v1/models",
+    "HEAD /",
+    "HEAD /api/blobs/{digest}",
+    "POST /api/batch",
+    "POST /api/benchmark/{model}",
+    "POST /api/blobs/{digest}",
+    "POST /api/chat",
+    "POST /api/copy",
+    "POST /api/create",
+    "POST /api/embed",
+    "POST /api/embeddings",
+    "POST /api/generate",
+    "POST /api/images/generate",
+    "POST /api/lora/apply",
+    "POST /api/lora/remove",
+    "POST /api/pull",
+    "POST /api/pull/smart",
+    "POST /api/push",
+    "POST /api/show",
+    "POST /api/snapshot/load",
+    "POST /api/snapshot/save",
+    "POST /api/stop",
+    "POST /api/train",
+    "POST /api/transcribe",
+    "POST /api/tts",
+    "POST /api/verify/{model}",
+    "POST /api/web_fetch",
+    "POST /api/web_search",
+    "POST /v1/audio/speech",
+    "POST /v1/audio/transcriptions",
+    "POST /v1/chat/completions",
+    "POST /v1/completions",
+    "POST /v1/embeddings",
+    "POST /v1/images/generations",
+    "POST /v1/messages",
+    "POST /v1/messages/count_tokens",
+    "POST /v1/responses",
+    "WS /ws/chat"
+  ],
+  "cli": {
+    "alias": [
+      "<model>",
+      "<alias>"
+    ],
+    "bench": [
+      "<model>",
+      "--lengths",
+      "--max-tokens",
+      "--runs"
+    ],
+    "check": [],
+    "compliance-dashboard": [],
+    "compliance-report": [
+      "--format",
+      "--output"
+    ],
+    "config": [],
+    "cp": [
+      "<source>",
+      "<destination>"
+    ],
+    "create": [
+      "<model>",
+      "--file",
+      "--host",
+      "--port"
+    ],
+    "debug": [],
+    "discover": [
+      "<query>",
+      "--family",
+      "--gated",
+      "--license",
+      "--limit",
+      "--min-likes",
+      "--multimodal",
+      "--quant",
+      "--refresh",
+      "--task"
+    ],
+    "doctor": [],
+    "draft-recommend": [
+      "<model>",
+      "--max-ratio"
+    ],
+    "help": [
+      "--extras"
+    ],
+    "import": [
+      "<path>",
+      "--alias",
+      "--name"
+    ],
+    "inspect": [
+      "<model>"
+    ],
+    "install llama-server": [
+      "--force",
+      "--variant",
+      "--yes"
+    ],
+    "launch": [
+      "<tool>",
+      "--api-key",
+      "--host",
+      "--model",
+      "--parallel",
+      "--port",
+      "--print",
+      "--yes"
+    ],
+    "list": [
+      "--supported-only"
+    ],
+    "login": [
+      "--token"
+    ],
+    "logout": [],
+    "lora": [
+      "<action>",
+      "<model>",
+      "--host",
+      "--id",
+      "--name",
+      "--path",
+      "--port",
+      "--scale"
+    ],
+    "mcp": [
+      "<action>",
+      "<server_id>",
+      "<target>",
+      "--capabilities",
+      "--host",
+      "--port",
+      "--transport"
+    ],
+    "outdated": [
+      "<model>"
+    ],
+    "ps": [
+      "--host",
+      "--port"
+    ],
+    "pull": [
+      "<model>",
+      "--alias",
+      "--format",
+      "--quantize",
+      "--revision",
+      "--skip-license",
+      "--yes"
+    ],
+    "pull-smart": [
+      "<model>",
+      "--max-vram-gb"
+    ],
+    "recommend": [
+      "--family",
+      "--quant",
+      "--task",
+      "--top"
+    ],
+    "rm": [
+      "<model>",
+      "--yes"
+    ],
+    "run": [
+      "<model>",
+      "--backend",
+      "--ctx",
+      "--session",
+      "--system",
+      "--verbose",
+      "--yes"
+    ],
+    "search": [
+      "<query>",
+      "--gguf",
+      "--limit",
+      "--literal",
+      "--max-params",
+      "--min-params",
+      "--page-size",
+      "--sort"
+    ],
+    "serve": [
+      "--api-key",
+      "--backend",
+      "--ctx",
+      "--gui",
+      "--host",
+      "--json-logs",
+      "--log-level",
+      "--model",
+      "--parallel",
+      "--port",
+      "--sandbox",
+      "--tray"
+    ],
+    "sessions list": [],
+    "sessions rm": [
+      "<name>"
+    ],
+    "sessions show": [
+      "<name>"
+    ],
+    "show": [
+      "<model>",
+      "--license",
+      "--modelfile",
+      "--parameters",
+      "--template"
+    ],
+    "snapshot": [
+      "<action>",
+      "<model>",
+      "--host",
+      "--name",
+      "--port"
+    ],
+    "speak": [
+      "<model>",
+      "<text>",
+      "--lang",
+      "--speed",
+      "--voice"
+    ],
+    "start": [
+      "--chat",
+      "--yes"
+    ],
+    "stop": [
+      "<model>",
+      "--host",
+      "--port"
+    ],
+    "train": [
+      "<model>",
+      "--backend",
+      "--batch-size",
+      "--data",
+      "--fuse",
+      "--gguf",
+      "--iters",
+      "--learning-rate",
+      "--max-seq-length",
+      "--name",
+      "--num-layers",
+      "--resume",
+      "--save-every"
+    ],
+    "tts": [
+      "<model>",
+      "<text>",
+      "--format",
+      "--lang",
+      "--output",
+      "--rate",
+      "--speed",
+      "--voice"
+    ],
+    "verify": [
+      "<model>"
+    ],
+    "version": []
+  },
+  "env": [
+    "HFL_ACCEPT_NETWORK_EXPOSURE",
+    "HFL_ALLOW_AGENT_LOOP",
+    "HFL_ALLOW_REMOTE_CODE",
+    "HFL_ALLOW_REMOTE_PULL",
+    "HFL_API_KEY",
+    "HFL_AUDIT_LOG_BACKUPS",
+    "HFL_AUDIT_LOG_MAX_BYTES",
+    "HFL_AUDIT_LOG_PATH",
+    "HFL_DEBUG",
+    "HFL_DEFAULT_CTX_SIZE",
+    "HFL_DISABLE_MEMORY_PREFLIGHT",
+    "HFL_DISABLE_MLX",
+    "HFL_FLASH_ATTENTION",
+    "HFL_GENERATION_TIMEOUT",
+    "HFL_HOME",
+    "HFL_HOST",
+    "HFL_KEEP_ALIVE",
+    "HFL_KV_CACHE_TYPE",
+    "HFL_LANG",
+    "HFL_LICENSE_POLICY",
+    "HFL_LLAMA_SERVER_BIN",
+    "HFL_LLM_LIBRARY",
+    "HFL_MAIN_GPU",
+    "HFL_MAX_BLOB_BYTES",
+    "HFL_MAX_LOADED_MODELS",
+    "HFL_MAX_QUEUE",
+    "HFL_MAX_REQUEST_BYTES",
+    "HFL_MCP_AUTOLOAD",
+    "HFL_MEMORY_BUDGET",
+    "HFL_METRICS_PUBLIC",
+    "HFL_MLX_PROMPT_CACHE_BYTES",
+    "HFL_MODEL_LOAD_TIMEOUT",
+    "HFL_NO_MLX_HINT",
+    "HFL_NUM_PARALLEL",
+    "HFL_ORIGINS",
+    "HFL_OTEL_ENABLED",
+    "HFL_OTEL_EXPORTER_ENDPOINT",
+    "HFL_OTEL_SERVICE_NAME",
+    "HFL_PORT",
+    "HFL_PROMPT_CACHE_MAX_GB",
+    "HFL_PROMPT_CACHE_PERSIST",
+    "HFL_QUEUE_ACQUIRE_TIMEOUT",
+    "HFL_QUEUE_MAX_INFLIGHT",
+    "HFL_QUEUE_MAX_SIZE",
+    "HFL_RATE_LIMIT_ENABLED",
+    "HFL_RATE_LIMIT_LOCAL",
+    "HFL_RATE_LIMIT_REQUESTS",
+    "HFL_RATE_LIMIT_WINDOW",
+    "HFL_SANDBOX",
+    "HFL_SEARXNG_URL",
+    "HFL_SPLIT_MODE",
+    "HFL_STREAM_QUEUE_GET_TIMEOUT",
+    "HFL_STREAM_QUEUE_PUT_TIMEOUT",
+    "HFL_TENSOR_PARALLEL_SIZE",
+    "HFL_TENSOR_SPLIT",
+    "HFL_TRANSFORMERS_QUANT",
+    "HFL_VERIFY_DOWNLOADS",
+    "HFL_VLLM_ERROR_PUT_TIMEOUT",
+    "HFL_VLLM_SHUTDOWN_JOIN_TIMEOUT",
+    "HFL_VRAM_OVERRIDE_GIB",
+    "HFL_WEB_SEARCH_BACKEND"
+  ],
+  "manifest_fields": [
+    "adapter_paths",
+    "alias",
+    "architecture",
+    "chat_template",
+    "commit_sha",
+    "context_length",
+    "created_at",
+    "declared_capabilities",
+    "default_parameters",
+    "draft_model_path",
+    "env_vars",
+    "file_hash",
+    "format",
+    "gated",
+    "gpai_classification",
+    "hash_algorithm",
+    "last_used",
+    "license",
+    "license_accepted_at",
+    "license_name",
+    "license_restrictions",
+    "license_url",
+    "local_path",
+    "messages",
+    "model_type",
+    "name",
+    "original_format",
+    "parameters",
+    "parent_digest",
+    "parent_name",
+    "quantization",
+    "repo_id",
+    "revision",
+    "size_bytes",
+    "system",
+    "training_flops",
+    "verified_at"
+  ],
+  "deprecated": {
+    "route POST /api/embeddings": {
+      "since": "0.21.0",
+      "use": "POST /api/embed"
+    }
+  }
+}
