@@ -65,6 +65,13 @@ class TestStaticPyprojectPins:
     in the pin bounds is caught before merge.
     """
 
+    def test_psutil_is_a_core_dependency(self):
+        """Memory admission needs it: without psutil HFL measured nothing and
+        loaded every model asked for, HFL_MEMORY_BUDGET ignored (a plain pip
+        install and the Docker image, where only an extra had brought it)."""
+        deps = _load_pyproject()["project"]["dependencies"]
+        assert _find_pin(deps, "psutil"), "psutil must be a core dependency"
+
     def test_huggingface_hub_pin_targets_1x(self):
         cfg = _load_pyproject()
         deps = cfg["project"]["dependencies"]

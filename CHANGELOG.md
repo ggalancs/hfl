@@ -84,6 +84,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A plain `pip install hfl` and the Docker image loaded models with no
+  memory check.** The memory admission (`HFL_MEMORY_BUDGET`: what fits,
+  which idle model to unload first) measures the machine with `psutil`,
+  which HFL never declared: a development install had it through an extra,
+  a user's install did not, and without it HFL loaded every model asked for
+  until the system's out-of-memory killer stepped in. Measured in the image:
+  no admission at all; with `psutil`, "budget 85% = 3.3 GB; after load ~2.3
+  GB". `psutil` is now a dependency. llama.cpp also counts physical cores
+  again (without `psutil` it ran on every hyperthread, which is slower).
+
 - **Security: behind a reverse proxy on the same machine, a client relayed
   with `Forwarded` or `X-Real-IP` counted as the owner.** Every request a
   local proxy relays reaches HFL from loopback, and loopback is the owner,

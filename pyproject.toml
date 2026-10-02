@@ -69,6 +69,13 @@ dependencies = [
     "pydantic>=2.12.0,<2.14",
     "httpx~=0.28.0",
     "pyyaml~=6.0",
+    # The memory admission (HFL_MEMORY_BUDGET: what fits, what to unload),
+    # the physical-core count llama.cpp runs on and /health's process figures
+    # all read psutil. It was never declared: the dev venv had it through an
+    # extra, so a plain pip install and the Docker image ran without it and
+    # loaded models with no memory check at all (measured in the image: no
+    # admission line; with psutil, "budget 85% = 3.3 GB; after load …").
+    "psutil>=5.9,<8",
 ]
 
 [project.optional-dependencies]
