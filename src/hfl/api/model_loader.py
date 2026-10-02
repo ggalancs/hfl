@@ -162,15 +162,22 @@ async def load_llm(
         # shrinks and therefore pure waste — each one evicting the weights
         # and throwing away the KV cache, so the next request had to
         # re-prefill its whole prompt from scratch.
-        if not requested_ctx or not resident_ctx or resident_ctx >= requested_ctx:
+        alive = getattr(resident_engine, "is_loaded", True)
+        if not alive:
+            # Its process died (llama-server killed by the OOM killer, a
+            # crash): requests went on to a closed port, a 500 each until
+            # keep_alive unloaded it (measured, audit G1). Load it again.
+            logger.warning("%s: its process is gone; loading it again", model_name)
+        elif not requested_ctx or not resident_ctx or resident_ctx >= requested_ctx:
             state.bind_request(model_name)
             return resident_engine, resident_manifest
-        logger.info(
-            "Reloading %s: request asked for num_ctx=%d, resident engine has %d",
-            model_name,
-            requested_ctx,
-            resident_ctx,
-        )
+        else:
+            logger.info(
+                "Reloading %s: request asked for num_ctx=%d, resident engine has %d",
+                model_name,
+                requested_ctx,
+                resident_ctx,
+            )
 
     # Lookup in registry
     manifest = get_registry().get(model_name)

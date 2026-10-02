@@ -295,6 +295,49 @@ class TestProcess:
                 owner.kill()
 
 
+class TestADeadProcess:
+    """llama-server killed under a loaded model (the OOM killer, a crash):
+    every request went on to its closed port, a 500 each until keep_alive
+    unloaded the model (measured, audit G1). The engine starts it again."""
+
+    @staticmethod
+    def _kill_server(argv_out) -> int:
+        import signal
+
+        pid = json.loads(argv_out.read_text())["pid"]
+        os.kill(pid, signal.SIGKILL)
+        return pid
+
+    @staticmethod
+    def _launches(argv_out) -> int:
+        return len(Path(str(argv_out) + ".all").read_text().splitlines())
+
+    def test_the_next_request_starts_it_again(self, engine, fake_server):
+        _, argv_out = fake_server
+        before = self._launches(argv_out)
+        self._kill_server(argv_out)
+        engine._proc.wait(timeout=10)  # its guard has exited too
+        assert engine.is_loaded  # loaded until unloaded: the model is still there
+        reply = engine.chat([ChatMessage(role="user", content="you")])
+        assert reply.text and self._launches(argv_out) == before + 1
+
+    def test_right_after_the_death_too(self, engine, fake_server):
+        """The request sent at once, while the guard has not exited yet: the
+        refused connection is retried after the restart."""
+        _, argv_out = fake_server
+        before = self._launches(argv_out)
+        self._kill_server(argv_out)
+        reply = engine.chat([ChatMessage(role="user", content="you")])
+        assert reply.text and self._launches(argv_out) == before + 1
+
+    def test_a_streamed_request_too(self, engine, fake_server):
+        _, argv_out = fake_server
+        self._kill_server(argv_out)
+        engine._proc.wait(timeout=10)
+        chunks = list(engine.chat_stream([ChatMessage(role="user", content="you")]))
+        assert "".join(chunks)
+
+
 class TestRequests:
     def test_chat(self, engine):
         result = engine.chat([ChatMessage(role="user", content="you")])

@@ -941,3 +941,21 @@ def test_an_embedding_model_that_cannot_fit_is_refused_and_nothing_goes(world):
         asyncio.run(get_state().admit_other("huge (embeddings)", 90 * GB, load_embed))
     assert "unload small" not in w.events
     assert [r.name for r in get_state().resident_models()] == ["small"]
+
+
+@pytest.mark.asyncio
+async def test_a_resident_whose_process_died_is_loaded_again(world):
+    """llama-server killed under a resident model (the OOM killer, a crash):
+    every request went on to the dead process — a 500 until keep_alive
+    unloaded it (measured, audit G1). The next request loads it again."""
+    w = world({"a": 10})
+    await _load("a")
+    first = w.engines["a"][0]
+    first.is_loaded = False  # its process is gone; the engine object remains
+
+    await _load("a")
+
+    from hfl.api.state import get_state
+
+    assert len(w.engines["a"]) == 2 and w.engines["a"][1].is_loaded
+    assert get_state().resident_models()[0].engine is w.engines["a"][1]

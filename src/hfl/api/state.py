@@ -736,6 +736,11 @@ class ServerState:
                 resident = self._residents.get(model_name)
             if resident is None:
                 return None
+            if not resident.engine.is_loaded:
+                # Its process died (llama-server killed by the OOM killer, a
+                # crash): every request went to a closed port, a 500 until
+                # keep_alive unloaded it (measured, audit G1). Load it again.
+                return None
             if required_ctx <= 0:
                 return resident
             resident_ctx = getattr(resident.engine, "context_size", 0)
@@ -761,7 +766,12 @@ class ServerState:
                         stale = self._residents.get(model_name)
                         if stale is not None:
                             await self._wait_for_release(stale, deadline)
-                            await self._retire(stale, "reloading with a larger context")
+                            why = (
+                                "reloading with a larger context"
+                                if stale.engine.is_loaded
+                                else "reloading: its process is gone"
+                            )
+                            await self._retire(stale, why)
                         await self._make_room(model_name, estimate, deadline)
                         engine, manifest = await loader()
                         footprint = estimate

@@ -23,6 +23,7 @@ its only client, and HFL's own authentication and limits stay in front.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -32,6 +33,8 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -456,6 +459,13 @@ def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
             proc.wait(timeout=10)
 
 
+# A request that got no reply because the process was dying: refused, or
+# accepted and then reset (measured: a request sent right after a SIGKILL
+# got "Connection reset by peer"). Sent again only once the process is
+# confirmed dead and started again (``_died``), so no reply is repeated.
+_BEFORE_A_REPLY = (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError)
+
+
 class LlamaServerEngine(InferenceEngine):
     """One ``llama-server`` child process serving one GGUF model."""
 
@@ -486,6 +496,8 @@ class LlamaServerEngine(InferenceEngine):
         # Its --slot-save-path when the prompt cache is off: where snapshots
         # pass through (created by this engine, removed when empty).
         self._work_dir: Path | None = None
+        # One restart at a time when the process died under the model.
+        self._revive_lock = threading.Lock()
 
     # ------------------------------------------------------------------ life
 
@@ -621,9 +633,7 @@ class LlamaServerEngine(InferenceEngine):
         slot_dir, total = self._slot_dir(), 0
         for slot in range(self._slots or _argv_slots(self._argv)):
             name = f"hfl-snapshot-{slot}.bin"
-            done = self._http().post(
-                f"/slots/{slot}?action=save", json={"filename": name}, timeout=600
-            )
+            done = self._post(f"/slots/{slot}?action=save", json={"filename": name}, timeout=600)
             done.raise_for_status()
             tokens = int(done.json().get("n_saved", 0))
             written = slot_dir / name
@@ -646,7 +656,7 @@ class LlamaServerEngine(InferenceEngine):
             name = f"hfl-snapshot-{slot}.bin"
             shutil.copyfile(saved, slot_dir / name)
             try:
-                done = self._http().post(
+                done = self._post(
                     f"/slots/{slot}?action=restore", json={"filename": name}, timeout=600
                 )
                 done.raise_for_status()
@@ -667,7 +677,7 @@ class LlamaServerEngine(InferenceEngine):
             if not saved.is_file():
                 continue
             try:
-                done = self._http().post(
+                done = self._post(
                     f"/slots/{slot}?action=restore", json={"filename": saved.name}, timeout=300
                 )
                 done.raise_for_status()
@@ -705,7 +715,7 @@ class LlamaServerEngine(InferenceEngine):
 
     def _props(self) -> dict[str, Any]:
         try:
-            props = self._http().get("/props", timeout=10).json()
+            props = self._get("/props", timeout=10).json()
         except (httpx.HTTPError, ValueError):
             return {}
         return props if isinstance(props, dict) else {}
@@ -751,10 +761,10 @@ class LlamaServerEngine(InferenceEngine):
         """Whether this vocabulary wants BOS: asked of llama-server's own
         tokenizer, with special tokens on and off."""
         try:
-            with_special = self._http().post(
+            with_special = self._post(
                 "/tokenize", json={"content": "a", "add_special": True}, timeout=10
             )
-            without = self._http().post(
+            without = self._post(
                 "/tokenize", json={"content": "a", "add_special": False}, timeout=10
             )
             return len(with_special.json()["tokens"]) > len(without.json()["tokens"])
@@ -804,7 +814,78 @@ class LlamaServerEngine(InferenceEngine):
     def _http(self) -> httpx.Client:
         if self._client is None:
             raise RuntimeError("llama-server engine is not loaded")
+        if self._proc is not None and self._proc.poll() is not None:
+            self._revive(self._proc)
+        assert self._client is not None
         return self._client
+
+    def _revive(self, dead: subprocess.Popen[bytes]) -> None:
+        """Start llama-server again for the loaded model: it died under it
+        (the OOM killer, a crash). Requests went on to its closed port — a
+        500 each until keep_alive unloaded the model (measured, audit G1)."""
+        with self._revive_lock:
+            if self._proc is not dead or self._client is None:
+                return  # another request started it again, or it was unloaded
+            logger.warning(
+                "llama-server for %s exited (code %s); starting it again",
+                Path(self._model_path).name,
+                dead.returncode,
+            )
+            old = self._client
+            argv = [*self._argv, *self._template_args, *self._lora_args()]
+            self._launch(argv, self._model_path, self._timeout)
+            old.close()
+
+    def _died(self) -> bool:
+        """After a request got no reply: whether the process had died (and was
+        started again). Its guard exits a moment after llama-server, so a
+        request sent right after the death still saw it running."""
+        proc = self._proc
+        if proc is None or not self._model_path:
+            return False
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            return False  # still running: the failure is something else
+        self._revive(proc)
+        return True
+
+    def _post(self, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            return self._http().post(path, **kwargs)
+        except _BEFORE_A_REPLY:
+            if not self._died():
+                raise
+            return self._http().post(path, **kwargs)
+
+    def _get(self, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            return self._http().get(path, **kwargs)
+        except _BEFORE_A_REPLY:
+            if not self._died():
+                raise
+            return self._http().get(path, **kwargs)
+
+    @contextlib.contextmanager
+    def _stream(self, method: str, path: str, **kwargs: Any) -> Iterator[httpx.Response]:
+        """``httpx.Client.stream``, sent again once if the process had died
+        before it answered. Once a reply has begun, a death ends it with an
+        error: half a reply is never repeated."""
+        try:
+            opened = self._http().stream(method, path, **kwargs)
+            response = opened.__enter__()
+        except _BEFORE_A_REPLY:
+            if not self._died():
+                raise
+            opened = self._http().stream(method, path, **kwargs)
+            response = opened.__enter__()
+        try:
+            yield response
+        except BaseException:
+            if not opened.__exit__(*sys.exc_info()):
+                raise
+        else:
+            opened.__exit__(None, None, None)
 
     def _chat_body(
         self, messages: list[ChatMessage], cfg: GenerationConfig, tools: list[dict] | None
@@ -854,7 +935,7 @@ class LlamaServerEngine(InferenceEngine):
         if cancel.current() is not None:
             data = self._streamed_chat(body)
         else:
-            response = self._http().post("/v1/chat/completions", json=body)
+            response = self._post("/v1/chat/completions", json=body)
             response.raise_for_status()
             data = response.json()
         choice = data["choices"][0]
@@ -901,7 +982,7 @@ class LlamaServerEngine(InferenceEngine):
         }
 
         def _stream() -> Iterator[str]:
-            with self._http().stream("POST", "/v1/chat/completions", json=body) as response:
+            with self._stream("POST", "/v1/chat/completions", json=body) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line.startswith("data: ") or line == "data: [DONE]":
@@ -945,7 +1026,7 @@ class LlamaServerEngine(InferenceEngine):
         if cancel.current() is not None:
             data = self._streamed_completion(body)
         else:
-            response = self._http().post("/completion", json=body)
+            response = self._post("/completion", json=body)
             response.raise_for_status()
             data = response.json()
         # Current builds say ``stop_type: "limit"``; older ones ``stopped_limit``.
@@ -962,7 +1043,7 @@ class LlamaServerEngine(InferenceEngine):
         """Ollama's ``context``: prompt and reply as tokens, the way the
         completion read them (special tokens parsed, BOS as the model wants)."""
         try:
-            done = self._http().post(
+            done = self._post(
                 "/tokenize",
                 json={"content": text, "add_special": True, "parse_special": True},
                 timeout=60,
@@ -979,7 +1060,7 @@ class LlamaServerEngine(InferenceEngine):
         body = {**self._completion_body(prompt, cfg), "stream": True}
 
         def _stream() -> Iterator[str]:
-            with self._http().stream("POST", "/completion", json=body) as response:
+            with self._stream("POST", "/completion", json=body) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line.startswith("data: "):
@@ -1004,7 +1085,7 @@ class LlamaServerEngine(InferenceEngine):
 
     def _events(self, path: str, body: dict[str, Any]) -> Iterator[dict[str, Any]]:
         """The server-sent events of ``path`` streamed, until done or cancelled."""
-        with self._http().stream("POST", path, json={**body, "stream": True}) as response:
+        with self._stream("POST", path, json={**body, "stream": True}) as response:
             response.raise_for_status()
             for line in response.iter_lines():
                 if cancel.cancelled():
@@ -1119,11 +1200,11 @@ class LlamaServerEngine(InferenceEngine):
         endpoint does (special tokens parsed and added)."""
         body = self._chat_body(messages, config or GenerationConfig(), tools)
         request = {k: body[k] for k in ("messages", "tools", "chat_template_kwargs") if k in body}
-        rendered = self._http().post("/apply-template", json=request, timeout=60)
+        rendered = self._post("/apply-template", json=request, timeout=60)
         if rendered.status_code == 404:
             raise NotImplementedError("this llama-server has no /apply-template")
         rendered.raise_for_status()
-        tokens = self._http().post(
+        tokens = self._post(
             "/tokenize",
             json={"content": rendered.json()["prompt"], "add_special": True, "parse_special": True},
             timeout=60,
@@ -1161,7 +1242,7 @@ class LlamaServerEngine(InferenceEngine):
         if not scales:
             return
         try:
-            done = self._http().post(
+            done = self._post(
                 "/lora-adapters",
                 json=[{"id": i, "scale": scale} for i, scale in enumerate(scales)],
                 timeout=30,
@@ -1213,7 +1294,10 @@ class LlamaServerEngine(InferenceEngine):
 
     @property
     def is_loaded(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
+        # Loaded until unloaded: a process that died under the model is
+        # started again by the next request (``_revive``), not reloaded
+        # through the server's residency, which would load it twice.
+        return self._client is not None and bool(self._model_path)
 
     @property
     def context_size(self) -> int:
