@@ -70,6 +70,28 @@ def _env_number(kind: type[Num], default: Num | None, *names: str) -> Num | None
     return default
 
 
+# What Kubernetes puts in every pod for each Service of its namespace
+# (Docker links' old format): a Service named ``hfl`` sets
+# ``HFL_PORT=tcp://10.43.134.149:11434``, one named ``ollama`` sets
+# ``OLLAMA_PORT`` alike. That is another address, never the port meant for
+# this process, and taken as one it stopped HFL at start in a crash loop
+# (measured on k3s).
+_SERVICE_LINK = ("tcp://", "udp://", "sctp://")
+
+
+def _env_port(*names: str) -> int | None:
+    """The first of ``names`` set to a port; Kubernetes' service-link
+    values (``tcp://host:port``) are not one, and are skipped."""
+    for name in names:
+        raw = os.environ.get(name, "")
+        if raw.strip().lower().startswith(_SERVICE_LINK):
+            continue
+        value = _env_number(int, None, name)
+        if value is not None:
+            return value
+    return None
+
+
 def _env_int(default: int, *names: str) -> int:
     value = _env_number(int, default, *names)
     return default if value is None else int(value)
@@ -250,9 +272,10 @@ class HFLConfig:
     #   4. Default ``11434``
     port: int = field(
         default_factory=lambda: (
-            _env_number(int, None, "HFL_PORT")
+            _env_port("HFL_PORT")
             or _parse_ollama_host_env()[1]
-            or _env_int(11434, "OLLAMA_PORT")
+            or _env_port("OLLAMA_PORT")
+            or 11434
         )
     )
 

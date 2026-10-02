@@ -454,3 +454,34 @@ class TestSafeEnsureDirs:
                 cfg.ensure_dirs()
             except OSError:
                 pass  # Expected in direct call, _safe_ensure_dirs catches it
+
+
+class TestKubernetesServiceLinks:
+    """Kubernetes sets, in every pod, ``<SERVICE>_PORT=tcp://ip:port`` for
+    each Service of the namespace: a Service named ``hfl`` (or ``ollama``)
+    made HFL stop at start on its own port variable (measured on k3s:
+    "Invalid value for 'HFL_PORT': tcp://10.43.134.149:11434")."""
+
+    @pytest.mark.parametrize("name", ["HFL_PORT", "OLLAMA_PORT"])
+    def test_a_service_link_is_not_a_port(self, monkeypatch, name):
+        from hfl.config import HFLConfig
+
+        for var in ("HFL_PORT", "OLLAMA_PORT", "OLLAMA_HOST"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(name, "tcp://10.43.134.149:11434")
+        assert HFLConfig().port == 11434
+
+    def test_the_next_source_still_applies(self, monkeypatch):
+        from hfl.config import HFLConfig
+
+        monkeypatch.setenv("HFL_PORT", "tcp://10.43.134.149:11434")
+        monkeypatch.setenv("OLLAMA_HOST", "0.0.0.0:9000")
+        assert HFLConfig().port == 9000
+
+    def test_a_typo_still_stops_with_its_name(self, monkeypatch):
+        from hfl.config import HFLConfig
+        from hfl.exceptions import InvalidConfigError
+
+        monkeypatch.setenv("HFL_PORT", "abc")
+        with pytest.raises(InvalidConfigError, match="HFL_PORT"):
+            HFLConfig()

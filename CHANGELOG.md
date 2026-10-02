@@ -84,6 +84,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **On Kubernetes, a Service named `hfl` (or `ollama`) stopped HFL at start.**
+  Kubernetes puts `<SERVICE>_PORT=tcp://ip:port` in every pod for each
+  Service of its namespace, so a Service named `hfl` set
+  `HFL_PORT=tcp://10.43.134.149:11434`, and HFL stopped with "Invalid value
+  for 'HFL_PORT'" in a crash loop (measured on k3s); `OLLAMA_PORT` the same
+  for a Service named `ollama`, the name a drop-in replacement gets. Such a
+  value is another address, never a port for HFL, and is now skipped.
+  [docs/production.md](docs/production.md) also sets
+  `enableServiceLinks: false`, which avoids it on earlier versions.
+
 - **A plain `pip install hfl` and the Docker image loaded models with no
   memory check.** The memory admission (`HFL_MEMORY_BUDGET`: what fits,
   which idle model to unload first) measures the machine with `psutil`,
