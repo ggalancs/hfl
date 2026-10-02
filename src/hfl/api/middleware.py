@@ -39,9 +39,12 @@ TRUSTED_PROXY_NETWORKS = [
 
 def _is_local_peer(request: Request) -> bool:
     """A request made on this machine: a loopback peer that relays nobody
-    (no X-Forwarded-For). A proxy that says whom it forwards is not one."""
+    (no X-Forwarded-For, Forwarded or X-Real-IP). A proxy that says whom it
+    forwards is not one."""
+    from hfl.api.admin_guard import RELAY_HEADERS
+
     host = request.client.host if request.client else ""
-    if request.headers.get("X-Forwarded-For"):
+    if any(header in request.headers for header in RELAY_HEADERS):
         return False
     try:
         return ipaddress.ip_address(host).is_loopback

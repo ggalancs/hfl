@@ -299,12 +299,17 @@ class TestLocalPeers:
         client = TestClient(_local_app(), client=(host, 50000))
         assert [client.get("/test").status_code for _ in range(5)] == [200] * 5
 
-    def test_a_proxy_on_loopback_that_forwards_someone_is(self):
+    @pytest.mark.parametrize(
+        "relayed",
+        [
+            {"X-Forwarded-For": "203.0.113.9"},
+            {"Forwarded": "for=203.0.113.9"},
+            {"X-Real-IP": "203.0.113.9"},
+        ],
+    )
+    def test_a_proxy_on_loopback_that_forwards_someone_is(self, relayed):
         client = TestClient(_local_app(), client=("127.0.0.1", 50000))
-        codes = [
-            client.get("/test", headers={"X-Forwarded-For": "203.0.113.9"}).status_code
-            for _ in range(3)
-        ]
+        codes = [client.get("/test", headers=relayed).status_code for _ in range(3)]
         assert codes[-1] == 429
 
     def test_a_remote_peer_still_is(self):

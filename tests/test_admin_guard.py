@@ -36,6 +36,20 @@ class TestIsLocalRequest:
     def test_non_loopback_hosts_are_remote(self, host):
         assert is_local_request(_request(host)) is False
 
+    @pytest.mark.parametrize(
+        "header",
+        [
+            {"x-forwarded-for": "203.0.113.5"},
+            {"forwarded": "for=203.0.113.5"},
+            {"x-real-ip": "203.0.113.5"},
+        ],
+    )
+    def test_a_request_relayed_by_a_local_proxy_is_remote(self, header):
+        """Behind a reverse proxy on this machine every request comes from
+        loopback; one that names the client it relays is not the owner.
+        With only ``Forwarded`` or ``X-Real-IP`` it was (measured)."""
+        assert is_local_request(_request("127.0.0.1", header)) is False
+
     def test_missing_peer_is_treated_as_remote(self):
         """No peer info → fail safe toward refusal, not exposure."""
         assert is_local_request(_request(None)) is False

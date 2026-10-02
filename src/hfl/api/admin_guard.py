@@ -37,16 +37,27 @@ logger = logging.getLogger(__name__)
 # through unresolved.
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+# Headers a reverse proxy sets for the client it relays. Behind a proxy on
+# this machine every request reaches HFL from loopback: one carrying any of
+# these speaks for someone else, never for the owner. Uvicorn already turns
+# a loopback peer's X-Forwarded-For into the client's address; ``Forwarded``
+# (RFC 7239) and ``X-Real-IP`` (nginx's habit) it does not, and with only
+# those the remote client counted as the owner (measured).
+RELAY_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
+
 
 def is_local_request(request: Request) -> bool:
     """Whether the request originates from the loopback interface.
 
     Fails safe: if the ASGI transport reports no peer (``request.client``
-    is ``None``), the caller is treated as **remote** so the guard errs
-    toward refusal rather than exposure.
+    is ``None``), or the request was relayed by a proxy (``RELAY_HEADERS``),
+    the caller is treated as **remote** so the guard errs toward refusal
+    rather than exposure.
     """
     client = request.client
     if client is None:
+        return False
+    if any(header in request.headers for header in RELAY_HEADERS):
         return False
     return client.host in _LOOPBACK_HOSTS
 

@@ -84,6 +84,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security: behind a reverse proxy on the same machine, a client relayed
+  with `Forwarded` or `X-Real-IP` counted as the owner.** Every request a
+  local proxy relays reaches HFL from loopback, and loopback is the owner,
+  who may pull, push and delete models. Uvicorn turns `X-Forwarded-For` into
+  the client's address, so a proxy sending it was safe; one sending only the
+  standard `Forwarded` header, or only `X-Real-IP` (a common nginx setup),
+  passed its remote clients through as the owner — measured against a
+  running server: `/api/pull` answered them as it answers the owner. Now a
+  loopback request carrying any of the three is a remote client, for the
+  owner routes and for the rate limit's local exemption. A proxy that sends
+  none of them still cannot be told apart from the owner:
+  [docs/production.md](docs/production.md) says to send `X-Forwarded-For`.
+
 - **logprobs on a BF16 MLX model.** Every request for logprobs failed with
   "Item size 2 for PEP 3118 buffer format string B": a BF16 array cannot
   reach numpy. The distribution is read as float32 (measured on Qwen3-14B;
