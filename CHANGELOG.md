@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MLX models serve several requests at once.** The MLX engine (safetensors
+  on Apple Silicon) answered one request at a time; a second client waited
+  for the first. It now batches them with mlx-lm's own continuous batching
+  (`BatchGenerator`): requests join and leave a running batch token by token,
+  4 at once by default, as many as `HFL_NUM_PARALLEL` says, or one at a time
+  with `HFL_NUM_PARALLEL=1`. Measured on an M3 Max with Qwen3-14B (BF16):
+  11.4 → 46 tokens/s with 8 requests (4.0x), the same speed with one, 0.5 GB
+  more memory. Sampling, a seed, `format`, logprobs, stop strings, the prompt
+  cache and cancellation work per request; a request whose client goes away
+  leaves the batch. With a `DRAFT` model (speculative decoding, which mlx-lm
+  does not batch) requests run one at a time as before.
+
+### Changed
+
+- **On MLX the repetition penalty also sees the end of the prompt**, as
+  llama.cpp's does (`repeat_last_n`). Batched generation keeps the prompt in
+  the penalty's context, where one-at-a-time generation left it out, so a
+  greedy reply with the default `repeat_penalty` of 1.1 can differ from
+  before. With the penalty off, batched and one-at-a-time replies are the same
+  token for token (measured on Qwen3-14B); requests batched together can
+  still part by BF16 rounding, as on llama-server or vLLM.
+
+### Fixed
+
+- **logprobs on a BF16 MLX model.** Every request for logprobs failed with
+  "Item size 2 for PEP 3118 buffer format string B": a BF16 array cannot
+  reach numpy. The distribution is read as float32 (measured on Qwen3-14B;
+  the audit's 4-bit model never showed it).
+
 ## [0.25.0] - 2026-10-01
 
 ### Fixed

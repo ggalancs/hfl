@@ -56,6 +56,16 @@ def is_available() -> bool:
     return True
 
 
+def _as_float32(logprobs: Any) -> Any:
+    """An MLX array numpy can read: float32 (BF16 has no buffer format)."""
+    dtype = getattr(logprobs, "dtype", None)
+    if dtype is None:
+        return logprobs
+    import mlx.core as mx
+
+    return logprobs if dtype == mx.float32 else logprobs.astype(mx.float32)
+
+
 class MLXEngine(InferenceEngine):
     """Inference engine wrapping mlx-lm's ``generate`` helper.
 
@@ -85,6 +95,10 @@ class MLXEngine(InferenceEngine):
         #: last request — speculative decoding at work, or not.
         self.last_draft_tokens: tuple[int, int] = (0, 0)
         self._draft: Any = None
+        # Several requests at once (``hfl.engine.mlx_batch``), or None: one
+        # at a time under ``_native``, as before.
+        self._batch: Any = None
+        self._slots = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -112,7 +126,27 @@ class MLXEngine(InferenceEngine):
         # needs the draft's beside it, so with a draft each request starts
         # from a fresh cache.
         self._prompt_store = None if self._draft is not None else self._new_prompt_store()
+        self._start_batching()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
+
+    def _start_batching(self) -> None:
+        """Serve several requests at once with mlx-lm's ``BatchGenerator``
+        when the model allows it: not with a draft (mlx-lm batches no
+        speculative decoding), not with one slot (``HFL_NUM_PARALLEL=1``)."""
+        from hfl.engine.mlx_batch import BatchScheduler, batchable, configured_slots
+
+        slots = configured_slots()
+        if slots <= 1 or self._draft is not None or not batchable(self._model):
+            return
+        self._batch = BatchScheduler(
+            self._model,
+            self._tokenizer,
+            slots=slots,
+            store=self._prompt_store,
+            model_key=self._model_path or "mlx-engine",
+        )
+        self._slots = slots
+        logger.info("MLX serving up to %d requests at once (continuous batching)", slots)
 
     @staticmethod
     def _adapter(paths: Any) -> str | None:
@@ -157,6 +191,9 @@ class MLXEngine(InferenceEngine):
             self._unload()
 
     def _unload(self) -> None:
+        if self._batch is not None:  # its thread holds the model: stop it first
+            self._batch.close()
+            self._batch, self._slots = None, 0
         self._model = None
         self._tokenizer = None
         self._model_path = None
@@ -302,6 +339,30 @@ class MLXEngine(InferenceEngine):
     @property
     def is_loaded(self) -> bool:
         return self._model is not None and self._tokenizer is not None
+
+    @property
+    def supports_concurrent_inference(self) -> bool:
+        return self._batch is not None
+
+    @property
+    def parallel_slots(self) -> int:
+        return self._slots
+
+    def _batched_responses(self, prompt: str, cfg: GenerationConfig) -> Iterator[Any]:
+        """This request's tokens from the shared batch; stopped by its own
+        cancellation signal (``hfl.engine.cancel``), never another's."""
+        from hfl.engine import cancel
+
+        sampling = self._build_sampling(cfg)
+        signal = cancel.current()
+        return cast(Iterator[Any], self._batch.stream(
+            [int(t) for t in self._tokenizer.encode(prompt)],
+            max_tokens=max(1, int(cfg.max_tokens or 2048)),
+            sampler=sampling["sampler"],
+            processors=sampling["logits_processors"],
+            cancelled=signal.is_set if signal is not None else (lambda: False),
+            logprobs=cfg.logprobs is not None,
+        ))  # fmt: skip
 
     @property
     def model_name(self) -> str:
@@ -519,6 +580,8 @@ class MLXEngine(InferenceEngine):
         prompt: str,
         config: GenerationConfig | None = None,
     ) -> GenerationResult:
+        if self._batch is not None:  # the batch thread alone touches the model
+            return self._generate(prompt, config)
         with self._native:  # see ``hfl.engine.base.held``
             return self._generate(prompt, config)
 
@@ -532,7 +595,7 @@ class MLXEngine(InferenceEngine):
             raise RuntimeError("MLX engine is not loaded")
         if cfg.logprobs is not None:
             return self._generate_logprobs(prompt, cfg)
-        if self._prompt_store is not None:
+        if self._batch is not None or self._prompt_store is not None:
             return self._generate_cached(prompt, cfg)
         text, n_prompt, n_gen, total_ns = self._run_generate(prompt, cfg)
         elapsed = max(total_ns, 1) / 1e9
@@ -557,15 +620,18 @@ class MLXEngine(InferenceEngine):
         import numpy as np
 
         start_ns = time.monotonic_ns()
-        if self._prompt_store is not None:
-            responses = self._cached_responses(prompt, cfg)
+        if self._batch is not None:
+            responses = self._batched_responses(prompt, cfg)
         else:
-            from mlx_lm import stream_generate
+            if self._prompt_store is not None:
+                responses = self._cached_responses(prompt, cfg)
+            else:
+                from mlx_lm import stream_generate
 
-            responses = stream_generate(
-                self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg)
-            )
-        responses = self._cancellable(responses)
+                responses = stream_generate(
+                    self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg)
+                )
+            responses = self._cancellable(responses)
         top = max(0, min(20, int(cfg.logprobs or 0)))
         eos = set(getattr(self._tokenizer, "eos_token_ids", None) or [])
         stops = self._stop_strings(cfg)
@@ -583,8 +649,10 @@ class MLXEngine(InferenceEngine):
                     finish = "stop"
                     continue
                 # In the model's dtype (bf16: a probability of 1.0001);
-                # normalised again in float64.
-                logprobs = np.array(response.logprobs, dtype=np.float64).reshape(-1)
+                # normalised again in float64. A BF16 array cannot reach
+                # numpy at all ("Item size 2 for PEP 3118 buffer"): every
+                # logprobs request on a BF16 MLX model failed (Qwen3-14B).
+                logprobs = np.array(_as_float32(response.logprobs), dtype=np.float64).reshape(-1)
                 peak = logprobs.max()
                 logprobs -= peak + np.log(np.exp(logprobs - peak).sum())
                 best = list(np.argpartition(-logprobs, top)[:top]) if top else []
@@ -628,7 +696,12 @@ class MLXEngine(InferenceEngine):
         text = ""
         last: Any = None
         n_gen = 0
-        responses = self._cancellable(self._cached_responses(prompt, cfg))
+        batched = self._batch is not None
+        responses = (
+            self._batched_responses(prompt, cfg)
+            if batched
+            else self._cancellable(self._cached_responses(prompt, cfg))
+        )
         try:
             for response in responses:
                 last = response
@@ -642,12 +715,16 @@ class MLXEngine(InferenceEngine):
             logger.exception("MLX generate failed")
             raise
         finally:
-            responses.close()
+            close = getattr(responses, "close", None)
+            if close is not None:
+                close()
         if stops:
             cut = self._earliest_stop(text, stops)
             if cut is not None:
                 text = text[:cut]
         total_ns = time.monotonic_ns() - start_ns
+        if batched:  # the last request's, as one at a time (diagnostic only)
+            self.last_prompt_tokens_reused = int(getattr(last, "reused", 0) or 0)
         n_prompt = self.last_prompt_tokens_reused + int(getattr(last, "prompt_tokens", 0) or 0)
         measured = self._measured_ns(last)
         if measured is None:
@@ -725,16 +802,20 @@ class MLXEngine(InferenceEngine):
             last[0] = token
             return token.text if hasattr(token, "text") else str(token)
 
+        batched = self._batch is not None
         cached = self._prompt_store is not None
         gen: Iterator[Any]
-        if cached:
-            gen = self._cached_responses(prompt, cfg)
+        if batched:
+            gen = self._batched_responses(prompt, cfg)
+        elif cached:
+            gen = self._cancellable(self._cached_responses(prompt, cfg))
         else:
             from mlx_lm import stream_generate
 
             kwargs = self._build_sampling(cfg)
-            gen = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
-        gen = self._cancellable(gen)
+            gen = self._cancellable(
+                stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
+            )
 
         def _stream() -> Iterator[str]:
             try:
@@ -749,17 +830,25 @@ class MLXEngine(InferenceEngine):
                     close()
                 response = last[0]
                 if response is not None and hasattr(response, "generation_tokens"):
-                    reused = self.last_prompt_tokens_reused if cached else 0
+                    if batched:
+                        reused = int(getattr(response, "reused", 0) or 0)
+                        self.last_prompt_tokens_reused = reused
+                    else:
+                        reused = self.last_prompt_tokens_reused if cached else 0
                     counted.prompt_tokens = reused + int(response.prompt_tokens or 0)
                     counted.completion_tokens = int(response.generation_tokens or 0)
 
+        if batched:  # no engine lock: the batch thread serialises the model
+            return counted.feed(_stream())
         return counted.feed(held(self._native, _stream()))
 
     def cancel(self) -> None:
         """Stop the running generation at its next token (the dispatcher
         calls this when a request runs past its time budget: the generation
-        used to go on to ``num_predict``, holding the model)."""
-        self._cancel.set()
+        used to go on to ``num_predict``, holding the model). Batching, each
+        request watches its own signal instead: this would stop them all."""
+        if self._batch is None:
+            self._cancel.set()
 
     def _cancellable(self, gen: Iterator[Any]) -> Generator[Any, None, None]:
         """``gen`` until ``cancel()``; the inner generator is closed either

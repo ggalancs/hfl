@@ -25,7 +25,7 @@ the host string does not.
 
 | HFL                            | Ollama alias               | Default | What it does |
 |--------------------------------|----------------------------|---------|--------------|
-| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1` (4 via llama-server by default, see below) | Requests one model serves at once. Only backends that serve several at once use it (llama-server: 4 when unset, and exactly what you set otherwise, 1 included; vLLM); every other backend runs one request at a time, across all its models. |
+| `HFL_QUEUE_MAX_INFLIGHT` / `HFL_NUM_PARALLEL` | `OLLAMA_NUM_PARALLEL`     | `1` (4 via llama-server by default, see below) | Requests one model serves at once. Only backends that serve several at once use it (llama-server and MLX: 4 when unset, and exactly what you set otherwise, 1 included; vLLM); every other backend runs one request at a time, across all its models. |
 | `HFL_QUEUE_MAX_SIZE` / `HFL_MAX_QUEUE`        | `OLLAMA_MAX_QUEUE`         | `16`    | Max wait queue; further requests get 429. |
 | `HFL_QUEUE_ACQUIRE_TIMEOUT`    | —                          | `60`    | Seconds a caller may wait for a slot before 503. |
 | `HFL_MAX_LOADED_MODELS`        | `OLLAMA_MAX_LOADED_MODELS` | `0`     | Optional ceiling on the **number** of resident models. `0` (default) = no ceiling: memory alone decides, see `HFL_MEMORY_BUDGET`. When set, loading one more model than this unloads the least recently used idle one. |
@@ -36,10 +36,11 @@ the host string does not.
 > The default GGUF backend (llama-cpp-python) and Transformers drive a single
 > non-reentrant model instance with one KV cache: two overlapping requests would
 > interleave their state and produce corrupted text, not an error, so they share
-> one queue, clamped to 1 slot (a warning is logged). llama-server and vLLM get a
-> queue of their own per model, with `HFL_NUM_PARALLEL` slots (llama-server: 4
-> when it is unset) — their requests neither wait behind each other nor
-> behind another model's.
+> one queue, clamped to 1 slot (a warning is logged). llama-server, MLX and vLLM
+> get a queue of their own per model, with `HFL_NUM_PARALLEL` slots (llama-server
+> and MLX: 4 when it is unset) — their requests neither wait behind each other
+> nor behind another model's. MLX batches them with mlx-lm's `BatchGenerator`
+> (not with a DRAFT model, which runs one request at a time).
 >
 > **Default:** when `hfl serve` gets no `--backend`/`--parallel` and none of
 > `HFL_NUM_PARALLEL`, `OLLAMA_NUM_PARALLEL`, `HFL_QUEUE_MAX_INFLIGHT`,

@@ -328,6 +328,8 @@ llama.cpp's `llama-server` installed (`brew install llama.cpp`), it serves each
 GGUF model with 4 parallel slots by default — what coding agents and several
 users need; two models answer at the same time too. Without it, or with
 `HFL_NUM_PARALLEL=1`, each GGUF model answers one request at a time in process.
+On Apple Silicon, MLX models serve 4 requests at once too (mlx-lm's batching,
+nothing to install): measured with Qwen3-14B, 4x the throughput with 8 clients.
 
 **OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations`
