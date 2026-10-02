@@ -50,15 +50,20 @@ for package in ('llama_cpp', 'hf_xet'):
         native_binaries += b
         native_imports += h
 
-# llama.cpp's llama-server, bundled when the build names its folder. As
-# binaries: PyInstaller keeps them executable (and on macOS re-signs them).
-llama_cpp_binaries = []
+# llama.cpp's llama-server, bundled when the build names its folder. Added
+# to the executable after the analysis, copied as they are: given to
+# Analysis (as binaries, or as data, which PyInstaller 6 reclassifies as
+# binaries), its dependency analysis also put llama.cpp's ggml.dll and
+# llama.dll at the bundle's root, where llama-cpp-python's own llama.dll
+# loaded them on Windows and failed (WinError 127: another build's ggml).
+# ``bundled_binary`` restores the executable bit if extraction drops it.
+llama_cpp_toc = []
 llama_cpp_dir = os.environ.get('HFL_PYI_LLAMA_CPP')
 if llama_cpp_dir:
     files = [p for p in Path(llama_cpp_dir).iterdir() if p.is_file()]
     if not any(p.name.startswith('llama-server') for p in files):
         raise SystemExit(f'HFL_PYI_LLAMA_CPP={llama_cpp_dir} holds no llama-server')
-    llama_cpp_binaries = [(str(p), 'llama.cpp') for p in files]
+    llama_cpp_toc = [(os.path.join('llama.cpp', p.name), str(p), 'DATA') for p in files]
 
 # Detect platform
 is_windows = sys.platform == 'win32'
@@ -155,7 +160,7 @@ excludes = [
 a = Analysis(
     ['src/hfl/cli/main.py'],
     pathex=[],
-    binaries=native_binaries + llama_cpp_binaries,
+    binaries=native_binaries,
     datas=datas,
     hiddenimports=hidden_imports + rich_imports + native_imports,
     hookspath=[],
@@ -175,16 +180,14 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.zipfiles,
-    a.datas,
+    a.datas + llama_cpp_toc,
     [],
     name='hfl',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,  # Compress with UPX if available
-    # UPX never touches llama.cpp's programs and libraries (an unpacked copy
-    # is what was checked).
-    upx_exclude=[Path(src).name for src, _dest in llama_cpp_binaries],
+    upx_exclude=[],
     runtime_tmpdir=None,
     console=True,  # CLI application
     disable_windowed_traceback=False,

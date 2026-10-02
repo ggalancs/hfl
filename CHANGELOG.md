@@ -29,7 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Docker image and the executables, DMG and MSI carry llama-server.**
   The same pinned build, fetched and checked the same way
   (`scripts/fetch_llama_server.py` for the PyInstaller builds, through
-  `HFL_PYI_LLAMA_CPP` in `hfl.spec`): out of the box `hfl serve` serves GGUF
+  `HFL_PYI_LLAMA_CPP` in `hfl.spec`, which adds it to the executable as is,
+  apart from llama-cpp-python's own libraries; on Windows with Microsoft's C++
+  runtime beside it, which llama.cpp's build needs and does not ship, and the
+  Vulkan build, which serves on the CPU where Vulkan cannot load — checked
+  with Vulkan made unloadable): out of the box `hfl serve` serves GGUF
   models with 4 slots; `HFL_NUM_PARALLEL=1` keeps llama.cpp in process, one
   request at a time. The image moves from Debian bookworm to trixie: llama.cpp's
   arm64 Linux build needs glibc 2.38. Each packaging is checked serving a

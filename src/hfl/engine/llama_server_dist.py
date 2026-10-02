@@ -143,7 +143,14 @@ def bundled_binary(name: str = "llama-server") -> str | None:
         return None
     roots = [Path(getattr(sys, "_MEIPASS", "")), Path(sys.executable).parent]
     for root in roots:
-        found = _runnable(root / "llama.cpp" / exe(name))
+        path = root / "llama.cpp" / exe(name)
+        if path.is_file() and not os.access(path, os.X_OK):
+            # Bundled as data (hfl.spec): extraction may drop the bit.
+            try:
+                path.chmod(path.stat().st_mode | stat.S_IXUSR)
+            except OSError:
+                pass
+        found = _runnable(path)
         if found:
             return found
     return None

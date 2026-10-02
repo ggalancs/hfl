@@ -232,3 +232,18 @@ def test_a_missing_system_library_names_the_package():
     assert hint and "libgomp.so.1" in hint and "apt install libgomp1" in hint
     assert _missing_library("llama-server does not run here: (no output)") is None
     assert _missing_library("libfoo.so.3: cannot open shared object file") is None
+
+
+def test_a_bundled_server_extracted_without_its_executable_bit_is_found(monkeypatch, tmp_path):
+    """hfl.spec bundles llama.cpp as data, copied as is (as binaries, their
+    DLLs reached the bundle's root and broke llama-cpp-python on Windows);
+    extraction may drop the executable bit, which the lookup restores."""
+    folder = tmp_path / "llama.cpp"
+    folder.mkdir()
+    server = folder / "llama-server"
+    server.write_text("#!/bin/sh\n")
+    server.chmod(0o644)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert dist.bundled_binary() == str(server)
+    assert os.access(server, os.X_OK)
