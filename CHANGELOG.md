@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before it runs on GitHub, the audits on three platforms, the order of the
   workflows, and the checks of every surface after publishing.
 
+- **Audit section G: failures.** Each check breaks something for real and
+  passes only when nothing hangs, nothing is left running, the client is
+  told and HFL serves again: llama-server killed in the middle of a reply
+  (G1), the disk filled during a download (G2, a 900 MB volume of its own),
+  the Hub cut off during a download (G3, through a proxy that drops every
+  connection), a client that stops reading (G4), the server stopped with
+  requests waiting (G5). Running them found the first four bugs under Fixed.
+
 - **Audit: E21 and E22.** E21 runs `hfl install llama-server` on the clean
   pip install with no llama-server on the PATH, then 4 requests at once must
   beat serving them in turn (measured on an M3 Max: 2.13x). E22: the same for
@@ -93,6 +101,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still part by BF16 rounding, as on llama-server or vLLM.
 
 ### Fixed
+
+- **A llama-server that died under a model is started again.** Killed by the
+  out-of-memory killer or crashed, its model stayed "loaded": every request
+  went to its closed port and got a 500 until `keep_alive` unloaded the model
+  (measured, audit G1). The next request now starts it again and is answered;
+  one sent at the very moment of the death is sent again once the restart is
+  done. A reply cut in the middle still ends with an error, never repeated.
+
+- **A client that stops reading no longer holds the model.** A client that
+  asked for a stream, read nothing more and kept the connection open blocked
+  every send, holding the request's model and queue slot for as long as it
+  liked — four such clients took all four slots of a model (measured, audit
+  G4: another model could not load, 503). A send blocked for
+  `HFL_STREAM_QUEUE_PUT_TIMEOUT` seconds (60 by default) now drops the
+  response and releases both at once.
+
+- **`hfl pull` ends with a message, not a traceback, when the disk fills up
+  or the Hub goes away in the middle of a download** (measured, audit G2,
+  G3): it says what happened and to run the same pull again, which
+  completes.
 
 - **On Kubernetes, a Service named `hfl` (or `ollama`) stopped HFL at start.**
   Kubernetes puts `<SERVICE>_PORT=tcp://ip:port` in every pod for each

@@ -90,6 +90,7 @@ The exit code is 1 when anything is `ROTO`.
 | D | each environment variable, and whether it is documented | `audit_checks/d_env.py` |
 | E | each engine through the same chat checks over the three APIs | `audit_checks/e_engines.py` |
 | F | ways to install and run: wheel, extras, Docker, Homebrew, tray, PyInstaller | `audit_checks/f_install.py` |
+| G | failures: llama-server killed mid-reply, disk full and the Hub lost mid-download, a client that stops reading, the server stopped with requests waiting — nothing may hang or be left running, and HFL must serve again | `audit_checks/g_failures.py` |
 
 The chat web UI (`/ui`) is checked by hand in a browser: open
 `http://127.0.0.1:11434/ui` on a server with a few models and hold a

@@ -26,7 +26,7 @@ def checks() -> None:
 def test_every_check_has_a_unique_id_in_its_section() -> None:
     ids = [c.cid for c in la.REGISTRY]
     assert [cid for cid, n in Counter(ids).items() if n > 1] == []
-    assert {cid[0] for cid in ids} == set("ABCDEF")
+    assert {cid[0] for cid in ids} == set(la.SECTIONS) == set("ABCDEFG")
 
 
 def test_every_need_names_a_registered_check() -> None:

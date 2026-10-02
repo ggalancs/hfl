@@ -182,6 +182,7 @@ class Audit:
             "NO_COLOR": "1",
         }
         self.port = 0  # of the running server, if any
+        self.proc: subprocess.Popen[bytes] | None = None  # of the running server
         self._shared: tuple[Any, str] | None = None
         # The server logs the running check wrote to, each from an offset:
         # read by ``engine_switches`` when it ends.
@@ -242,6 +243,7 @@ class Audit:
             env={**self.env, **(env or {})},
             cwd=self.scratch,
         )
+        self.proc = proc  # for the checks that stop or watch the server itself
         base = f"http://127.0.0.1:{port}"
         try:
             deadline = time.monotonic() + ready
@@ -457,6 +459,7 @@ SECTIONS = {
     "D": "environment variables",
     "E": "engines",
     "F": "ways to install and run",
+    "G": "failures: what breaks, and how HFL comes back",
 }
 
 
