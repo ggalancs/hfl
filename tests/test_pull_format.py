@@ -111,7 +111,7 @@ def test_with_none_and_no_cmake_it_says_how_to_get_one(temp_config, monkeypatch)
     converter = _converter(temp_config, monkeypatch, which=lambda t: None)
     with pytest.raises(ToolNotFoundError) as caught:
         converter._quantizer()
-    assert "brew install llama.cpp" in str(caught.value.details)
+    assert "hfl install llama-server" in str(caught.value.details)
     assert "hfl[llama]" in str(caught.value.details)
 
 

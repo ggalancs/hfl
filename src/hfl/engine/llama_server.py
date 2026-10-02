@@ -58,11 +58,15 @@ DEFAULT_SLOTS = 4
 
 
 def binary() -> str | None:
-    """The ``llama-server`` to run: ``HFL_LLAMA_SERVER_BIN`` or the PATH's."""
+    """The ``llama-server`` to run: ``HFL_LLAMA_SERVER_BIN``, else the PATH's
+    (an install of the user's own), else the copy an executable bundles,
+    else the one ``hfl install llama-server`` put in ``~/.hfl/bin``."""
     configured = os.environ.get("HFL_LLAMA_SERVER_BIN")
     if configured:
         return configured if Path(configured).is_file() else None
-    return shutil.which("llama-server")
+    from hfl.engine.llama_server_dist import bundled_binary, managed_binary
+
+    return shutil.which("llama-server") or bundled_binary() or managed_binary()
 
 
 @functools.lru_cache(maxsize=4)
@@ -492,8 +496,8 @@ class LlamaServerEngine(InferenceEngine):
         exe = binary()
         if exe is None:
             raise RuntimeError(
-                "llama-server was not found: install llama.cpp (e.g. `brew install llama.cpp`) "
-                "or set HFL_LLAMA_SERVER_BIN"
+                "llama-server was not found: `hfl install llama-server` (llama.cpp's own "
+                "build), install llama.cpp, or set HFL_LLAMA_SERVER_BIN"
             )
         requested = kwargs.get("n_ctx")
         explicit = isinstance(requested, int) and requested > 0

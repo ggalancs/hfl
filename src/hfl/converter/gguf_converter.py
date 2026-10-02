@@ -525,6 +525,12 @@ class GGUFConverter:
         on_path = shutil.which("llama-quantize")
         if on_path is not None:
             return [on_path]
+        # The one `hfl install llama-server` brings (or an executable bundles).
+        from hfl.engine.llama_server_dist import bundled_binary, managed_binary
+
+        installed = bundled_binary("llama-quantize") or managed_binary("llama-quantize")
+        if installed is not None:
+            return [installed]
         probe = subprocess.run(
             [sys.executable, "-c", "import llama_cpp; llama_cpp.llama_model_quantize"],
             capture_output=True,
@@ -537,7 +543,7 @@ class GGUFConverter:
     def _build_quantizer(self) -> None:
         """Build llama.cpp's ``llama-quantize`` — the last resort."""
         hint = (
-            "Quantizing needs llama-quantize: `brew install llama.cpp` (macOS), "
+            "Quantizing needs llama-quantize: `hfl install llama-server` (brings it), "
             "`pip install 'hfl[llama]'`, or git + cmake + a C++ compiler to build it. "
             "Or pull a GGUF build of the model: `hfl search <name> --gguf`."
         )

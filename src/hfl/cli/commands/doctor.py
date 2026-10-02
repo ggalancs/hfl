@@ -236,8 +236,8 @@ def build_report() -> DoctorReport:
     if report.llama_server is None:
         recs.append(
             "llama.cpp's llama-server not found: GGUF models answer one request at a "
-            "time. Install llama.cpp (e.g. `brew install llama.cpp`) for "
-            "`hfl serve --parallel N`."
+            "time. `hfl install llama-server` installs llama.cpp's official build "
+            "(4 requests at once by default)."
         )
     has_accel = bool(report.nvidia_devices) or report.metal_available or bool(report.rocm_devices)
     if not has_accel:

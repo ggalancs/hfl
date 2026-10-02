@@ -3768,6 +3768,27 @@ def draft_recommend_cmd(
 # Saved chat sessions
 # ----------------------------------------------------------------------
 
+install_app = typer.Typer(help=t("commands.install.description"), no_args_is_help=True)
+app.add_typer(install_app, name="install")
+
+
+@install_app.command("llama-server", help=t("commands.install.llama_server.description"))
+def install_llama_server(
+    variant: str | None = typer.Option(
+        None, "--variant", help=t("commands.install.llama_server.options.variant")
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help=t("commands.install.llama_server.options.yes")
+    ),
+    force: bool = typer.Option(
+        False, "--force", help=t("commands.install.llama_server.options.force")
+    ),
+) -> None:
+    from hfl.cli.commands.install import install_llama_server as run
+
+    raise typer.Exit(run(variant=variant, assume_yes=yes is True, force=force is True))
+
+
 sessions_app = typer.Typer(help=t("commands.sessions.description"), no_args_is_help=True)
 app.add_typer(sessions_app, name="sessions")
 

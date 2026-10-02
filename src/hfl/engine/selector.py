@@ -61,8 +61,8 @@ def _get_llama_cpp_engine() -> InferenceEngine:
         raise MissingDependencyError(
             "The llama-cpp backend requires the 'llama-cpp-python' library, or\n"
             "llama.cpp's own llama-server on PATH, which HFL then uses (no compiler\n"
-            "needed): winget install ggml.llamacpp (Windows), brew install llama.cpp\n"
-            "(macOS).\n\n"
+            "needed): hfl install llama-server (llama.cpp's official build, any\n"
+            "platform).\n\n"
             "Install llama-cpp-python with:\n"
             "  pip install llama-cpp-python\n\n"
             "For GPU support (CUDA):\n"

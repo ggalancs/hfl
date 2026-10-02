@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`hfl install llama-server`: GGUF models answer several requests at once
+  without installing llama.cpp.** Until now that took llama.cpp's
+  `llama-server`, installed separately (Homebrew, winget, a build); a
+  `pip install` answered one request at a time. The command fetches
+  llama.cpp's official build of a pinned release (b10964) for this platform
+  (Metal on Apple Silicon, Vulkan on Windows, CPU or Vulkan on Linux, CUDA on
+  Windows on request) from its GitHub releases, checks its sha256 against
+  the one in HFL, and keeps `llama-server` and `llama-quantize` (which GGUF
+  conversion uses) with their libraries in `~/.hfl/bin/`. It says what it
+  downloads and asks first (`--yes` without a terminal). A build that does
+  not run on the machine (an older glibc) changes nothing. `hfl serve` finds
+  it, after `HFL_LLAMA_SERVER_BIN` and the PATH. Measured on macOS with
+  llama.cpp hidden from the PATH: installed (11 MB), and a GGUF served with 4
+  slots.
+
 - **MLX models serve several requests at once.** The MLX engine (safetensors
   on Apple Silicon) answered one request at a time; a second client waited
   for the first. It now batches them with mlx-lm's own continuous batching

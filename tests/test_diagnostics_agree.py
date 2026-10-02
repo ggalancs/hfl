@@ -62,7 +62,8 @@ def test_check_and_doctor_list_the_same_backends(machine, temp_config):
 def test_the_recommendation_names_the_fix(monkeypatch):
     monkeypatch.setattr("hfl.engine.llama_server.binary", lambda: None)
     real = doctor.build_report()
-    assert any("hfl serve --parallel" in r for r in real.recommendations)
+    # It names the fix: the command that installs llama-server.
+    assert any("hfl install llama-server" in r for r in real.recommendations)
 
 
 def test_asking_llama_cpp_about_the_gpu_prints_nothing(monkeypatch, capfd):

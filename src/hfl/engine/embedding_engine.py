@@ -313,7 +313,7 @@ class LlamaServerEmbeddingEngine(EmbeddingEngine):
         if exe is None:
             raise RuntimeError(
                 "GGUF embeddings need llama-cpp-python or llama.cpp's llama-server: "
-                "install one (e.g. `brew install llama.cpp`)"
+                "`hfl install llama-server`, or `pip install 'hfl[llama]'`"
             )
         try:
             arch = read_fields(model_path, {"general.architecture"}).get("general.architecture")

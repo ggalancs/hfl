@@ -94,8 +94,8 @@ is left to you. HFL fetches only the files a model needs and runs them:
 
 | How | Command |
 |---|---|
-| **pip** (recommended) | `pip install "hfl[llama,mlx]"` |
-| **pip on Windows** | `winget install ggml.llamacpp` then `pip install hfl` (GGUF through llama-server; `hfl[llama]` needs Visual Studio's C++ Build Tools) |
+| **pip** (recommended) | `pip install "hfl[llama,mlx]"`, then `hfl install llama-server` (llama.cpp's official build: GGUF models answer 4 requests at once) |
+| **pip on Windows** | `pip install hfl` then `hfl install llama-server` (no compiler needed; `hfl[llama]` needs Visual Studio's C++ Build Tools) |
 | **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`) |
 | **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases) |
 | **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
@@ -324,7 +324,8 @@ context window. Nothing in the agent's own configuration is changed.
 Arguments after `--` go to the agent: `hfl launch claude -m qwen-coder -- -p "fix the tests"`.
 
 The server listens on `http://localhost:11434` and speaks three APIs. With
-llama.cpp's `llama-server` installed (`brew install llama.cpp`), it serves each
+llama.cpp's `llama-server` (`hfl install llama-server` fetches its official
+build; a `brew install llama.cpp` serves too), it serves each
 GGUF model with 4 parallel slots by default — what coding agents and several
 users need; two models answer at the same time too. Without it, or with
 `HFL_NUM_PARALLEL=1`, each GGUF model answers one request at a time in process.

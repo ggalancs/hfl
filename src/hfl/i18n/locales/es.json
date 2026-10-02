@@ -261,6 +261,17 @@
         "yes": "Tomar la primera sugerencia sin preguntar",
         "chat": "Abrir un chat cuando el modelo esté listo"
       }
+    },
+    "install": {
+      "description": "Instala lo que HFL puede usar sin instalación aparte",
+      "llama_server": {
+        "description": "llama-server de llama.cpp (build oficial): los modelos GGUF atienden varias peticiones a la vez",
+        "options": {
+          "variant": "Build: metal, cpu, vulkan o cuda (las que llama.cpp publica para esta plataforma)",
+          "force": "Instala aunque ya haya un llama-server",
+          "yes": "Instala sin preguntar"
+        }
+      }
     }
   },
   "messages": {
@@ -385,7 +396,7 @@
     "memory_refused_gpu": "No hay memoria de GPU suficiente para {model}: necesita ~{need} GB y la GPU llegaría a {after} de {total} GB ({after_pct}%), por encima del HFL_MEMORY_BUDGET del {budget}%.",
     "unknown_backend": "Backend desconocido {backend}: elige uno de {choices}.",
     "bad_parallel": "--parallel debe ser 0 o más.",
-    "llama_server_missing": "Las peticiones en paralelo necesitan llama-server de llama.cpp, que no está instalado (p. ej. `brew install llama.cpp`), o define HFL_LLAMA_SERVER_BIN.",
+    "llama_server_missing": "Las peticiones en paralelo necesitan llama-server de llama.cpp, que no está instalado: `hfl install llama-server` instala su build oficial (o define HFL_LLAMA_SERVER_BIN).",
     "tray_no_display": "La bandeja necesita una sesión de escritorio y no hay ninguna (sin DISPLAY ni WAYLAND_DISPLAY). Ejecuta `hfl serve` sin --tray."
   },
   "warnings": {
@@ -696,5 +707,16 @@
     "fusing": "Fusionando el adaptador en un modelo nuevo…",
     "fused": "Modelo fusionado: {name}",
     "gguf": "Modelo GGUF: {name}"
+  },
+  "install": {
+    "llama_server": {
+      "already": "llama-server ya está aquí: {path}. HFL lo usa (--force instala igualmente el de HFL).",
+      "installed_before": "Ya instalado: {path}.",
+      "no_build": "llama.cpp no publica una build '{variant}' para esta máquina; las que hay: {offered}.",
+      "what": "llama.cpp {release} (build {variant}, {mb:.0f} MB) desde github.com/ggml-org/llama.cpp, comprobado con su sha256 publicado, en {folder}.",
+      "needs_yes": "No se ha instalado nada: no hay terminal donde preguntar. Ejecútalo con --yes.",
+      "confirm": "¿Descargarlo e instalarlo?",
+      "done": "Instalado: {path}. hfl serve ya sirve los modelos GGUF con 4 peticiones a la vez."
+    }
   }
 }

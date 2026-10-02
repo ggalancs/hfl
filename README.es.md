@@ -98,8 +98,8 @@ los ejecuta:
 
 | Cómo | Comando |
 |---|---|
-| **pip** (recomendado) | `pip install "hfl[llama,mlx]"` |
-| **pip en Windows** | `winget install ggml.llamacpp` y después `pip install hfl` (GGUF con llama-server; `hfl[llama]` necesita las C++ Build Tools de Visual Studio) |
+| **pip** (recomendado) | `pip install "hfl[llama,mlx]"` y después `hfl install llama-server` (la build oficial de llama.cpp: los modelos GGUF atienden 4 peticiones a la vez) |
+| **pip en Windows** | `pip install hfl` y después `hfl install llama-server` (sin compilador; `hfl[llama]` necesita las C++ Build Tools de Visual Studio) |
 | **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (solo esta máquina; para abrirlo a la red, publica `-p 11434:11434` con `-e HFL_API_KEY=…`) |
 | **Instaladores** | `.dmg`, `.msi` y binarios independientes en la [página de releases](https://github.com/ggalancs/hfl/releases) |
 | **Desde el código** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
@@ -329,10 +329,14 @@ HFL descarga el modelo si hace falta, arranca un servidor si no hay ninguno
 ventana de contexto real. No se toca la configuración propia del agente.
 Lo que va tras `--` se le pasa al agente: `hfl launch claude -m qwen-coder -- -p "arregla los tests"`.
 
-El servidor escucha en `http://localhost:11434` y habla tres APIs. Por defecto
-atiende una petición a la vez por modelo GGUF; `hfl serve --parallel 4` (con
-llama.cpp instalado) atiende varias a la vez, lo que necesitan los agentes de
-programación y varios usuarios.
+El servidor escucha en `http://localhost:11434` y habla tres APIs. Con el
+`llama-server` de llama.cpp (`hfl install llama-server` descarga su build
+oficial; también sirve `brew install llama.cpp`), atiende cada modelo GGUF con 4
+peticiones a la vez por defecto, lo que necesitan los agentes de programación y
+varios usuarios. Sin él, o con `HFL_NUM_PARALLEL=1`, atiende una a la vez. En
+Apple Silicon, los modelos MLX también atienden 4 a la vez (el batching de
+mlx-lm, sin instalar nada): medido con Qwen3-14B, 4 veces el rendimiento con 8
+clientes.
 
 **OpenAI** — `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations`

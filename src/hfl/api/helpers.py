@@ -175,7 +175,7 @@ def suggest_parallel(dispatcher: Any, engine: Any) -> None:
     logger.warning(
         "A request is waiting for the model to finish another one. GGUF models can "
         "serve several at once: start the server with `hfl serve --parallel 4` "
-        "(needs llama.cpp's llama-server)."
+        "(needs llama.cpp's llama-server: `hfl install llama-server`)."
     )
 
 
