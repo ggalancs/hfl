@@ -413,11 +413,40 @@ class ModelLeaseMiddleware:
             return
         from hfl.api.state import close_lease_scope, open_lease_scope
 
+        deadline = float(config.stream_queue_put_timeout or 0)
+
+        async def send_or_give_up(message: Any) -> None:
+            # A client that stops reading (and keeps the connection open)
+            # blocks every send: the leases below, and the request's queue
+            # slot, were held as long as it liked — four such clients took a
+            # model's four slots (measured, audit G4). Past the deadline the
+            # response is dropped and everything is released.
+            if deadline <= 0 or message.get("type") != "http.response.body":
+                await send(message)
+                return
+            try:
+                await asyncio.wait_for(send(message), timeout=deadline)
+            except asyncio.TimeoutError:
+                raise _ClientStalled(deadline) from None
+
         token = open_lease_scope()
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, send_or_give_up)
+        except _ClientStalled as stalled:
+            logger.warning(
+                "%s %s: the client read nothing for %.0fs; response dropped",
+                scope.get("method", ""),
+                scope.get("path", ""),
+                stalled.seconds,
+            )
         finally:
             close_lease_scope(token)
+
+
+class _ClientStalled(Exception):
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"client stalled for {seconds:.0f}s")
+        self.seconds = seconds
 
 
 app.add_middleware(ModelLeaseMiddleware)

@@ -16,6 +16,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator
 
+from starlette.responses import StreamingResponse
+
 from hfl.config import config as _hfl_config
 
 if TYPE_CHECKING:
@@ -61,6 +63,26 @@ def _record_stream_orphan() -> None:
         get_metrics().record_stream_cancel_orphan()
     except Exception:  # pragma: no cover - defensive
         pass
+
+
+class ClosingStreamingResponse(StreamingResponse):
+    """A ``StreamingResponse`` that closes its body when it stops, however
+    it stops. Starlette leaves an interrupted body (a client that read
+    nothing past the send deadline, a disconnect) suspended until the
+    garbage collector finds it — and the body's ``finally`` is what returns
+    the request's queue slot and stops the generation (measured: released
+    only by ``gc.collect()``)."""
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # pragma: no cover - closing must not mask the outcome
+                    logger.debug("closing a stream's body failed", exc_info=True)
 
 
 async def stream_with_backpressure(

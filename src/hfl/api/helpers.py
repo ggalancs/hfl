@@ -485,12 +485,12 @@ async def prepare_stream_response(
     Its generator is responsible for ``await slot_cm.__aexit__(...)`` in
     its own ``finally`` — matching the existing route convention.
     """
-    from fastapi.responses import StreamingResponse
+    from hfl.api.streaming import ClosingStreamingResponse
 
     slot_or_response = await acquire_stream_slot(path=path)
     if isinstance(slot_or_response, JSONResponse):
         return slot_or_response
-    return StreamingResponse(gen_factory(slot_or_response), media_type=media_type)
+    return ClosingStreamingResponse(gen_factory(slot_or_response), media_type=media_type)
 
 
 def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
