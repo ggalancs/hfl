@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the one in HFL, and keeps `llama-server` and `llama-quantize` (which GGUF
   conversion uses) with their libraries in `~/.hfl/bin/`. It says what it
   downloads and asks first (`--yes` without a terminal). A build that does
-  not run on the machine (an older glibc) changes nothing. `hfl serve` finds
+  not run on the machine (an older glibc) changes nothing; when it stops on a
+  missing system library (a bare Ubuntu has no `libgomp.so.1`), the command
+  names the package to install. `hfl serve` finds
   it, after `HFL_LLAMA_SERVER_BIN` and the PATH. Measured on macOS with
   llama.cpp hidden from the PATH: installed (11 MB), and a GGUF served with 4
   slots.

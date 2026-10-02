@@ -715,6 +715,7 @@
       "no_build": "llama.cpp publishes no '{variant}' build for this machine; builds here: {offered}.",
       "what": "llama.cpp {release} ({variant} build, {mb:.0f} MB) from github.com/ggml-org/llama.cpp, checked against its published sha256, into {folder}.",
       "needs_yes": "Nothing installed: no terminal to ask in. Run it with --yes.",
+      "missing_library": "Nothing changed. That build needs {library} from the system: install it (Debian/Ubuntu: sudo apt install {package}) and run this again.",
       "confirm": "Download and install it?",
       "done": "Installed: {path}. hfl serve now serves GGUF models with 4 requests at once."
     }

@@ -216,3 +216,19 @@ def test_the_real_download_checks_the_sha256(monkeypatch, tmp_path):
     assert dist._download("x.tar.gz", good, tmp_path, None).read_bytes() == payload
     with pytest.raises(dist.InstallError, match="not the published"):
         dist._download("x.tar.gz", "f" * 64, tmp_path, None)
+
+
+def test_a_missing_system_library_names_the_package():
+    """What a bare Ubuntu 24.04 said (measured): the command says what to
+    install instead of only relaying the loader's error."""
+    from hfl.cli.commands.install import _missing_library
+
+    said = (
+        "llama-server does not run here: /work/build/.llama.cpp-wwiqh91u/llama-server: error "
+        "while loading shared libraries: libgomp.so.1: cannot open shared object file: No such "
+        "file or directory"
+    )
+    hint = _missing_library(said)
+    assert hint and "libgomp.so.1" in hint and "apt install libgomp1" in hint
+    assert _missing_library("llama-server does not run here: (no output)") is None
+    assert _missing_library("libfoo.so.3: cannot open shared object file") is None

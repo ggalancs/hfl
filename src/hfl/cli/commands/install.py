@@ -11,6 +11,7 @@ the machine.
 
 from __future__ import annotations
 
+import re
 import shutil
 
 from rich.console import Console
@@ -68,6 +69,26 @@ def install_llama_server(*, variant: str | None, assume_yes: bool, force: bool) 
             server = dist.install(variant, progress=lambda n: bar.advance(task, n))
         except dist.InstallError as exc:
             console.print(f"[red]{escape(str(exc))}[/]")
+            hint = _missing_library(str(exc))
+            if hint:
+                console.print(f"[yellow]{escape(hint)}[/]")
             return 1
     console.print(f"[green]{t('install.llama_server.done', path=escape(str(server)))}[/]")
     return 0
+
+
+# A system library llama.cpp's Linux build links and a minimal system may
+# lack (a bare Ubuntu has no OpenMP runtime); the package that provides it.
+_PACKAGES = {"libgomp": "libgomp1", "libvulkan": "libvulkan1"}
+
+
+def _missing_library(said: str) -> str | None:
+    """What to install when the build stopped on a missing shared library."""
+    found = re.search(r"([\w.+-]+\.so[\w.]*): cannot open shared object file", said)
+    if not found:
+        return None
+    library = found.group(1)
+    package = next((p for stem, p in _PACKAGES.items() if library.startswith(stem)), None)
+    if package is None:
+        return None
+    return t("install.llama_server.missing_library", library=library, package=package)

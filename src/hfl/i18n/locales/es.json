@@ -715,6 +715,7 @@
       "no_build": "llama.cpp no publica una build '{variant}' para esta máquina; las que hay: {offered}.",
       "what": "llama.cpp {release} (build {variant}, {mb:.0f} MB) desde github.com/ggml-org/llama.cpp, comprobado con su sha256 publicado, en {folder}.",
       "needs_yes": "No se ha instalado nada: no hay terminal donde preguntar. Ejecútalo con --yes.",
+      "missing_library": "No se ha cambiado nada. Esa build necesita {library} del sistema: instálala (Debian/Ubuntu: sudo apt install {package}) y vuelve a ejecutarlo.",
       "confirm": "¿Descargarlo e instalarlo?",
       "done": "Instalado: {path}. hfl serve ya sirve los modelos GGUF con 4 peticiones a la vez."
     }
