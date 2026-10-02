@@ -12,12 +12,13 @@ stopped at the network-exposure prompt) and unable to load llama.cpp
 1. the image as is, its default command, port published on loopback: it
    must answer ``/healthz`` from the host;
 2. with ``HFL_API_KEY`` in its environment: 401 without the key, 200 with it;
-3. llama.cpp importable in it;
+3. llama.cpp importable in it, and its bundled ``llama-server`` runs;
 4. ``scripts/platform_check.py`` inside it — models pulled, served and
-   answered over every API.
+   answered over every API, the chat model by llama-server (several
+   requests at once), as ``hfl serve`` does when llama-server is there.
 
 Every container it starts is removed, whatever happens. Exit 0 only when
-all four passed.
+all passed.
 """
 
 from __future__ import annotations
@@ -103,11 +104,15 @@ def main() -> int:
             imported.stdout.strip() or imported.stderr.strip()[-300:],
         )
 
+        server = _docker("run", "--rm", "--entrypoint", "llama-server", image, "--version")
+        said = (server.stdout + server.stderr).strip()
+        run.check("llama-server runs", server.returncode == 0 and "build" in said, said[-200:])
+
         checked = _docker(
             "run", "--rm", "--name", "hfl-image-check-platform",
             "-v", f"{CHECK}:/check/platform_check.py:ro",
             "--entrypoint", "/opt/venv/bin/python", image, "-u", "/check/platform_check.py",
-            timeout=1500,
+            "--expect-backend", "llama-server", timeout=1500,
         )  # fmt: skip
         lines = [line for line in checked.stdout.splitlines() if line[:3] in ("OK ", "BAD")]
         run.check(

@@ -9,6 +9,7 @@ import concurrent.futures
 import io
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -324,6 +325,100 @@ def e16(a: Audit) -> str:
             f"two models {d['two_models']['speedup']}x"
         )
     return part.verdict()
+
+
+def _without_llama_server(path: str) -> str:
+    """``PATH`` without the folders holding a ``llama-server``: a machine
+    where llama.cpp was never installed."""
+    names = ("llama-server", "llama-server.exe")
+    kept = [d for d in path.split(os.pathsep) if not any((Path(d) / n).exists() for n in names)]
+    return os.pathsep.join(kept)
+
+
+def _speedup(said: str) -> str:
+    """The 4-at-once speed-up ``bench_concurrency.py`` printed, if it did."""
+    try:
+        return f"; 4 at once {json.loads(said)['parallel']['speedup']}x"
+    except (ValueError, KeyError, TypeError):
+        return ""
+
+
+@check("E21", "hfl install llama-server: 4 at once from a clean pip install", needs=("A24",))
+def e21(a: Audit) -> str:
+    """A pip install has no llama-server; ``hfl install llama-server`` fetches
+    llama.cpp's official build, and ``hfl serve`` then serves GGUF with 4
+    slots — with no llama.cpp of the user's on the PATH. The binary is
+    looked for here by its folder, not through HFL's own lookup."""
+    part = Parts()
+    env = {"PATH": _without_llama_server(a.env.get("PATH", ""))}
+    # Nothing else for HFL to find (the audit's environment drops HFL_*).
+    expect(shutil.which("llama-server", path=env["PATH"]) is None, "llama-server still on PATH")
+    done = a.cli("install", "llama-server", "--yes", "--force", env=env, timeout=1800)
+    said = (done.stdout + done.stderr).strip()
+    expect(done.returncode == 0, f"exit {done.returncode}: {said[-400:]}")
+    found = sorted((a.home / "bin").glob("llama.cpp-*/llama-server*"))
+    expect(found, f"no llama-server under {a.home / 'bin'}: {said[-300:]}")
+    version = subprocess.run(
+        [str(found[0]), "--version"], capture_output=True, text=True, timeout=60
+    )  # fmt: skip
+    part(
+        "the installed llama-server runs",
+        lambda: expect("build" in version.stdout + version.stderr, version.stderr[-200:]),
+    )
+    gpu = _llama_server_has_gpu(str(found[0]))
+    floor = "1.5" if gpu else "1.1"  # E16's floors, same model
+    with a.server(env=env) as base:
+        bench = subprocess.run(
+            [
+                a.python, str(REPO / "scripts" / "bench_concurrency.py"), base,
+                "--model", "chat", "--runs", "3", "--tokens", "96",
+                "--min-parallel-speedup", floor,
+            ],
+            capture_output=True, text=True, timeout=3600,
+        )  # fmt: skip
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        text = log.read_text(errors="replace")
+        part(
+            "served by the installed llama-server, 4 slots",
+            lambda: expect("shared by 4 parallel slots" in text, "no llama-server in log"),
+        )
+    part(
+        f"4 at once over the floor ({'GPU' if gpu else 'CPU'}: {floor}x)",
+        lambda: expect(bench.returncode == 0, bench.stderr.strip()[-400:] or bench.stdout[-400:]),
+    )
+    return part.verdict() + _speedup(bench.stdout)
+
+
+MLX_FLOOR = "1.5"
+
+
+@check("E22", "MLX: 4 requests at once (continuous batching)", needs=("A24",))
+def e22(a: Audit) -> str:
+    """mlx-lm's BatchGenerator serves several requests on one model at once;
+    one after another, four take four times one. Measured with the 0.5B
+    4-bit ``mlxq`` on an M3 Max: see the floor."""
+    need_apple_silicon("MLX")
+    part = Parts()
+    with a.server() as base:
+        bench = subprocess.run(
+            [
+                a.python, str(REPO / "scripts" / "bench_concurrency.py"), base,
+                "--model", "mlxq", "--runs", "3", "--tokens", "96",
+                "--min-parallel-speedup", MLX_FLOOR,
+            ],
+            capture_output=True, text=True, timeout=3600,
+        )  # fmt: skip
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        text = log.read_text(errors="replace")
+        part(
+            "MLX batching on",
+            lambda: expect("continuous batching" in text, "no MLX batching in log"),
+        )
+    part(
+        f"4 at once over the floor ({MLX_FLOOR}x)",
+        lambda: expect(bench.returncode == 0, bench.stderr.strip()[-400:] or bench.stdout[-400:]),
+    )
+    return part.verdict() + _speedup(bench.stdout)
 
 
 @check("E3", "MLX")

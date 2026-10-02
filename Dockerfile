@@ -13,6 +13,12 @@
 #                   "llama,transformers,mcp".
 #   PYTHON_VERSION — pinned to 3.12 to match CI.
 #
+# llama.cpp's own llama-server (the pinned official build, its sha256
+# checked by ``hfl.engine.llama_server_dist``) lives in /opt/llama.cpp, on
+# the PATH: GGUF models answer several requests at once out of the box.
+# Debian trixie, not bookworm: llama.cpp's arm64 Linux build needs glibc
+# 2.38 (bookworm has 2.36).
+#
 # Runtime:
 #   docker run --rm -p 11434:11434 ghcr.io/ggalancs/hfl:latest serve
 #
@@ -25,7 +31,7 @@ ARG HFL_EXTRAS=llama
 # Stage 1: builder
 # --------------------------------------------------------------------
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM python:${PYTHON_VERSION}-slim-trixie AS builder
 
 ARG HFL_EXTRAS
 
@@ -64,18 +70,25 @@ RUN python -m venv /opt/venv \
         --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
         ".[${HFL_EXTRAS}]"
 
+# llama-server and llama-quantize, by HFL's own installer: the same pinned
+# release and checks as ``hfl install llama-server`` (it refuses a build
+# that does not run here).
+RUN /opt/venv/bin/python -c "from pathlib import Path; \
+from hfl.engine.llama_server_dist import install; \
+print(install(target=Path('/opt/llama.cpp')))"
+
 # --------------------------------------------------------------------
 # Stage 2: runtime
 # --------------------------------------------------------------------
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
+FROM python:${PYTHON_VERSION}-slim-trixie AS runtime
 
 LABEL org.opencontainers.image.title="hfl" \
       org.opencontainers.image.description="Run HuggingFace models locally (Ollama-compatible)" \
       org.opencontainers.image.source="https://github.com/ggalancs/hfl" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-ENV PATH="/opt/venv/bin:${PATH}" \
+ENV PATH="/opt/venv/bin:/opt/llama.cpp:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HFL_HOME=/var/lib/hfl \
@@ -94,6 +107,7 @@ RUN apt-get update \
  && chown -R hfl:hfl /var/lib/hfl
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/llama.cpp /opt/llama.cpp
 
 USER hfl
 WORKDIR /var/lib/hfl

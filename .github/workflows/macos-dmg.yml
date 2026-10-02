@@ -55,13 +55,23 @@ jobs:
         env:
           CMAKE_ARGS: "-DGGML_METAL=ON"
           HFL_PYI_ICON: packaging/macos/hfl.icns
+          HFL_PYI_LLAMA_CPP: build/llama.cpp
         run: |
           pip install -e ".[llama]"
+          # llama.cpp's llama-server, bundled (the pinned release, sha256
+          # checked): GGUF models answer several requests at once.
+          python scripts/fetch_llama_server.py build/llama.cpp
           pyinstaller hfl.spec --clean
 
       # The 0.22.0 DMG could not run any model (llama.cpp's libraries were not
-      # in the binary). Run one, for real, before packaging it.
+      # in the binary). Run one, for real, before packaging it: by the
+      # bundled llama-server (the default), then by llama.cpp in process.
+      - name: Check the binary runs a model (bundled llama-server)
+        run: python scripts/platform_check.py --hfl dist/hfl --expect-backend llama-server
+
       - name: Check the binary runs a model (llama.cpp in process)
+        env:
+          HFL_LLM_LIBRARY: llama-cpp
         run: python scripts/platform_check.py --hfl dist/hfl --expect-backend llama.cpp
 
       - name: Derive version

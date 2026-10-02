@@ -162,6 +162,9 @@ def _kept(member: str) -> str | None:
     if lowered.startswith("license"):
         return name
     if lowered.endswith((".dll", ".dylib")) or ".so" in lowered:
+        # Each tool's own code (libllama-cli-impl.so…): only ours.
+        if "-impl" in lowered and not any(program in lowered for program in PROGRAMS):
+            return None
         return name
     return None
 

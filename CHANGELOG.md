@@ -24,6 +24,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   llama.cpp hidden from the PATH: installed (11 MB), and a GGUF served with 4
   slots.
 
+- **The Docker image and the executables, DMG and MSI carry llama-server.**
+  The same pinned build, fetched and checked the same way
+  (`scripts/fetch_llama_server.py` for the PyInstaller builds, through
+  `HFL_PYI_LLAMA_CPP` in `hfl.spec`): out of the box `hfl serve` serves GGUF
+  models with 4 slots; `HFL_NUM_PARALLEL=1` keeps llama.cpp in process, one
+  request at a time. The image moves from Debian bookworm to trixie: llama.cpp's
+  arm64 Linux build needs glibc 2.38. Each packaging is checked serving a
+  model both ways before it ships; `scripts/image_check.py` also runs the
+  image's llama-server. Measured: the image (arm64) passes `image_check.py`
+  with the chat model served by llama-server, and a PyInstaller executable
+  built on macOS passes `platform_check.py` both ways with no llama-server on
+  the PATH.
+
+- **Audit: E21 and E22.** E21 runs `hfl install llama-server` on the clean
+  pip install with no llama-server on the PATH, then 4 requests at once must
+  beat serving them in turn (measured on an M3 Max: 2.13x). E22: the same for
+  an MLX model (2.38x).
+
 - **MLX models serve several requests at once.** The MLX engine (safetensors
   on Apple Silicon) answered one request at a time; a second client waited
   for the first. It now batches them with mlx-lm's own continuous batching

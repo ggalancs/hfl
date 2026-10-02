@@ -47,13 +47,24 @@ jobs:
       - name: Build PyInstaller executable
         env:
           HFL_PYI_ICON: packaging\windows\hfl.ico
+          HFL_PYI_LLAMA_CPP: build\llama.cpp
         run: |
           pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -e ".[llama]"
+          # llama.cpp's llama-server, bundled (the pinned Vulkan build, which
+          # carries the CPU backends too; sha256 checked): GGUF models answer
+          # several requests at once, on any GPU or none.
+          python scripts/fetch_llama_server.py build\llama.cpp
           pyinstaller hfl.spec --clean
 
       # The 0.22.0 executables and DMG could not run any model (llama.cpp's
-      # libraries were not in the binary). Run one, for real, before packaging.
+      # libraries were not in the binary). Run one, for real, before packaging:
+      # by the bundled llama-server (the default), then by llama.cpp in process.
+      - name: Check the executable runs a model (bundled llama-server)
+        run: python scripts/platform_check.py --hfl dist\hfl.exe --expect-backend llama-server
+
       - name: Check the executable runs a model (llama.cpp in process)
+        env:
+          HFL_LLM_LIBRARY: llama-cpp
         run: python scripts/platform_check.py --hfl dist\hfl.exe --expect-backend llama.cpp
 
       - name: Derive version

@@ -66,7 +66,15 @@ jobs:
         env:
           CMAKE_ARGS: ${{ matrix.platform == 'macos' && '-DGGML_METAL=OFF -DGGML_NATIVE=OFF' || '-DGGML_METAL=ON' }}
 
+      # llama.cpp's llama-server, bundled: GGUF models answer several
+      # requests at once with nothing else installed. The pinned release,
+      # its sha256 checked, as `hfl install llama-server` fetches it.
+      - name: Fetch llama-server
+        run: python scripts/fetch_llama_server.py build/llama.cpp
+
       - name: Build executable
+        env:
+          HFL_PYI_LLAMA_CPP: build/llama.cpp
         run: |
           pyinstaller hfl.spec --clean
 
@@ -86,9 +94,15 @@ jobs:
           ./dist/hfl.exe --help
 
       # `version` and `--help` passed for executables that could not run any
-      # model. Run one, for real: pull, serve, answer over the three APIs,
-      # served by llama.cpp in process.
+      # model. Run one, for real: pull, serve, answer over the three APIs —
+      # by the bundled llama-server (the default), then by llama.cpp in
+      # process (one request at a time).
+      - name: Check the executable runs a model (bundled llama-server)
+        run: python scripts/platform_check.py --hfl dist/hfl${{ matrix.platform == 'windows' && '.exe' || '' }} --expect-backend llama-server
+
       - name: Check the executable runs a model (llama.cpp in process)
+        env:
+          HFL_LLM_LIBRARY: llama-cpp
         run: python scripts/platform_check.py --hfl dist/hfl${{ matrix.platform == 'windows' && '.exe' || '' }} --expect-backend llama.cpp
 
       - name: Rename artifact (Unix)

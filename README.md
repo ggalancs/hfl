@@ -96,8 +96,8 @@ is left to you. HFL fetches only the files a model needs and runs them:
 |---|---|
 | **pip** (recommended) | `pip install "hfl[llama,mlx]"`, then `hfl install llama-server` (llama.cpp's official build: GGUF models answer 4 requests at once) |
 | **pip on Windows** | `pip install hfl` then `hfl install llama-server` (no compiler needed; `hfl[llama]` needs Visual Studio's C++ Build Tools) |
-| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`) |
-| **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases) |
+| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`). llama-server included: GGUF models answer 4 requests at once |
+| **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases), llama-server included |
 | **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
 
 <details>

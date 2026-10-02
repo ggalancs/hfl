@@ -102,7 +102,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check the image (start, key, llama.cpp, platform_check.py)
+      - name: Check the image (start, key, llama.cpp, llama-server, platform_check.py)
         run: |
           python -m pip install httpx
           python scripts/image_check.py hfl-image-check:local
@@ -191,7 +191,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check the image (start, key, llama.cpp, platform_check.py)
+      - name: Check the image (start, key, llama.cpp, llama-server, platform_check.py)
         run: |
           python -m pip install httpx
           python scripts/image_check.py hfl-image-check:local

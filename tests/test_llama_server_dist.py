@@ -35,6 +35,8 @@ def _archive(tmp_path: Path, build: str = "10964", extra: dict[str, bytes] | Non
         "llama-b10964/llama-quantize": b"#!/bin/sh\n",
         "llama-b10964/llama-cli": b"#!/bin/sh\n",  # another tool: left out
         "llama-b10964/libllama.0.dylib": b"lib",
+        "llama-b10964/libllama-server-impl.so": b"lib",
+        "llama-b10964/libllama-cli-impl.so": b"lib",  # another tool's code: left out
         "llama-b10964/LICENSE": b"MIT",
         **(extra or {}),
     }
@@ -77,7 +79,14 @@ def test_only_the_server_quantizer_libraries_and_license_leave_the_archive(offli
     server = dist.install("test", target=target)
     kept = sorted(p.name for p in target.iterdir())
     assert kept == sorted(
-        ["LICENSE", "libllama.0.dylib", "libllama.dylib", "llama-quantize", "llama-server"]
+        [
+            "LICENSE",
+            "libllama-server-impl.so",
+            "libllama.0.dylib",
+            "libllama.dylib",
+            "llama-quantize",
+            "llama-server",
+        ]  # fmt: skip
     )
     assert os.access(server, os.X_OK) and (target / "libllama.dylib").is_symlink()
 

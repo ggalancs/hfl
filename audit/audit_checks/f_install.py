@@ -171,10 +171,13 @@ def f5(a: Audit) -> str:
 @check("F6", "PyInstaller executable runs a model", needs=(EXTRA_ID["llama"],))
 def f6(a: Audit) -> str:
     """Built from hfl.spec in the ``[llama]`` venv, as the release workflows
-    do, then run for real: ``platform_check.py --hfl <executable>`` pulls,
-    serves and answers with llama.cpp in process, without llama-server on
-    PATH. ``version`` alone passed for the 0.22.0 executables and DMG, which
-    could not run any model (llama.cpp's libraries were not bundled)."""
+    do — llama-server fetched by ``scripts/fetch_llama_server.py`` and
+    bundled — then run for real, without llama-server on PATH:
+    ``platform_check.py --hfl <executable>`` pulls, serves and answers twice,
+    by the bundled llama-server (the default) and by llama.cpp in process
+    (``HFL_LLM_LIBRARY=llama-cpp``). ``version`` alone passed for the 0.22.0
+    executables and DMG, which could not run any model (llama.cpp's
+    libraries were not bundled)."""
     venv = a.work / "extras" / "llama"
     python = venv_exe(venv, "python")
     if not python.exists():
@@ -187,6 +190,13 @@ def f6(a: Audit) -> str:
     )
     expect(added.returncode == 0, added.stderr[-300:])
     out_dir = a.work / "pyi"
+    # The audited install's own Python runs the fetch: the [llama] venv may
+    # hold an older wheel.
+    fetched = subprocess.run(
+        [a.python, str(REPO / "scripts" / "fetch_llama_server.py"), str(out_dir / "llama.cpp")],
+        capture_output=True, text=True, timeout=1800,
+    )  # fmt: skip
+    expect(fetched.returncode == 0, (fetched.stdout + fetched.stderr)[-300:])
     build = subprocess.run(
         [
             str(venv_exe(venv, "pyinstaller")),
@@ -202,6 +212,7 @@ def f6(a: Audit) -> str:
         text=True,
         timeout=3600,
         cwd=REPO,
+        env={**os.environ, "HFL_PYI_LLAMA_CPP": str(out_dir / "llama.cpp")},
     )
     expect(build.returncode == 0, build.stderr[-300:])
     name = "hfl.exe" if WINDOWS else "hfl"
@@ -213,24 +224,24 @@ def f6(a: Audit) -> str:
         for d in os.environ.get("PATH", "").split(os.pathsep)
         if d and not any((Path(d) / n).exists() for n in ("llama-server", "llama-server.exe"))
     )
-    checked = subprocess.run(
-        [
-            a.python,
-            str(REPO / "scripts" / "platform_check.py"),
-            "--hfl",
-            str(binary),
-            "--expect-backend",
-            "llama.cpp",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=2400,
-        env={**a.env, "PATH": path},
-    )
-    lines = [x for x in checked.stdout.splitlines() if x[:3] in ("OK ", "BAD")]
-    expect(checked.returncode == 0, " · ".join(x for x in lines if x.startswith("BAD"))[-400:]
-           or checked.stderr[-300:])  # fmt: skip
-    return f"{binary.stat().st_size // 2**20} MB; platform_check.py: {len(lines)} checks passed"
+    passed = []
+    for backend, env in (("llama-server", {}), ("llama.cpp", {"HFL_LLM_LIBRARY": "llama-cpp"})):
+        checked = subprocess.run(
+            [
+                a.python, str(REPO / "scripts" / "platform_check.py"), "--hfl", str(binary),
+                "--expect-backend", backend,
+            ],
+            capture_output=True, text=True, timeout=2400, env={**a.env, "PATH": path, **env},
+        )  # fmt: skip
+        lines = [x for x in checked.stdout.splitlines() if x[:3] in ("OK ", "BAD")]
+        expect(
+            checked.returncode == 0,
+            f"{backend}: " + (" · ".join(x for x in lines if x.startswith("BAD"))[-400:]
+                              or checked.stderr[-300:]),
+        )  # fmt: skip
+        passed.append(f"{backend} {len(lines)}")
+    size = binary.stat().st_size // 2**20
+    return f"{size} MB, llama-server bundled; platform_check.py passed: {', '.join(passed)}"
 
 
 def _wix_bin() -> Path | None:
