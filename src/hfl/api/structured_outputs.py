@@ -72,7 +72,19 @@ _REPEAT_KEYS = (
     "minItems", "maxItems", "minLength", "maxLength", "minProperties",
     "maxProperties", "minContains", "maxContains",
 )  # fmt: skip
-_QUANTIFIER_RE = re.compile(r"\{\s*(\d*)\s*(?:,\s*(\d*)\s*)?\}")
+# A {m}, {m,} or {m,n} quantifier: its inside captured whole (one class that
+# excludes "{", so each try stops at the next brace: linear; two \s* around an empty \d* were
+# polynomial backtracking — CodeQL py/polynomial-redos), then read in Python.
+_QUANTIFIER_RE = re.compile(r"\{([\d\s,]+)\}")
+
+
+def _quantifier_bounds(inside: str) -> list[str]:
+    """The numbers of a quantifier's inside ("2", "2,", "2, 5"); [] if it is
+    not one (a literal brace)."""
+    parts = [part.strip() for part in inside.split(",")]
+    if len(parts) > 2 or not all(part.isdigit() or part == "" for part in parts):
+        return []
+    return [part for part in parts if part]
 
 
 def normalize_ollama_format(value: str | dict | None) -> str | dict | None:
@@ -216,7 +228,8 @@ def _validate_schema_recursive(
                 )
             # The grammar spells a quantifier out like any other repetition.
             for match in _QUANTIFIER_RE.finditer(pattern):
-                if any(len(b) > 4 or int(b) > MAX_SCHEMA_REPEAT for b in match.groups() if b):
+                bounds = _quantifier_bounds(match.group(1))
+                if any(len(b) > 4 or int(b) > MAX_SCHEMA_REPEAT for b in bounds):
                     raise APIValidationError(
                         f'JSON Schema "pattern" repeats more than {MAX_SCHEMA_REPEAT} times'
                     )

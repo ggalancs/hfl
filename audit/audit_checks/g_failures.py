@@ -404,7 +404,7 @@ def g4(a: Audit) -> str:
         stalled = socket.create_connection(("127.0.0.1", port), timeout=10)
         stalled.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
         stalled.sendall(
-            b"POST /api/generate HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+            b"POST /api/generate HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
             + f"Content-Length: {len(body)}\r\n\r\n".encode()
             + body
         )

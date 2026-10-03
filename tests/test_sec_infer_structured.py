@@ -231,3 +231,26 @@ class TestTheEngineChecksTheGrammarBuilds:
         with pytest.raises(ValidationError):
             engine.generate_stream("p", bad)
         model.assert_not_called()
+
+
+class TestPatternQuantifierScan:
+    """The quantifier scan of a schema "pattern" was a polynomial regex
+    (CodeQL py/polynomial-redos); and padding must not hide a bound."""
+
+    def test_a_padded_quantifier_is_still_bounded(self):
+        from hfl.api.structured_outputs import validate_json_schema
+        from hfl.exceptions import ValidationError as APIValidationError
+
+        schema = {"type": "string", "pattern": "a{" + " " * 40 + "99999}"}
+        with pytest.raises(APIValidationError, match="repeats more than"):
+            validate_json_schema(schema)
+
+    def test_the_scan_is_linear(self):
+        import time
+
+        from hfl.api.structured_outputs import _QUANTIFIER_RE
+
+        started = time.monotonic()
+        list(_QUANTIFIER_RE.finditer("{" + " " * 200_000))
+        list(_QUANTIFIER_RE.finditer("{ " * 100_000))
+        assert time.monotonic() - started < 1.0
