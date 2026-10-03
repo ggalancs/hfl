@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-03
+
 ### Security
 
 A security audit of the whole code (2026-10-03: five areas reviewed in
