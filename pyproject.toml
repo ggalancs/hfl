@@ -301,17 +301,12 @@ markers = [
 [tool.coverage.run]
 source = ["src/hfl"]
 branch = true
+# Everything is measured: the CLI, the tray and the TTS engines were left
+# out, and the total hid them (main.py alone at 67 %). Their tests run with
+# the optional backends faked, as CI has none of them.
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    # TTS engines require external deps (torch, transformers, coqui-tts)
-    "src/hfl/engine/bark_engine.py",
-    "src/hfl/engine/coqui_engine.py",
-    # CLI is tested via integration tests
-    "src/hfl/cli/main.py",
-    "src/hfl/cli/commands/*",
-    # Tray requires GUI (pystray) - tested with mocks
-    "src/hfl/tray/*",
 ]
 
 [tool.coverage.report]
@@ -324,7 +319,9 @@ exclude_lines = [
     # Don't require coverage for abstract methods
     "@abstractmethod",
 ]
-fail_under = 75
+# 90 % in total, and in every component (scripts/coverage_by_component.py,
+# run by scripts/ci-local.sh and the CI workflows).
+fail_under = 90
 show_missing = true
 
 [tool.coverage.html]

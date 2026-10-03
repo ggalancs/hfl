@@ -147,6 +147,10 @@ def _license_or_exit(
                 console.print(f"[yellow]{t('warnings.download_cancelled')}[/]")
                 raise typer.Exit(0)
             license_accepted_at = datetime.now().isoformat()
+        except typer.Exit:
+            # The user declined: typer.Exit is a RuntimeError, and the handler
+            # below took it for a failed check and offered to download anyway.
+            raise
         except Exception as e:
             console.print(f"[yellow]{t('warnings.could_not_verify_license')}:[/] {e}")
             if not typer.confirm(t("warnings.continue_without_license"), default=False):
@@ -438,7 +442,7 @@ def _load_for_chat(manifest: Any, backend: str, ctx: int, verbose: bool) -> Any:
         engine = select_engine(Path(manifest.local_path), backend=backend)
         engine.load(manifest.local_path, **load_kwargs_for(manifest, ctx), verbose=verbose)
     except MissingDependencyError as e:
-        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{escape_markup(str(e))}")
         raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.model_loaded')}[/]\n")
     return engine
@@ -684,7 +688,7 @@ def _load_tts_or_exit(model: str) -> tuple[Any, Any]:
         engine = select_tts_engine(Path(manifest.local_path))
         engine.load(manifest.local_path)
     except MissingDependencyError as e:
-        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+        console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{escape_markup(str(e))}")
         raise typer.Exit(1) from e
     console.print(f"[green]{t('messages.tts_model_loaded')}[/]")
     return manifest, engine
@@ -1364,7 +1368,7 @@ def _run_tray(
     except ImportError:
         console.print(
             "[red]Error:[/] Tray mode requires pystray and Pillow.\n"
-            "Install with: [cyan]pip install hfl[tray][/]"
+            "Install with: [cyan]pip install hfl\\[tray][/]"
         )
         raise typer.Exit(1) from None
     except Exception as exc:
@@ -1450,7 +1454,7 @@ def _preload(model: str, ctx: int, state: Any) -> None:
             state.engine.load(manifest.local_path, **load_kwargs_for(manifest, n_ctx))
             state.current_model = manifest
         except MissingDependencyError as e:
-            console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{e}")
+            console.print(f"[red]{t('errors.missing_dependency')}:[/]\n\n{escape_markup(str(e))}")
             raise typer.Exit(1) from e
 
 
@@ -2723,7 +2727,7 @@ def mcp(
                 console.print("[red]Usage:[/] hfl mcp disconnect <id>")
                 raise typer.Exit(1)
             await client.disconnect(server_id)
-            console.print(f"[green]Disconnected[/] {server_id}")
+            console.print(f"[green]Disconnected[/] {escape_markup(str(server_id))}")
         elif action == "serve":
             from hfl.mcp.server import (
                 MCPServerUnavailableError,
@@ -2740,22 +2744,22 @@ def mcp(
                 elif transport == "sse":
                     await serve_sse(host, port, cap_list)
                 else:
-                    console.print(f"[red]Unknown transport:[/] {transport}")
+                    console.print(f"[red]Unknown transport:[/] {escape_markup(str(transport))}")
                     raise typer.Exit(1)
             except MCPServerUnavailableError as exc:
-                console.print(f"[red]MCP unavailable:[/] {exc}")
+                console.print(f"[red]MCP unavailable:[/] {escape_markup(str(exc))}")
                 raise typer.Exit(1) from exc
         else:
-            console.print(f"[red]Unknown action:[/] {action}")
+            console.print(f"[red]Unknown action:[/] {escape_markup(str(action))}")
             raise typer.Exit(1)
 
     try:
         asyncio.run(_run())
     except MCPClientUnavailableError as exc:
-        console.print(f"[red]MCP unavailable:[/] {exc}")
+        console.print(f"[red]MCP unavailable:[/] {escape_markup(str(exc))}")
         raise typer.Exit(1) from exc
     except MCPConnectionError as exc:
-        console.print(f"[red]MCP error:[/] {exc}")
+        console.print(f"[red]MCP error:[/] {escape_markup(str(exc))}")
         raise typer.Exit(1) from exc
 
 
@@ -3094,12 +3098,16 @@ def help_command(
         for extra_name in extra_order:
             info = t(f"help.extras.{extra_name}.summary")
             install_cmd = f"pip install 'hfl[{extra_name}]'"
-            check_module = t(f"help.extras.{extra_name}.check_module")
+            key = f"help.extras.{extra_name}.check_module"
+            check_module = t(key)
+            # A null in the locale comes back from t() as the key itself.
+            if check_module in ("null", key):
+                check_module = ""
 
             # Installed = findable. Importing it ran the package: slow for
             # torch or vllm, and pystray raises Xlib's DisplayNameError on a
             # Linux without a display (local audit A13 on Linux).
-            if check_module and check_module != "null":
+            if check_module:
                 try:
                     found = importlib.util.find_spec(check_module) is not None
                 except (ImportError, ValueError):

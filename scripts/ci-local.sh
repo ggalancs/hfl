@@ -12,7 +12,8 @@
 # Jobs reproduced — THREE workflows gate a push, not one:
 #   ci.yml    lint       — ``ruff check`` + ``ruff format --check``
 #             type-check — ``mypy src/hfl/api/ src/hfl/cli/``
-#             test       — ``pytest tests/ --cov=hfl``   (floor 75, pyproject)
+#             test       — ``pytest tests/ --cov=hfl``   (floor 90, pyproject),
+#                          then 90 % per component (coverage_by_component.py)
 #   lint.yml  ruff       — same two commands over ``src/`` (WIDER than ci.yml's
 #                          ``src/hfl``: a second package under src/ is linted
 #                          by lint.yml and invisible to ci.yml)
@@ -22,11 +23,10 @@
 #                          inside the suite, so it gates through ci.yml's test
 #                          job regardless. Checked early here to fail in
 #                          seconds rather than after the full suite.
-#   test.yml  test       — same tests with ``--cov-fail-under=80``
+#   test.yml  test       — same tests and checks, ``--cov-fail-under=90``
 #
-# The coverage floors differ (75 in ci.yml via pyproject, 80 in test.yml), so
-# the suite runs ONCE at the stricter 80: passing 80 passes 75, and a second
-# full run would cost another ~85 s to prove nothing.
+# Both workflows hold the same floors (90 % in total and per component), so
+# the suite runs once here.
 #
 # Deliberately NOT reproduced, because each needs tooling this script will not
 # install for you — run them yourself before a release:
@@ -153,9 +153,11 @@ mypy src/hfl --ignore-missing-imports || fail_step "mypy src/hfl (test_static_an
 # 4. Test (ci.yml + test.yml ``test`` jobs — current Python only)
 # ------------------------------------------------------------------
 
-blue "=> [test] pytest tests/ --cov=hfl --cov-fail-under=80 (test.yml's floor)"
-pytest tests/ --cov=hfl --cov-report=xml --cov-report=term-missing \
-    --cov-fail-under=80 || fail_step "pytest"
+blue "=> [test] pytest tests/ --cov=hfl --cov-fail-under=90, then 90 % per component"
+pytest tests/ --cov=hfl --cov-report=xml --cov-report=json:coverage.json \
+    --cov-report=term-missing --cov-fail-under=90 || fail_step "pytest"
+python scripts/coverage_by_component.py coverage.json --floor 90 \
+    || fail_step "coverage per component (90 % each)"
 
 green ""
 green "✓ ci.yml + lint.yml + test.yml all pass locally. Safe to push."

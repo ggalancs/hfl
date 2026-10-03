@@ -43,7 +43,8 @@ jobs:
       # fail_ci_if_error disabled, failed silently on every run.
       - name: Run tests
         run: |
-          pytest tests/ --cov=hfl --cov-report=term-missing
+          pytest tests/ --cov=hfl --cov-report=term-missing --cov-report=json:coverage.json
+          python scripts/coverage_by_component.py coverage.json --floor 90
 
   lint:
     name: Lint

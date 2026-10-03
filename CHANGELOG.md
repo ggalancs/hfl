@@ -183,6 +183,12 @@ Behaviour an operator notices is marked **(changed)**.
 
 ### Changed
 
+- **Test coverage: 90 % in every component, 96 % in total** (it was 86 %
+  with the CLI, the tray and two TTS engines left out of the count).
+  `scripts/coverage_by_component.py` holds each component to 90 % in the
+  local gate and the CI workflows; the code that needs optional backends
+  is tested with them faked, so CI — which has none — measures it.
+
 - **On MLX the repetition penalty also sees the end of the prompt**, as
   llama.cpp's does (`repeat_last_n`). Batched generation keeps the prompt in
   the penalty's context, where one-at-a-time generation left it out, so a
@@ -192,6 +198,25 @@ Behaviour an operator notices is marked **(changed)**.
   still part by BF16 rounding, as on llama-server or vLLM.
 
 ### Fixed
+
+- **Found by raising test coverage to 90 % in every component** (each
+  bug pinned first by a test that failed):
+  - Declining a model's license at `hfl pull` was taken for a failed
+    license check, and HFL then offered to download it anyway.
+  - Coqui XTTS streaming produced no audio: it used `tts_to_file`, which
+    writes a file and returns its path, and streamed the path's letters
+    (leaving a stray `output.wav`).
+  - A failed Transformers load could leave the engine marked loaded, with
+    the model in memory.
+  - Embeddings through llama-server crashed on a GGUF whose header could
+    not be read, instead of using the default context.
+  - Go templates: a `range` or `with` whose `else` never reached `end` was
+    accepted, the rest of the template silently taken as the else branch.
+  - Install hints lost their extra (`pip install 'hfl[mlx]'` printed as
+    `pip install 'hfl'`): in missing-backend messages, `serve --tray` and
+    `hfl mcp`. `hfl help --extras` showed "not installed" for `all`.
+  - A failed Transformers training run named the interpreter instead of
+    the step that failed.
 
 - **No llama-server is left running behind HFL.** Two ways, found by the
   soak test: a load that outlived its request (a load timeout; here, a Mac

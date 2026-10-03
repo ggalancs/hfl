@@ -315,6 +315,7 @@ class LlamaServerEmbeddingEngine(EmbeddingEngine):
                 "GGUF embeddings need llama-cpp-python or llama.cpp's llama-server: "
                 "`hfl install llama-server`, or `pip install 'hfl[llama]'`"
             )
+        arch = None  # an unreadable header: the 8192 default below, not an UnboundLocalError
         try:
             arch = read_fields(model_path, {"general.architecture"}).get("general.architecture")
             keys = {f"{arch}.context_length", f"{arch}.embedding_length"}

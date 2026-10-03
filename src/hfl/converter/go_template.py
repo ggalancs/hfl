@@ -337,7 +337,11 @@ class _Parser:
             elif keyword in ("range", "with"):
                 pipe = _parse_pipeline(rest)
                 inner, term, _ = self.parse_block(("else", "end"))
-                other = self.parse_block(("end",))[0] if term == "else" else None
+                other = None
+                if term == "else":
+                    # The else branch must reach its {{ end }} too: unchecked, the
+                    # rest of the template silently became the else branch.
+                    other, term, _ = self.parse_block(("end",))
                 if term == "":
                     raise GoTemplateError(f"{keyword} without end")
                 node = _Range if keyword == "range" else _With

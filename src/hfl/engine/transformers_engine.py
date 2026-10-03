@@ -135,7 +135,9 @@ class TransformersEngine(InferenceEngine):
             logger.info("Model loaded in %.2fs on %s: %s", elapsed, device, model_path)
         except Exception as e:
             logger.error("Failed to load model %s: %s", model_path, e)
-            # Cleanup partial state on failure
+            # Cleanup partial state on failure: also what was already assigned
+            # to the engine, or a failed load still reported is_loaded.
+            self._model = self._tokenizer = None
             if model is not None:
                 del model
             if tokenizer is not None:

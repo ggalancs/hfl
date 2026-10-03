@@ -31,4 +31,6 @@ jobs:
       # swallowed by fail_ci_if_error: false).
       - name: Run tests with coverage
         run: |
-          pytest --cov=hfl --cov-report=term-missing --cov-fail-under=80
+          pytest --cov=hfl --cov-report=term-missing --cov-report=json:coverage.json \
+            --cov-fail-under=90
+          python scripts/coverage_by_component.py coverage.json --floor 90

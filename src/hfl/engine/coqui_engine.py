@@ -195,27 +195,14 @@ class CoquiEngine(AudioEngine):
                 yield audio[i : i + chunk_size]
 
     def _stream_xtts(self, text: str, config: TTSConfig | None = None) -> Iterator[bytes]:
-        """Stream synthesis using XTTS streaming API."""
-        config = config or TTSConfig()
-
-        # XTTS streaming requires different handling
-        try:
-            chunks = self._tts.tts_to_file(
-                text=text,
-                language=config.language,
-                speaker=config.voice if config.voice != "default" else None,
-                split_sentences=True,
-            )
-            # This is a simplified version - actual XTTS streaming
-            # would use the lower-level streaming API
-            yield from chunks
-        except Exception:
-            # Fallback to non-streaming
-            result = self.synthesize(text, config)
-            chunk_size = 1024
-            audio = result.audio
-            for i in range(0, len(audio), chunk_size):
-                yield audio[i : i + chunk_size]
+        """XTTS audio in chunks: synthesised whole, then sent in pieces. It
+        called ``tts_to_file`` here, which writes ``output.wav`` and returns
+        its path — the "stream" was the path's characters, and a stray file."""
+        result = self.synthesize(text, config or TTSConfig())
+        chunk_size = 1024
+        audio = result.audio
+        for i in range(0, len(audio), chunk_size):
+            yield audio[i : i + chunk_size]
 
     @property
     def is_loaded(self) -> bool:

@@ -272,7 +272,15 @@ def run(
     if proc.returncode != 0:
         detail = next((line for line in reversed(tail) if line.strip()), "")
         # "mlx_lm lora", "hfl.training.hf_lora_run train": the step that failed.
-        step = " ".join(argv[2:4]) if argv[1:2] == ["-m"] else Path(argv[0]).name
+        # A module run with -c (self_exec.module_argv, which keeps the working
+        # directory off sys.path) names itself inside the code it runs.
+        started = re.search(r"run_module\('([\w.]+)'", argv[2]) if argv[1:2] == ["-c"] else None
+        if argv[1:2] == ["-m"]:
+            step = " ".join(argv[2:4])
+        elif started:
+            step = " ".join([started.group(1), *argv[3:4]])
+        else:
+            step = Path(argv[0]).name
         raise TrainingError(f"{step} failed (exit {proc.returncode}): {detail[-300:]}")
 
 
