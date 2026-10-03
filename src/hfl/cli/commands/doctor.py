@@ -150,10 +150,15 @@ def _probe_metal() -> bool:
         return True
 
 
+# Where Linux lists the GPUs (a module name, so a test can point elsewhere
+# without replacing pathlib.Path for everyone).
+_DRM_ROOT = "/sys/class/drm"
+
+
 def _probe_rocm() -> list[str]:
     from pathlib import Path
 
-    root = Path("/sys/class/drm")
+    root = Path(_DRM_ROOT)
     if not root.exists():
         return []
     cards: list[str] = []

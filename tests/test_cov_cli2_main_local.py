@@ -395,7 +395,10 @@ class TestTrain:
         trainers.mlx.run_error = _TrainingError("loss is nan")
         result = _train("base", "--data", "d.jsonl", "--backend", "mlx")
         assert result.exit_code == 1
-        assert "loss is nan" in result.stdout and "train-base-lora.log" in result.stdout
+        # Rich wraps at the terminal's width, which cut the log's path in
+        # two on Linux CI (80 columns): compared without the line breaks.
+        said = result.stdout.replace("\n", "")
+        assert "loss is nan" in said and "train-base-lora.log" in said
 
     def test_fuse_and_gguf(self, trainers):
         result = _train("base", "--data", "d.jsonl", "--backend", "mlx", "--gguf", "q4_k_m")

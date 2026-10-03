@@ -213,17 +213,11 @@ class TestDoctorProbes:
         assert doctor._probe_metal() is expected
 
     def _drm(self, monkeypatch, tmp_path: Path) -> Path:
-        import pathlib
-
-        real = pathlib.Path
+        # Not pathlib.Path itself: replaced globally, it broke every path
+        # pytest made afterwards on Python < 3.12 (pathlib reads its own
+        # global Path), and the run ended in an INTERNALERROR.
         root = tmp_path / "drm"
-
-        def fake_path(*parts):
-            if parts == ("/sys/class/drm",):
-                return real(root)
-            return real(*parts)
-
-        monkeypatch.setattr(pathlib, "Path", fake_path)
+        monkeypatch.setattr(doctor, "_DRM_ROOT", str(root))
         return root
 
     def test_rocm_without_drm_is_no_cards(self, monkeypatch, tmp_path):
