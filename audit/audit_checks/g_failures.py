@@ -73,6 +73,19 @@ def _llama_servers(a: Audit) -> list:
     return found
 
 
+def _left_behind(a: Audit) -> list:
+    """The llama-servers still running once their server is gone, after the
+    guard's own bound: it notices its parent's death within a second and
+    gives llama-server ten to stop (on Windows the harness stops HFL with
+    TerminateProcess, so the guard is what cleans up)."""
+    deadline = time.monotonic() + 20
+    found = _llama_servers(a)
+    while found and time.monotonic() < deadline:
+        time.sleep(0.5)
+        found = _llama_servers(a)
+    return found
+
+
 def _answers(base: str, model: str = "chat", timeout: float = 300) -> str:
     """A short chat answer, or what went wrong."""
     body = {"model": model, "stream": False, "messages": USER, "options": {"num_predict": 8}}
@@ -133,7 +146,7 @@ def g1(a: Audit) -> str:
         part("the next request answers", lambda: expect("paris" in again.lower(), again[:200]))
         stale = [p for p in killed if p.is_running() and p.status() != "zombie"]
         part("the killed one is gone", lambda: expect(not stale, [p.pid for p in stale]))
-    leftovers = _llama_servers(a)
+    leftovers = _left_behind(a)
     part("nothing left after the server stops", lambda: expect(not leftovers, len(leftovers)))
     return part.verdict()
 
@@ -469,7 +482,7 @@ def g5(a: Audit) -> str:
         exit_after = time.monotonic() - stopped
         part("no client left hanging", lambda: expect("HUNG" not in outcomes, outcomes))
         part("the server exits", lambda: expect(proc.poll() is not None, f"{exit_after:.0f}s"))
-    leftovers = _llama_servers(a)
+    leftovers = _left_behind(a)
     part("no llama-server left behind", lambda: expect(not leftovers, [p.pid for p in leftovers]))
     with a.server() as base:
         again = _answers(base)
