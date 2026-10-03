@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every Python package a `pip install hfl` of that release brings, attached
   to the GitHub Release with its checksum.
 
+- **Benchmark against Ollama redone** ([docs/benchmarks.md](docs/benchmarks.md)):
+  on the same Phi-3.5-mini Q4_K_M as on 2026-09-24, with several requests
+  at once HFL went from 59 to 140 tok/s (4 at once), level with
+  llama-server on its own and 61 % ahead of Ollama; one request at a time
+  the three stay close. Raw data in `docs/benchmarks/`.
+
 - **Audit section G: failures.** Each check breaks something for real and
   passes only when nothing hangs, nothing is left running, the client is
   told and HFL serves again: llama-server killed in the middle of a reply

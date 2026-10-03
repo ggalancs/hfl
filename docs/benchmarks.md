@@ -7,7 +7,42 @@ pip install "hfl[llama]" && brew install ollama llama.cpp     # or your platform
 python scripts/bench_compare.py hf.co/bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M
 ```
 
-## Result — 2026-09-24
+## Result — 2026-10-03 (current)
+
+Apple M3 Max, 128 GB, macOS 26.6.2, on AC power. The same
+[Phi-3.5-mini-instruct Q4_K_M](https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF)
+as below, so the two dates compare. HFL from `main` after 0.25.0 (its own
+defaults: GGUF served through llama-server with 4 slots), Ollama 0.34.2,
+llama-server build 10964. Medians of 5 interleaved rounds. Raw data:
+[4 at once](benchmarks/2026-10-03-m3-max-phi-3.5-mini-c4.json),
+[8 at once](benchmarks/2026-10-03-m3-max-phi-3.5-mini-c8.json).
+
+| | HFL | Ollama | llama-server |
+|---|---:|---:|---:|
+| Time to first token, short prompt | 0.108 s | 0.064 s | 0.128 s |
+| Time to first token, ~2,000-token prompt | 2.07 s | 2.13 s | 2.15 s |
+| Decode, one request | 89.9 tok/s | 84.3 tok/s | 88.5 tok/s |
+| Throughput, 4 requests at once | **140.1 tok/s** | 87.1 tok/s | 145.0 tok/s |
+| Throughput, 8 requests at once (second run) | **137.6 tok/s** | 92.1 tok/s | 139.4 tok/s |
+
+What changed since 2026-09-24: with several requests at once HFL went from
+59 to 140 tok/s — it now serves GGUF through llama-server's parallel slots
+by default, level with llama-server run on its own, and 61 % ahead of
+Ollama with its defaults. One request at a time the three stay close.
+Eight requests give what four give: HFL (like llama-server here) has 4
+slots, so the other four wait their turn. Ollama answers a short prompt's
+first token sooner. The absolute numbers are higher than on 09-24 for every
+server (another session; see below why only same-session comparisons
+count).
+
+MLX models (safetensors on Apple Silicon) now batch too: 4 requests at once
+gave 2.38x the throughput of one after another with Qwen2.5-0.5B-Instruct
+4-bit (audit E22), 4.0x with 8 on Qwen3-14B BF16. Ollama has no MLX
+backend to compare with.
+
+Not measured yet: the same on Linux.
+
+## Result — 2026-09-24 (0.21.0)
 
 Apple M3 Max, 128 GB, macOS 26.6.2, on AC power.
 [Phi-3.5-mini-instruct Q4_K_M](https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF) (MIT, 2.2 GB).
