@@ -5,8 +5,11 @@
 
 ``model`` is a Hub repo id that diffusers would download on first use.
 Only a caller who may fetch models (the owner) can trigger that; anyone
-else is served pipelines already on disk. The load and the rendering run
-off the event loop — they used to freeze the whole server.
+else is served pipelines already in the cache, by repo id: a filesystem
+path is the owner's too. The load and the rendering run off the event
+loop — they used to freeze the whole server — and through the shared
+inference queue, one at a time: each render holds a whole pipeline in
+memory, and nothing else bounded how many ran at once.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from hfl.engine.diffusers_engine import (
     DEFAULT_SIZE,
@@ -27,13 +30,23 @@ from hfl.engine.diffusers_engine import (
     ImageResult,
     is_available,
 )
-from hfl.hub.local_cache import hub_model_available_locally
+from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
+from hfl.hub.local_cache import hub_model_available_locally, is_model_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Images"])
 
 _SIZE = r"^\d{2,5}x\d{2,5}$"
+# Per side. Memory grows with the pixel count: 99999x99999 passed the
+# pattern above. Twice SDXL's native 2048, beyond any OpenAI size.
+_MAX_SIDE = 4096
+
+
+def _check_size(size: str) -> str:
+    if any(int(side) > _MAX_SIDE for side in size.split("x")):
+        raise ValueError(f"each side of size must be at most {_MAX_SIDE}")
+    return size
 
 
 class ImageRequest(BaseModel):
@@ -46,6 +59,8 @@ class ImageRequest(BaseModel):
     steps: int = Field(DEFAULT_STEPS, ge=1, le=200)
     guidance_scale: float = Field(7.5, ge=0.0, le=50.0)
     seed: int | None = Field(None)
+
+    _size = field_validator("size")(_check_size)
 
 
 class OpenAIImageRequest(BaseModel):
@@ -60,6 +75,8 @@ class OpenAIImageRequest(BaseModel):
     quality: str | None = None
     style: str | None = None
     user: str | None = None
+
+    _size = field_validator("size")(_check_size)
 
 
 def _dimensions(size: str) -> tuple[int, int]:
@@ -95,9 +112,17 @@ async def _render(request: Request, model: str, count: int, **params: Any) -> li
             status_code=501,
             detail="Image-generation backend not installed. `pip install 'hfl[imagegen]'`.",
         )
-    from hfl.api.admin_guard import may_fetch_models
+    from hfl.api.admin_guard import is_local_request, may_fetch_models
+    from hfl.api.helpers import run_dispatched
 
     local_only = not may_fetch_models(request)
+    owner = is_local_request(request) and not local_only
+    if not owner and not is_model_id(model):
+        # The same answer whether the path exists or not: this is no oracle.
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "model must be a Hub repo id", "code": "model_not_an_id"},
+        )
     if local_only and not await asyncio.to_thread(hub_model_available_locally, model):
         raise HTTPException(
             status_code=404,
@@ -109,7 +134,9 @@ async def _render(request: Request, model: str, count: int, **params: Any) -> li
                 "code": "model_not_local",
             },
         )
-    return await asyncio.to_thread(_render_sync, model, local_only, count, **params)
+    return await run_dispatched(
+        _render_sync, model, local_only, count, operation="image_generation", **params
+    )
 
 
 @router.post("/api/images/generate", response_model=None)
@@ -121,18 +148,23 @@ async def api_images_generate(req: ImageRequest, request: Request) -> dict[str, 
     single base64-encoded PNG — clients decode locally.
     """
     width, height = _dimensions(req.size)
-    (result,) = await _render(
-        request,
-        req.model,
-        1,
-        prompt=req.prompt,
-        negative_prompt=req.negative_prompt,
-        width=width or DEFAULT_SIZE,
-        height=height or DEFAULT_SIZE,
-        steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        seed=req.seed,
-    )
+    try:
+        (result,) = await _render(
+            request,
+            req.model,
+            1,
+            prompt=req.prompt,
+            negative_prompt=req.negative_prompt,
+            width=width or DEFAULT_SIZE,
+            height=height or DEFAULT_SIZE,
+            steps=req.steps,
+            guidance_scale=req.guidance_scale,
+            seed=req.seed,
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        from hfl.api.helpers import queue_response_from_error
+
+        return queue_response_from_error(exc)
     return {
         "model": req.model,
         "prompt": req.prompt,
@@ -148,7 +180,7 @@ async def api_images_generate(req: ImageRequest, request: Request) -> dict[str, 
 
 
 @router.post("/v1/images/generations", response_model=None, tags=["OpenAI"])
-async def openai_images(req: OpenAIImageRequest, request: Request) -> dict[str, Any]:
+async def openai_images(req: OpenAIImageRequest, request: Request) -> dict[str, Any] | JSONResponse:
     """OpenAI-compatible image generation, returned as ``b64_json``.
 
     ``url`` is refused: HFL does not host files for clients to fetch."""
@@ -158,15 +190,20 @@ async def openai_images(req: OpenAIImageRequest, request: Request) -> dict[str, 
             detail="response_format 'url' is not supported: HFL returns images as b64_json.",
         )
     width, height = _dimensions(req.size)
-    results = await _render(
-        request,
-        req.model,
-        req.n,
-        prompt=req.prompt,
-        width=width,
-        height=height,
-        steps=DEFAULT_STEPS,
-    )
+    try:
+        results = await _render(
+            request,
+            req.model,
+            req.n,
+            prompt=req.prompt,
+            width=width,
+            height=height,
+            steps=DEFAULT_STEPS,
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        from hfl.api.helpers import queue_response_from_error
+
+        return queue_response_from_error(exc, path="/v1/images/generations")
     return {
         "created": int(time.time()),
         "data": [{"b64_json": r.image_png_base64, "revised_prompt": req.prompt} for r in results],

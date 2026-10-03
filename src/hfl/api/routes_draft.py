@@ -12,7 +12,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from hfl.hub.connectivity import describe_hub_failure
 from hfl.hub.draft_picker import pick_draft_for
@@ -29,9 +29,11 @@ router = APIRouter(tags=["HFL Beyond"])
     responses={
         200: {"description": "Draft pick or null"},
         400: {"description": "Missing target model"},
+        403: {"description": "Remote caller"},
     },
 )
 async def api_draft_recommend(
+    request: Request,
     model: str = Query(..., min_length=1, max_length=256),
     max_ratio: float = Query(default=0.25, gt=0.0, le=1.0),
 ) -> dict[str, Any]:
@@ -52,7 +54,13 @@ async def api_draft_recommend(
 
     ``pick`` is ``null`` when no candidate was found (rare — the
     canonical fallbacks cover the major families).
+
+    Owner-only: every call queries the Hub (no cache) with the owner's
+    implicit token, so a remote client could spend it at will.
     """
+    from hfl.api.admin_guard import require_owner
+
+    require_owner(request, "draft recommend")
     try:
         pick = pick_draft_for(model, max_ratio=max_ratio)
     except Exception as exc:  # pragma: no cover — Hub failure is upstream

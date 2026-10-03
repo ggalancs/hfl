@@ -154,6 +154,12 @@ def test_the_source_archive_is_extracted_safely(tmp_path, monkeypatch) -> None:
         yield Response()
 
     monkeypatch.setattr("httpx.stream", stream)
+    # The converter is pinned by sha256: this fake archive stands in for it.
+    import hashlib
+
+    monkeypatch.setattr(
+        gguf_converter, "LLAMA_CPP_SHA256", hashlib.sha256(raw.getvalue()).hexdigest()
+    )
     target = tmp_path / "tools" / "llama.cpp"
     target.parent.mkdir()
     gguf_converter._download_converter(target)

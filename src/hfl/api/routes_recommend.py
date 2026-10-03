@@ -10,10 +10,11 @@ can render "we picked these because your machine has X RAM / Y GPU".
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from hfl.hub.connectivity import describe_hub_failure
 from hfl.hub.hw_profile import get_hw_profile
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["HFL Beyond"])
 
+# "fits comfortably (4.1/12.0 GB)": the second figure is the host's memory.
+_HOST_BUDGET = re.compile(r"\s*\([\d.]+/[\d.]+ GB(?: available)?\)")
+
 
 @router.get(
     "/api/recommend",
@@ -30,10 +34,12 @@ router = APIRouter(tags=["HFL Beyond"])
     summary="Recommend HuggingFace Hub models for the current host",
     responses={
         200: {"description": "Top-N recommendations"},
+        403: {"description": "Remote caller"},
         503: {"description": "Hub unavailable"},
     },
 )
 async def api_recommend(
+    request: Request,
     task: str | None = Query(default=None, max_length=32),
     family: str | None = Query(default=None, max_length=64),
     quantization: str | None = Query(default=None, max_length=32),
@@ -45,7 +51,16 @@ async def api_recommend(
     client can explain *why* these picks: "we have 16 GB unified
     memory on Apple Silicon, that's why we recommend MLX 4-bit
     variants over GGUF Q4_K_M".
+
+    Owner-only: every call queries the Hub (no cache) with the owner's
+    implicit token. The host profile, and the memory budget in the
+    reasoning, are the owner's alone even when remote administration
+    is on — like the host figures of /api/ps and /metrics.
     """
+    from hfl.api.admin_guard import is_local_request, require_owner
+
+    require_owner(request, "recommend")
+    owner = is_local_request(request)
     profile = get_hw_profile()
     valid_tasks = {"chat", "code", "vision", "embeddings", "tools"}
     if task is not None and task not in valid_tasks:
@@ -69,16 +84,17 @@ async def api_recommend(
         raise HTTPException(status_code=503, detail=detail) from exc
 
     return {
-        "hardware_profile": asdict(profile),
+        "hardware_profile": asdict(profile) if owner else None,
         "task": task,
         "family": family,
         "quantization": quantization,
         "total": len(recommendations),
-        "recommendations": [_serialise(r) for r in recommendations],
+        "recommendations": [_serialise(r, owner) for r in recommendations],
     }
 
 
-def _serialise(rec: Recommendation) -> dict[str, Any]:
+def _serialise(rec: Recommendation, owner: bool = True) -> dict[str, Any]:
+    reasoning = rec.reasoning if owner else [_HOST_BUDGET.sub("", r) for r in rec.reasoning]
     return {
         "repo_id": rec.repo_id,
         "family": rec.family,
@@ -90,5 +106,5 @@ def _serialise(rec: Recommendation) -> dict[str, Any]:
         "gated": rec.gated,
         "estimated_vram_gb": rec.estimated_vram_gb,
         "score": rec.score,
-        "reasoning": rec.reasoning,
+        "reasoning": reasoning,
     }

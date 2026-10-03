@@ -223,12 +223,29 @@ def _snapshot_key() -> bytes:
         pass
     key = secrets.token_bytes(32)
     key_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_bytes(key)
-    try:
-        key_path.chmod(0o600)
-    except OSError:  # pragma: no cover — non-POSIX filesystem
-        pass
+    _write_private(key_path, key)
     return key
+
+
+def _write_private(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` created ``0600``: born private, not chmod-ed
+    after a window at the umask's mode (0644 by default) in which another
+    account could open it. An existing file is truncated and chmod-ed too."""
+    # O_BINARY: on Windows a bare os.open fd is in text mode, and the CRT
+    # would turn every 0x0A of the pickle into 0x0D 0x0A.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except (AttributeError, OSError):  # pragma: no cover — Windows
+            pass
+        with os.fdopen(fd, "wb") as f:
+            fd = -1
+            f.write(data)
+    finally:
+        if fd != -1:
+            os.close(fd)
 
 
 def _state_mac(raw: bytes) -> str:
@@ -283,7 +300,7 @@ def save_snapshot(engine: "InferenceEngine", *, name: str, model_name: str) -> S
     # that a later load would feed into ``Llama.load_state`` and corrupt the
     # model's memory. Write to a sibling temp then atomically rename.
     tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
-    tmp_path.write_bytes(raw)
+    _write_private(tmp_path, raw)  # a KV cache holds the conversation
     os.replace(tmp_path, state_path)
 
     tokens = int(getattr(state, "n_tokens", 0) or 0)

@@ -26,6 +26,7 @@ Security posture:
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import re
@@ -43,6 +44,9 @@ __all__ = ["WebFetchError", "fetch"]
 _DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _MAX_REDIRECTS = 3
+# httpx's timeout bounds each read, not the fetch: a server trickling a byte
+# every few seconds kept the tool (and the request's model lease) forever.
+_OVERALL_DEADLINE_S = 30.0
 
 
 class WebFetchError(ValueError):
@@ -54,19 +58,32 @@ class WebFetchError(ValueError):
 # ----------------------------------------------------------------------
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
 def _is_private_ip(ip_str: str) -> bool:
+    """True unless ``ip_str`` is a globally routable unicast address.
+
+    An allow-list (``is_global``), not a deny-list: ``is_private`` is False
+    for 100.64.0.0/10 (CGNAT / Tailscale, and Alibaba's metadata service at
+    100.100.100.200), so naming bad ranges one by one let those through.
+    IPv6 forms that embed an IPv4 address are judged by that address.
+    """
     try:
-        ip = ipaddress.ip_address(ip_str)
+        ip: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(
+            ip_str.split("%", 1)[0]
+        )
     except ValueError:
         return True  # Unparseable == unsafe.
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = ip.ipv4_mapped or ip.sixtofour
+        if embedded is None and ip.teredo is not None:
+            embedded = ip.teredo[1]
+        if embedded is None and ip in _NAT64:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is not None:
+            ip = embedded
+    return not ip.is_global or ip.is_multicast
 
 
 def _resolve_and_validate(url: str) -> tuple[str, str]:
@@ -217,59 +234,17 @@ async def fetch(
     ``WebFetchError`` only for protocol / security / timeout
     failures, which the route turns into a 400.
     """
-    cleaned_url, pinned_ip = _resolve_and_validate(url)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
-        "Accept": "text/html,application/xhtml+xml",
-    }
+    # getaddrinfo blocks: off the event loop, or one slow resolver stalls
+    # every request the server is handling.
+    cleaned_url, pinned_ip = await asyncio.to_thread(_resolve_and_validate, url)
     try:
-        # Redirects are followed manually so every hop is re-validated by the
-        # SSRF guard *and* pinned to its validated IP. httpx's own
-        # follow_redirects (and its connect-time DNS re-resolution) would
-        # otherwise chase / rebind onto 169.254.169.254 / 127.0.0.1.
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            current, current_ip = cleaned_url, pinned_ip
-            body_bytes = b""
-            charset = "utf-8"
-            for _ in range(_MAX_REDIRECTS + 1):
-                connect_url, host_header, extensions = _pinned_request(current, current_ip)
-                # Stream so the body is read incrementally with a hard byte
-                # budget: a non-streaming ``get`` buffers the ENTIRE response
-                # into memory before slicing, so ``max_bytes`` capped only the
-                # parser input, not RAM — a multi-GB body (the model controls
-                # the URL) would OOM the process regardless. (SEC)
-                async with client.stream(
-                    "GET",
-                    connect_url,
-                    headers={**headers, **host_header},
-                    extensions=extensions,
-                ) as resp:
-                    location = resp.headers.get("location") if resp.is_redirect else None
-                    if location:
-                        # Redirect: only the Location matters — never read the
-                        # (possibly huge) redirect body. Re-run the full scheme +
-                        # private-IP guard and re-pin against the logical URL
-                        # before following.
-                        current, current_ip = _resolve_and_validate(urljoin(current, location))
-                        continue
-                    # Terminal hop (non-redirect, or redirect without Location):
-                    # pull the body until the budget is reached, then stop.
-                    charset = resp.charset_encoding or "utf-8"
-                    total = 0
-                    chunks: list[bytes] = []
-                    async for chunk in resp.aiter_bytes():
-                        chunks.append(chunk)
-                        total += len(chunk)
-                        if total >= max_bytes:
-                            break
-                    body_bytes = b"".join(chunks)[:max_bytes]
-                    break
-            else:
-                raise WebFetchError("too many redirects")
-            try:
-                body = body_bytes.decode(charset, errors="replace")
-            except LookupError:
-                body = body_bytes.decode("utf-8", errors="replace")
+        body = await asyncio.wait_for(
+            _fetch_body(cleaned_url, pinned_ip, max_bytes=max_bytes, timeout=timeout),
+            timeout=_OVERALL_DEADLINE_S,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.info("web_fetch deadline exceeded for %s", cleaned_url)
+        raise WebFetchError("URL fetch timed out") from exc
     except httpx.HTTPError as exc:
         logger.info("web_fetch HTTP error for %s: %s", cleaned_url, exc)
         raise WebFetchError("URL could not be fetched") from exc
@@ -281,3 +256,69 @@ async def fetch(
         "links": extracted["links"],
         "url": cleaned_url,
     }
+
+
+async def _fetch_body(cleaned_url: str, pinned_ip: str, *, max_bytes: int, timeout: float) -> str:
+    """Fetch the (already validated) URL, following redirects; return text."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
+        "Accept": "text/html,application/xhtml+xml",
+        # httpx decompresses a whole raw chunk before the byte count sees it,
+        # so a gzip bomb overshot max_bytes ~20x. Ask for the bytes as-is.
+        "Accept-Encoding": "identity",
+    }
+    # Redirects are followed manually so every hop is re-validated by the
+    # SSRF guard *and* pinned to its validated IP. httpx's own
+    # follow_redirects (and its connect-time DNS re-resolution) would
+    # otherwise chase / rebind onto 169.254.169.254 / 127.0.0.1.
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        current, current_ip = cleaned_url, pinned_ip
+        body_bytes = b""
+        charset = "utf-8"
+        for _ in range(_MAX_REDIRECTS + 1):
+            connect_url, host_header, extensions = _pinned_request(current, current_ip)
+            # Stream so the body is read incrementally with a hard byte
+            # budget: a non-streaming ``get`` buffers the ENTIRE response
+            # into memory before slicing, so ``max_bytes`` capped only the
+            # parser input, not RAM — a multi-GB body (the model controls
+            # the URL) would OOM the process regardless. (SEC)
+            async with client.stream(
+                "GET",
+                connect_url,
+                headers={**headers, **host_header},
+                extensions=extensions,
+            ) as resp:
+                location = resp.headers.get("location") if resp.is_redirect else None
+                if location:
+                    # Redirect: only the Location matters — never read the
+                    # (possibly huge) redirect body. Re-run the full scheme +
+                    # private-IP guard and re-pin against the logical URL
+                    # before following.
+                    current, current_ip = await asyncio.to_thread(
+                        _resolve_and_validate, urljoin(current, location)
+                    )
+                    continue
+                # Terminal hop (non-redirect, or redirect without Location):
+                # pull the body until the budget is reached, then stop.
+                encoding = resp.headers.get("content-encoding", "").strip().lower()
+                if encoding not in ("", "identity"):
+                    # Sent compressed although we asked for identity:
+                    # refuse rather than inflate an unbounded body.
+                    raise WebFetchError("URL returned a compressed body — refusing")
+                charset = resp.charset_encoding or "utf-8"
+                total = 0
+                chunks: list[bytes] = []
+                async for chunk in resp.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= max_bytes:
+                        break
+                body_bytes = b"".join(chunks)[:max_bytes]
+                break
+        else:
+            raise WebFetchError("too many redirects")
+        try:
+            body = body_bytes.decode(charset, errors="replace")
+        except LookupError:
+            body = body_bytes.decode("utf-8", errors="replace")
+    return body

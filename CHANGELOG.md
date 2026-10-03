@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+A security audit of the whole code (2026-10-03: five areas reviewed in
+parallel, each finding reproduced with a test that fails without its fix).
+Behaviour an operator notices is marked **(changed)**.
+
+- **High**
+  - `/ws/chat`: one socket alternating chat and cancel stacked unlimited
+    generations outside the queue. A socket now has one generation at a
+    time, through the same dispatcher slot as HTTP, with a bounded
+    `max_tokens` by default.
+  - The agent loop ran the owner's MCP tools for any API client. It now
+    needs the owner, and connected MCP tools are offered only to the owner.
+  - Converting a pulled model to GGUF could run Python shipped in the repo
+    (llama.cpp's converter loads some tokenizers with remote code), with
+    `HFL_ALLOW_REMOTE_CODE` off. **(changed)** A repo whose config declares
+    `auto_map` or that carries `.py` files is not converted unless remote
+    code is allowed; the converter runs offline and without the HF token;
+    `.py` files are not downloaded.
+  - A raw `GBNF:` grammar crashed the engine (any grammar llama.cpp
+    rejects, not only deep ones): grammars are length- and depth-limited
+    and built once before sampling — a bad one is a 400.
+  - A JSON schema with huge `minItems`/`maxLength`… exhausted memory in the
+    in-process engine: repetition bounds are capped at 1000 and every
+    subschema keyword is walked.
+- **Medium**
+  - **(changed)** DNS rebinding: a server bound to loopback answers only to
+    `localhost`, `127.0.0.1`, `::1` and the hosts in `HFL_ORIGINS`; other
+    `Host` headers get 403. A reverse proxy on the same machine that
+    forwards the public name needs it in `HFL_ORIGINS`.
+  - **(changed)** Owner-only now: blob uploads (`/api/blobs`), `verify`,
+    `benchmark`, `recommend`, `draft/recommend`, `discover?refresh=true`.
+  - A remote client could unload (`keep_alive: 0`) or pin (`-1`) a shared
+    model, and unload one with an oversized `num_ctx`: its `keep_alive`
+    unload/pin is ignored, `num_ctx` is capped at the model's trained
+    context, and a load that cannot fit is refused before anything is
+    unloaded.
+  - `web_fetch` reached 100.64.0.0/10 (Alibaba Cloud metadata, Tailscale):
+    only globally routable addresses; name resolution off the event loop;
+    an overall deadline; compressed bodies refused, not inflated.
+  - MCP servers inherited all of HFL's environment (tokens, keys): they get
+    the MCP SDK's default environment plus what their config declares.
+    HFL's MCP SSE server has DNS-rebinding protection. Tool calls time
+    out. MCP tools failed right after `connect()` (a lost transport); fixed.
+  - `hfl serve --tray` skipped the network-exposure check.
+  - License gate: `"limited"` contains `"mit"`, so a non-commercial
+    `license_name` counted as permissive. Names now match exactly or by
+    family token.
+  - The commit recorded for a pull was not necessarily the one downloaded:
+    files, checksums and the license are read at the resolved commit.
+  - The llama.cpp converter was fetched from `master` unpinned: it is the
+    pinned release (b10964), its archive checked by sha256.
+  - A per-request Go template could allocate without bound
+    (`{{ range 9999999999 }}`): ranges are lazy and work is capped.
+  - Tool-call parsing took quadratic time (minutes) on crafted output: all
+    parsers are linear now, with identical results.
+  - `/api/show` and `/api/lora` gave remote clients absolute host paths;
+    `/api/recommend` and the compliance dashboard host hardware and token
+    status. Redacted for non-owners.
+  - Image and speech routes accepted host paths as the model (a
+    file-existence oracle): non-owners may use model ids only. Media work
+    goes through the queue; image size is capped at 4096 per side.
+  - `/api/verify` ran inference on the event loop (froze the server).
+  - Terminal escape and markup injection from Hub metadata in the license
+    panel, `hfl list` and `hfl show`.
+- **Low**
+  - Chat transcripts and KV snapshots were readable by other local users:
+    created 0600 in 0700 folders.
+  - `hfl launch` put the API key on a command line; it goes through the
+    environment.
+  - Children (llama-server, the guard) no longer inherit tokens and keys.
+  - The child guard and the training runner no longer run code from the
+    working directory (`python -m` put it first on `sys.path`).
+  - The HF token prompt no longer echoes, and never appears from the server.
+  - A container with host networking (`--network host`) no longer counts as
+    an isolated network for the unattended-bind convenience.
+  - `/health/deep?probe=true` needs the key; WebSocket key guesses are
+    throttled like HTTP ones; the SerpAPI key no longer reaches the log;
+    audio uploads have their own size limit instead of none; the
+    provenance log is written atomically.
+
 ### Added
 
 - **`hfl install llama-server`: GGUF models answer several requests at once

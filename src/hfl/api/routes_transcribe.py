@@ -7,7 +7,10 @@
 download on first use. Only a caller who may fetch models (the owner:
 :func:`~hfl.api.admin_guard.may_fetch_models`) can trigger that download;
 anyone else is served models already on disk, or told the model is not on
-this server. The load and the inference run off the event loop.
+this server — by name: a filesystem path is the owner's too. The load and
+the inference run off the event loop, through the shared inference queue
+one at a time: nothing else bounded how many Whisper models were loaded
+at once.
 """
 
 from __future__ import annotations
@@ -19,8 +22,9 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.engine.whisper_engine import WhisperEngine, WhisperResult, is_available
-from hfl.hub.local_cache import whisper_available_locally
+from hfl.hub.local_cache import is_model_id, whisper_available_locally
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["STT"])
@@ -86,9 +90,20 @@ async def _transcribe(
             status_code=501,
             detail="Whisper backend not installed. `pip install 'hfl[stt]'`.",
         )
-    from hfl.api.admin_guard import may_fetch_models
+    from hfl.api.admin_guard import is_local_request, may_fetch_models
+    from hfl.api.helpers import run_dispatched
 
     local_only = not may_fetch_models(request)
+    owner = is_local_request(request) and not local_only
+    if not owner and not is_model_id(model):
+        # The same answer whether the path exists or not: this is no oracle.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "model must be a Whisper size or a Hub repo id",
+                "code": "model_not_an_id",
+            },
+        )
     if local_only and not await asyncio.to_thread(whisper_available_locally, model):
         raise HTTPException(
             status_code=404,
@@ -101,8 +116,14 @@ async def _transcribe(
             },
         )
     audio = await _read_audio(file)
-    return await asyncio.to_thread(
-        _transcribe_sync, audio, model, language, include_segments, local_only
+    return await run_dispatched(
+        _transcribe_sync,
+        audio,
+        model,
+        language,
+        include_segments,
+        local_only,
+        operation="transcription",
     )
 
 
@@ -125,7 +146,12 @@ async def api_transcribe(
     ``language`` (ISO code, optional), ``include_segments`` (attach
     per-segment timestamps).
     """
-    result = await _transcribe(request, file, model, language, include_segments)
+    try:
+        result = await _transcribe(request, file, model, language, include_segments)
+    except (QueueFullError, QueueTimeoutError) as exc:
+        from hfl.api.helpers import queue_response_from_error
+
+        return queue_response_from_error(exc)
     envelope: dict[str, Any] = {
         "text": result.text,
         "language": result.language,
@@ -167,7 +193,7 @@ async def openai_transcriptions(
     prompt: str | None = Form(None),
     response_format: str = Form("json"),
     temperature: float = Form(0.0),
-) -> dict[str, Any] | PlainTextResponse:
+) -> dict[str, Any] | PlainTextResponse | JSONResponse:
     """OpenAI-compatible transcription. ``whisper-1`` (and OpenAI's other
     names) mean the default local Whisper; any size or repo id works too.
     ``prompt`` and ``temperature`` are accepted and not used."""
@@ -178,7 +204,12 @@ async def openai_transcriptions(
         )
     whisper_model = _DEFAULT_MODEL if model in _OPENAI_MODELS else model
     with_segments = response_format in ("verbose_json", "srt", "vtt")
-    result = await _transcribe(request, file, whisper_model, language, with_segments)
+    try:
+        result = await _transcribe(request, file, whisper_model, language, with_segments)
+    except (QueueFullError, QueueTimeoutError) as exc:
+        from hfl.api.helpers import queue_response_from_error
+
+        return queue_response_from_error(exc, path="/v1/audio/transcriptions")
     if response_format == "text":
         return PlainTextResponse(result.text)
     if response_format in ("srt", "vtt"):

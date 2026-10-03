@@ -15,7 +15,7 @@ import logging
 import statistics
 import time
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 if TYPE_CHECKING:
     from hfl.engine.base import InferenceEngine
@@ -274,8 +274,14 @@ async def run_benchmark_stream(
     runs_per_length: int = 3,
     max_tokens: int = 64,
     prompt_lengths: tuple[int, ...] = (16, 256, 2048),
+    run_call: Callable[..., Awaitable[Any]] | None = None,
 ) -> AsyncIterator[dict]:
     """Yield per-run NDJSON-shaped progress events.
+
+    ``run_call(fn, *args)`` runs each measurement off the event loop
+    (default ``asyncio.to_thread``). The server passes one that goes
+    through the model's dispatcher queue: a measurement is a generation,
+    and on a shared model it must wait its turn like any other.
 
     Event grammar:
 
@@ -298,7 +304,7 @@ async def run_benchmark_stream(
         prompt = _GOLDEN.get(length, "Hello.")
         runs: list[BenchmarkRun] = []
         for i in range(runs_per_length):
-            run = await asyncio.to_thread(_measure_one, engine, prompt, max_tokens)
+            run = await (run_call or asyncio.to_thread)(_measure_one, engine, prompt, max_tokens)
             runs.append(run)
             yield {
                 "status": "run",

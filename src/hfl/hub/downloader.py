@@ -127,6 +127,7 @@ def _download_snapshot(
     local_dir: Path,
     token: str | None,
     allow_patterns: list[str] | None,
+    ignore_patterns: list[str] | None = None,
 ) -> Path:
     """Download a repo snapshot with retry logic."""
     local_path = snapshot_download(
@@ -135,8 +136,30 @@ def _download_snapshot(
         local_dir=local_dir,
         token=token,
         allow_patterns=allow_patterns,
+        ignore_patterns=ignore_patterns,
     )
     return Path(local_path)
+
+
+def _ref(resolved: ResolvedModel) -> str | None:
+    """The revision every request of a pull uses: the commit the resolver
+    saw when it has one. A branch name ("main") moves: the files, the parts
+    of a split GGUF and the sha256 they are checked against could each come
+    from a different commit than the one recorded as pulled."""
+    return getattr(resolved, "commit_sha", None) or resolved.revision
+
+
+# Python in the repo runs only through trust_remote_code (or llama.cpp's
+# converter, which trusts it for some architectures). Without the operator's
+# opt-in it is not downloaded at all: a repo with neither safetensors nor
+# GGUF is fetched whole, and "whole" included its .py files.
+_CODE_FILES = ["*.py"]
+
+
+def _code_excluded() -> list[str] | None:
+    from hfl.security import remote_code_allowed
+
+    return None if remote_code_allowed() else list(_CODE_FILES)
 
 
 def _hub_sha256(resolved: ResolvedModel, token: str | None) -> dict[str, str]:
@@ -146,7 +169,7 @@ def _hub_sha256(resolved: ResolvedModel, token: str | None) -> dict[str, str]:
 
     try:
         info = HfApi().model_info(
-            resolved.repo_id, revision=resolved.revision, files_metadata=True, token=token
+            resolved.repo_id, revision=_ref(resolved), files_metadata=True, token=token
         )
     except Exception as exc:
         logger.warning("Could not read the Hub's checksums for %s: %s", resolved.repo_id, exc)
@@ -199,7 +222,7 @@ def _verify_downloads(
         logger.warning("%s: sha256 mismatch (%s…); downloading it again", name, actual[:16])
         console.print(f"[yellow]{name} does not match the Hub's sha256; downloading it again[/]")
         _discard(model_dir, name)
-        _download_file(resolved.repo_id, name, resolved.revision, model_dir, token)
+        _download_file(resolved.repo_id, name, _ref(resolved), model_dir, token)
         actual = _sha256_of(path)
         if actual != expected[name]:
             _discard(model_dir, name)
@@ -251,7 +274,8 @@ def _planned(resolved: ResolvedModel, names: list[str]) -> list[str]:
         return [n for n in names if n in wanted]
     if resolved.format == "safetensors":
         return [n for n in names if any(fnmatch.fnmatch(n, p) for p in _SAFETENSORS_FILES)]
-    return list(names)
+    excluded = _code_excluded() or []
+    return [n for n in names if not any(fnmatch.fnmatch(n, p) for p in excluded)]
 
 
 def expected_files(resolved: ResolvedModel) -> dict[str, int]:
@@ -262,7 +286,7 @@ def expected_files(resolved: ResolvedModel) -> dict[str, int]:
     try:
         info = HfApi().model_info(
             resolved.repo_id,
-            revision=resolved.revision,
+            revision=_ref(resolved),
             files_metadata=True,
             token=_token_quietly(resolved.repo_id),
         )
@@ -327,7 +351,7 @@ def pull_model(resolved: ResolvedModel) -> Path:
         path = _download_file(
             repo_id=resolved.repo_id,
             filename=resolved.filename,
-            revision=resolved.revision,
+            revision=_ref(resolved),
             local_dir=model_dir,
             token=token,
         )
@@ -337,7 +361,7 @@ def pull_model(resolved: ResolvedModel) -> Path:
             _download_file(
                 repo_id=resolved.repo_id,
                 filename=filename,
-                revision=resolved.revision,
+                revision=_ref(resolved),
                 local_dir=model_dir,
                 token=token,
             )
@@ -349,10 +373,11 @@ def pull_model(resolved: ResolvedModel) -> Path:
 
     snapshot = _download_snapshot(
         repo_id=resolved.repo_id,
-        revision=resolved.revision,
+        revision=_ref(resolved),
         local_dir=model_dir,
         token=token,
         allow_patterns=allow_patterns or None,
+        ignore_patterns=_code_excluded(),
     )
     downloaded = [str(p.relative_to(model_dir)) for p in model_dir.rglob("*") if p.is_file()]
     _verify_downloads(resolved, model_dir, token, [n for n in downloaded if ".cache" not in n])

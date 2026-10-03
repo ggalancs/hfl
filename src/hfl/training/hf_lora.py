@@ -12,7 +12,6 @@ adapter merged into a copy of the base, registered under the chosen name
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -57,8 +56,10 @@ def available() -> str | None:
 
 def command(model_path: str, data: Data, adapter: Path, options: Options) -> list[str]:
     """The training run's command line."""
-    argv = [
-        sys.executable, "-m", "hfl.training.hf_lora_run", "train",
+    from hfl.utils.self_exec import module_argv
+
+    argv = module_argv(
+        "hfl.training.hf_lora_run", "train",
         "--model", model_path,
         "--data", str(data.folder),
         "--adapter", str(adapter),
@@ -69,7 +70,7 @@ def command(model_path: str, data: Data, adapter: Path, options: Options) -> lis
         "--learning-rate", str(options.learning_rate),
         "--max-seq-length", str(options.max_seq_length),
         "--save-every", str(options.save_every),
-    ]  # fmt: skip
+    )  # fmt: skip
     if options.resume:
         argv.append("--resume")
     return argv
@@ -78,11 +79,13 @@ def command(model_path: str, data: Data, adapter: Path, options: Options) -> lis
 def register(base: Any, name: str, adapter: Path, log: Path) -> Any:
     """The adapter merged into a copy of ``base``, registered as ``name``."""
     out = adapter.parent.parent / "models" / name
-    argv = [
-        sys.executable, "-m", "hfl.training.hf_lora_run", "merge",
+    from hfl.utils.self_exec import module_argv
+
+    argv = module_argv(
+        "hfl.training.hf_lora_run", "merge",
         "--model", str(base.local_path),
         "--adapter", str(adapter),
         "--out", str(out),
-    ]  # fmt: skip
+    )  # fmt: skip
     run(argv, log, lambda event: None)
     return register_fused(base, name, out)

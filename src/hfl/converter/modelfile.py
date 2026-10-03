@@ -19,6 +19,7 @@ yield byte-identical strings so snapshot tests don't flake.
 
 from __future__ import annotations
 
+from pathlib import PurePath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ def _quote_triple(value: str) -> str:
     return f'"""{value}"""'
 
 
-def render_modelfile(manifest: "ModelManifest") -> str:
+def render_modelfile(manifest: "ModelManifest", *, reveal_paths: bool = True) -> str:
     '''Render ``manifest`` as a Modelfile string.
 
     Layout matches Ollama's ``ollama show --modelfile`` output:
@@ -66,7 +67,9 @@ def render_modelfile(manifest: "ModelManifest") -> str:
     Sections are omitted when the manifest has no data for them. The
     ``FROM`` line always fires — a Modelfile without ``FROM`` is
     invalid per the Ollama spec, so we emit the local path as a last
-    resort.
+    resort — or, with ``reveal_paths=False`` (anyone but the owner), the
+    model's name, and adapters by file name: where models live on the
+    host is not a remote caller's business.
     '''
     lines: list[str] = []
 
@@ -78,8 +81,10 @@ def render_modelfile(manifest: "ModelManifest") -> str:
         if not digest.startswith("sha"):
             digest = f"sha256:{digest}"
         lines.append(f"FROM {digest}")
-    else:
+    elif reveal_paths:
         lines.append(f"FROM {manifest.local_path}")
+    else:
+        lines.append(f"FROM {manifest.name}")
 
     # ----- TEMPLATE -----
     if manifest.chat_template:
@@ -129,7 +134,7 @@ def render_modelfile(manifest: "ModelManifest") -> str:
     adapters: list[str] = getattr(manifest, "adapter_paths", None) or []
     for adapter in adapters:
         lines.append("")
-        lines.append(f"ADAPTER {adapter}")
+        lines.append(f"ADAPTER {adapter if reveal_paths else PurePath(adapter).name}")
 
     # ----- LICENSE -----
     if manifest.license_name or manifest.license:

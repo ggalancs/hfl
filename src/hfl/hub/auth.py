@@ -22,10 +22,13 @@ This design ensures that:
 - hfl complies with HuggingFace Terms of Service
 """
 
+import threading
+
 from huggingface_hub import HfApi, get_token
 from huggingface_hub.utils import HfHubHTTPError
 
 from hfl.config import config
+from hfl.utils.terminal import stdin_is_terminal
 
 LocalTokenNotFoundError: type[BaseException]
 try:
@@ -78,6 +81,14 @@ def ensure_auth(repo_id: str) -> str | None:
 
     # If there is no token, request one interactively
     if not token:
+        # Only a person at the CLI may be asked. /api/pull reaches here from a
+        # worker thread: a prompt there blocked the request on the server's
+        # stdin (or read a token typed into the wrong process).
+        if threading.current_thread() is not threading.main_thread() or not stdin_is_terminal():
+            raise RuntimeError(
+                f"{repo_id} requires HuggingFace authentication. "
+                "Set HF_TOKEN or run `hfl login`, then retry."
+            )
         from rich.console import Console
         from rich.prompt import Prompt
 
@@ -87,7 +98,8 @@ def ensure_auth(repo_id: str) -> str | None:
         console.print("You can configure your token permanently with: [cyan]hfl login[/]")
         console.print("Or enter your token now (https://huggingface.co/settings/tokens):\n")
 
-        token = Prompt.ask("HF Token")
+        # password: a token echoed to the terminal ends up in scrollback.
+        token = Prompt.ask("HF Token", password=True)
 
     try:
         api.model_info(repo_id, token=token)

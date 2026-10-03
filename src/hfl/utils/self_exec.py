@@ -26,19 +26,39 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+# ``-m`` and ``-c`` put the working directory first on ``sys.path``: started
+# from a directory that holds an ``hfl/`` package (a cloned repository, a
+# shared /tmp), the child ran that package instead of HFL. The command
+# drops the entry before importing anything of HFL's (``-P`` does the same,
+# from Python 3.11 only).
+_WITHOUT_CWD = "import sys; sys.path[:] = [p for p in sys.path if p not in ('', '.')]; "
+
+
 def child_guard_argv(parent_pid: int, command: list[str]) -> list[str]:
     """Run ``command`` for as long as ``parent_pid`` lives (see
     ``hfl.engine._child_guard``)."""
     if is_frozen():
         return [sys.executable, CHILD_GUARD_FLAG, str(parent_pid), "--", *command]
-    return [sys.executable, "-m", "hfl.engine._child_guard", str(parent_pid), "--", *command]
+    code = _WITHOUT_CWD + "from hfl.engine._child_guard import main; sys.exit(main(sys.argv))"
+    return [sys.executable, "-c", code, str(parent_pid), "--", *command]
+
+
+def module_argv(module: str, *args: str) -> list[str]:
+    """``python -m module args…`` without the working directory on the path."""
+    code = _WITHOUT_CWD + f"import runpy; runpy.run_module({module!r}, run_name='__main__')"
+    return [sys.executable, "-c", code, *args]
 
 
 def hfl_argv(*args: str) -> list[str]:
     """``hfl args…`` with this same HFL."""
     if is_frozen():
         return [sys.executable, *args]
-    return [sys.executable, "-c", "from hfl.cli.main import cli_main; cli_main()", *args]
+    return [
+        sys.executable,
+        "-c",
+        _WITHOUT_CWD + "from hfl.cli.main import cli_main; cli_main()",
+        *args,
+    ]
 
 
 def _kernel32() -> Any:

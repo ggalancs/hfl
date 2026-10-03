@@ -124,7 +124,9 @@ def _unknown_license(repo_id: str) -> "LicenseInfo":
     )
 
 
-async def _license_gate(repo_id: str) -> tuple["LicenseInfo", dict[str, Any] | None]:
+async def _license_gate(
+    repo_id: str, revision: str | None = None
+) -> tuple["LicenseInfo", dict[str, Any] | None]:
     """Apply the server owner's license policy to a repo (non-interactive).
 
     Returns ``(license_info, error_event)``. ``error_event`` is ``None``
@@ -139,7 +141,8 @@ async def _license_gate(repo_id: str) -> tuple["LicenseInfo", dict[str, Any] | N
     policy = getattr(config, "license_policy", "permissive")
 
     try:
-        info = await asyncio.to_thread(check_model_license, repo_id)
+        # At the commit that is downloaded, not at a moving "main".
+        info = await asyncio.to_thread(check_model_license, repo_id, revision=revision)
     except Exception as exc:  # network / Hub failure → fail closed as UNKNOWN
         logger.warning("license classification failed for %s: %s", repo_id, exc)
         info = _unknown_license(repo_id)
@@ -424,7 +427,9 @@ async def _run_pull_streaming(
     # Classify + apply HFL_LICENSE_POLICY. A license the owner has not
     # pre-accepted stops the pull before a single byte is transferred.
     yield _event("verifying license")
-    license_info, license_error = await _license_gate(resolved.repo_id)
+    license_info, license_error = await _license_gate(
+        resolved.repo_id, resolved.commit_sha or resolved.revision
+    )
     if license_error is not None:
         yield json.dumps(license_error, separators=(",", ":")) + "\n"
         return

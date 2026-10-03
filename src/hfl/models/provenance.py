@@ -9,11 +9,17 @@ and for preserving attribution in derivative works.
 """
 
 import json
+import logging
+import os
+import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from hfl.config import config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,20 +76,46 @@ class ProvenanceLog:
         """
         self.path = log_path or (config.home_dir / "provenance.json")
         self._records: list[dict] = []
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
-        """Loads existing records from the file."""
-        if self.path.exists():
-            try:
-                self._records = json.loads(self.path.read_text())
-            except (json.JSONDecodeError, FileNotFoundError):
-                self._records = []
+        """Loads existing records from the file.
+
+        A file that does not parse is kept, renamed aside, never emptied:
+        it used to load as ``[]`` and the next record overwrote the whole
+        legal-traceability log with one entry."""
+        try:
+            text = self.path.read_text()
+        except FileNotFoundError:
+            return
+        try:
+            records = json.loads(text)
+            if not isinstance(records, list):
+                raise ValueError("not a list of records")
+        except ValueError as exc:
+            aside = self.path.with_name(
+                f"{self.path.name}.corrupt-{datetime.now().strftime('%Y%m%dT%H%M%S%f')}"
+            )
+            os.replace(self.path, aside)
+            logger.warning("provenance log %s unreadable (%s); kept as %s", self.path, exc, aside)
+            records = []
+        self._records = records
 
     def _save(self) -> None:
-        """Saves records to the file."""
+        """Saves records to the file: whole or not at all (temp + rename),
+        so a crash mid-write leaves the previous log, not half of one."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._records, indent=2))
+        fd, tmp = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(self._records, indent=2))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def record(self, conversion: ConversionRecord) -> None:
         """
@@ -92,8 +124,10 @@ class ProvenanceLog:
         Args:
             conversion: Record of the performed conversion.
         """
-        self._records.append(asdict(conversion))
-        self._save()
+        # One writer at a time: the server pulls on worker threads.
+        with self._lock:
+            self._records.append(asdict(conversion))
+            self._save()
 
     def get_history(self, repo_id: str) -> list[dict]:
         """

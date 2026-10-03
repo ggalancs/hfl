@@ -40,6 +40,8 @@ HFL_HOME=/var/lib/hfl
 HFL_HOST=127.0.0.1
 HFL_PORT=11434
 HFL_API_KEY=change-me-to-a-long-random-key
+# With a reverse proxy on this machine forwarding the public name (below):
+# HFL_ORIGINS=https://hfl.example.com
 ```
 
 `/etc/systemd/system/hfl.service`:
@@ -300,6 +302,12 @@ in the pod answers and is still there after the pod is replaced.
   }
   ```
 
+- **Host names**: a server bound to loopback answers only to `localhost`,
+  `127.0.0.1`, `::1` and the names in `HFL_ORIGINS` (a web page cannot reach
+  it through DNS rebinding). A reverse proxy on the same machine that
+  forwards the public `Host` — nginx with `proxy_set_header Host $host`
+  as above, Caddy by default — needs that name in `HFL_ORIGINS`
+  (`HFL_ORIGINS=https://hfl.example.com`), or every request gets 403.
 - **Browsers**: a web UI on another origin needs it in `HFL_ORIGINS`.
 - **Rate limit**: 60 requests a minute per client by default
   (`HFL_RATE_LIMIT_*`); requests from this machine are exempt unless

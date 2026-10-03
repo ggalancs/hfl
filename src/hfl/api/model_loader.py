@@ -52,6 +52,25 @@ def _manifest_ctx(manifest: "ModelManifest") -> int:
     return value if value > 0 else 0
 
 
+def _within_trained_context(requested_ctx: int, manifest: "ModelManifest") -> int:
+    """A request's ``num_ctx``, no larger than the context the model was
+    trained for — as Ollama does. Any client may send ``num_ctx``; unbounded,
+    a huge one reloaded the model for a window it cannot use, sized a KV
+    cache for it, and pushed the other resident models out."""
+    from hfl.engine import footprint
+
+    trained = footprint.advertised_context(manifest.local_path) if requested_ctx else 0
+    if trained and requested_ctx > trained:
+        logger.info(
+            "Clamping num_ctx %d → %d (%s's trained context length)",
+            requested_ctx,
+            trained,
+            manifest.name,
+        )
+        return trained
+    return requested_ctx
+
+
 def _canonical_model_name(model_name: str) -> str:
     """The local name to load for ``model_name``, validated.
 
@@ -162,6 +181,8 @@ async def load_llm(
         # shrinks and therefore pure waste — each one evicting the weights
         # and throwing away the KV cache, so the next request had to
         # re-prefill its whole prompt from scratch.
+        if requested_ctx and resident_ctx and resident_ctx < requested_ctx:
+            requested_ctx = _within_trained_context(requested_ctx, resident_manifest)
         alive = getattr(resident_engine, "is_loaded", True)
         if not alive:
             # Its process died (llama-server killed by the OOM killer, a
@@ -189,6 +210,7 @@ async def load_llm(
     model_type = detect_model_type(model_path)
     if model_type != ModelType.LLM:
         raise ModelTypeMismatchError(model_name, expected="llm", got=model_type.value)
+    requested_ctx = _within_trained_context(requested_ctx, manifest)
 
     # Context resolution, most specific first:
     #   1. ``options.num_ctx`` on this request (Ollama semantics).

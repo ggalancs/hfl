@@ -44,6 +44,7 @@ ADMIN_ROUTES: list[tuple[str, str, dict | None]] = [
     ("DELETE", "/api/snapshot/probe", None),
     ("POST", "/api/batch", {"model": "m", "requests": [{"prompt": "hi"}]}),
     ("POST", "/api/train", {"model": "m", "data": "/tmp/d.jsonl"}),
+    ("POST", "/api/blobs/sha256:" + "0" * 64, {"probe": 1}),
 ]
 
 
@@ -311,11 +312,11 @@ class TestPathMatchingIsExactEverywhere:
     def test_body_limit_exemption_is_exact(self):
         from hfl.api.middleware import RequestBodyLimitMiddleware as M
 
-        assert isinstance(M.EXCLUDED_PATHS, frozenset)
+        assert isinstance(M.AUDIO_PATHS, frozenset)
         assert not hasattr(M, "EXCLUDED_PREFIXES")
-        assert "/api/transcribe" in M.EXCLUDED_PATHS
-        # A look-alike must NOT inherit the exemption.
-        assert "/api/transcribe-evil" not in M.EXCLUDED_PATHS
+        assert "/api/transcribe" in M.AUDIO_PATHS
+        # A look-alike must NOT inherit the larger audio budget.
+        assert "/api/transcribe-evil" not in M.AUDIO_PATHS
 
     def test_rate_limit_exemption_is_exact(self):
         from hfl.api.middleware import RateLimitMiddleware as M

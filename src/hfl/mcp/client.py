@@ -32,6 +32,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on one MCP tool call; a tool that legitimately needs longer
+# is a job, not a tool call.
+_CALL_TOOL_TIMEOUT_S = 120.0
+# Upper bound on tearing one connection down.
+_DISCONNECT_TIMEOUT_S = 10.0
+
 __all__ = [
     "MCPClient",
     "MCPTool",
@@ -106,6 +112,8 @@ class _ServerConnection:
     target: str
     session: Any | None = None  # mcp.ClientSession, typed loosely for optional dep
     tools: list[MCPTool] = field(default_factory=list)
+    stop: asyncio.Event | None = None
+    task: asyncio.Task[None] | None = None
 
 
 class MCPClient:
@@ -163,10 +171,14 @@ class MCPClient:
             parts = target[len("stdio://") :].split()
             if not parts:
                 raise MCPConnectionError(server_id, "stdio target is empty")
+            # ``env=None`` lets the SDK use get_default_environment() (PATH,
+            # HOME, USER…) and a declared env is merged on top of it. Passing
+            # os.environ.copy() handed every MCP server HF_TOKEN, HFL_API_KEY,
+            # search keys and cloud credentials.
             params = sdk["StdioServerParameters"](
                 command=parts[0],
                 args=parts[1:],
-                env=env or os.environ.copy(),
+                env=env or None,
             )
             transport_cm = sdk["stdio_client"](params)
         elif target.startswith(("sse://", "http://", "https://")):
@@ -185,11 +197,22 @@ class MCPClient:
             target=target,
         )
         async with self._lock:
+            loop = asyncio.get_running_loop()
+            ready: asyncio.Future[tuple[Any, Any]] = loop.create_future()
+            conn.stop = asyncio.Event()
+            # The transport and the session are anyio context managers: they
+            # must be entered and exited by the same task, and something must
+            # hold them. Entered by hand in connect() and then dropped, the
+            # transport generator was finalised by GC from another task —
+            # "exit cancel scope in a different task", the subprocess killed,
+            # the next call_tool "Connection closed". One owner task per
+            # connection enters both, waits for disconnect, and exits both.
+            conn.task = asyncio.create_task(
+                self._own_connection(sdk, transport_cm, conn.stop, ready),
+                name=f"mcp-{server_id}",
+            )
             try:
-                read, write = await transport_cm.__aenter__()
-                session = await sdk["ClientSession"](read, write).__aenter__()
-                await session.initialize()
-                listing = await session.list_tools()
+                session, listing = await ready
                 tools = [
                     MCPTool(
                         server_id=server_id,
@@ -206,12 +229,53 @@ class MCPClient:
                 conn.session = session
                 conn.tools = tools
                 self._servers[server_id] = conn
-            except MCPClientUnavailableError:
+            except asyncio.CancelledError:
+                conn.stop.set()
+                conn.task.cancel()
                 raise
             except Exception as exc:
                 logger.exception("MCP connection failed for %s", server_id)
+                await self._stop_owner(conn)
                 raise MCPConnectionError(server_id, "failed to initialize session") from exc
         return tools
+
+    @staticmethod
+    async def _own_connection(
+        sdk: Any,
+        transport_cm: Any,
+        stop: asyncio.Event,
+        ready: asyncio.Future[tuple[Any, Any]],
+    ) -> None:
+        """Hold one server's transport + session open until ``stop`` is set."""
+        try:
+            async with transport_cm as streams:
+                read, write = streams[0], streams[1]
+                async with sdk["ClientSession"](read, write) as session:
+                    await session.initialize()
+                    listing = await session.list_tools()
+                    ready.set_result((session, listing))
+                    await stop.wait()
+        except Exception as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            else:
+                logger.warning("MCP connection ended: %s", type(exc).__name__)
+        finally:
+            if not ready.done():  # cancelled before the session was up
+                ready.cancel()
+
+    @staticmethod
+    async def _stop_owner(conn: _ServerConnection) -> None:
+        if conn.stop is not None:
+            conn.stop.set()
+        if conn.task is None:
+            return
+        try:
+            # The SDK's own shutdown (stdin close, then terminate) is bounded;
+            # this bound only keeps a wedged transport from hanging disconnect.
+            await asyncio.wait_for(conn.task, timeout=_DISCONNECT_TIMEOUT_S)
+        except Exception:
+            logger.exception("MCP disconnect error for %s", conn.server_id)
 
     async def disconnect(self, server_id: str) -> None:
         """Close the session and drop bookkeeping for ``server_id``.
@@ -220,12 +284,9 @@ class MCPClient:
         """
         async with self._lock:
             conn = self._servers.pop(server_id, None)
-            if conn is None or conn.session is None:
+            if conn is None:
                 return
-            try:
-                await conn.session.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("MCP disconnect error for %s", server_id)
+            await self._stop_owner(conn)
 
     async def disconnect_all(self) -> None:
         ids = list(self._servers.keys())
@@ -267,7 +328,12 @@ class MCPClient:
         if conn is None or conn.session is None:
             raise MCPConnectionError(tool.server_id, "no active session")
         try:
-            return await conn.session.call_tool(tool.name, arguments or {})
+            # Bounded: a server that never answers held the agent loop (and its
+            # model lease) forever.
+            return await asyncio.wait_for(
+                conn.session.call_tool(tool.name, arguments or {}),
+                timeout=_CALL_TOOL_TIMEOUT_S,
+            )
         except Exception as exc:
             logger.exception("MCP call_tool failed: %s", qualified_name)
             raise MCPConnectionError(

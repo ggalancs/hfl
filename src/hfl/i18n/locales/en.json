@@ -367,6 +367,7 @@
     "use_list_to_see": "Use 'hfl list' to see available models.",
     "missing_dependency": "Missing dependency",
     "cannot_convert_gguf": "Cannot convert to GGUF",
+    "convert_remote_code": "{file} would run Python from the model repo during conversion (llama.cpp's converter trusts remote code for some architectures). Refused: set HFL_ALLOW_REMOTE_CODE=1 only if you trust this repo, or pull a GGUF build instead.",
     "create_incomplete": "The server stopped before the model was created: nothing was saved. Its log says why.",
     "conversion_failed": "GGUF conversion failed",
     "model_downloaded_but": "The model has been downloaded but cannot be run with llama.cpp.",
@@ -410,7 +411,9 @@
     "continue_question": "Continue?",
     "playback_failed": "Could not play audio",
     "refuse_unattended_bind": "Refusing to bind {host} unattended: nobody can confirm the exposure here. Set HFL_API_KEY to require a key on every request, or HFL_ACCEPT_NETWORK_EXPOSURE=true to expose it without one.",
-    "container_bind": "Inside a container: reachable wherever its port is published (docker run -p, compose ports), with no key. Set HFL_API_KEY to require one."
+    "container_bind": "Inside a container: reachable wherever its port is published (docker run -p, compose ports), with no key. Set HFL_API_KEY to require one.",
+    "container_host_network": "This container shares the host's network (--network host / hostNetwork): the bind reaches the host's own interfaces, not only published ports.",
+    "container_bind_unverified": "Inside a container, with no key. Could not verify that it has a network of its own: under host networking (--network host / hostNetwork) the server is reachable on the host's interfaces. Set HFL_API_KEY to require a key."
   },
   "legal": {
     "ai_disclaimer": "AI models may generate incorrect, biased, or inappropriate information. The user is responsible for the use they make of the generated responses."

@@ -15,7 +15,8 @@ def client(temp_config):
     """Create test client."""
     reset_state()
     reset_metrics()
-    return TestClient(app)
+    # The owner (loopback): the deep check's process figures are the owner's alone.
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 class TestHealthBasic:

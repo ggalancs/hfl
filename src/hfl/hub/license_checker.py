@@ -10,6 +10,8 @@ This module implements the recommendations from legal audit R1
 to mitigate the risk of model license violations.
 """
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 
@@ -150,19 +152,58 @@ class LicenseInfo:
     gated: bool
 
 
-def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
+def _normalize(name: str) -> str:
+    """``"Apache 2.0"`` / ``"apache_2.0"`` -> ``"apache-2.0"``: the table's spelling."""
+    return re.sub(r"[\s_]+", "-", name.strip().lower())
+
+
+def _family_match(name: str) -> str | None:
+    """The longest non-permissive table key that ``name`` names as a whole
+    token — ``"qwen2"`` is qwen, ``"llama3.1-community"`` is llama3.1 — or
+    None.
+
+    It was a bare substring test both ways, so ``"acme-limited-noncommercial"``
+    (it contains "mit") or a name of ``"a"`` (it is inside "apache-2.0")
+    came out PERMISSIVE: no acceptance panel, and through the server's default
+    policy. A key must now start a token and end one (or be followed by a
+    version digit), and a permissive class is only ever given to an exact
+    name: a near-miss of a permissive license is not that license.
+    """
+    keys = [
+        key
+        for key, risk in LICENSE_CLASSIFICATION.items()
+        if risk not in (LicenseRisk.PERMISSIVE, LicenseRisk.UNKNOWN)
+    ]
+    return _token_match(name, keys)
+
+
+def _token_match(name: str, keys: list[str]) -> str | None:
+    """The longest of ``keys`` that ``name`` contains as a whole token."""
+    best: str | None = None
+    for key in keys:
+        pattern = rf"(?:^|[-./+]){re.escape(key)}(?=$|[-./+]|\d)"
+        if re.search(pattern, name) and (best is None or len(key) > len(best)):
+            best = key
+    return best
+
+
+def check_model_license(
+    repo_id: str, token: str | None = None, revision: str | None = None
+) -> LicenseInfo:
     """
     Query and classify the license of a HuggingFace model.
 
     Args:
         repo_id: Repository ID (e.g.: "meta-llama/Llama-3.1-8B")
         token: Optional authentication token
+        revision: The commit (or ref) being pulled. The model card at
+            ``main`` may say something else than the one at a pinned ref.
 
     Returns:
         LicenseInfo with all license details.
     """
     api = HfApi()
-    info = api.model_info(repo_id, token=token)
+    info = api.model_info(repo_id, revision=revision, token=token)
 
     # Try to get license from card_data
     license_id = None
@@ -191,7 +232,7 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
 
     # Normalize license_id and license_name
     license_id = license_id.lower().strip() if license_id else "other"
-    license_name_normalized = license_name.lower().strip() if license_name else None
+    license_name_normalized = _normalize(license_name) if license_name else None
 
     # If license_id is "other" but we have license_name, use license_name for classification
     classification_key = license_id
@@ -201,20 +242,18 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
     # Search for classification
     risk = LICENSE_CLASSIFICATION.get(classification_key, LicenseRisk.UNKNOWN)
 
-    # If still UNKNOWN but we have license_name, search for partial match
+    # If still UNKNOWN but we have license_name, look for a license family
     if risk == LicenseRisk.UNKNOWN and license_name_normalized:
-        for known_license, known_risk in LICENSE_CLASSIFICATION.items():
-            if known_license in license_name_normalized or license_name_normalized in known_license:
-                risk = known_risk
-                classification_key = known_license
-                break
+        family = _family_match(license_name_normalized)
+        if family is not None:
+            risk = LICENSE_CLASSIFICATION[family]
+            classification_key = family
 
-    # Search for restrictions (try partial match for variants)
-    restrictions = []
-    for key, restr in LICENSE_RESTRICTIONS.items():
-        if key in classification_key or classification_key in key:
-            restrictions = restr
-            break
+    # Restrictions of the license (or family) it was classified as
+    family = classification_key
+    if family not in LICENSE_RESTRICTIONS:
+        family = _token_match(classification_key, list(LICENSE_RESTRICTIONS)) or family
+    restrictions = list(LICENSE_RESTRICTIONS.get(family, []))
 
     # Detect if gated
     gated = getattr(info, "gated", False) or False
@@ -234,6 +273,22 @@ def check_model_license(repo_id: str, token: str | None = None) -> LicenseInfo:
         url=license_url,
         gated=bool(gated),
     )
+
+
+# Hub-supplied text (model card fields) shown in the terminal: no control
+# characters (C0, DEL, C1 — ESC/CSI/OSC sequences can erase or rewrite what
+# was printed, or plant a hyperlink) and no Unicode format characters (bidi
+# overrides reorder what is read).
+def _plain(text: object) -> str:
+    return "".join(ch for ch in str(text) if unicodedata.category(ch) not in ("Cc", "Cf"))
+
+
+def _shown(text: object) -> str:
+    """``text`` safe to put inside Rich markup: plain, and its ``[`` escaped
+    so a card cannot open its own tags (a fake "PERMISSIVE", a [link])."""
+    from rich.markup import escape
+
+    return escape(_plain(text))
 
 
 def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
@@ -257,7 +312,7 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
 
     # Permissive licenses do not require confirmation
     if license_info.risk == LicenseRisk.PERMISSIVE:
-        console.print(f"  [green]License:[/] {license_info.license_id} (permissive)")
+        console.print(f"  [green]License:[/] {_shown(license_info.license_id)} (permissive)")
         return True
 
     # Build message according to risk level
@@ -282,7 +337,7 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
     restrictions_text = ""
     if license_info.restrictions:
         restrictions_text = "\n\nRestrictions:\n" + "\n".join(
-            f"  - {r}" for r in license_info.restrictions
+            f"  - {_shown(r)}" for r in license_info.restrictions
         )
 
     gated_text = ""
@@ -292,12 +347,12 @@ def require_user_acceptance(license_info: LicenseInfo, repo_id: str) -> bool:
     console.print(
         Panel(
             f"[bold {color}]{title}[/]\n\n"
-            f"Model: {repo_id}\n"
-            f"License: {license_info.license_id}\n\n"
+            f"Model: {_shown(repo_id)}\n"
+            f"License: {_shown(license_info.license_id)}\n\n"
             f"{warning}"
             f"{restrictions_text}"
             f"{gated_text}"
-            f"\n\nDetails: {license_info.url}",
+            f"\n\nDetails: {_shown(license_info.url)}",
             title="Terms of Use",
             border_style=color,
         )
@@ -355,4 +410,4 @@ def get_license_summary(license_info: LicenseInfo) -> str:
         LicenseRisk.UNKNOWN: "[yellow]?[/]",
     }
     emoji = risk_emoji.get(license_info.risk, "?")
-    return f"{license_info.license_id} {emoji}"
+    return f"{_shown(license_info.license_id)} {emoji}"

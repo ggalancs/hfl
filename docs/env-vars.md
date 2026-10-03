@@ -87,7 +87,7 @@ the host string does not.
 
 | HFL                          | Ollama alias       | Default                  | What it does |
 |------------------------------|--------------------|--------------------------|--------------|
-| `HFL_ORIGINS`                | `OLLAMA_ORIGINS`   | (same-origin)            | Comma-separated CORS allow-list. `*` flips wildcard mode (and rejects credentials). |
+| `HFL_ORIGINS`                | `OLLAMA_ORIGINS`   | (same-origin)            | Comma-separated CORS allow-list. `*` flips wildcard mode (and rejects credentials). Also the host names a server bound to loopback answers to besides `localhost`, `127.0.0.1` and `::1`: any other `Host` header gets 403, which stops a web page from reaching a local server through DNS rebinding. Behind a reverse proxy on the same machine that forwards the public `Host`, list that name here (`https://hfl.example.com`). |
 | `HFL_RATE_LIMIT_ENABLED`     | —                  | `true`                   | Master switch for the in-process rate limiter. |
 | `HFL_RATE_LIMIT_REQUESTS`    | —                  | `60`                     | Requests per window. |
 | `HFL_RATE_LIMIT_WINDOW`      | —                  | `60`                     | Window size in seconds. |

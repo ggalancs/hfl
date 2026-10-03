@@ -15,7 +15,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from hfl.hub.license_checker import LICENSE_CLASSIFICATION, LicenseRisk
 
@@ -106,7 +106,7 @@ def _build_compliance_dashboard() -> dict[str, Any]:
     summary="Local-registry compliance overview",
     responses={200: {"description": "Compliance dashboard"}},
 )
-async def api_compliance_dashboard() -> dict[str, Any]:
+async def api_compliance_dashboard(request: Request) -> dict[str, Any]:
     """Return a one-shot snapshot of compliance-relevant metadata.
 
     Output shape::
@@ -122,5 +122,15 @@ async def api_compliance_dashboard() -> dict[str, Any]:
         }
 
     No mutation: this endpoint never writes to the registry.
+
+    ``has_hf_token`` and ``gated_without_token`` are for the owner only:
+    whether the server holds a Hub credential is not a remote caller's
+    business, and the second list says as much.
     """
-    return _build_compliance_dashboard()
+    from hfl.api.admin_guard import is_local_request
+
+    dashboard = _build_compliance_dashboard()
+    if not is_local_request(request):
+        dashboard.pop("has_hf_token", None)
+        dashboard.pop("gated_without_token", None)
+    return dashboard

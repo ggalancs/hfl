@@ -414,6 +414,41 @@ class ServerState:
     # Admission
     # ------------------------------------------------------------------
 
+    def _refuse_if_it_never_fits(self, name: str, estimate: int) -> None:
+        """Raise ``MemoryBudgetExceededError`` when ``estimate`` bytes would
+        not fit with every resident model unloaded — ``_make_room``'s own
+        refusal, made before a stale copy of ``name`` is retired. Made
+        after, a request with an oversized ``num_ctx`` unloaded the model
+        every other client was using and then was refused anyway."""
+        from hfl.engine.residency import (
+            budget_fraction,
+            current_gpu_memory,
+            current_memory,
+            plan_admission,
+        )
+        from hfl.exceptions import MemoryBudgetExceededError
+
+        if _memory_checks_disabled() or estimate <= 0:
+            return
+        memory = current_memory()
+        if memory is None:
+            return
+        gpu = current_gpu_memory()
+        # Every resident counts as reclaimable here, the stale copy included.
+        plan = plan_admission(
+            estimate, memory, self._views(), budget_fraction(), _effective_max_models(), gpu=gpu
+        )
+        if plan.reason == "too_big":
+            raise MemoryBudgetExceededError(
+                name,
+                needed=estimate,
+                plan=plan,
+                total=memory.total,
+                budget=budget_fraction(),
+                gpu_total=gpu.total if gpu is not None else 0,
+                remedy=_fitting_remedy(name),
+            )
+
     async def _make_room(self, name: str, estimate: int, deadline: float) -> "AdmissionPlan | None":
         """Evict until ``estimate`` bytes fit, waiting for busy models if
         that is what it takes. Raises when it cannot fit."""
@@ -765,6 +800,7 @@ class ServerState:
                         deadline = time.monotonic() + _busy_wait_seconds()
                         stale = self._residents.get(model_name)
                         if stale is not None:
+                            self._refuse_if_it_never_fits(model_name, estimate)
                             await self._wait_for_release(stale, deadline)
                             why = (
                                 "reloading with a larger context"

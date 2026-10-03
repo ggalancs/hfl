@@ -158,8 +158,13 @@ def test_what_it_cannot_render_raises(template) -> None:
 
 
 def test_output_is_bounded() -> None:
-    nested = "{{ range .L }}{{ range $.L }}{{ range $.L }}{{ $.S }}{{ end }}{{ end }}{{ end }}"
+    # Few steps, much output: the output cap.
+    wide = "{{ range .L }}{{ $.S }}{{ end }}"
     with pytest.raises(GoTemplateError, match="too large"):
+        render_strict(wide, {"L": list(range(200)), "S": "x" * 100_000})
+    # Many steps (200**3): the work cap stops it first.
+    nested = "{{ range .L }}{{ range $.L }}{{ range $.L }}{{ $.S }}{{ end }}{{ end }}{{ end }}"
+    with pytest.raises(GoTemplateError, match="too large|too much work"):
         render_strict(nested, {"L": list(range(200)), "S": "x" * 10})
 
 

@@ -259,6 +259,22 @@ def estimate_footprint(model_path: str | Path, n_ctx: int = 0) -> Footprint:
     return _UNKNOWN
 
 
+def advertised_context(model_path: str | Path) -> int:
+    """The context length the model at ``model_path`` was trained for (its
+    GGUF header's, or ``max_position_embeddings``); 0 when unknown. Never
+    raises."""
+    path = Path(model_path)
+    try:
+        ggufs = _gguf_files(path)
+        if ggufs:
+            return _gguf_max_ctx(ggufs[0])
+        if path.is_dir():
+            return int(_text_config(path).get("max_position_embeddings") or 0)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug("could not read the context length of %s: %s", path, exc)
+    return 0
+
+
 def footprint_of_loaded(model_path: str | Path, engine: Any) -> Footprint:
     """Re-measure with the context the engine actually opened.
 

@@ -16,6 +16,7 @@ abusive schema (deep recursion, 10K properties) fails fast with
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from hfl.exceptions import ValidationError as APIValidationError
@@ -38,6 +39,40 @@ MAX_SCHEMA_PROPERTIES = 200
 # Maximum length of a ``pattern`` regex inside a schema — prevents
 # ReDoS against the grammar compiler.
 MAX_PATTERN_LENGTH = 1024
+
+# Largest repetition bound a schema may ask for (``minItems`` /
+# ``maxItems`` / ``minLength`` / ``maxLength`` and the like, and a
+# ``{m,n}`` quantifier in a ``pattern``). llama-cpp-python writes every
+# repetition out in the grammar: ``maxLength: 10**7`` took 638 MB and
+# ``10**9`` some 60 GB. Near 1000 optional repetitions llama.cpp refuses
+# the grammar anyway (where exactly depends on the rest of it), and the
+# in-process engine went down on a refused one: ``llama_cpp.py`` checks
+# that the grammar builds before sampling.
+MAX_SCHEMA_REPEAT = 1000
+
+# A raw ``GBNF:`` grammar goes to llama.cpp as it is. Its parser recurses
+# once per nested group: 100 000 nested parentheses (200 KB) crashed the
+# in-process engine — the whole server — and killed llama-server.
+MAX_GRAMMAR_BYTES = 64 * 1024
+MAX_GRAMMAR_DEPTH = 256
+
+# Keywords whose value is a subschema, a list of them, or a map of them.
+# All of them are walked: a limit enforced on some keywords only is a
+# limit a schema nests its way around.
+_SUBSCHEMA_KEYS = (
+    "items", "additionalItems", "contains", "not", "additionalProperties",
+    "propertyNames", "if", "then", "else", "unevaluatedItems",
+    "unevaluatedProperties",
+)  # fmt: skip
+_SUBSCHEMA_LIST_KEYS = ("allOf", "anyOf", "oneOf", "prefixItems")
+_SUBSCHEMA_MAP_KEYS = (
+    "properties", "patternProperties", "definitions", "$defs", "dependentSchemas",
+)  # fmt: skip
+_REPEAT_KEYS = (
+    "minItems", "maxItems", "minLength", "maxLength", "minProperties",
+    "maxProperties", "minContains", "maxContains",
+)  # fmt: skip
+_QUANTIFIER_RE = re.compile(r"\{\s*(\d*)\s*(?:,\s*(\d*)\s*)?\}")
 
 
 def normalize_ollama_format(value: str | dict | None) -> str | dict | None:
@@ -62,6 +97,7 @@ def normalize_ollama_format(value: str | dict | None) -> str | dict | None:
             return None
         # Raw GBNF passthrough for advanced users.
         if value.startswith("GBNF:"):
+            validate_gbnf(value[len("GBNF:") :])
             return value
         raise APIValidationError(f"format must be 'json' or a JSON Schema object, got {value!r}")
     if isinstance(value, dict):
@@ -126,6 +162,38 @@ def validate_json_schema(schema: dict) -> None:
         raise APIValidationError("JSON Schema must be an object at the top level")
 
 
+def validate_gbnf(grammar: str) -> None:
+    """Bound a raw GBNF grammar before llama.cpp parses it: its size, and
+    how deep its groups nest (``(``, ``[``, ``{`` outside string literals,
+    character classes and comments).
+
+    Raises:
+        APIValidationError: The grammar is too large or nests too deep.
+    """
+    if len(grammar.encode("utf-8")) > MAX_GRAMMAR_BYTES:
+        raise APIValidationError(f"GBNF grammar exceeds {MAX_GRAMMAR_BYTES} bytes")
+    depth = 0
+    i, n = 0, len(grammar)
+    while i < n:
+        ch = grammar[i]
+        if ch in '"[':
+            # A literal runs to its unescaped closer; nothing inside it nests.
+            closer = '"' if ch == '"' else "]"
+            i += 1
+            while i < n and grammar[i] != closer:
+                i += 2 if grammar[i] == "\\" else 1
+        elif ch == "#":
+            newline = grammar.find("\n", i)
+            i = n if newline == -1 else newline
+        elif ch in "({":
+            depth += 1
+            if depth > MAX_GRAMMAR_DEPTH:
+                raise APIValidationError(f"GBNF grammar nesting exceeds {MAX_GRAMMAR_DEPTH} levels")
+        elif ch in ")}":
+            depth = max(0, depth - 1)
+        i += 1
+
+
 def _validate_schema_recursive(
     node: Any,
     *,
@@ -146,10 +214,25 @@ def _validate_schema_recursive(
                 raise APIValidationError(
                     f'JSON Schema "pattern" exceeds {MAX_PATTERN_LENGTH} chars'
                 )
+            # The grammar spells a quantifier out like any other repetition.
+            for match in _QUANTIFIER_RE.finditer(pattern):
+                if any(len(b) > 4 or int(b) > MAX_SCHEMA_REPEAT for b in match.groups() if b):
+                    raise APIValidationError(
+                        f'JSON Schema "pattern" repeats more than {MAX_SCHEMA_REPEAT} times'
+                    )
+
+        for key in _REPEAT_KEYS:
+            bound = node.get(key)
+            if (
+                isinstance(bound, (int, float))
+                and not isinstance(bound, bool)
+                and bound > MAX_SCHEMA_REPEAT
+            ):
+                raise APIValidationError(f'JSON Schema "{key}" exceeds {MAX_SCHEMA_REPEAT}')
 
         # Count properties across ``properties`` / ``definitions`` /
-        # ``$defs``.
-        for key in ("properties", "definitions", "$defs"):
+        # ``$defs`` and the other maps of subschemas.
+        for key in _SUBSCHEMA_MAP_KEYS:
             sub = node.get(key)
             if isinstance(sub, dict):
                 counters["properties"] += len(sub)
@@ -161,17 +244,15 @@ def _validate_schema_recursive(
                 for child in sub.values():
                     _validate_schema_recursive(child, depth=depth + 1, counters=counters)
 
-        # Recurse into other structural keys.
-        for key in ("items", "additionalItems", "contains", "not"):
+        # ``dependencies`` maps a property to a subschema or to a list of
+        # property names (strings, which the walk passes over).
+        for key in (*_SUBSCHEMA_KEYS, *_SUBSCHEMA_LIST_KEYS, "dependencies"):
             sub = node.get(key)
-            if sub is not None:
+            if isinstance(sub, dict) and key == "dependencies":
+                for child in sub.values():
+                    _validate_schema_recursive(child, depth=depth + 1, counters=counters)
+            elif sub is not None:
                 _validate_schema_recursive(sub, depth=depth + 1, counters=counters)
-
-        for key in ("allOf", "anyOf", "oneOf"):
-            arr = node.get(key)
-            if isinstance(arr, list):
-                for sub in arr:
-                    _validate_schema_recursive(sub, depth=depth + 1, counters=counters)
 
     elif isinstance(node, list):
         for item in node:

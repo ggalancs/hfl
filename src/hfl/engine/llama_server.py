@@ -385,6 +385,25 @@ def _as_marker(call: dict) -> str:
     )
 
 
+# Names of secrets: any variable with one of these words in its name.
+_SECRET_WORDS = frozenset({"KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIALS"})
+
+
+def _child_env(key: str) -> dict[str, str]:
+    """The environment for llama-server and its guard: HFL's, without its
+    secrets (HF_TOKEN, HFL_API_KEY, the search providers' keys…), and with
+    llama-server's own key. llama-server parses whatever a client sends —
+    prompts, grammars, images — and needs none of them; what it never holds
+    it cannot give away."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not _SECRET_WORDS.intersection(name.upper().split("_"))
+    }
+    env["LLAMA_API_KEY"] = key
+    return env
+
+
 def start_server(
     base_argv: list[str], model_path: str, log_path: Path, timeout: float
 ) -> tuple[subprocess.Popen[bytes], httpx.Client]:
@@ -405,7 +424,7 @@ def start_server(
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
-            env={**os.environ, "LLAMA_API_KEY": key},
+            env=_child_env(key),
             # Its own process group, guard and llama-server: what
             # ``stop_server`` kills when SIGTERM is not enough.
             start_new_session=os.name != "nt",

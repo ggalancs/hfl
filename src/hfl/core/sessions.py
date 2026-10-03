@@ -14,6 +14,7 @@ pickle.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -65,11 +66,10 @@ class ChatSession:
 
 def sessions_dir() -> Path:
     """Return ``~/.hfl/sessions`` creating it if missing."""
-    from hfl.config import config
+    from hfl.config import config, private_dir
 
-    path = config.home_dir / "sessions"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    # Transcripts are private: 0700, not the umask's world-readable 0755.
+    return private_dir(config.home_dir / "sessions")
 
 
 def _validate_name(name: str) -> str:
@@ -94,10 +94,13 @@ def save_session(session: ChatSession) -> Path:
     session.touch()
     path = _path_for(session.name)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(asdict(session), indent=2, ensure_ascii=False, default=str),
-        encoding="utf-8",
-    )
+    data = json.dumps(asdict(session), indent=2, ensure_ascii=False, default=str)
+    # 0600 from creation (write_text used the umask: 0644, readable by every
+    # local user). A leftover tmp keeps its old mode under O_TRUNC, so drop it.
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(data)
     tmp.replace(path)
     return path
 

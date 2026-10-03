@@ -301,6 +301,99 @@ async def serve_stdio(capabilities: list[str] | None = None) -> None:
         await server.run(read, write, server.create_initialization_options())
 
 
+_LOOPBACK_NAMES = ("127.0.0.1", "localhost", "[::1]")
+
+
+def _bind_host_names(host: str) -> list[str]:
+    """Host-header names a client may legitimately use for ``host``.
+
+    Loopback names always; the bind address itself; for a wildcard bind
+    (0.0.0.0 / ::) every local interface address plus this machine's
+    hostname, since LAN clients reach it by any of them. Never a domain
+    the operator did not name: a rebinding attacker's domain is exactly
+    what must not match.
+    """
+    import socket
+
+    names: list[str] = list(_LOOPBACK_NAMES)
+
+    def _add(name: str) -> None:
+        name = name.strip().lower()
+        if not name:
+            return
+        if ":" in name and not name.startswith("["):
+            name = f"[{name.split('%')[0]}]"  # IPv6 literal, scope id dropped
+        if name not in names:
+            names.append(name)
+
+    if host in ("0.0.0.0", "::", ""):
+        try:
+            import psutil
+
+            for addrs in psutil.net_if_addrs().values():
+                for a in addrs:
+                    if a.family in (socket.AF_INET, socket.AF_INET6):
+                        _add(a.address)
+        except Exception:
+            logger.debug("could not enumerate interfaces for MCP allowed hosts")
+        hostname = socket.gethostname()
+        _add(hostname)
+        if not hostname.endswith(".local"):
+            _add(f"{hostname}.local")
+    else:
+        _add(host)
+    return names
+
+
+def _transport_security(host: str) -> Any:
+    """DNS-rebinding protection for the SSE transport, or None if unsupported.
+
+    The SDK defaults it OFF: without it any web page the user visits can
+    rebind its domain to 127.0.0.1 and drive this server's tools.
+    """
+    try:
+        from mcp.server.transport_security import TransportSecuritySettings
+    except ImportError:  # SDK older than the setting (added in mcp 1.10)
+        logger.warning("mcp SDK has no DNS-rebinding protection; upgrade mcp")
+        return None
+    names = _bind_host_names(host)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[*names, *(f"{n}:*" for n in names)],
+        allowed_origins=[
+            f"{scheme}://{n}{port}"
+            for scheme in ("http", "https")
+            for n in names
+            for port in ("", ":*")
+        ],
+    )
+
+
+def _build_sse_app(server: Any, host: str) -> Any:
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+
+    security = _transport_security(host)
+    sse = (
+        SseServerTransport("/messages/", security_settings=security)
+        if security is not None
+        else SseServerTransport("/messages/")
+    )
+
+    async def handle_sse(request: Any) -> None:
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+            read, write = streams
+            await server.run(read, write, server.create_initialization_options())
+
+    return Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+        ]
+    )
+
+
 async def serve_sse(host: str, port: int, capabilities: list[str] | None = None) -> None:
     """Run the HFL MCP server over SSE on ``host:port``.
 
@@ -309,22 +402,7 @@ async def serve_sse(host: str, port: int, capabilities: list[str] | None = None)
     """
     server = HFLMCPServer(capabilities).build_server()
     import uvicorn
-    from mcp.server.sse import SseServerTransport
-    from starlette.applications import Starlette
-    from starlette.routing import Mount, Route
 
-    sse = SseServerTransport("/messages/")
-
-    async def handle_sse(request: Any) -> None:
-        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-            read, write = streams
-            await server.run(read, write, server.create_initialization_options())
-
-    app = Starlette(
-        routes=[
-            Route("/sse", endpoint=handle_sse),
-            Mount("/messages/", app=sse.handle_post_message),
-        ]
-    )
+    app = _build_sse_app(server, host)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     await uvicorn.Server(config).serve()

@@ -42,10 +42,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import HTTPConnection
 
 from hfl import __version__
 from hfl.api.exception_handlers import register_exception_handlers
-from hfl.api.middleware import JSONBodyMiddleware, RequestBodyLimitMiddleware, RequestLogger
+from hfl.api.middleware import (
+    HostValidationMiddleware,
+    JSONBodyMiddleware,
+    RequestBodyLimitMiddleware,
+    RequestLogger,
+)
 from hfl.api.routes_anthropic import router as anthropic_router
 from hfl.api.routes_batch import router as batch_router
 from hfl.api.routes_benchmark import router as benchmark_router
@@ -94,7 +100,7 @@ _AUTH_BACKOFF_AFTER = 3  # first failures answer immediately
 _AUTH_BACKOFF_CAP_S = 2.0
 
 
-async def _record_auth_failure(request: Request) -> None:
+async def _record_auth_failure(request: HTTPConnection) -> None:
     """Count a failed authentication and sleep proportionally.
 
     The delay starts only after a few failures so a human who mistypes a
@@ -115,7 +121,7 @@ async def _record_auth_failure(request: Request) -> None:
         logger.warning("repeated API key failures from %s (%d consecutive)", peer, count)
 
 
-def _clear_auth_failures(request: Request) -> None:
+def _clear_auth_failures(request: HTTPConnection) -> None:
     """Reset a peer's counter after a successful authentication."""
     peer = request.client.host if request.client else "unknown"
     _AUTH_FAILURES.pop(peer, None)
@@ -187,7 +193,11 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Skip auth for public endpoints — exact match, no prefixes.
         path = request.url.path.rstrip("/") or "/"
-        if path in self.PUBLIC_ENDPOINTS:
+        # ``/health/deep?probe=…`` runs inference, which is never public. Any
+        # value of the parameter, so a spelling FastAPI reads as true cannot
+        # slip past a list of true spellings here.
+        probing = path == "/health/deep" and "probe" in request.query_params
+        if path in self.PUBLIC_ENDPOINTS and not probing:
             response = await call_next(request)
             return response
 
@@ -493,6 +503,14 @@ app.add_middleware(RequestLogger)
 # ``curl -d '{...}'`` without a Content-Type, as in Ollama's docs.
 app.add_middleware(JSONBodyMiddleware)
 
+# DNS-rebinding guard, just inside CORS: a request for a host that is not
+# this machine is refused before auth, routes or logging see it (a rebound
+# page is same-origin, so it never sends the preflight CORS answers).
+# ``_bound_host`` is the address ``start_server`` bound (None when another
+# ASGI server runs the app; the guard then reads the connection's address).
+_bound_host: str | None = None
+app.add_middleware(HostValidationMiddleware, bound_host=lambda: _bound_host)
+
 # CORS — added LAST so it is the OUTERMOST middleware and can answer browser
 # preflight (OPTIONS) requests before auth/rate-limit run. Configurable via
 # config.py: ["*"] when cors_allow_all, otherwise the explicit origins.
@@ -572,11 +590,18 @@ def start_server(
                  - Authorization: Bearer <api_key>
                  - X-API-Key: <api_key>
     """
+    global _bound_host
     get_state().api_key = api_key
-    uvicorn.run(
-        app,
-        host=host or config.host,
-        port=port or config.port,
-        log_level="info",
-        timeout_graceful_shutdown=30,
-    )
+    _bound_host = host or config.host
+    try:
+        uvicorn.run(
+            app,
+            host=_bound_host,
+            port=port or config.port,
+            log_level="info",
+            timeout_graceful_shutdown=30,
+        )
+    finally:
+        # Nothing is bound once uvicorn returns; a stale value would apply
+        # this server's Host rules to the next app run in the process.
+        _bound_host = None

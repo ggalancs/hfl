@@ -11,7 +11,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
@@ -19,6 +19,7 @@ from hfl.api.converters import ollama_to_generation_config
 from hfl.api.errors import service_unavailable, structured_output_unsupported
 from hfl.api.helpers import (
     apply_keep_alive,
+    caller_is_owner,
     prepare_stream_response,
     queue_response_from_error,
     run_dispatched,
@@ -299,6 +300,7 @@ def _build_chat_message(
 async def api_generate(
     req: GenerateRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict[str, Any] | StreamingResponse | Response:
     """Ollama-compatible ``POST /api/generate`` (raw prompt completion).
 
@@ -309,7 +311,10 @@ async def api_generate(
     state (surfaced by ``/api/ps``'s ``expires_at``) or queues an
     immediate unload when set to 0.
     """
-    unload_after = apply_keep_alive(req.model, req.keep_alive)
+    # SEC: a model is shared by every client; only the owner may unload it
+    # (keep_alive 0) or pin it forever (negative), as with /api/stop.
+    owner = caller_is_owner(request)
+    unload_after = apply_keep_alive(req.model, req.keep_alive, owner=owner)
     if not req.prompt:
         return await _preload_reply(req.model, req.options, unload_after, chat=False)
     await _ensure_model_loaded(req.model, req.options)
@@ -536,6 +541,7 @@ async def _stream_generate(
 async def api_chat(
     req: ChatRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict[str, Any] | StreamingResponse | Response:
     """Ollama-compatible ``POST /api/chat`` (multi-turn chat).
 
@@ -572,8 +578,16 @@ async def api_chat(
                     "retryable": False,
                 },
             )
+        # The opt-in says the loop may run, not for whom: the tools run with
+        # the operator's privileges (their files, their credentials), so a
+        # remote API client — or a web page on the owner's browser — may not
+        # drive them.
+        from hfl.api.admin_guard import require_owner
 
-    unload_after = apply_keep_alive(req.model, req.keep_alive)
+        require_owner(request, "agent loop")
+
+    owner = caller_is_owner(request)
+    unload_after = apply_keep_alive(req.model, req.keep_alive, owner=owner)
     if not req.messages:
         return await _preload_reply(req.model, req.options, unload_after, chat=True)
     await _ensure_model_loaded(req.model, req.options)
@@ -591,8 +605,10 @@ async def api_chat(
     # connected external server is reachable from the model without
     # the client having to declare them. Best-effort — if the MCP
     # SDK isn't installed or no servers are connected, this is a
-    # no-op.
-    tools = _merge_mcp_tools(tools)
+    # no-op. SEC: the owner's only — the schemas name the operator's
+    # servers and tools, and a remote client could not run them anyway.
+    if owner:
+        tools = _merge_mcp_tools(tools)
 
     # OLLAMA_PARITY_PLAN P0-5: structured-output constraint.
     if req.format is not None:

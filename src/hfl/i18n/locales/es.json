@@ -367,6 +367,7 @@
     "use_list_to_see": "Usa 'hfl list' para ver los modelos disponibles.",
     "missing_dependency": "Dependencia faltante",
     "cannot_convert_gguf": "No se puede convertir a GGUF",
+    "convert_remote_code": "{file} ejecutaría Python del repositorio del modelo durante la conversión (el conversor de llama.cpp confía en código remoto para algunas arquitecturas). Rechazado: define HFL_ALLOW_REMOTE_CODE=1 solo si confías en este repositorio, o descarga una versión GGUF.",
     "create_incomplete": "El servidor se detuvo antes de crear el modelo: no se ha guardado nada. Su log dice por qué.",
     "conversion_failed": "La conversión a GGUF ha fallado",
     "model_downloaded_but": "El modelo se ha descargado pero no se puede ejecutar con llama.cpp.",
@@ -410,7 +411,9 @@
     "continue_question": "¿Continuar?",
     "playback_failed": "No se pudo reproducir el audio",
     "refuse_unattended_bind": "No se escucha en {host} sin nadie que lo confirme. Define HFL_API_KEY para exigir una clave en cada petición, o HFL_ACCEPT_NETWORK_EXPOSURE=true para exponerlo sin ella.",
-    "container_bind": "Dentro de un contenedor: accesible donde se publique su puerto (docker run -p, ports de compose), sin clave. Define HFL_API_KEY para exigirla."
+    "container_bind": "Dentro de un contenedor: accesible donde se publique su puerto (docker run -p, ports de compose), sin clave. Define HFL_API_KEY para exigirla.",
+    "container_host_network": "Este contenedor comparte la red del anfitrión (--network host / hostNetwork): se escucha en las interfaces del propio anfitrión, no solo en los puertos publicados.",
+    "container_bind_unverified": "Dentro de un contenedor, sin clave. No se pudo comprobar que tenga red propia: con la red del anfitrión (--network host / hostNetwork) el servidor es accesible en las interfaces del anfitrión. Define HFL_API_KEY para exigir una clave."
   },
   "legal": {
     "ai_disclaimer": "Los modelos de IA pueden generar información incorrecta, sesgada o inapropiada. El usuario es responsable del uso que haga de las respuestas generadas."

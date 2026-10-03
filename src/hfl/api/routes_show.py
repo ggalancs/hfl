@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from hfl.converter.modelfile import render_modelfile
@@ -138,7 +138,7 @@ def _details(manifest: Any) -> dict[str, Any]:
         404: {"description": "Model not found in the local registry."},
     },
 )
-async def show_model(req: ShowRequest) -> dict[str, Any]:
+async def show_model(req: ShowRequest, request: Request) -> dict[str, Any]:
     """Ollama-compatible ``POST /api/show``.
 
     Looks up the registry entry for ``req.model`` and returns the
@@ -149,8 +149,11 @@ async def show_model(req: ShowRequest) -> dict[str, Any]:
     if manifest is None:
         raise ModelNotFoundError(req.model)
 
+    from hfl.api.admin_guard import is_local_request
+
     body = {
-        "modelfile": render_modelfile(manifest),
+        # Host paths only for the owner, like /api/ps's host figures.
+        "modelfile": render_modelfile(manifest, reveal_paths=is_local_request(request)),
         "parameters": _format_parameters(manifest),
         "template": model_template(manifest),
         "details": _details(manifest),

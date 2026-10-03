@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from hfl.hub.connectivity import describe_hub_failure
 from hfl.hub.discovery import (
@@ -65,10 +65,12 @@ def _annotate_local_availability(entries: list[DiscoveryEntry]) -> None:
     responses={
         200: {"description": "Discovery results"},
         400: {"description": "Invalid filter combination"},
+        403: {"description": "refresh=true from a remote caller"},
         503: {"description": "Hub unavailable"},
     },
 )
 async def api_discover(
+    request: Request,
     q: str | None = Query(default=None, max_length=256),
     family: str | None = Query(default=None, max_length=64),
     task: str | None = Query(default=None, max_length=64),
@@ -86,7 +88,13 @@ async def api_discover(
     The endpoint is read-only and does not require authentication
     (gated repos still need ``HF_TOKEN`` to actually load — but
     they're visible in discovery so users learn they exist).
+    ``refresh=true`` is the owner's: it forces a Hub query with the
+    owner's implicit token on every call, cache or not.
     """
+    if refresh:
+        from hfl.api.admin_guard import require_owner
+
+        require_owner(request, "discover refresh")
     query = DiscoveryQuery(
         q=q,
         family=family,

@@ -94,7 +94,12 @@ class TestEnsureAuth:
 
     def test_gated_model_requires_token_interactive(self):
         """Test that gated models prompt for token when none available."""
-        with patch("hfl.hub.auth.HfApi") as mock_api_class:
+        # The prompt appears only at an interactive terminal (never from a
+        # server's worker thread or without a TTY).
+        with (
+            patch("hfl.hub.auth.stdin_is_terminal", return_value=True),
+            patch("hfl.hub.auth.HfApi") as mock_api_class,
+        ):
             mock_api = MagicMock()
             # First call fails (no token), second call succeeds (with user-provided token)
             mock_api.model_info.side_effect = [
@@ -122,7 +127,12 @@ class TestEnsureAuth:
 
     def test_gated_model_invalid_token_raises(self):
         """Test that invalid token raises RuntimeError."""
-        with patch("hfl.hub.auth.HfApi") as mock_api_class:
+        # The prompt appears only at an interactive terminal (never from a
+        # server's worker thread or without a TTY).
+        with (
+            patch("hfl.hub.auth.stdin_is_terminal", return_value=True),
+            patch("hfl.hub.auth.HfApi") as mock_api_class,
+        ):
             mock_api = MagicMock()
             # Both HfHubHTTPError calls - first triggers prompt, second fails validation
             mock_api.model_info.side_effect = _make_hf_http_error("Invalid token")

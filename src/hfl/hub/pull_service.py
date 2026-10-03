@@ -93,10 +93,13 @@ def disk_space(resolved: ResolvedModel, convert_to: str | None) -> DiskSpace | N
     from hfl.config import config
     from hfl.hub.downloader import _SAFETENSORS_FILES
     from hfl.hub.quant_table import _BITS_PER_WEIGHT
+    from hfl.security import remote_code_allowed
 
     try:
         info = HfApi().model_info(
-            resolved.repo_id, revision=getattr(resolved, "revision", None), files_metadata=True
+            resolved.repo_id,
+            revision=getattr(resolved, "commit_sha", None) or getattr(resolved, "revision", None),
+            files_metadata=True,
         )
     except Exception:  # offline or refused: the download itself will say
         logger.debug("no file sizes for %s", resolved.repo_id, exc_info=True)
@@ -107,8 +110,8 @@ def disk_space(resolved: ResolvedModel, convert_to: str | None) -> DiskSpace | N
         names = [n for n in names if n]
     elif resolved.format == "safetensors":
         names = [n for n in sizes if any(fnmatch(n, pattern) for pattern in _SAFETENSORS_FILES)]
-    else:
-        names = list(sizes)
+    else:  # a whole repo, less the code it is not allowed to fetch
+        names = [n for n in sizes if not n.endswith(".py") or remote_code_allowed()]
     download = sum(sizes.get(n, 0) for n in names)
     if not download:
         return None
@@ -216,9 +219,18 @@ def _llm_not_gguf(
 def _convert(local_path: Path, repo_id: str, quantize: str) -> Path:
     import subprocess
 
-    from hfl.converter.gguf_converter import GGUFConverter, check_model_convertibility
+    from hfl.converter.gguf_converter import (
+        GGUFConverter,
+        check_model_convertibility,
+        check_remote_code,
+    )
     from hfl.exceptions import ConversionError
 
+    # Before anything else: converting can run the repo's Python (see
+    # check_remote_code), and the converter is fetched only after this.
+    refused = check_remote_code(local_path)
+    if refused is not None:
+        raise PullStepError("errors.cannot_convert_gguf", reason=refused, repo=repo_id)
     convertible, reason = check_model_convertibility(local_path)
     if not convertible:
         raise PullStepError("errors.cannot_convert_gguf", reason=reason, repo=repo_id)

@@ -369,7 +369,24 @@ def queue_response_from_error(
     return queue_timeout(waited_seconds=exc.waited_seconds, path=path)
 
 
-def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> bool:
+def caller_is_owner(request: Any) -> bool:
+    """Whether ``request`` comes from the owner, as :func:`require_owner`
+    decides it (loopback peer without relay headers, or remote admin opted
+    in; never a web page with a foreign ``Origin``) — asked, not enforced,
+    for routes that serve everyone but keep part of what they do for the
+    owner."""
+    from hfl.api.admin_guard import require_owner
+
+    try:
+        # An operation name the audit catalogue does not map: a question
+        # asked on every request must not write an audit record.
+        require_owner(request, "owner check")
+    except HTTPException:
+        return False
+    return True
+
+
+def apply_keep_alive(model_name: str, keep_alive: str | int | float | None, *, owner: bool) -> bool:
     """Honour an Ollama-style ``keep_alive`` value on a request.
 
     Records the resulting deadline on the server state so ``/api/ps``
@@ -390,6 +407,11 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
     Returns:
         ``True`` when post-response unload is requested; ``False`` when
         the deadline was recorded or the field was omitted.
+
+        owner: Whether the caller is the owner. A model is shared by every
+            client, and unloading one or pinning it forever is what
+            ``/api/stop`` keeps for the owner: for anyone else those two
+            values count as an omitted field.
 
     Raises:
         APIValidationError: The value can't be parsed (maps to 400).
@@ -415,6 +437,9 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None) -> b
     entry = get_registry().get(model_name)
     if entry is not None:
         model_name = str(entry.name)
+
+    if not owner and delta is not None and (is_unload_immediately(delta) or is_never_expire(delta)):
+        delta = None
 
     if delta is None:
         # Field omitted: the model keeps the keep_alive it already had — an

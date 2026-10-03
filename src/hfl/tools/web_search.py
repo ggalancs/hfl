@@ -137,7 +137,7 @@ class DuckDuckGoBackend(WebSearchBackend):
                 resp.raise_for_status()
                 body = resp.text
         except httpx.HTTPError as exc:
-            logger.warning("DuckDuckGo search failed: %s", exc)
+            logger.warning("DuckDuckGo search failed: %s", _redacted(exc))
             raise WebSearchUpstreamError("web search backend unreachable") from exc
         # DuckDuckGo answers a client it takes for a bot with HTTP 202 and a
         # challenge page — not an error to raise_for_status — which parsed
@@ -202,7 +202,7 @@ class TavilyBackend(WebSearchBackend):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            logger.warning("Tavily search failed: %s", exc)
+            logger.warning("Tavily search failed: %s", _redacted(exc))
             raise _classified(exc, "Tavily") from exc
         return [
             {
@@ -238,7 +238,7 @@ class BraveBackend(WebSearchBackend):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            logger.warning("Brave search failed: %s", exc)
+            logger.warning("Brave search failed: %s", _redacted(exc))
             raise _classified(exc, "Brave") from exc
         web = data.get("web", {})
         return [
@@ -279,7 +279,7 @@ class SerpAPIBackend(WebSearchBackend):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            logger.warning("SerpAPI search failed: %s", exc)
+            logger.warning("SerpAPI search failed: %s", _redacted(exc))
             raise _classified(exc, "SerpAPI") from exc
         return [
             {
@@ -294,6 +294,18 @@ class SerpAPIBackend(WebSearchBackend):
 # ----------------------------------------------------------------------
 # Factory
 # ----------------------------------------------------------------------
+
+
+def _redacted(exc: httpx.HTTPError) -> str:
+    """Status + URL without its query: str(HTTPStatusError) carries the full
+    URL, and SerpAPI's has ``api_key=`` in it — the key ended up in the log."""
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    try:
+        url = exc.request.url
+        where = f"{url.scheme}://{url.host}{url.path}"
+    except RuntimeError:  # an exception raised before any request was built
+        where = "?"
+    return f"HTTP {status} from {where}" if status else f"{type(exc).__name__} for {where}"
 
 
 def _classified(exc: httpx.HTTPError, service: str) -> WebSearchError:
@@ -334,7 +346,7 @@ class SearXNGBackend(WebSearchBackend):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            logger.warning("SearXNG search failed: %s", exc)
+            logger.warning("SearXNG search failed: %s", _redacted(exc))
             raise _classified(exc, "SearXNG") from exc
         except ValueError as exc:  # not JSON: an HTML page, a proxy's error
             raise WebSearchUpstreamError("SearXNG answered, but not in JSON") from exc
@@ -377,7 +389,7 @@ class ExaBackend(WebSearchBackend):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            logger.warning("Exa search failed: %s", exc)
+            logger.warning("Exa search failed: %s", _redacted(exc))
             raise _classified(exc, "Exa") from exc
         return [
             {

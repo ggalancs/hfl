@@ -115,8 +115,11 @@ def start_server(
     """``hfl serve`` on 127.0.0.1:``port``, logging to ``log_path``."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = hfl_argv("serve", "--host", "127.0.0.1", "--port", str(port))
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     if api_key:
-        cmd += ["--api-key", api_key]
+        # Through the environment, which `serve` reads: on argv every local
+        # user could read the key in `ps`.
+        env["HFL_API_KEY"] = api_key
     if parallel:
         cmd += ["--parallel", str(parallel)]
     with open(log_path, "ab") as log:
@@ -125,7 +128,7 @@ def start_server(
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env=env,
         )
 
 

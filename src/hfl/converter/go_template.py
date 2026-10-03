@@ -25,7 +25,8 @@ Templates are attacker-controlled (``template`` in an /api/generate body,
 ``TEMPLATE`` in a Modelfile), so: field lookups never resolve a segment
 starting with ``_`` and never walk into a primitive's attributes, no function
 reaches Python beyond the list above, and output is capped
-(``MAX_OUTPUT``) — nested ranges multiply.
+(``MAX_OUTPUT``) — nested ranges multiply — and so is the work done
+(``MAX_STEPS``): ``{{ range 9999999999 }}{{ end }}`` prints nothing.
 
 :func:`render_go_template` falls back to the literal source on any error
 (``/api/generate``: a convenience, never a gate); :func:`render_strict`
@@ -37,7 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,6 +47,10 @@ logger = logging.getLogger(__name__)
 __all__ = ["render_go_template", "render_strict", "GoStruct", "GoTemplateError", "MAX_OUTPUT"]
 
 MAX_OUTPUT = 4_000_000  # characters
+# Nodes rendered plus range iterations. A real template over a long chat is a
+# few dozen per message; an empty loop over an integer literal output never
+# caught (``{{ range 3000000 }}`` built a 3M-item list first: 319 MB).
+MAX_STEPS = 1_000_000
 
 
 class GoTemplateError(ValueError):
@@ -597,6 +602,12 @@ class _Renderer:
         self.out: list[str] = []
         self.size = 0
         self.loops = 0  # ranges being rendered: where break/continue may be
+        self.steps = 0
+
+    def step(self) -> None:
+        self.steps += 1
+        if self.steps > MAX_STEPS:
+            raise GoTemplateError("template does too much work")
 
     def emit(self, text: str) -> None:
         self.size += len(text)
@@ -643,6 +654,7 @@ class _Renderer:
             scope.vars[pipe.decl[0]] = value
 
     def render(self, node: _Node, dot: Any, scope: _Scope) -> None:
+        self.step()
         if isinstance(node, _Block):
             inner = _Scope(scope)
             for child in node.children:
@@ -680,17 +692,19 @@ class _Renderer:
 
     def range(self, node: _Range, dot: Any, scope: _Scope) -> None:
         value = self.pipeline(node.pipe, dot, scope)
+        items: Iterable[tuple[Any, Any]]
         if isinstance(value, Mapping):
             items = [(k, value[k]) for k in sorted(value)]
         elif isinstance(value, (list, tuple)):
             items = list(enumerate(value))
         elif isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            items = [(i, i) for i in range(value)]
+            # Lazily: the count is the template's (an integer literal), not data.
+            items = ((i, i) for i in range(value)) if value else []
         elif value is None:
             items = []
         else:
             raise GoTemplateError(f"range over {type(value).__name__}")
-        if not items:
+        if isinstance(items, list) and not items:
             if node.else_ is not None:
                 self.render(node.else_, dot, scope)
             return
@@ -698,6 +712,7 @@ class _Renderer:
         if len(names) > 2:
             raise GoTemplateError("too many variables in range")
         for key, item in items:
+            self.step()
             inner = _Scope(scope)
             if len(names) == 1:
                 inner.vars[names[0]] = item

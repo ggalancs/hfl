@@ -225,14 +225,28 @@ def check_model_convertibility(model_path: Path) -> tuple[bool, str]:
     return (True, "")
 
 
-# Pinned llama.cpp version for reproducibility and security
-# Update this when testing a new version
+# The converter is code HFL runs, so it is the release HFL pins for
+# llama-server (``hfl.engine.llama_server_dist.RELEASE``), checked: a clone
+# must land on LLAMA_CPP_COMMIT, an archive must hash to LLAMA_CPP_SHA256.
+# It used to fetch ``master`` unchecked: whatever was pushed last ran here.
+# Move all three together (and RELEASE) when testing a new version.
 LLAMA_CPP_REPO = "https://github.com/ggml-org/llama.cpp.git"
-LLAMA_CPP_BRANCH = "master"  # Can be changed to a specific tag or commit
+LLAMA_CPP_BRANCH = "b10964"  # a tag: == llama_server_dist.RELEASE
+LLAMA_CPP_COMMIT = "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4"
+LLAMA_CPP_SHA256 = "4c96d72c40cefdacf621457d8a12fe5673b8de5b640ff7fe6d342ea1c579a9fe"
+# Written beside the converter once it is checked: a tree without it (or with
+# another release) was fetched before the pin.
+_PIN_MARKER = ".hfl-release"
 
 
 def _get_llama_cpp_version(llama_cpp_dir: Path) -> str:
     """Gets the version/commit of the installed llama.cpp."""
+    try:
+        marker = llama_cpp_dir / _PIN_MARKER
+        if marker.is_file():
+            return marker.read_text().strip() or "unknown"
+    except OSError:
+        pass
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -260,8 +274,9 @@ code = llama_cpp.llama_model_quantize(source.encode(), target.encode(), ctypes.b
 sys.exit(1 if code != 0 else 0)
 """
 
+# Where github.com/ggml-org/llama.cpp/archive/refs/tags/<tag>.tar.gz redirects.
 LLAMA_CPP_ARCHIVE = (
-    "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/refs/heads/" + LLAMA_CPP_BRANCH
+    "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/refs/tags/" + LLAMA_CPP_BRANCH
 )
 
 
@@ -271,7 +286,9 @@ def _download_converter(target: Path) -> None:
     The whole tree, not only ``convert_hf_to_gguf.py`` and ``gguf-py``: the
     script now imports its own ``conversion`` package, and a list of the
     files it needs would break on its next split. Regular files and
-    directories only (no links, no devices), none outside ``target``."""
+    directories only (no links, no devices), none outside ``target``.
+    Nothing is unpacked unless the archive hashes to ``LLAMA_CPP_SHA256``."""
+    import hashlib
     import tarfile
     import tempfile
 
@@ -279,11 +296,20 @@ def _download_converter(target: Path) -> None:
 
     with tempfile.TemporaryDirectory(dir=target.parent) as staging:
         archive = Path(staging) / "llama.cpp.tar.gz"
+        digest = hashlib.sha256()
         with httpx.stream("GET", LLAMA_CPP_ARCHIVE, timeout=60.0, follow_redirects=True) as r:
             r.raise_for_status()
             with open(archive, "wb") as sink:
                 for chunk in r.iter_bytes():
+                    digest.update(chunk)
                     sink.write(chunk)
+        if digest.hexdigest() != LLAMA_CPP_SHA256:
+            raise ConversionError(
+                "safetensors",
+                "GGUF",
+                f"llama.cpp's source archive ({LLAMA_CPP_ARCHIVE}) does not match the "
+                f"sha256 HFL pins (got {digest.hexdigest()}); nothing was unpacked.",
+            )
         unpacked = Path(staging) / "src"
         with tarfile.open(archive, "r:gz") as tar:
             for member in tar.getmembers():
@@ -304,8 +330,17 @@ def _download_converter(target: Path) -> None:
         shutil.move(str(unpacked), str(target))
 
 
-def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
-    """Verify git clone integrity by checking remote URL."""
+def _without_git_suffix(url: str) -> str:
+    # removesuffix, not rstrip(".git"): rstrip drops any of the characters
+    # ".", "g", "i", "t" from the end ("…/llama.cpp-git" == "…/llama.cpp-").
+    return url[: -len(".git")] if url.endswith(".git") else url
+
+
+def _verify_git_clone(
+    repo_dir: Path, expected_repo: str, expected_commit: str = LLAMA_CPP_COMMIT
+) -> bool:
+    """The clone comes from ``expected_repo`` and its HEAD is
+    ``expected_commit`` (a tag can be moved; the commit cannot)."""
     try:
         result = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],
@@ -316,10 +351,112 @@ def _verify_git_clone(repo_dir: Path, expected_repo: str) -> bool:
         if result.returncode != 0:
             return False
         actual_url = result.stdout.strip()
-        # Normalize URLs for comparison (handle .git suffix)
-        return actual_url.rstrip(".git") == expected_repo.rstrip(".git")
+        if _without_git_suffix(actual_url) != _without_git_suffix(expected_repo):
+            return False
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+        )
+        return head.returncode == 0 and head.stdout.strip() == expected_commit
     except (FileNotFoundError, OSError):
         return False
+
+
+def _fetched_before_pin(llama_cpp_dir: Path) -> bool:
+    """A converter HFL fetched before it was pinned (or at another release):
+    a clone not at LLAMA_CPP_COMMIT, or an archive tree without the marker.
+    A tree with neither ``.git`` nor ``gguf-py`` was put there by hand and is
+    left alone."""
+    marker = llama_cpp_dir / _PIN_MARKER
+    if marker.is_file():
+        try:
+            return marker.read_text().strip() != LLAMA_CPP_BRANCH
+        except OSError:
+            return True
+    if (llama_cpp_dir / ".git").exists():
+        return not _verify_git_clone(llama_cpp_dir, LLAMA_CPP_REPO)
+    return (llama_cpp_dir / "gguf-py").is_dir()
+
+
+# Environment variables the converter subprocess must not see. It needs no
+# Hub access (the model is already on disk), so it gets no token to leak;
+# NO_LOCAL_GGUF would make it import a pip ``gguf`` instead of the gguf-py
+# pinned with it.
+_CONVERTER_ENV_DROP = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "NO_LOCAL_GGUF")
+
+
+def _converter_env() -> dict[str, str]:
+    """The environment ``convert_hf_to_gguf.py`` runs in: offline (an
+    ``auto_map`` naming another repo cannot fetch code at convert time) and
+    without the Hub token."""
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k not in _CONVERTER_ENV_DROP}
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
+    return env
+
+
+# JSON keys that make transformers import Python from the repo (or from
+# another repo: "other/repo--module.Class"). llama.cpp's converter loads the
+# tokenizer of several architectures (Qwen, ChatGLM, GLM-4, DeepSeek-V2,
+# HunYuan, Dream, LLaDA, Kimi-Linear…) with trust_remote_code=True, so any
+# of them is code execution at convert time.
+_REMOTE_CODE_KEYS = ("auto_map",)
+
+
+def _declares_remote_code(data: object) -> bool:
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if any(key in node for key in _REMOTE_CODE_KEYS):
+                return True
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return False
+
+
+def remote_code_in(model_path: Path) -> str | None:
+    """The first file in ``model_path`` that would run repo code when the
+    converter loads it — a ``.py`` file, or a JSON config declaring
+    ``auto_map`` — as a path relative to it; None when there is none.
+    huggingface_hub's own ``.cache`` is not the model."""
+    if not model_path.is_dir():
+        return None
+    for path in sorted(model_path.rglob("*")):
+        rel = path.relative_to(model_path)
+        if ".cache" in rel.parts or not path.is_file():
+            continue
+        if path.suffix == ".py":
+            return str(rel)
+        if path.suffix == ".json":
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue  # what transformers cannot parse it cannot follow either
+            if _declares_remote_code(data):
+                return str(rel)
+    return None
+
+
+def check_remote_code(model_path: Path) -> str | None:
+    """Why converting ``model_path`` is refused (a translated message), or
+    None. Converting runs llama.cpp's converter, which can run the repo's
+    Python; that needs the same opt-in as loading it: HFL_ALLOW_REMOTE_CODE."""
+    from hfl.security import remote_code_allowed
+
+    if remote_code_allowed():
+        return None
+    found = remote_code_in(model_path)
+    if found is None:
+        return None
+    from hfl.i18n import t
+
+    return t("errors.convert_remote_code", file=found)
 
 
 def _gguf_variant_path(base: Path, label: str) -> Path:
@@ -482,7 +619,9 @@ class GGUFConverter:
         (:meth:`_quantizer`).
         """
         if self.convert_script.exists():
-            return
+            if not _fetched_before_pin(self.llama_cpp_dir):
+                return
+            self._set_aside_unpinned()
         console.print("[yellow]Fetching llama.cpp's converter (Python only)...[/]")
         self.llama_cpp_dir.parent.mkdir(parents=True, exist_ok=True)
         if shutil.which("git") is not None:
@@ -511,7 +650,20 @@ class GGUFConverter:
                 "convert_hf_to_gguf.py",
                 f"llama.cpp's source was fetched into {self.llama_cpp_dir} without it.",
             )
+        (self.llama_cpp_dir / _PIN_MARKER).write_text(LLAMA_CPP_BRANCH)
         console.print("[green]Converter ready.[/]")
+
+    def _set_aside_unpinned(self) -> None:
+        """Move a converter fetched before the pin out of the way (not
+        deleted: it may hold a ``llama-quantize`` built from it)."""
+        import tempfile
+
+        aside = Path(tempfile.mkdtemp(prefix="llama.cpp.unpinned-", dir=self.llama_cpp_dir.parent))
+        shutil.move(str(self.llama_cpp_dir), str(aside / self.llama_cpp_dir.name))
+        console.print(
+            f"[yellow]The converter in {self.llama_cpp_dir} was not llama.cpp "
+            f"{LLAMA_CPP_BRANCH}; moved to {aside} (safe to delete).[/]"
+        )
 
     def _quantizer(self) -> list[str]:
         """The command that quantizes ``<in> <out> <TYPE>``, from what is
@@ -590,6 +742,9 @@ class GGUFConverter:
         Returns:
             Path to the final GGUF file.
         """
+        refused = check_remote_code(model_path)
+        if refused is not None:
+            raise ConversionError("safetensors", "GGUF", refused)
         self.ensure_tools()
 
         # R3 - Legal warning about license preservation
@@ -623,6 +778,7 @@ class GGUFConverter:
                     str(fp16_path),
                 ],
                 check=True,
+                env=_converter_env(),
             )
 
         if quantization.upper() == "F16":

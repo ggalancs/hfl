@@ -79,6 +79,61 @@ def _safe_json_load(payload: str) -> Any:
         return None
 
 
+# --- Linear-time scanning -----------------------------------------------------
+#
+# The text parsed here is a model's reply, which whoever writes the prompt can
+# steer, and it is parsed on the event loop. A lazy ``.*?`` that never meets
+# its closer scans to the end of the text from every opener: ``<tool_call>{``
+# repeated took 2.9 s at 48 KB and 46.5 s at 192 KB. Every scan below is
+# linear in the reply.
+
+
+def _sub_before_last(
+    pattern: re.Pattern[str], repl: Any, text: str, closer: re.Pattern[str]
+) -> str:
+    """``pattern.sub(repl, text)``, searching only up to the end of the last
+    match of ``closer`` — the tail every match of ``pattern`` ends with. An
+    opener after it can match nothing, so the rest is kept unsearched: the
+    result is the same, without the scan from each such opener to the end."""
+    last = None
+    for last in closer.finditer(text):
+        pass
+    if last is None:
+        return text
+    cut = last.end()
+    return pattern.sub(repl, text[:cut]) + text[cut:]
+
+
+def _drop_dangling_call(text: str) -> str:
+    """``text`` without a ``<tool_call>`` that ends it (whitespace around it
+    included). A regex anchored at the end tried every whitespace position
+    of a long run: quadratic."""
+    stripped = text.rstrip()
+    if stripped.endswith("<tool_call>"):
+        return stripped[: -len("<tool_call>")].rstrip()
+    return text
+
+
+def _fenced_body(text: str) -> str | None:
+    """The body of the first ```` ``` ```` fence (an optional ``json`` tag
+    and the whitespace around the body left out), or None when it is not
+    closed. Found without a regex: the lazy one this replaces backtracked
+    cubically over a long run of whitespace with no closing fence (10 KB:
+    226 s)."""
+    opening = text.find("```")
+    if opening == -1:
+        return None
+    start = opening + 3
+    if text.startswith("json", start):
+        start += 4
+    while start < len(text) and text[start].isspace():
+        start += 1
+    closing = text.find("```", start)
+    if closing == -1:
+        return None
+    return text[start:closing].rstrip()
+
+
 # --- Qwen 2.5 / Qwen 3 --------------------------------------------------------
 
 
@@ -88,9 +143,7 @@ _QWEN_TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*(\{.*?\})\s*(?:</tool_call>|$)",
     re.DOTALL,
 )
-
-
-_DANGLING_CALL_RE = re.compile(r"\s*<tool_call>\s*$")
+_QWEN_TOOL_CALL_END_RE = re.compile(r"\}\s*(?:</tool_call>|$)")
 
 
 def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
@@ -130,23 +183,26 @@ def parse_qwen(text: str, tools: list[dict] | None = None) -> ParseResult:
         calls.append(_wrap(name, arguments))
         return ""
 
-    cleaned = _QWEN_TOOL_CALL_RE.sub(_sub, text)
-    cleaned = _QWEN_XML_FUNCTION_RE.sub(_sub_xml, cleaned)
+    cleaned = _sub_before_last(_QWEN_TOOL_CALL_RE, _sub, text, _QWEN_TOOL_CALL_END_RE)
+    cleaned = _sub_before_last(_QWEN_XML_FUNCTION_RE, _sub_xml, cleaned, _QWEN_XML_END_RE)
     # A call opened and never written: Qwen3-Coder ended its last answer to
     # Claude Code and Codex with a bare ``<tool_call>`` (measured). Nothing
     # follows it, so it is no text of the answer's.
-    cleaned = _DANGLING_CALL_RE.sub("", cleaned)
+    cleaned = _drop_dangling_call(cleaned)
     return _strip_thinking(cleaned).strip(), calls
 
 
+# A name stops at ``<`` too: ``<function=<function=...`` otherwise had each
+# opener run its name to the same far ``>`` (quadratic).
 _QWEN_XML_FUNCTION_RE = re.compile(
-    r"(?:<tool_call>\s*)?<function=([^>\s]+)>(.*?)</function>(?:\s*</tool_call>)?",
+    r"(?:<tool_call>\s*)?<function=([^<>\s]+)>(.*?)</function>(?:\s*</tool_call>)?",
     re.DOTALL,
 )
+_QWEN_XML_END_RE = re.compile(r"</function>(?:\s*</tool_call>)?")
 # A value ends at its closing tag, or — when the model forgets it — at the
 # next parameter or the end of the function body.
 _QWEN_XML_PARAM_RE = re.compile(
-    r"<parameter=([^>\s]+)>(.*?)(?:</parameter>|(?=<parameter=)|\Z)",
+    r"<parameter=([^<>\s]+)>(.*?)(?:</parameter>|(?=<parameter=)|\Z)",
     re.DOTALL,
 )
 
@@ -204,11 +260,13 @@ _LLAMA3_PYTHON_TAG_RE = re.compile(
     r"<\|python_tag\|>\s*(\{.*?\})(?:\s*<\|eom_id\|>|\s*$)",
     re.DOTALL,
 )
+_LLAMA3_PYTHON_TAG_END_RE = re.compile(r"\}(?:\s*<\|eom_id\|>|\s*$)")
 
 _LLAMA3_FUNCTION_RE = re.compile(
     r"<function=([\w.\-]+)>\s*(\{.*?\})\s*</function>",
     re.DOTALL,
 )
+_LLAMA3_FUNCTION_END_RE = re.compile(r"\}\s*</function>")
 
 
 def parse_llama3(text: str) -> ParseResult:
@@ -227,7 +285,9 @@ def parse_llama3(text: str) -> ParseResult:
             calls.append(_wrap(payload["name"], args))
         return ""
 
-    cleaned = _LLAMA3_PYTHON_TAG_RE.sub(_sub_python_tag, text)
+    cleaned = _sub_before_last(
+        _LLAMA3_PYTHON_TAG_RE, _sub_python_tag, text, _LLAMA3_PYTHON_TAG_END_RE
+    )
 
     def _sub_function(match: re.Match) -> str:
         name = match.group(1)
@@ -235,7 +295,7 @@ def parse_llama3(text: str) -> ParseResult:
         calls.append(_wrap(name, args))
         return ""
 
-    cleaned = _LLAMA3_FUNCTION_RE.sub(_sub_function, cleaned)
+    cleaned = _sub_before_last(_LLAMA3_FUNCTION_RE, _sub_function, cleaned, _LLAMA3_FUNCTION_END_RE)
     return cleaned.strip(), calls
 
 
@@ -283,6 +343,7 @@ _GEMMA4_TOOL_CALL_RE = re.compile(
     r"<\|tool_call>call:([\w.\-]+)\{(.*?)\}(?:<tool_call\|>|(?=<\|)|$)",
     re.DOTALL,
 )
+_GEMMA4_TOOL_CALL_END_RE = re.compile(r"\}(?:<tool_call\|>|(?=<\|)|$)")
 
 
 def _gemma4_dsl_to_dict(body: str) -> dict:
@@ -363,7 +424,7 @@ def parse_gemma4(text: str) -> ParseResult:
         calls.append(_wrap(name, args))
         return ""
 
-    cleaned = _GEMMA4_TOOL_CALL_RE.sub(_sub, text)
+    cleaned = _sub_before_last(_GEMMA4_TOOL_CALL_RE, _sub, text, _GEMMA4_TOOL_CALL_END_RE)
     return cleaned, calls
 
 
@@ -371,14 +432,15 @@ def parse_gemma4(text: str) -> ParseResult:
 
 
 # The recipient comes after the channel when the model writes a call and
-# before it in the template's own rendering; the JSON starts after
+# before it in the template's own rendering; the JSON starts after the next
 # ``<|message|>`` and runs to ``<|call|>`` (dropped as the stop token, so
-# often absent).
+# often absent). The message marker is found with ``str.find``: a pattern
+# running to it scanned to the end from every recipient without one.
 _HARMONY_CALL_RE = re.compile(
     r"(?:<\|start\|>assistant\s*)?(?:<\|channel\|>\w+\s*)?to=functions\.([^\s<]+)"
-    r"(?:(?!<\|message\|>).)*<\|message\|>",
-    re.DOTALL,
 )
+_HARMONY_MESSAGE = "<|message|>"
+_NON_SPACE_RE = re.compile(r"\S")
 _HARMONY_FINAL_RE = re.compile(
     r"<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|return\|>|$)", re.DOTALL
 )
@@ -394,34 +456,45 @@ def parse_harmony(text: str) -> ParseResult:
     channel (reasoning and channel markers dropped)."""
     calls: list[ToolCall] = []
     consumed: list[tuple[int, int]] = []
-    for match in _HARMONY_CALL_RE.finditer(text):
-        found = _extract_first_json_object(text[match.end() :])
-        if found is None:
+    ends: dict[int, int] | None = None
+    pos = 0
+    while (match := _HARMONY_CALL_RE.search(text, pos)) is not None:
+        message = text.find(_HARMONY_MESSAGE, match.end())
+        if message == -1:
+            break  # no later recipient has a message either
+        pos = message + len(_HARMONY_MESSAGE)
+        if ends is None:
+            ends = _balanced_ends(text)
+        # The JSON must start the message.
+        first = _NON_SPACE_RE.search(text, pos)
+        if first is None or first.start() not in ends:
             continue
-        raw, (start, end) = found
-        if text[match.end() : match.end() + start].strip():
-            continue  # the JSON must start the message
-        calls.append(_wrap(match.group(1), _safe_json_load(raw) or {}))
-        consumed.append((match.start(), match.end() + end))
+        start, end = first.start(), ends[first.start()]
+        calls.append(_wrap(match.group(1), _safe_json_load(text[start:end]) or {}))
+        consumed.append((match.start(), end))
     if not calls and "<|channel|>" not in text:
         return text, calls
     final = _HARMONY_FINAL_RE.search(text)
     if final:
         return final.group(1).strip(), calls
-    for start, end in reversed(consumed):
-        text = text[:start] + text[end:]
-    return _HARMONY_ANY_RE.sub("", text).strip(), calls
+    kept, last = [], 0
+    for start, end in consumed:
+        kept.append(text[last : max(last, start)])
+        last = max(last, end)
+    kept.append(text[last:])
+    return _HARMONY_ANY_RE.sub("", "".join(kept)).strip(), calls
 
 
 # --- DeepSeek -----------------------------------------------------------------
 
 
-_DEEPSEEK_CALL_RE = re.compile(
-    r"<｜tool▁call▁begin｜>(.*?)<｜tool▁sep｜>(.*?)(?:<｜tool▁call▁end｜>|$)",
-    re.DOTALL,
-)
+# A call is ``BEGIN head SEP body`` up to ``END`` or the end of the text,
+# found with ``str.find`` (a lazy pattern scanned from every ``BEGIN``
+# without a ``SEP`` to the end of the text).
+_DEEPSEEK_BEGIN = "<｜tool▁call▁begin｜>"
+_DEEPSEEK_SEP = "<｜tool▁sep｜>"
+_DEEPSEEK_END = "<｜tool▁call▁end｜>"
 _DEEPSEEK_WRAPPERS_RE = re.compile(r"<｜tool▁calls▁(?:begin|end)｜>")
-_DEEPSEEK_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
 def parse_deepseek(text: str) -> ParseResult:
@@ -429,19 +502,33 @@ def parse_deepseek(text: str) -> ParseResult:
     ``NAME<｜tool▁sep｜>{json}`` and V3 / R1's
     ``function<｜tool▁sep｜>NAME`` followed by a fenced JSON block."""
     calls: list[ToolCall] = []
-
-    def _sub(match: re.Match[str]) -> str:
-        head, body = match.group(1).strip(), match.group(2)
+    kept: list[str] = []
+    pos = 0
+    while (begin := text.find(_DEEPSEEK_BEGIN, pos)) != -1:
+        sep = text.find(_DEEPSEEK_SEP, begin + len(_DEEPSEEK_BEGIN))
+        if sep == -1:
+            break  # nor has any later call a separator
+        body_start = sep + len(_DEEPSEEK_SEP)
+        end = text.find(_DEEPSEEK_END, body_start)
+        if end != -1:
+            stop, after = end, end + len(_DEEPSEEK_END)
+        else:
+            # Unclosed, the call runs to the end — before a final newline,
+            # as the ``$`` of the pattern this replaces did.
+            final_nl = text.endswith("\n") and len(text) - 1 >= body_start
+            stop = after = len(text) - 1 if final_nl else len(text)
+        head, body = text[begin + len(_DEEPSEEK_BEGIN) : sep].strip(), text[body_start:stop]
         if head == "function":
             name, _, body = body.partition("\n")
-            fenced = _DEEPSEEK_FENCE_RE.search(body)
-            body = fenced.group(1) if fenced else body
+            fenced = _fenced_body(body)
+            body = fenced if fenced is not None else body
         else:
             name = head
         calls.append(_wrap(name.strip(), _safe_json_load(body.strip()) or {}))
-        return ""
-
-    cleaned = _DEEPSEEK_CALL_RE.sub(_sub, text)
+        kept.append(text[pos:begin])
+        pos = after
+    kept.append(text[pos:])
+    cleaned = "".join(kept)
     if calls:
         cleaned = _DEEPSEEK_WRAPPERS_RE.sub("", cleaned)
     return _strip_thinking(cleaned).strip(), calls
@@ -458,11 +545,29 @@ _GLM_CALL_RE = re.compile(
     r"<tool_call>\s*([^\s<{]+)\s*(.*?)(?:</tool_call>|$)",
     re.DOTALL,
 )
-_GLM_ARG_RE = re.compile(r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>", re.DOTALL)
+_GLM_KEY_END_RE = re.compile(r"</arg_key>\s*<arg_value>")
 # GLM-4-0414: a call is the function's name on a line of its own, then its
 # JSON arguments, each call in an assistant turn of its own.
 _GLM4_HEAD_RE = re.compile(r"^\s*([A-Za-z_][\w.\-]*)\n\s*(?=\{)")
 _GLM4_TURN_RE = re.compile(r"<\|assistant\|>")
+
+
+def _glm_pairs(body: str) -> list[tuple[str, str]]:
+    """The ``<arg_key>K</arg_key><arg_value>V</arg_value>`` pairs of a GLM
+    call, found with ``str.find`` — what ``findall`` of the lazy pattern
+    found, without its scan to the end from every key left unclosed."""
+    pairs: list[tuple[str, str]] = []
+    pos = 0
+    while (key := body.find("<arg_key>", pos)) != -1:
+        middle = _GLM_KEY_END_RE.search(body, key + len("<arg_key>"))
+        if middle is None:
+            break  # nor has any later key a value
+        end = body.find("</arg_value>", middle.end())
+        if end == -1:
+            break
+        pairs.append((body[key + len("<arg_key>") : middle.start()], body[middle.end() : end]))
+        pos = end + len("</arg_value>")
+    return pairs
 
 
 def _tool_names(tools: list[dict] | None) -> set[str]:
@@ -488,7 +593,7 @@ def parse_glm(text: str, tools: list[dict] | None = None) -> ParseResult:
         name = match.group(1)
         schema = _parameter_schemas(tools, name)
         arguments: dict[str, Any] = {}
-        for key, raw in _GLM_ARG_RE.findall(match.group(2)):
+        for key, raw in _glm_pairs(match.group(2)):
             key = key.strip()
             typed = _typed_value(raw, schema.get(key))
             if typed is raw and (schema.get(key) or {}).get("type") != "string":
@@ -532,15 +637,17 @@ _FENCED_JSON_RE = re.compile(
     r"```(?:json)?\s*(\{.*?\})\s*```",
     re.DOTALL,
 )
+_FENCED_JSON_END_RE = re.compile(r"\}\s*```")
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_THINK_END_RE = re.compile(r"</think>")
 
 
 def _strip_thinking(text: str) -> str:
     """Remove qwen/DeepSeek-style ``<think>...</think>`` blocks — and, when
     the template opened the block in the prompt (so only ``</think>``
     reaches the text), everything up to that close."""
-    text = _THINK_RE.sub("", text)
+    text = _sub_before_last(_THINK_RE, "", text, _THINK_END_RE)
     if "</think>" in text and "<think>" not in text:
         text = text.split("</think>", 1)[1]
     return text
@@ -606,8 +713,11 @@ def parse_fallback(text: str) -> ParseResult:
             return True
         return False
 
-    # 1. Fenced json block
-    m = _FENCED_JSON_RE.search(state["cleaned"])
+    # 1. Fenced json block (searched up to the last place one can end)
+    fence_end = None
+    for fence_end in _FENCED_JSON_END_RE.finditer(state["cleaned"]):
+        pass
+    m = fence_end and _FENCED_JSON_RE.search(state["cleaned"][: fence_end.end()])
     if m and _consume(m.group(1), m.group(0)):
         return state["cleaned"].strip(), calls
 
@@ -634,37 +744,80 @@ def parse_fallback(text: str) -> ParseResult:
 
 
 def _extract_first_json_object(text: str) -> tuple[str, tuple[int, int]] | None:
-    """Return the first balanced JSON object substring and its span.
-
-    Walks a brace counter while respecting JSON string escaping. Returns
-    ``None`` if no balanced object is found.
+    """Return the first balanced JSON object substring and its span: the
+    first ``{`` whose braces balance, counted from it alone while respecting
+    JSON string escaping. Returns ``None`` if no balanced object is found.
     """
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(text)):
-            ch = text[i]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : i + 1], (start, i + 1)
-        start = text.find("{", start + 1)
-    return None
+    ends = _balanced_ends(text)
+    if not ends:
+        return None
+    start = min(ends)
+    return text[start : ends[start]], (start, ends[start])
+
+
+_BRACE_EVENT_RE = re.compile(r'[{}"\\]')
+_OUT, _IN, _ESC = 0, 1, 2  # outside a string, inside one, after its backslash
+
+
+def _balanced_ends(text: str) -> dict[int, int]:
+    """For every ``{`` that a scan starting there balances, the index just
+    past its ``}`` — the scan counting braces outside JSON strings.
+
+    One pass serves every start: scanning from each ``{`` to the end was
+    quadratic on ``{`` repeated, and Harmony did it per call marker (cubic).
+    Scans in the same string state at the same character go on alike, so
+    they travel as at most three groups, one per state, each with the stack
+    of braces its scans have open. Two groups reaching one state merge top
+    to top — every later brace opens or closes on both — and braces that
+    close together share one record (union-find).
+    """
+    parent: dict[int, int] = {}
+
+    def find(node: int) -> int:
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def merge(a: list[int], b: list[int]) -> list[int]:
+        if len(a) < len(b):
+            a, b = b, a
+        offset = len(a) - len(b)
+        for depth, node in enumerate(b):
+            parent[find(node)] = find(a[offset + depth])
+        return a
+
+    closed: dict[int, int] = {}
+    groups: dict[int, list[int]] = {}
+    last = -1
+    for event in _BRACE_EVENT_RE.finditer(text):
+        i, ch = event.start(), event.group()
+        if i > last + 1 and _ESC in groups:
+            # The character after the backslash was an ordinary one.
+            escaped = groups.pop(_ESC)
+            groups[_IN] = merge(groups[_IN], escaped) if _IN in groups else escaped
+        last = i
+        if ch == "{" and _OUT not in groups:
+            groups[_OUT] = []  # a scan starts here
+        moved: dict[int, list[int]] = {}
+        for state, stack in groups.items():
+            if state == _OUT:
+                new = _IN if ch == '"' else _OUT
+                if ch == "{":
+                    parent[i] = i
+                    stack.append(i)
+                elif ch == "}":
+                    closed[find(stack.pop())] = i + 1
+            elif state == _IN:
+                new = _ESC if ch == "\\" else _OUT if ch == '"' else _IN
+            else:
+                new = _IN
+            if stack:  # a group with nothing open has nothing left to find
+                moved[new] = merge(moved[new], stack) if new in moved else stack
+        groups = moved
+    return {start: closed[find(start)] for start in parent if find(start) in closed}
 
 
 # --- Dispatch -----------------------------------------------------------------
@@ -711,7 +864,7 @@ def _answer_text(text: str) -> str:
     reply's ``final`` channel, or the text without ``<think>`` blocks."""
     if "<|channel|>" in text:
         return parse_harmony(text)[0]
-    return _DANGLING_CALL_RE.sub("", _strip_thinking(text)).strip()
+    return _drop_dangling_call(_strip_thinking(text)).strip()
 
 
 def dispatch(

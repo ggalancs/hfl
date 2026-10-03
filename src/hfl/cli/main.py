@@ -128,7 +128,9 @@ def _show_resolved_or_exit(resolved: Any) -> None:
             raise typer.Exit(1)
 
 
-def _license_or_exit(repo_id: str, skip_license: bool) -> tuple[Any, str | None]:
+def _license_or_exit(
+    repo_id: str, skip_license: bool, revision: str | None = None
+) -> tuple[Any, str | None]:
     """The model's license, accepted by the user (and when); exits 0 when
     they decline."""
     from datetime import datetime
@@ -139,7 +141,8 @@ def _license_or_exit(repo_id: str, skip_license: bool) -> tuple[Any, str | None]
     license_accepted_at = None
     if not skip_license:
         try:
-            license_info = check_model_license(repo_id)
+            # Read at the commit that is downloaded, not at a moving "main".
+            license_info = check_model_license(repo_id, revision=revision)
             if not require_user_acceptance(license_info, repo_id):
                 console.print(f"[yellow]{t('warnings.download_cancelled')}[/]")
                 raise typer.Exit(0)
@@ -359,7 +362,9 @@ def pull(
     _disk_space_or_exit(resolved, quantize if _will_convert(resolved, format) else None)
 
     # 2. License (R1 - legal audit), 3. download
-    license_info, license_accepted_at = _license_or_exit(resolved.repo_id, skip_license)
+    license_info, license_accepted_at = _license_or_exit(
+        resolved.repo_id, skip_license, revision=resolved.commit_sha or resolved.revision
+    )
     local_path = _download_or_exit(resolved)
 
     # 4. Its type, and — an LLM that is not a GGUF — MLX or a conversion
@@ -594,7 +599,10 @@ def launch(
     model: str = typer.Option(None, "--model", "-m", help=t("commands.launch.options.model")),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("commands.launch.options.host")),
     port: int | None = typer.Option(None, "--port", "-p", help=t("commands.launch.options.port")),
-    api_key: str = typer.Option(None, "--api-key", help=t("commands.launch.options.api_key")),
+    # HFL_API_KEY too, as `serve` reads it: the key a running server wants.
+    api_key: str = typer.Option(
+        None, "--api-key", envvar="HFL_API_KEY", help=t("commands.launch.options.api_key")
+    ),
     print_only: bool = typer.Option(False, "--print", help=t("commands.launch.options.print")),
     parallel: int = typer.Option(0, "--parallel", help=t("commands.launch.options.parallel")),
     yes: bool = typer.Option(False, "--yes", "-y", help=t("shortname.option_yes")),
@@ -1086,6 +1094,23 @@ def escape_markup(text: str) -> str:
     return escape(text)
 
 
+def _no_controls(text: object) -> str:
+    """``text`` without control characters (newline and tab kept).
+
+    Manifest fields come from Hub metadata or an imported entry: an ESC in
+    one drove the user's terminal (title, colours, cursor) when printed.
+    """
+    import re
+
+    return re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", str(text))
+
+
+def _plain(text: object) -> str:
+    """Untrusted text for a markup context: controls dropped, markup escaped
+    (an unbalanced ``[/x]`` in a license string crashed with MarkupError)."""
+    return escape_markup(_no_controls(text))
+
+
 def _memory_check_or_exit(manifest: Any, n_ctx: int) -> None:
     """Say what loading ``manifest`` will do to memory, and refuse if it
     cannot fit under HFL_MEMORY_BUDGET — before any weights are read."""
@@ -1241,6 +1266,37 @@ def _in_container() -> bool:
     )
 
 
+# Inode of the initial (host) network namespace: fixed since Linux 6.18
+# (PROC_NET_INIT_INO); earlier kernels numbered it like any other namespace.
+_HOST_NETNS_INO = 0xEFFFFFF9
+
+
+def _container_network() -> str:
+    """``"host"``, ``"own"`` or ``"unknown"``: whose network this container binds.
+
+    ``--network host`` / ``hostNetwork: true`` put the container in the host's
+    network namespace: 0.0.0.0 there is the host's real interfaces, not a
+    namespace reachable only through published ports. Comparing with PID 1's
+    namespace says nothing (PID 1 is the container's own init either way);
+    the namespace's inode does, on kernels that fix the host's (measured:
+    0xEFFFFFF9 under ``docker run --network host`` on 7.0, a fresh one under
+    the default bridge). On older kernels, or without /proc, it is unknown.
+    """
+    if not sys.platform.startswith("linux"):
+        return "unknown"
+    try:
+        ino = os.stat("/proc/self/ns/net").st_ino
+    except OSError:
+        return "unknown"
+    if ino == _HOST_NETNS_INO:
+        return "host"
+    try:
+        major, minor = (int(x) for x in os.uname().release.split(".")[:2])
+    except ValueError:
+        return "unknown"
+    return "own" if (major, minor) >= (6, 18) else "unknown"
+
+
 def _is_public_bind(host: str) -> bool:
     """Whether binding to ``host`` exposes the server beyond this machine.
 
@@ -1355,11 +1411,19 @@ def _confirm_exposure(host: str, api_key: str | None) -> None:
         if opted_in:
             pass
         elif not stdin_is_terminal():
-            if not (api_key or _in_container()):
+            # The container convenience holds only while the container has a
+            # network of its own: under host networking 0.0.0.0 is the host's
+            # interfaces, an exposure nobody published.
+            network = _container_network() if (_in_container() and not api_key) else None
+            if network == "host":
+                console.print(f"[yellow]{t('warnings.container_host_network')}[/]")
+            if not (api_key or (network is not None and network != "host")):
                 console.print(f"[red]{t('warnings.refuse_unattended_bind', host=host)}[/]")
                 raise typer.Exit(1)
-            if _in_container() and not api_key:
+            if network == "own":
                 console.print(f"[yellow]{t('warnings.container_bind')}[/]")
+            elif network == "unknown":
+                console.print(f"[yellow]{t('warnings.container_bind_unverified')}[/]")
         elif not typer.confirm(t("warnings.continue_question"), default=True):
             raise typer.Exit(0)
 
@@ -1449,11 +1513,14 @@ def serve(
 
         host = _cfg.host
 
+    # Before the tray branch: the tray serves the same host, and returning
+    # into it first let HFL_HOST=0.0.0.0 bind publicly with no key and no
+    # question asked.
+    _confirm_exposure(host, api_key)
+
     if tray:
         _run_tray(host, port, api_key, model, log_level, json_logs)
         return
-
-    _confirm_exposure(host, api_key)
 
     # Store context size override in state for lazy-load path
     state = get_state()
@@ -1533,19 +1600,21 @@ def list_models(
         if m.license:
             # Risk indicator based on license type
             nc_licenses = ["cc-by-nc", "mrl", "mnpl"]
+            shown = _plain(m.license)
             if any(nc in m.license.lower() for nc in nc_licenses):
-                license_str = f"[red]{m.license}[/]"
+                license_str = f"[red]{shown}[/]"
             elif m.license.lower() in ["apache-2.0", "mit", "bsd"]:
-                license_str = f"[green]{m.license}[/]"
+                license_str = f"[green]{shown}[/]"
             else:
-                license_str = f"[yellow]{m.license}[/]"
+                license_str = f"[yellow]{shown}[/]"
 
+        # Table cells are markup too: every manifest string is escaped.
         table.add_row(
-            m.name,
-            m.alias or "-",
+            _plain(m.name),
+            _plain(m.alias or "-"),
             type_str,
-            m.format,
-            m.quantization or "-",
+            _plain(m.format),
+            _plain(m.quantization or "-"),
             license_str,
             m.display_size,
         )
@@ -1810,26 +1879,33 @@ def show(
 
     manifest = ModelRegistry().get(model)
     if manifest is None:
-        console.print(f"[red]Model not found:[/] {model}")
+        console.print(f"[red]Model not found:[/] {_plain(model)}")
         raise typer.Exit(1)
 
-    # Single-section flags first (mirror ollama show --modelfile).
+    # Single-section flags first (mirror ollama show --modelfile). Each is
+    # manifest text: printed literally (markup=False) and without controls.
     if modelfile:
-        console.print(render_modelfile(manifest), end="")
+        console.print(
+            _no_controls(render_modelfile(manifest)), end="", markup=False, highlight=False
+        )
         return
     if parameters:
         from hfl.api.routes_show import _format_parameters
 
-        console.print(_format_parameters(manifest))
+        console.print(_no_controls(_format_parameters(manifest)), markup=False, highlight=False)
         return
     if template:
         from hfl.models.chat_template import model_template
 
         # markup=False: templates are full of [ ] that Rich would eat.
-        console.print(model_template(manifest), markup=False, highlight=False)
+        console.print(_no_controls(model_template(manifest)), markup=False, highlight=False)
         return
     if license_only:
-        console.print(manifest.license_name or manifest.license or "")
+        console.print(
+            _no_controls(manifest.license_name or manifest.license or ""),
+            markup=False,
+            highlight=False,
+        )
         return
 
     # Default: summary table — same columns ollama show prints.
@@ -1839,21 +1915,21 @@ def show(
     summary = Table.grid(padding=(0, 2))
     summary.add_column(style="dim", justify="right")
     summary.add_column()
-    summary.add_row("Name", manifest.name)
-    summary.add_row("Architecture", manifest.architecture or "unknown")
-    summary.add_row("Parameters", manifest.parameters or "?")
-    summary.add_row("Quantization", manifest.quantization or "?")
-    summary.add_row("Format", manifest.format or "?")
+    summary.add_row("Name", _plain(manifest.name))
+    summary.add_row("Architecture", _plain(manifest.architecture or "unknown"))
+    summary.add_row("Parameters", _plain(manifest.parameters or "?"))
+    summary.add_row("Quantization", _plain(manifest.quantization or "?"))
+    summary.add_row("Format", _plain(manifest.format or "?"))
     if manifest.context_length:
         summary.add_row("Context", f"{manifest.context_length} tokens")
     summary.add_row("Size", manifest.display_size)
     summary.add_row(
         "Capabilities",
-        ", ".join(detect_capabilities(manifest)) or "—",
+        _plain(", ".join(detect_capabilities(manifest)) or "—"),
     )
-    summary.add_row("License", manifest.license or "—")
+    summary.add_row("License", _plain(manifest.license or "—"))
 
-    console.print(Panel(summary, title=f"Model: {manifest.name}", expand=False))
+    console.print(Panel(summary, title=f"Model: {_plain(manifest.name)}", expand=False))
 
 
 @app.command(name="ps")

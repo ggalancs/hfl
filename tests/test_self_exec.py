@@ -17,7 +17,9 @@ from hfl.utils import self_exec
 def test_installed_uses_the_interpreter(monkeypatch) -> None:
     monkeypatch.setattr(self_exec, "is_frozen", lambda: False)
     guard = self_exec.child_guard_argv(42, ["llama-server", "-m", "x.gguf"])
-    assert guard[1:5] == ["-m", "hfl.engine._child_guard", "42", "--"]
+    # -c with the working directory dropped from sys.path (-m put it first).
+    assert guard[1] == "-c" and guard[3:5] == ["42", "--"]
+    assert "_child_guard" in guard[2]
     assert self_exec.hfl_argv("serve")[1] == "-c"
 
 

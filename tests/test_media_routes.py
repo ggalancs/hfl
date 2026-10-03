@@ -209,8 +209,9 @@ class TestOpenAITranscriptions:
     def test_uploads_beyond_the_json_cap_reach_the_route(self):
         from hfl.api.middleware import RequestBodyLimitMiddleware as M
 
-        assert "/v1/audio/transcriptions" in M.EXCLUDED_PATHS
-        assert "/v1/audio/transcriptions-x" not in M.EXCLUDED_PATHS
+        # A budget of their own (audio), on exact paths only.
+        assert "/v1/audio/transcriptions" in M.AUDIO_PATHS
+        assert "/v1/audio/transcriptions-x" not in M.AUDIO_PATHS
 
     def test_a_remote_client_cannot_trigger_a_download_here_either(self, monkeypatch):
         from hfl.api import routes_transcribe

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
+from pathlib import PurePath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -50,6 +51,18 @@ async def _change_adapters(
     from hfl.api.helpers import run_dispatched
 
     return await run_dispatched(call, engine, *args, operation=operation, **kwargs)
+
+
+def _adapter_row(info: Any, request: Request) -> dict[str, Any]:
+    """An adapter as the caller may see it: the host path for the owner,
+    the file name for anyone else (where the data dir is, and whose home
+    it is in, is not a remote caller's business)."""
+    from hfl.api.admin_guard import is_local_request
+
+    row = asdict(info)
+    if not is_local_request(request):
+        row["path"] = PurePath(str(row.get("path", ""))).name
+    return row
 
 
 logger = logging.getLogger(__name__)
@@ -131,7 +144,7 @@ async def api_lora_apply(req: ApplyLoraRequest, request: Request) -> dict[str, A
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return asdict(info)
+    return _adapter_row(info, request)
 
 
 @router.post(
@@ -173,8 +186,8 @@ async def api_lora_remove(req: RemoveLoraRequest, request: Request) -> dict[str,
 
 
 @router.get("/api/lora", response_model=None, summary="List all active LoRA adapters")
-async def api_lora_list_all() -> dict[str, list[dict[str, Any]]]:
-    return {"adapters": [asdict(a) for a in list_loras()]}
+async def api_lora_list_all(request: Request) -> dict[str, list[dict[str, Any]]]:
+    return {"adapters": [_adapter_row(a, request) for a in list_loras()]}
 
 
 @router.get(
@@ -182,7 +195,7 @@ async def api_lora_list_all() -> dict[str, list[dict[str, Any]]]:
     response_model=None,
     summary="List adapters bound to a specific model",
 )
-async def api_lora_list_for_model(model: str) -> dict[str, Any]:
+async def api_lora_list_for_model(model: str, request: Request) -> dict[str, Any]:
     try:
         engine, _ = await load_llm(model)
     except FileNotFoundError as exc:
@@ -195,4 +208,4 @@ async def api_lora_list_for_model(model: str) -> dict[str, Any]:
         ) from exc
     if engine is None:
         raise HTTPException(status_code=503, detail="engine not available")
-    return {"model": model, "adapters": [asdict(a) for a in list_loras(engine)]}
+    return {"model": model, "adapters": [_adapter_row(a, request) for a in list_loras(engine)]}

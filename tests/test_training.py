@@ -264,7 +264,9 @@ def test_the_transformers_command_line(tmp_path) -> None:
 
     data = trainer.Data(folder=tmp_path, format="completions", train=3, valid=1)
     argv = hf_lora.command("/m", data, tmp_path / "a", trainer.Options(batch_size=8, resume=True))
-    assert argv[1:4] == ["-m", "hfl.training.hf_lora_run", "train"]
+    # -c without the working directory on sys.path (-m put it first: an hfl/
+    # package in the current folder ran instead of HFL's).
+    assert argv[1] == "-c" and "hfl.training.hf_lora_run" in argv[2] and argv[3] == "train"
     assert argv[argv.index("--format") + 1] == "completions"
     assert argv[argv.index("--batch-size") + 1] == "3" and "--resume" in argv
 

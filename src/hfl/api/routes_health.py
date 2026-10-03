@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from hfl.api.state import get_state
@@ -138,11 +138,14 @@ async def health_live() -> dict[str, Any]:
 
 
 @router.get("/health/deep", tags=["Health"], summary="Deep health check")
-async def health_deep(probe: bool = False) -> dict[str, Any]:
+async def health_deep(request: Request, probe: bool = False) -> dict[str, Any]:
     """Deep health check - all systems.
 
     Args:
         probe: If True, run a minimal inference test to verify model health.
+            That is inference: ``APIKeyMiddleware`` asks for the key when the
+            parameter is present, and the probe waits for a dispatcher slot
+            like any other request.
     """
     from hfl import __version__
 
@@ -167,23 +170,37 @@ async def health_deep(probe: bool = False) -> dict[str, Any]:
     probe_engine = state.engine
     if probe and state.is_llm_loaded() and probe_engine is not None:
         # Leased for the call: with several models resident, a concurrent
-        # load may evict this one, and the probe runs outside the dispatcher.
+        # load may evict this one.
         await state.pin_engine(probe_engine)
         try:
-            import asyncio
-
+            from hfl.api.helpers import run_dispatched
             from hfl.engine.base import GenerationConfig
+            from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
+            # SEC: through the dispatcher. Run beside it, the probe was a
+            # second call on a non-reentrant model mid-generation, and a
+            # loop of probes an unbounded stack of threads.
             probe_config = GenerationConfig(max_tokens=1)
-            probe_result = await asyncio.to_thread(probe_engine.generate, "test", probe_config)
+            probe_result = await run_dispatched(
+                probe_engine.generate, "test", probe_config, operation="health probe"
+            )
             result["llm"]["probe"] = "ok" if probe_result.text else "empty"
+        except (QueueFullError, QueueTimeoutError):
+            # Busy is not unhealthy: the model is serving others.
+            result["llm"]["probe"] = "busy"
         except Exception as e:
             result["llm"]["probe"] = f"failed: {type(e).__name__}"
             result["status"] = "degraded"
         finally:
             await state.unpin_engine(probe_engine)
 
-    # System metrics if psutil is available
+    # System metrics if psutil is available. The owner's only: this
+    # endpoint answers without the key, and the process's memory and
+    # threads say what is being served to anyone who polls it.
+    from hfl.api.helpers import caller_is_owner
+
+    if not caller_is_owner(request):
+        return result
     try:
         import psutil
 

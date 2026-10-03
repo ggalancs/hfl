@@ -156,6 +156,9 @@ class TestServeCommand:
         """The Docker image stopped here every time: nobody answers a prompt
         in a container, and there 0.0.0.0 reaches only the published ports."""
         monkeypatch.setattr("hfl.cli.main._in_container", lambda: True)
+        # A container with its own network (not --network host): pinned, so
+        # the result does not depend on the kernel of the machine running it.
+        monkeypatch.setattr("hfl.cli.main._container_network", lambda: "own")
         with patch("hfl.api.server.start_server") as mock_start:
             result = runner.invoke(app, ["serve", "--host", "0.0.0.0"])
         assert result.exit_code == 0, result.output

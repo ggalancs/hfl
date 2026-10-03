@@ -126,6 +126,13 @@ _AUDIT_EVENT_FOR: dict[str, str] = {
     "snapshot load": "snapshot.load",
     "snapshot delete": "snapshot.delete",
     "train": "model.train",
+    "blob upload": "blob.upload",
+    "agent loop": "agent.loop",
+    "verify": "model.verify",
+    "benchmark": "model.benchmark",
+    "recommend": "hub.recommend",
+    "draft recommend": "hub.draft_recommend",
+    "discover refresh": "hub.discover_refresh",
 }
 
 

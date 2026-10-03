@@ -905,6 +905,47 @@ def _completion_grammar(response_format: Any) -> Any:
     return None
 
 
+def _grammar_source(response_format: Any) -> str | None:
+    """The GBNF llama.cpp compiles for a schema or a raw ``GBNF:`` format,
+    built as the chat handler and ``_completion_grammar`` build it; None
+    for anything else (plain JSON mode is llama-cpp-python's own grammar)."""
+    if isinstance(response_format, str) and response_format.startswith("GBNF:"):
+        return response_format[len("GBNF:") :]
+    if not isinstance(response_format, dict):
+        return None
+    try:
+        import json
+
+        from llama_cpp.llama_grammar import json_schema_to_gbnf
+
+        return str(json_schema_to_gbnf(json.dumps(response_format)))
+    except Exception:  # the chat handler falls back to plain JSON on it
+        return None
+
+
+def _refuse_unbuildable_grammar(model: Any, response_format: Any) -> None:
+    """Refuse, as a bad request, a format whose grammar llama.cpp will not
+    build. llama-cpp-python adds the grammar sampler without checking that
+    it was built: an undefined rule, a syntax error or 1001 nested optional
+    repetitions leave it NULL, and the first token sampled through it took
+    the whole process down (SIGSEGV, measured on 0.3.x). So the grammar is
+    built once against the model's vocabulary first, and thrown away."""
+    vocab = getattr(getattr(model, "_model", None), "vocab", None)
+    if not isinstance(vocab, int):
+        return  # not a loaded llama.cpp model (a test's stand-in)
+    source = _grammar_source(response_format)
+    if source is None:
+        return
+    import llama_cpp
+
+    sampler = llama_cpp.llama_sampler_init_grammar(vocab, source.encode("utf-8"), b"root")
+    if not sampler:
+        from hfl.exceptions import ValidationError
+
+        raise ValidationError("format: llama.cpp cannot build a grammar from it")
+    llama_cpp.llama_sampler_free(sampler)
+
+
 def _render_special_tokens(model: Any, on: bool) -> None:
     """Make ``model``'s completions keep (or drop, the library's default)
     control tokens in their text.
@@ -2421,6 +2462,7 @@ class LlamaCppEngine(InferenceEngine):
             "stop": cfg.stop,
             "seed": cfg.seed if cfg.seed >= 0 else None,
         }
+        _refuse_unbuildable_grammar(self._model, cfg.response_format)
         grammar = _completion_grammar(cfg.response_format)
         if grammar is not None:
             call_kwargs["grammar"] = grammar
@@ -2493,6 +2535,7 @@ class LlamaCppEngine(InferenceEngine):
         counted = CountedStream()
         model = self._model
         effective_prompt = completion_prompt(prompt, cfg)
+        _refuse_unbuildable_grammar(model, cfg.response_format)
         grammar = _completion_grammar(cfg.response_format)
         stopping = self._stopping()
 
@@ -2648,6 +2691,7 @@ class LlamaCppEngine(InferenceEngine):
         # ``response_format`` kwarg that create_chat_completion accepts
         # natively (maps to OpenAI's JSON mode for free-form JSON, or
         # to a compiled schema grammar for strict conformance).
+        _refuse_unbuildable_grammar(self._model, cfg.response_format)
         kwargs.update(_chat_format_kwargs(cfg.response_format))
         kwargs["logits_processor"] = self._cancellable_logits(kwargs)
 
@@ -2769,6 +2813,7 @@ class LlamaCppEngine(InferenceEngine):
         }
         if tools:
             kwargs["tools"] = tools
+        _refuse_unbuildable_grammar(self._model, cfg.response_format)
         kwargs.update(_chat_format_kwargs(cfg.response_format))
         kwargs["logits_processor"] = self._cancellable_logits(kwargs)
 

@@ -86,7 +86,8 @@ async def api_batch(
     from hfl.api.admin_guard import require_owner
 
     require_owner(request, "batch")
-    unload_after = apply_keep_alive(req.model, req.keep_alive)
+    # Owner-only route (require_owner above): its keep_alive is honoured.
+    unload_after = apply_keep_alive(req.model, req.keep_alive, owner=True)
     try:
         await load_llm(req.model)
     except Exception:

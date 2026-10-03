@@ -30,6 +30,7 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from hfl.api.admin_guard import require_owner
 from hfl.config import config
 from hfl.hub.blobs import (
     BlobTooLargeError,
@@ -88,6 +89,11 @@ async def post_blob(digest: str, request: Request) -> Response:
     limit middleware must exempt ``/api/blobs/`` (see
     ``RequestBodyLimitMiddleware.EXCLUDED_PREFIXES``).
     """
+    # SEC: an owner operation. A blob is only of use to ``/api/create``,
+    # which is the owner's; open to anyone, this wrote unbounded bytes to
+    # the server's disk for any remote peer — or for any web page through
+    # the owner's browser (a ``text/plain`` POST needs no CORS preflight).
+    require_owner(request, "blob upload")
     try:
         # SEC-2: bound the upload when an operator has configured a cap;
         # the default (0 → None) preserves the unlimited GGUF create flow.

@@ -609,11 +609,26 @@ class HFLConfig:
 
     def ensure_dirs(self):
         """Creates the necessary directories."""
+        # Chat transcripts and logs are the user's alone: a new HFL home is
+        # created 0700. An existing one is left as found (HFL_HOME may be a
+        # directory the user chose and shares); the private subdirectories
+        # HFL owns are tightened even if an older version made them 0755.
+        self.home_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for private in (self.home_dir / "sessions", self.home_dir / "logs"):
+            private_dir(private)
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         # Initialize registry if it doesn't exist
         if not self.registry_path.exists():
             self.registry_path.write_text("[]")
+
+
+def private_dir(path: Path) -> Path:
+    """Create ``path`` (owner-only, 0700) or tighten it if it exists."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name == "posix" and (path.stat().st_mode & 0o077):
+        path.chmod(0o700)
+    return path
 
 
 # Global instance

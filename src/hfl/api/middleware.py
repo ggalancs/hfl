@@ -153,14 +153,19 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
     # keeps a prefix because the digest is a path parameter, but it is
     # anchored with the separator and the route validates the digest against
     # a 64-hex regex before touching disk.
-    EXCLUDED_PATHS: frozenset[str] = frozenset({"/api/transcribe", "/v1/audio/transcriptions"})
+    # Audio uploads get a budget of their own instead of no budget: exempted,
+    # Starlette spooled a multipart body of any size to temp disk before the
+    # route's 100 MB check ran (security audit, 2026-10-03). 100 MiB of audio
+    # plus room for the multipart framing and form fields.
+    AUDIO_PATHS: frozenset[str] = frozenset({"/api/transcribe", "/v1/audio/transcriptions"})
+    AUDIO_MAX_BYTES = 101 * 1024 * 1024
     BLOB_PREFIX = "/api/blobs/"
 
     def __init__(self, app: Any, max_bytes: int) -> None:
         super().__init__(app)
         self.max_bytes = max_bytes
 
-    def _too_large_response(self) -> JSONResponse:
+    def _too_large_response(self, budget: int) -> JSONResponse:
         return JSONResponse(
             status_code=413,
             content={
@@ -169,7 +174,7 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
                     "code": "PAYLOAD_TOO_LARGE",
                     "category": "client",
                     "retryable": False,
-                    "details": {"max_bytes": self.max_bytes},
+                    "details": {"max_bytes": budget},
                 }
             },
         )
@@ -179,9 +184,10 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
             response: Response = await call_next(request)
             return response
         path = request.url.path.rstrip("/") or "/"
-        if path in self.EXCLUDED_PATHS or request.url.path.startswith(self.BLOB_PREFIX):
+        if request.url.path.startswith(self.BLOB_PREFIX):
             response = await call_next(request)
             return response
+        budget = self.AUDIO_MAX_BYTES if path in self.AUDIO_PATHS else self.max_bytes
 
         content_length = request.headers.get("content-length")
         declared: int | None = None
@@ -192,8 +198,8 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
                 # Malformed Content-Length — fall through to streamed enforcement.
                 declared = None
         if declared is not None:
-            if declared > self.max_bytes:
-                return self._too_large_response()
+            if declared > budget:
+                return self._too_large_response(budget)
             # A valid Content-Length within budget is authoritative — a body
             # cannot be both Content-Length-framed and chunked. Outside the
             # ``try`` above: a ValueError raised by the route itself must
@@ -213,8 +219,8 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
         body = b""
         async for chunk in request.stream():
             body += chunk
-            if len(body) > self.max_bytes:
-                return self._too_large_response()
+            if len(body) > budget:
+                return self._too_large_response(budget)
 
         request._body = body
         response = await call_next(request)
@@ -445,3 +451,128 @@ class JSONBodyMiddleware:
                     headers.append((b"content-type", b"application/json"))
                     scope = {**scope, "headers": headers}
         await self.app(scope, receive, send)
+
+
+# Host names that only ever mean this machine. Exact matches, compared
+# lower-case without the port: a suffix or prefix test would accept
+# ``localhost.evil.example``.
+_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_address(host: str | None) -> bool:
+    """Whether a bind or socket address is the loopback interface."""
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _host_name(value: str) -> str:
+    """The name in a ``Host`` header (or an origin's authority), lower-case,
+    without the port; IPv6 without its brackets. Anything unparsable comes
+    back whole, and so matches no allowed name."""
+    value = value.strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        rest = value[end + 1 :] if end != -1 else ""
+        if end != -1 and (not rest or (rest.startswith(":") and rest[1:].isdigit())):
+            return value[1:end]
+        return value
+    name, sep, port = value.rpartition(":")
+    if sep and port.isdigit():
+        return name
+    return value
+
+
+def _origin_host_names(origins: list[str]) -> set[str]:
+    """The host names of the ``HFL_ORIGINS`` entries: scheme and port dropped."""
+    from urllib.parse import urlsplit
+
+    names: set[str] = set()
+    for origin in origins:
+        authority = urlsplit(origin).netloc if "://" in origin else origin
+        if authority:
+            names.add(_host_name(authority))
+    return names
+
+
+class HostValidationMiddleware:
+    """Refuse a ``Host`` that is not this machine on a loopback-bound server.
+
+    DNS rebinding: a page served from the attacker's domain on port 11434
+    points that name at 127.0.0.1 after loading, and from then on its requests reach
+    the owner's HFL **same-origin** — no CORS, no preflight, every response
+    readable. The one thing the browser cannot forge is the ``Host`` header,
+    which still names the attacker's domain. A server that listens only on
+    loopback has no legitimate caller that names it otherwise, except the
+    hosts the operator listed in ``HFL_ORIGINS`` (a reverse proxy that
+    forwards the public name).
+
+    A server bound to another address is left alone: its operators reach it
+    by real names this cannot know. Pure ASGI, so HTTP and the WebSocket
+    handshake are both covered.
+    """
+
+    def __init__(self, app: Any, bound_host: Callable[[], str | None]) -> None:
+        self.app = app
+        # Read per request: ``start_server`` records the bind after import.
+        self._bound_host = bound_host
+
+    def _loopback_server(self, scope: dict[str, Any]) -> bool:
+        bound = self._bound_host()
+        if bound is not None:
+            return _is_loopback_address(bound)
+        # Mounted by another ASGI server (``uvicorn hfl.api.server:app``):
+        # the local address of this connection, which the server — not the
+        # client — reports.
+        server = scope.get("server")
+        if not server:
+            return False
+        return _is_loopback_address(str(server[0]))
+
+    def _allowed(self, scope: dict[str, Any]) -> bool:
+        if not self._loopback_server(scope):
+            return True
+        raw = next((v for n, v in scope.get("headers") or [] if n.lower() == b"host"), None)
+        if raw is None:
+            # HTTP/1.0 without Host: never a browser, so never a rebinding.
+            return True
+        name = _host_name(raw.decode("latin-1"))
+        if name in _LOOPBACK_NAMES:
+            return True
+        from hfl.config import config
+
+        if config.cors_allow_all:
+            # "Any web page may call this server": a rebound page gets
+            # nothing that CORS does not already hand every page.
+            return True
+        return name in _origin_host_names(config.cors_origins or [])
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] not in ("http", "websocket") or self._allowed(scope):
+            await self.app(scope, receive, send)
+            return
+        logger.warning("refused a request for a host that is not this server (DNS rebinding?)")
+        if scope["type"] == "websocket":
+            # Closing before accepting refuses the handshake (HTTP 403).
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        response = JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "error": (
+                        "Host header does not name this server. Reach it as localhost or "
+                        "127.0.0.1, or add the host to HFL_ORIGINS if a proxy forwards it."
+                    ),
+                    "code": "host_not_allowed",
+                    "category": "auth",
+                    "retryable": False,
+                }
+            },
+        )
+        await response(scope, receive, send)

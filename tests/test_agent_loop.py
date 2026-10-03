@@ -27,7 +27,8 @@ def _fresh_mcp():
 @pytest.fixture
 def client(temp_config):
     reset_state()
-    yield TestClient(app)
+    # The owner (loopback): blobs, keep_alive and the agent loop are the owner's alone.
+    yield TestClient(app, client=("127.0.0.1", 50000))
     reset_state()
 
 

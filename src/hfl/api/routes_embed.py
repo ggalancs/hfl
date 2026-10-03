@@ -38,11 +38,11 @@ import struct
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from hfl.api.deprecation import add_deprecation_headers
-from hfl.api.helpers import apply_keep_alive
+from hfl.api.helpers import apply_keep_alive, caller_is_owner
 from hfl.exceptions import (
     ModelNotFoundError,
     ModelNotReadyError,
@@ -381,10 +381,11 @@ def _select_embedding_backend(model_path: Any) -> Any:
         404: {"description": "Model not found."},
     },
 )
-async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
+async def ollama_embed(req: OllamaEmbedRequest, request: Request) -> dict[str, Any]:
     """Ollama-compatible ``POST /api/embed``."""
     start = time.monotonic_ns()
-    apply_keep_alive(req.model, req.keep_alive)
+    # A remote client may not unload or pin a shared model (as on chat).
+    apply_keep_alive(req.model, req.keep_alive, owner=caller_is_owner(request))
 
     inputs = req.input if isinstance(req.input, list) else [req.input]
 
@@ -432,7 +433,7 @@ async def ollama_embed(req: OllamaEmbedRequest) -> dict[str, Any]:
     },
 )
 async def ollama_embeddings_legacy(
-    req: OllamaEmbeddingsLegacyRequest, response: Response
+    req: OllamaEmbeddingsLegacyRequest, response: Response, request: Request
 ) -> dict[str, Any]:
     """Legacy ``POST /api/embeddings`` — single prompt, single vector.
 
@@ -447,7 +448,7 @@ async def ollama_embeddings_legacy(
     here is what replaces it — and nothing that is not.
     """
     add_deprecation_headers(response, alternative="/api/embed")
-    apply_keep_alive(req.model, req.keep_alive)
+    apply_keep_alive(req.model, req.keep_alive, owner=caller_is_owner(request))
     result, _ = await _embed_on(req.model, lambda engine: engine.embed([req.prompt]))
     return {"embedding": result.embeddings[0]}
 

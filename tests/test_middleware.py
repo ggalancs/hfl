@@ -470,10 +470,11 @@ class TestRequestBodyLimitMiddleware:
         global text-oriented limit must not 413 it."""
         from hfl.api.middleware import RequestBodyLimitMiddleware
 
-        # Exemptions are exact paths now (a startswith test also exempted
-        # "/api/transcribe-anything" from the cap — audit N-02).
-        assert "/api/transcribe" in RequestBodyLimitMiddleware.EXCLUDED_PATHS
-        assert "/api/transcribe-evil" not in RequestBodyLimitMiddleware.EXCLUDED_PATHS
+        # Exact paths (a startswith test also exempted "/api/transcribe-anything"
+        # from the cap — audit N-02), with a budget of their own rather than
+        # none (an unbounded upload was spooled to disk — audit 2026-10-03).
+        assert "/api/transcribe" in RequestBodyLimitMiddleware.AUDIO_PATHS
+        assert "/api/transcribe-evil" not in RequestBodyLimitMiddleware.AUDIO_PATHS
 
         app = FastAPI()
         app.add_middleware(RequestBodyLimitMiddleware, max_bytes=8)
@@ -483,9 +484,15 @@ class TestRequestBodyLimitMiddleware:
             return {"ok": True}
 
         client = TestClient(app)
-        # 100 bytes, far over the 8-byte cap — excluded path must not 413.
+        # 100 bytes, far over the 8-byte cap — the audio budget applies instead.
         response = client.post("/api/transcribe", json={"x": "y" * 100})
         assert response.status_code == 200
+        # ...and it is a budget: a declared body over it is refused unread.
+        over = RequestBodyLimitMiddleware.AUDIO_MAX_BYTES + 1
+        response = client.post(
+            "/api/transcribe", content=b"x", headers={"content-length": str(over)}
+        )
+        assert response.status_code == 413
 
 
 class TestMetricLabelCardinality:

@@ -77,6 +77,12 @@ AUDIT_EVENTS = frozenset(
         "snapshot.save",
         "snapshot.load",
         "snapshot.delete",
+        "agent.loop",
+        "model.verify",
+        "model.benchmark",
+        "hub.recommend",
+        "hub.draft_recommend",
+        "hub.discover_refresh",
         "model.train",
     }
 )
