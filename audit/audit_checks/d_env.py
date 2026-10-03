@@ -420,13 +420,31 @@ def d27(a: Audit) -> str:
 
 @probe("D28", "HFL_MEMORY_BUDGET")
 def d28(a: Audit) -> str:
+    """The lowest budget HFL takes (below 10 % counts as 10 %), and the load
+    decided by it: refused when the planned use after the load exceeds it,
+    served when it fits. "1 % refuses" held only on a machine already using
+    more than 10 % of its memory (not the Windows PC, at 9 %)."""
+    import re
+
     with a.server(env={"HFL_MEMORY_BUDGET": "1"}) as base:
         out = _chat(base, num_predict=2)
-    expect(
-        out.status_code in (503, 507) and "memory" in out.text.lower(),
-        (out.status_code, out.text[:200]),
+    log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+    plan = re.search(
+        r"budget (\d+)% = ([\d.]+) GB; after load ~([\d.]+) GB",
+        log.read_text(errors="replace"),
     )
-    return f"a 1% budget refuses the load: {out.status_code}"
+    expect(plan, f"no admission line in the log: {out.status_code}")
+    assert plan is not None
+    floor, budget, after = int(plan.group(1)), float(plan.group(2)), float(plan.group(3))
+    expect(floor == 10, f"budget {floor}% for HFL_MEMORY_BUDGET=1 (expected the 10 % floor)")
+    if after > budget:
+        expect(
+            out.status_code in (503, 507) and "memory" in out.text.lower(),
+            (out.status_code, out.text[:200]),
+        )
+        return f"10 % floor; {after} GB > {budget} GB: refused ({out.status_code})"
+    expect(out.status_code == 200, (out.status_code, out.text[:200]))
+    return f"10 % floor; {after} GB fits {budget} GB: served"
 
 
 @probe("D29", "HFL_METRICS_PUBLIC")
