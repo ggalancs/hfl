@@ -21,8 +21,8 @@ class Hfl < Formula
 
   desc "Download, run and try any Hugging Face model on your own machine"
   homepage "https://github.com/ggalancs/hfl"
-  url "https://files.pythonhosted.org/packages/e1/8d/2864d1ec00a20942850b1fdf72badf90d7e577cd337e74b8b81f6a991851/hfl-0.25.0.tar.gz"
-  sha256 "edb0b5529e2be432088d29afcefa29c7861b2c7419a75c25080efbe6bb854d53"
+  url "https://files.pythonhosted.org/packages/35/c6/88717873e11ff6fa225dd1b157387ee045fd3b65feefb65befad045aed1f/hfl-0.26.0.tar.gz"
+  sha256 "1a29ab6ccce86abfaebe1b3ff6e7fe1f0f45f7d456f175adb51dc42d8b351e81"
   license "Apache-2.0"
   head "https://github.com/ggalancs/hfl.git", branch: "main"
 
@@ -121,6 +121,11 @@ class Hfl < Formula
   resource "packaging" do
     url "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz"
     sha256 "94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79"
+  end
+
+  resource "psutil" do
+    url "https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz"
+    sha256 "0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372"
   end
 
   resource "pydantic" do

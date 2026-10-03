@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
 PackageIdentifier: ggalancs.HFL
-PackageVersion: 0.25.0
+PackageVersion: 0.26.0
 InstallerType: wix
 Scope: machine
 UpgradeBehavior: install
@@ -8,8 +8,8 @@ Commands:
   - hfl
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/ggalancs/hfl/releases/download/v0.25.0/hfl-0.25.0.msi
-    InstallerSha256: 2BF23F58C0444740A6804D65A9D65157E4DC7BB1A07A1CB6F147E1D218573766
+    InstallerUrl: https://github.com/ggalancs/hfl/releases/download/v0.26.0/hfl-0.26.0.msi
+    InstallerSha256: B5FCC6313AC30D4D3EBF182B4404D6D8B08D292F74C6A6CFCF1D16CE0BFBB719
     AppsAndFeaturesEntries:
       - UpgradeCode: '{F9FDE6C0-1D4C-4B7B-8C18-5AEA57F3A5C1}'
 ManifestType: installer
