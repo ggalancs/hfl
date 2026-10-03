@@ -106,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No llama-server is left running behind HFL.** Two ways, found by the
+  soak test: a load that outlived its request (a load timeout; here, a Mac
+  asleep) finished in its thread and its llama-server belonged to nobody —
+  32 of them by morning; and a llama-server that got SIGTERM while still
+  starting ignored it (llama.cpp loses a signal that early), so after the
+  wait HFL killed only its guard and the server ran on with its model
+  (11 hours). An abandoned load is now unloaded when it finishes, and a
+  stop that times out kills the guard and llama-server together.
+
 - **The Docker image users pull is signed.** Only the per-architecture
   images were (`…:0.25.0-arm64`, `-amd64`); `cosign verify` on
   `ghcr.io/ggalancs/hfl:0.25.0` or `:latest` — the multi-architecture index

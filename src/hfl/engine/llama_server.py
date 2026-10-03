@@ -406,6 +406,9 @@ def start_server(
             stdout=log,
             stderr=subprocess.STDOUT,
             env={**os.environ, "LLAMA_API_KEY": key},
+            # Its own process group, guard and llama-server: what
+            # ``stop_server`` kills when SIGTERM is not enough.
+            start_new_session=os.name != "nt",
         )
     base = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + timeout
@@ -440,6 +443,10 @@ def start_server(
     return proc, client
 
 
+# How long llama-server gets to stop on SIGTERM before it is killed.
+_STOP_WAIT = 30.0
+
+
 def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
     """Stop a llama-server started by ``start_server`` (SIGTERM, then kill)."""
     if proc is not None and proc.poll() is None:
@@ -453,9 +460,16 @@ def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
             return
         proc.send_signal(signal.SIGTERM)
         try:
-            proc.wait(timeout=30)
+            proc.wait(timeout=_STOP_WAIT)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            # Killing the guard alone left llama-server running, holding its
+            # model, for good: one that got SIGTERM while still starting
+            # ignored it (llama.cpp loses a signal that early; measured in
+            # the soak, 11 hours). The whole group goes.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
             proc.wait(timeout=10)
 
 

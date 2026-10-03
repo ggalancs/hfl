@@ -31,8 +31,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 FAKE = r"""
-import json, os, socketserver, sys, time
+import json, os, signal, socketserver, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+if os.environ.get("FAKE_IGNORE_TERM") == "1":  # as llama.cpp does with an early SIGTERM
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 args = sys.argv[1:]
 port = int(args[args.index("--port") + 1])
@@ -336,6 +339,33 @@ class TestADeadProcess:
         engine._proc.wait(timeout=10)
         chunks = list(engine.chat_stream([ChatMessage(role="user", content="you")]))
         assert "".join(chunks)
+
+
+class TestStopping:
+    def test_a_server_that_ignores_sigterm_is_killed_with_its_guard(self, fake_server, monkeypatch):
+        """llama-server lost a SIGTERM sent while it started, and killing
+        only the guard left it running with its model for 11 hours (the
+        soak). The whole process group is killed after the wait."""
+        from hfl.engine import llama_server
+        from hfl.engine.llama_server import LlamaServerEngine
+
+        model, argv_out = fake_server
+        monkeypatch.setenv("FAKE_IGNORE_TERM", "1")
+        monkeypatch.setattr(llama_server, "_STOP_WAIT", 1.0)
+        engine = LlamaServerEngine()
+        engine.load(str(model))
+        pid = json.loads(argv_out.read_text())["pid"]
+        engine.unload()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(pid, 9)  # this test's own mess
+            pytest.fail("llama-server outlived the stop")
 
 
 class TestRequests:

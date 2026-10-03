@@ -363,10 +363,19 @@ def _record_load(name: str, started: float) -> None:
 async def _load_into(engine: "InferenceEngine", manifest: "ModelManifest", n_ctx: int) -> None:
     """``engine.load`` off the event loop; a half-loaded engine is unloaded
     on failure so it never leaks."""
+    loading = asyncio.ensure_future(
+        asyncio.to_thread(engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx))
+    )
     try:
-        await asyncio.to_thread(
-            engine.load, manifest.local_path, **load_kwargs_for(manifest, n_ctx)
-        )
+        await asyncio.shield(loading)
+    except asyncio.CancelledError:
+        # The request gave up (a load timeout, a client gone) while the
+        # thread was still loading: it cannot be stopped, and what it
+        # finished loading belonged to nobody — a llama-server left running
+        # for each timed-out load (measured: 32 after a night of them).
+        # Release it once the thread is done.
+        loading.add_done_callback(lambda _: asyncio.ensure_future(_release(engine)))
+        raise
     except BaseException:
         if engine.is_loaded:
             try:
@@ -374,6 +383,17 @@ async def _load_into(engine: "InferenceEngine", manifest: "ModelManifest", n_ctx
             except Exception as cleanup_error:
                 logger.error("Failed to cleanup engine after load error: %s", cleanup_error)
         raise
+
+
+async def _release(engine: "InferenceEngine") -> None:
+    """Unload an engine whose load finished after its request gave up."""
+    if not engine.is_loaded:
+        return
+    logger.warning("unloading %s: its load finished after the request gave up", engine)
+    try:
+        await asyncio.to_thread(engine.unload)
+    except Exception as exc:
+        logger.error("Failed to unload an abandoned load: %s", exc)
 
 
 def _backend_name(engine: object) -> str:
