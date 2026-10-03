@@ -356,7 +356,10 @@ def e21(a: Audit) -> str:
     done = a.cli("install", "llama-server", "--yes", "--force", env=env, timeout=1800)
     said = (done.stdout + done.stderr).strip()
     expect(done.returncode == 0, f"exit {done.returncode}: {said[-400:]}")
-    found = sorted((a.home / "bin").glob("llama.cpp-*/llama-server*"))
+    name = "llama-server.exe" if os.name == "nt" else "llama-server"
+    # The program itself: on Windows "llama-server*" also matched (and
+    # sorted first) llama-server-impl.dll.
+    found = sorted((a.home / "bin").glob(f"llama.cpp-*/{name}"))
     expect(found, f"no llama-server under {a.home / 'bin'}: {said[-300:]}")
     version = subprocess.run(
         [str(found[0]), "--version"], capture_output=True, text=True, timeout=60

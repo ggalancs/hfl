@@ -372,6 +372,18 @@ def g4(a: Audit) -> str:
     env = {"HFL_MAX_LOADED_MODELS": "1", "HFL_STREAM_QUEUE_PUT_TIMEOUT": "15"}
     with a.server(env=env) as base:
         expect(_answers(base).strip(), "chat did not answer")
+        # The stall shows only once the reply outgrows the network buffers;
+        # on a slow generation (a CPU) that takes minutes, and the request is
+        # then simply busy, which is right. tests/test_stalled_client.py
+        # covers the mechanism there.
+        timed = httpx.post(base + "/api/generate", json=_long(300, stream=False), timeout=300)
+        reply = timed.json()
+        rate = reply.get("eval_count", 0) / max(reply.get("eval_duration", 0) / 1e9, 1e-9)
+        if rate < 150:
+            raise Uncheckable(
+                f"generation at {rate:.0f} tok/s: too slow to fill the buffers in time "
+                "(tests/test_stalled_client.py covers the mechanism)"
+            )
         port = int(base.rsplit(":", 1)[1])
         long = _long(20000, stream=True)
         long["options"]["num_ctx"] = 32768
