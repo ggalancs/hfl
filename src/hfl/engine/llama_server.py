@@ -466,6 +466,21 @@ def start_server(
 _STOP_WAIT = 30.0
 
 
+def _how_it_ended(code: int | None) -> str:
+    """How llama-server ended, from its guard's exit code (128 + N when a
+    signal N killed it; SIGKILL is most often the OOM killer)."""
+    if code is not None and os.name != "nt" and code > 128:
+        number = code - 128
+        try:
+            name = signal.Signals(number).name
+        except ValueError:
+            name = f"signal {number}"
+        if number == signal.SIGKILL:
+            return f"was killed ({name}; out of memory?)"
+        return f"was killed ({name})"
+    return f"exited (code {code})"
+
+
 def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
     """Stop a llama-server started by ``start_server`` (SIGTERM, then kill)."""
     if proc is not None and proc.poll() is None:
@@ -860,9 +875,9 @@ class LlamaServerEngine(InferenceEngine):
             if self._proc is not dead or self._client is None:
                 return  # another request started it again, or it was unloaded
             logger.warning(
-                "llama-server for %s exited (code %s); starting it again",
+                "llama-server for %s %s; starting it again",
                 Path(self._model_path).name,
-                dead.returncode,
+                _how_it_ended(dead.returncode),
             )
             old = self._client
             argv = [*self._argv, *self._template_args, *self._lora_args()]

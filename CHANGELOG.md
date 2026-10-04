@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An out-of-memory kill of llama-server was logged as a clean exit.** When
+  the kernel killed llama-server, HFL started it again (correct) but logged
+  "exited (code 0)": its guard process reported any death by a signal as 0.
+  It now reports 128 + the signal, and the log says "was killed (SIGKILL;
+  out of memory?)". Found by the Linux benchmark in a 4 GB Docker VM.
+
 ## [0.26.0] - 2026-10-03
 
 ### Security

@@ -92,7 +92,12 @@ def main(argv: list[str]) -> int:
         if _parent_gone(parent, handle):
             _stop(child)
             break
-    return child.returncode if child.returncode is not None and child.returncode >= 0 else 0
+    code = child.returncode
+    if code is None:
+        return 0
+    # Killed by a signal (the OOM killer's SIGKILL): 128 + its number, as a
+    # shell reports it. Reported as 0, an OOM kill read as a clean exit.
+    return 128 - code if code < 0 else code
 
 
 if __name__ == "__main__":

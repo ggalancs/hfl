@@ -209,6 +209,12 @@ class TestChildGuard:
         argv = ["guard", str(os.getppid()), "--", PY, "-c", "raise SystemExit(3)"]
         assert guard.main(argv) == 3
 
+    def test_a_child_killed_by_sigkill_is_not_reported_as_a_clean_exit(self, guard):
+        # The OOM killer's way: it used to come out as code 0.
+        code = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+        argv = ["guard", str(os.getppid()), "--", PY, "-c", code]
+        assert guard.main(argv) == 128 + signal.SIGKILL
+
     def test_a_parent_that_is_gone_stops_the_child(self, guard, monkeypatch):
         started: list = []
         real_popen = subprocess.Popen
@@ -220,7 +226,7 @@ class TestChildGuard:
         monkeypatch.setattr(guard.subprocess, "Popen", popen)
         monkeypatch.setattr(guard, "_parent_gone", lambda parent, handle: True)
         argv = ["guard", "1", "--", PY, "-c", "import time; time.sleep(30)"]
-        assert guard.main(argv) == 0  # terminated by a signal: reported as 0
+        assert guard.main(argv) == 128 + signal.SIGTERM  # as a shell reports it
         assert started[0].returncode == -signal.SIGTERM
 
     def test_sigterm_is_forwarded_to_the_child(self, guard, monkeypatch):
@@ -234,7 +240,7 @@ class TestChildGuard:
 
         monkeypatch.setattr(guard, "_parent_gone", parent_gone)
         argv = ["guard", "1", "--", PY, "-c", "import time; time.sleep(30)"]
-        assert guard.main(argv) == 0
+        assert guard.main(argv) == 128 + signal.SIGTERM
         # After the child is gone a late signal is not sent anywhere.
         forwarded[0](signal.SIGINT, None)
 

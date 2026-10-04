@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import signal
 import subprocess
 import types
 
@@ -310,6 +312,15 @@ class TestRevival:
 
         engine._proc = Running()
         assert engine._died() is False
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
+    def test_how_it_ended_names_the_signal(self):
+        assert ls._how_it_ended(128 + signal.SIGKILL) == "was killed (SIGKILL; out of memory?)"
+        assert ls._how_it_ended(128 + signal.SIGSEGV) == "was killed (SIGSEGV)"
+        assert ls._how_it_ended(128 + 99) == "was killed (signal 99)"
+        assert ls._how_it_ended(0) == "exited (code 0)"
+        assert ls._how_it_ended(1) == "exited (code 1)"
+        assert ls._how_it_ended(None) == "exited (code None)"
 
     def test_revive_only_the_process_that_died(self):
         engine = _engine()
