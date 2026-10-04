@@ -44,7 +44,9 @@ from pathlib import Path
 import httpx
 import psutil
 
-MODELS = ["chat", "think", "stories"]  # GGUF, in and out of memory
+# GGUF, in and out of memory; --models adds others (``mlxq``: MLX, which runs
+# inside HFL's own process, not in a llama-server of its own).
+MODELS = ["chat", "think", "stories"]
 EMBED = "embed"
 TOOL = {
     "type": "function",
@@ -188,6 +190,23 @@ def _tree(pid: int) -> tuple[int, int, int, int]:
     return own, rss, fds, len(procs) - 1
 
 
+def _formats(base: str) -> dict[str, str]:
+    """Each local model's format, by name (``gguf``, ``safetensors``, ``mlx``…)."""
+    tags = httpx.get(base + "/api/tags", timeout=30).json().get("models", [])
+    return {m["name"]: str((m.get("details") or {}).get("format") or "") for m in tags}
+
+
+def _in_process_loaded(base: str, formats: dict[str, str]) -> bool:
+    """Whether a model HFL runs in its own process (MLX, Transformers: any
+    format but GGUF, which llama-server runs apart) is loaded now. Its weights
+    are then in HFL's own memory: hundreds of MB that come and go with it."""
+    try:
+        loaded = httpx.get(base + "/api/ps", timeout=10).json().get("models", [])
+    except (httpx.HTTPError, ValueError):
+        return False
+    return any(formats.get(m.get("name", ""), "gguf").lower() != "gguf" for m in loaded)
+
+
 def _p95(values: list[float]) -> float:
     if len(values) < 2:
         return values[0] if values else 0.0
@@ -209,20 +228,34 @@ def verdict(samples: list[dict], hours: float) -> tuple[bool, list[str]]:
         return False, ["fewer than 3 samples after the first hour: nothing to judge"]
     hs = [s["h"] for s in steady]
     span = hs[-1] - hs[0]
-    for key, unit, limit_rel, limit_abs in (
-        ("hfl_mb", "MB", 0.05, None),
-        ("fds", "files", None, 20),
-        ("children", "processes", None, 1),
-    ):
-        ys = [float(s[key]) for s in steady]
-        growth = _trend(hs, ys) * span
+    # HFL's own memory, judged apart while a model runs inside HFL (MLX) and
+    # while none does: its weights come and go with it, hundreds of MB that
+    # would read as a leak, or hide one. A leak grows in both.
+    groups = [("", steady)]
+    if any(s.get("in_process") for s in steady):
+        groups = [
+            (" (an in-process model loaded)", [s for s in steady if s.get("in_process")]),
+            (" (none loaded in process)", [s for s in steady if not s.get("in_process")]),
+        ]
+    checks = [("hfl_mb", label, group, "MB", 0.05, None) for label, group in groups]
+    checks += [
+        ("fds", "", steady, "files", None, 20),
+        ("children", "", steady, "processes", None, 1),
+    ]
+    for key, label, group, unit, limit_rel, limit_abs in checks:
+        if len(group) < 3:
+            lines.append(f"--- {key}{label}: {len(group)} samples, too few to judge")
+            continue
+        xs = [s["h"] for s in group]
+        ys = [float(s[key]) for s in group]
+        growth = _trend(xs, ys) * span
         level = statistics.fmean(ys)
         bound = limit_abs if limit_abs is not None else level * (limit_rel or 0)
         good = growth <= bound
         ok &= good
         lines.append(
-            f"{'OK ' if good else 'BAD'} {key}: trend {growth:+.1f} {unit} over {span:.1f} h "
-            f"(level {level:.0f}, allowed {bound:.0f})"
+            f"{'OK ' if good else 'BAD'} {key}{label}: trend {growth:+.1f} {unit} over "
+            f"{span:.1f} h (level {level:.0f}, allowed {bound:.0f}, {len(group)} samples)"
         )
     server_errors = sum(s["errors_5xx"] for s in samples)
     good = server_errors == 0
@@ -254,7 +287,11 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=300.0)
     parser.add_argument("--clients", type=int, default=4)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--models", default=",".join(MODELS), help="aliases to chat and stream with"
+    )
     args = parser.parse_args()
+    MODELS[:] = [m for m in args.models.split(",") if m]
     work = args.work.expanduser().resolve()
     hfl = work / "venv" / ("Scripts/hfl.exe" if os.name == "nt" else "bin/hfl")
     if not hfl.exists():
@@ -294,6 +331,7 @@ def main() -> int:
             except httpx.HTTPError:
                 pass
             time.sleep(0.5)
+        formats = _formats(base)
         clients = [threading.Thread(target=load.client, daemon=True) for _ in range(args.clients)]
         for c in clients:
             c.start()
@@ -307,6 +345,7 @@ def main() -> int:
             window = load.take()
             alive = server.poll() is None
             own, rss, fds, children = _tree(server.pid) if alive else (0, 0, 0, 0)
+            in_process = _in_process_loaded(base, formats) if alive else False
 
             def failed(r: dict) -> bool:
                 status = r["status"]
@@ -315,7 +354,7 @@ def main() -> int:
             sample = {
                 "h": round((time.monotonic() - started) / 3600, 3),
                 "hfl_mb": round(own / 2**20, 1), "rss_mb": round(rss / 2**20, 1),
-                "fds": fds, "children": children,
+                "fds": fds, "children": children, "in_process": in_process,
                 "requests": len(window),
                 "errors_5xx": sum(1 for r in window if failed(r)),
                 "capacity": sum(1 for r in window if r["status"] in (429, 503)),
