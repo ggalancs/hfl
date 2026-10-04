@@ -40,7 +40,38 @@ gave 2.38x the throughput of one after another with Qwen2.5-0.5B-Instruct
 4-bit (audit E22), 4.0x with 8 on Qwen3-14B BF16. Ollama has no MLX
 backend to compare with.
 
-Not measured yet: the same on Linux.
+## Result — 2026-10-04, Linux (CPU only)
+
+Linux arm64 (Debian trixie) in Docker Desktop on the same M3 Max: a VM of
+4 cores and 4 GB, no GPU. HFL 0.26.0 (GGUF through llama-server, 4 slots),
+Ollama 0.34.2, llama-server build 10964, each with 4 threads.
+[Qwen2.5-0.5B-Instruct Q4_K_M](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF)
+(Apache-2.0): Phi-3.5 did not fit three times in 4 GB, and neither did
+Qwen2.5-1.5B — on a CPU each llama-server holds its own copy of the weights,
+and the kernel killed them. Raw data:
+[4 at once, 7 rounds](benchmarks/2026-10-04-linux-arm64-cpu-qwen2.5-0.5b-c4.json),
+[8 at once, 5 rounds](benchmarks/2026-10-04-linux-arm64-cpu-qwen2.5-0.5b-c8.json).
+
+| | HFL | Ollama | llama-server |
+|---|---:|---:|---:|
+| Time to first token, short prompt | 0.072 s | 0.071 s | 0.066 s |
+| Time to first token, ~2,000-token prompt | 6.74 s | 6.60 s | 6.61 s |
+| Decode, one request | 120.3 tok/s | 137.0 tok/s | 135.5 tok/s |
+| Throughput, 4 requests at once | **196.4 tok/s** | 160.5 tok/s | 213.8 tok/s |
+| Throughput, 8 requests at once (second run) | **190.4 tok/s** | 159.6 tok/s | 212.9 tok/s |
+
+With several requests at once HFL is 22 % ahead of Ollama and 8 % behind
+llama-server run on its own; one request at a time it is the slowest of the
+three, by about 11 %. Prefill (the long prompt) is level.
+
+Where the 11 % goes, measured against the same llama-server HFL started
+(a 256-token reply, medians of 6): 1.59 s sent to it directly with
+llama-server's own sampling defaults, 1.73 s directly with the settings HFL
+sends (Ollama's defaults: `repeat_penalty` 1.1, `top_k` 40, `top_p` 0.9),
+1.80 s through HFL. About two thirds is the sampling — the repetition
+penalty costs CPU on every token — and the rest is HFL relaying the stream
+while llama-server's 4 threads already fill the 4 cores. On the Mac,
+where the model runs on the GPU, neither shows (the table above).
 
 ## Result — 2026-09-24 (0.21.0)
 
