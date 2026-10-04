@@ -437,14 +437,27 @@ def d28(a: Audit) -> str:
     assert plan is not None
     floor, budget, after = int(plan.group(1)), float(plan.group(2)), float(plan.group(3))
     expect(floor == 10, f"budget {floor}% for HFL_MEMORY_BUDGET=1 (expected the 10 % floor)")
-    if after > budget:
+    # On a GPU the same line plans its memory too, and either plan refuses:
+    # judged by RAM alone, D28 expected a 200 on an L4 where the GPU's 10 %
+    # (2.2 GB) was already taken and HFL rightly answered 507.
+    gpu = re.search(
+        r"GPU [\d.]+ GB of [\d.]+ GB in use \(\d+%\), budget \d+% = ([\d.]+) GB, "
+        r"after load ~([\d.]+) GB",
+        log.read_text(errors="replace"),
+    )
+    plans = [("RAM", budget, after)]
+    if gpu:
+        plans.append(("GPU", float(gpu.group(1)), float(gpu.group(2))))
+    over = [f"{name} {used} GB > {cap} GB" for name, cap, used in plans if used > cap]
+    if over:
         expect(
             out.status_code in (503, 507) and "memory" in out.text.lower(),
             (out.status_code, out.text[:200]),
         )
-        return f"10 % floor; {after} GB > {budget} GB: refused ({out.status_code})"
+        return f"10 % floor; {', '.join(over)}: refused ({out.status_code})"
     expect(out.status_code == 200, (out.status_code, out.text[:200]))
-    return f"10 % floor; {after} GB fits {budget} GB: served"
+    fits = ", ".join(f"{name} {used} GB fits {cap} GB" for name, cap, used in plans)
+    return f"10 % floor; {fits}: served"
 
 
 @probe("D29", "HFL_METRICS_PUBLIC")

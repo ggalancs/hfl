@@ -375,6 +375,49 @@ def g3(a: Audit) -> str:
 # -- G4 ------------------------------------------------------------------------
 
 
+def _send_queue(server_port: int, client_port: int) -> int | None:
+    """Bytes the server has written to a connection and its client has not
+    read (Linux: the ``tx_queue`` of /proc/net/tcp), or None when gone."""
+    want = (f":{server_port:04X}", f":{client_port:04X}")
+    for line in open("/proc/net/tcp").read().splitlines()[1:]:
+        fields = line.split()
+        if fields[1].endswith(want[0]) and fields[2].endswith(want[1]):
+            return int(fields[4].split(":")[0], 16)
+    return None
+
+
+def _wait_until_stalled(base: str, server_port: int, client_port: int) -> None:
+    """Until the stalled connection's buffer is full, so the server's writes
+    block. Linux grows a connection's send buffer while its client reads
+    nothing, up to ``tcp_wmem``'s maximum (4 MiB by default): on an L4 a
+    20,000-token reply never filled it, the stream was simply busy, and the
+    other model's 60-second wait ran out (Modal, 2026-10-04). With the buffer
+    capped at 256 KB the same server let the model go 15 s after it filled.
+    """
+    cap = int(open("/proc/sys/net/ipv4/tcp_wmem").read().split()[2])
+    last, steady, deadline = -1, 0, time.monotonic() + 240
+    while time.monotonic() < deadline:
+        queued = _send_queue(server_port, client_port)
+        if (
+            queued is None
+            or httpx.get(base + "/healthz", timeout=10).json().get("queue_in_flight", 0) == 0
+        ):
+            raise Uncheckable(
+                f"the reply ended before it filled the connection's buffer "
+                f"(Linux grows it up to tcp_wmem's {cap / 2**20:.1f} MiB); "
+                "tests/test_stalled_client.py covers the mechanism"
+            )
+        steady = steady + 1 if queued == last and queued > 0 else 0
+        if steady >= 2:  # unchanged for 10 s: the writes block
+            return
+        last = queued
+        time.sleep(5)
+    raise Uncheckable(
+        f"the connection's buffer was still growing after 240 s ({last / 2**20:.1f} MiB "
+        f"of tcp_wmem's {cap / 2**20:.1f} MiB): this model does not fill it in time"
+    )
+
+
 @check("G4", "a client that stops reading its stream", needs=("A24",))
 def g4(a: Audit) -> str:
     """A client asks for a long streamed reply, then reads nothing and keeps
@@ -392,7 +435,8 @@ def g4(a: Audit) -> str:
         timed = httpx.post(base + "/api/generate", json=_long(300, stream=False), timeout=300)
         reply = timed.json()
         rate = reply.get("eval_count", 0) / max(reply.get("eval_duration", 0) / 1e9, 1e-9)
-        if rate < 150:
+        # On Linux the check watches the buffer fill itself (below), at any speed.
+        if rate < 150 and not sys.platform.startswith("linux"):
             raise Uncheckable(
                 f"generation at {rate:.0f} tok/s: too slow to fill the buffers in time "
                 "(tests/test_stalled_client.py covers the mechanism)"
@@ -416,6 +460,8 @@ def g4(a: Audit) -> str:
             health.get("queue_in_flight", 0) >= 1,
             f"the stalled request is not in flight any more: {health}",
         )
+        if sys.platform.startswith("linux"):
+            _wait_until_stalled(base, port, stalled.getsockname()[1])
         started = time.monotonic()
         # Another model, with one model at a time: chat has to go. A
         # request that holds chat would keep it (and this one waiting).
