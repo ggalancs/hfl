@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An MLX model leaked ~4 MB of HFL's memory each time it was loaded.** Each
+  load built the model's tokenizer again, and transformers' tokenizer leaks
+  native memory the garbage collector never sees (~7 MB per
+  `AutoTokenizer`, measured; a known upstream behaviour, not HFL's). An
+  8-hour soak that swapped an MLX model in and out 7,600 times grew HFL from
+  1.5 GB to 9 GB. HFL now keeps each model's tokenizer across unloads (up to
+  eight models; rebuilt when its files change) and still frees the weights:
+  150 load/unload cycles grew the process by 136 MB instead of 566 MB. What
+  remains (~0.9 MB per load) is MLX building the model itself, upstream.
 - **An out-of-memory kill of llama-server was logged as a clean exit.** When
   the kernel killed llama-server, HFL started it again (correct) but logged
   "exited (code 0)": its guard process reported any death by a signal as 0.

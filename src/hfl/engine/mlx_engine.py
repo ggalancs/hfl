@@ -35,6 +35,17 @@ from hfl.engine.base import (
 
 logger = logging.getLogger(__name__)
 
+# The tokenizer of each model loaded, kept across unloads: building one again
+# on every load leaked native memory in transformers' tokenizer (~7 MB per
+# AutoTokenizer, measured), which the GC and MLX's own counters never see.
+# A soak that loaded and unloaded an MLX model 7,600 times grew HFL from
+# 1.5 GB to 9 GB. A tokenizer holds no per-request state (mlx-lm hands each
+# caller its own copy of the streaming detokenizer), so one per model serves
+# every load of it. Bounded: the least recently loaded go first.
+_TOKENIZERS: dict[tuple[str, int, Any], Any] = {}
+_TOKENIZERS_LOCK = threading.Lock()
+_TOKENIZERS_KEPT = 8
+
 __all__ = ["MLXEngine", "is_available"]
 
 
@@ -64,6 +75,41 @@ def _as_float32(logprobs: Any) -> Any:
     import mlx.core as mx
 
     return logprobs if dtype == mx.float32 else logprobs.astype(mx.float32)
+
+
+def _load_local(model_path: str, adapter: str | None) -> tuple[Any, Any]:
+    """``mlx_lm.load`` for a model on disk, the tokenizer reused from an
+    earlier load of the same files (see ``_TOKENIZERS``)."""
+    from mlx_lm.utils import load_adapters, load_model
+
+    path = Path(model_path)
+    model, config = load_model(path)
+    if adapter:
+        model = load_adapters(model, adapter)
+        model.eval()
+    return model, _tokenizer_for(path, config.get("eos_token_id"))
+
+
+def _tokenizer_for(path: Path, eos: Any) -> Any:
+    from mlx_lm.utils import load_tokenizer
+
+    # The files' modification times: a model replaced in place (re-pulled,
+    # re-quantized) gets its new tokenizer, not the one kept.
+    stamp = sum(
+        f.stat().st_mtime_ns for f in path.iterdir() if f.name.startswith(("tokenizer", "vocab"))
+    )
+    key = (str(path.resolve()), stamp, tuple(eos) if isinstance(eos, list) else eos)
+    with _TOKENIZERS_LOCK:
+        kept = _TOKENIZERS.pop(key, None)
+        if kept is not None:
+            _TOKENIZERS[key] = kept  # the most recent last
+            return kept
+    tokenizer = load_tokenizer(path, eos_token_ids=eos)
+    with _TOKENIZERS_LOCK:
+        _TOKENIZERS[key] = tokenizer
+        while len(_TOKENIZERS) > _TOKENIZERS_KEPT:
+            _TOKENIZERS.pop(next(iter(_TOKENIZERS)))
+    return tokenizer
 
 
 class MLXEngine(InferenceEngine):
@@ -116,7 +162,9 @@ class MLXEngine(InferenceEngine):
         # ``(model, tokenizer, config)`` when ``return_config=True``; the
         # starred target accepts either arity (we only want the first two).
         adapter = self._adapter(kwargs.get("lora_paths"))
-        if adapter:
+        if Path(model_path).is_dir():
+            self._model, self._tokenizer = _load_local(model_path, adapter)
+        elif adapter:
             self._model, self._tokenizer, *_ = load(model_path, adapter_path=adapter)
         else:
             self._model, self._tokenizer, *_ = load(model_path)
