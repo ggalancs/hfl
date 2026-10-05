@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Gabriel Galán Pelayo
-"""An MLX model's tokenizer is built once and kept across unloads.
+"""Repeated MLX loads do not grow HFL's memory.
 
-Building it again on every load leaked native memory in transformers'
-tokenizer (~7 MB per load, measured; the GC never sees it): a soak that
-loaded and unloaded an MLX model 7,600 times grew HFL from 1.5 GB to 9 GB.
-A fake ``mlx_lm.utils`` counts the tokenizers built.
+An 8-hour soak that swapped an MLX model in and out 7,600 times grew HFL
+from 1.5 GB to 9 GB. Two causes, both measured outside HFL: MLX's global
+random state, split lazily by every layer's initial weights and never
+evaluated (0.54 MB per build, without end), and transformers' tokenizer,
+whose native memory grows ~0.4-0.7 GB over the first loads. HFL evaluates
+the random state after each load and keeps each model's tokenizer.
 """
 
 from __future__ import annotations
@@ -48,6 +50,11 @@ def fake_utils(monkeypatch):
     utils.load_tokenizer = load_tokenizer  # type: ignore[attr-defined]
     fake = ModuleType("mlx_lm")
     fake.utils = utils  # type: ignore[attr-defined]
+
+    def whole_load(*_args, **_kwargs):  # a model folder never goes through it
+        pytest.fail("mlx_lm.load used for a model folder")
+
+    fake.load = whole_load  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlx_lm", fake)
     monkeypatch.setitem(sys.modules, "mlx_lm.utils", utils)
     monkeypatch.setattr(mlx_engine, "_TOKENIZERS", {})
@@ -115,3 +122,41 @@ def test_load_takes_a_model_folder_through_the_kept_tokenizer(fake_utils, tmp_pa
     engine.load(str(path))
     assert engine._tokenizer is tokenizer
     assert len(fake_utils["built"]) == 1
+
+
+@pytest.fixture
+def fake_mx(monkeypatch):
+    evaluated: list[object] = []
+    core = ModuleType("mlx.core")
+    random = ModuleType("mlx.core.random")
+    random.state = ["key"]  # type: ignore[attr-defined]
+    core.random = random  # type: ignore[attr-defined]
+    core.eval = lambda *arrays: evaluated.extend(arrays)  # type: ignore[attr-defined]
+    mlx = ModuleType("mlx")
+    mlx.core = core  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", core)
+    return {"evaluated": evaluated, "core": core}
+
+
+def test_a_load_evaluates_mlx_random_state(fake_utils, fake_mx, tmp_path, monkeypatch):
+    path = _model_dir(tmp_path)
+    monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
+    engine = mlx_engine.MLXEngine()
+    monkeypatch.setattr(engine, "_start_batching", lambda: None)
+    monkeypatch.setattr(engine, "_new_prompt_store", lambda: None)
+    engine.load(str(path))
+    assert fake_mx["evaluated"] == [fake_mx["core"].random.state]
+
+
+def test_settling_the_random_state_never_fails_a_load(fake_mx, monkeypatch):
+    def broken(*_arrays):
+        raise RuntimeError("metal")
+
+    monkeypatch.setattr(fake_mx["core"], "eval", broken)
+    mlx_engine._settle_random_state()  # no exception
+
+
+def test_without_mlx_there_is_nothing_to_settle(monkeypatch):
+    monkeypatch.setitem(sys.modules, "mlx.core", None)  # import fails
+    mlx_engine._settle_random_state()

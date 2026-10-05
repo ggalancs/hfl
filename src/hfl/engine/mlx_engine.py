@@ -36,12 +36,11 @@ from hfl.engine.base import (
 logger = logging.getLogger(__name__)
 
 # The tokenizer of each model loaded, kept across unloads: building one again
-# on every load leaked native memory in transformers' tokenizer (~7 MB per
-# AutoTokenizer, measured), which the GC and MLX's own counters never see.
-# A soak that loaded and unloaded an MLX model 7,600 times grew HFL from
-# 1.5 GB to 9 GB. A tokenizer holds no per-request state (mlx-lm hands each
-# caller its own copy of the streaming detokenizer), so one per model serves
-# every load of it. Bounded: the least recently loaded go first.
+# on every load costs time and grows native memory transformers' tokenizer
+# never hands back (+0.4-0.7 GB over the first 100-200 loads, then level;
+# measured), so one per model serves every load of it. A tokenizer holds no
+# per-request state (mlx-lm hands each caller its own copy of the streaming
+# detokenizer). Bounded: the least recently loaded go first.
 _TOKENIZERS: dict[tuple[str, int, Any], Any] = {}
 _TOKENIZERS_LOCK = threading.Lock()
 _TOKENIZERS_KEPT = 8
@@ -112,6 +111,27 @@ def _tokenizer_for(path: Path, eos: Any) -> Any:
     return tokenizer
 
 
+def _settle_random_state() -> None:
+    """Evaluate MLX's global random state after a model is built.
+
+    Each random draw splits that state lazily, and building a model draws one
+    for every layer's initial weights, which loading then replaces: nothing
+    ever evaluates the chain, so it grows for as long as the process lives.
+    0.54 MB per build of Qwen2.5-0.5B (1,000 builds: +538 MB, MLX's own
+    counters at 0); an 8-hour soak that swapped an MLX model in and out 7,600
+    times grew HFL from 1.5 GB to 9 GB. Evaluated, the chain collapses to one
+    key: 1,000 builds +0.1 MB.
+    """
+    try:
+        import mlx.core as mx
+    except ImportError:
+        return
+    try:
+        mx.eval(mx.random.state)
+    except Exception:  # never fail a load over housekeeping
+        logger.debug("mlx random state not evaluated", exc_info=True)
+
+
 class MLXEngine(InferenceEngine):
     """Inference engine wrapping mlx-lm's ``generate`` helper.
 
@@ -175,6 +195,7 @@ class MLXEngine(InferenceEngine):
         # from a fresh cache.
         self._prompt_store = None if self._draft is not None else self._new_prompt_store()
         self._start_batching()
+        _settle_random_state()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
 
     def _start_batching(self) -> None:
