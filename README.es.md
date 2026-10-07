@@ -74,7 +74,7 @@ dirección, también `/docs`, que carga scripts de un CDN).
   presupuesto de memoria que fijes: los modelos se cargan juntos mientras quepan,
   los ociosos dejan sitio, uno en uso nunca se descarga en mitad de una petición,
   y uno que no cabe se rechaza con las cifras, antes de descargar nada. Tiene en
-  cuenta la GPU en NVIDIA.
+  cuenta la GPU en NVIDIA y AMD.
 - **Conoce el Hub.** Encuentra modelos que caben en tu hardware (`hfl recommend`),
   elige la mejor cuantización de la comunidad para tu máquina (`hfl pull-smart`),
   dimensiona los modelos Mixture-of-Experts por sus parámetros totales, comprueba
@@ -125,6 +125,13 @@ Homebrew (`brew install llama.cpp`), el de un paquete del sistema o el que trae
 llama-cpp-python (`pip install 'hfl[llama]'`). Solo se compila algo si no hay
 ninguno; entonces hacen falta **git**, **cmake** y un **compilador de C++**.
 Los modelos GGUF ya cuantizados y los MLX no necesitan nada de esto.
+
+Con una GPU AMD (ROCm, Linux x64), `hfl install llama-server --variant rocm`
+instala la build ROCm de llama.cpp para los modelos GGUF. Los extras
+`transformers` y `vllm` instalan por defecto la build de PyTorch para NVIDIA,
+que no puede usar una GPU AMD: instala antes la build ROCm de PyTorch, como
+indica [pytorch.org](https://pytorch.org/get-started/locally/) para tu
+versión de ROCm.
 
 </details>
 
@@ -230,8 +237,8 @@ Memory: 65.3 of 128.0 GB in use (51%). qwen3-14b needs ~9.0 GB → after loading
 - el hueco lo ocupan modelos respondiendo peticiones → la carga los espera;
 - no cabe ni solo → se rechaza con las cifras (HTTP 507), sin descargar nada.
 
-Con una GPU NVIDIA el modelo también debe caber en la tarjeta (leída con
-`nvidia-smi`). Los modelos ociosos se descargan tras `keep_alive` (por defecto `5m`,
+Con una GPU NVIDIA o AMD el modelo también debe caber en la tarjeta (leída con
+`nvidia-smi`, o `rocm-smi`/`amd-smi` en ROCm). Los modelos ociosos se descargan tras `keep_alive` (por defecto `5m`,
 renovado con cada uso). `hfl ps` y `GET /api/ps` muestran qué está cargado y cuánto
 margen queda.
 

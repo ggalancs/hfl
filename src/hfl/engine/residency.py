@@ -308,16 +308,89 @@ def _nvidia_smi(args: list[str]) -> list[list[str]] | None:
     return [[cell.strip() for cell in line.split(",")] for line in out.splitlines() if line.strip()]
 
 
-def current_gpu_memory() -> MemoryView | None:
-    """NVIDIA memory across all GPUs, with this process's share, or None.
+def _amd_smi_json(tool: str, args: list[str]) -> Any:
+    """``rocm-smi``/``amd-smi`` output as parsed JSON, or None (no tool, it
+    failed, or it printed no JSON, as ``WARNING: No JSON data to report``)."""
+    import json
+    import shutil
+    import subprocess
 
-    Read from ``nvidia-smi`` (installed with the driver) rather than torch:
-    llama.cpp's CUDA build puts models in VRAM without torch present. All
-    GPUs are summed, because llama.cpp splits layers across them.
+    exe = shutil.which(tool)
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, *args, "--json"], capture_output=True, text=True, timeout=10, check=True
+        ).stdout
+        start = min((i for i in (out.find("{"), out.find("[")) if i >= 0), default=-1)
+        return json.loads(out[start:]) if start >= 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        logger.debug("%s failed: %s", tool, exc)
+        return None
+
+
+def _amd_gpu_memory() -> MemoryView | None:
+    """AMD memory across all GPUs, with HFL's share, or None.
+
+    llama.cpp's ROCm build puts models in VRAM with no torch, as its CUDA
+    build does. Without this, HFL kept one model at a time on an MI300X
+    (192 GB) because it could not read its memory (audit E16, 2026-10-07).
+    ``rocm-smi`` ships with ROCm; ``amd-smi`` is its successor.
+    """
+    own = _own_pids()
+    cards = _amd_smi_json("rocm-smi", ["--showmeminfo", "vram"])
+    if isinstance(cards, dict) and cards:
+        try:
+            total = sum(int(c["VRAM Total Memory (B)"]) for c in cards.values())
+            used = sum(int(c["VRAM Total Used Memory (B)"]) for c in cards.values())
+        except (KeyError, TypeError, ValueError):
+            return None
+        # {"system": {"PID28389": "llama-server, 1, 2353860608, 11011, 0"}}:
+        # name, GPUs, VRAM bytes, SDMA, CU occupancy.
+        mine, seen = 0, False
+        procs = _amd_smi_json("rocm-smi", ["--showpids"]) or {}
+        for key, row in (procs.get("system", {}) if isinstance(procs, dict) else {}).items():
+            try:
+                pid, vram = int(str(key).removeprefix("PID")), int(str(row).split(",")[2])
+            except (ValueError, IndexError):
+                continue
+            if pid in own:
+                mine, seen = mine + vram, True
+        return MemoryView(total=total, in_use=used, hfl_rss=mine, attributed=seen)
+    gpus = _amd_smi_json("amd-smi", ["metric", "--mem-usage"])
+    if isinstance(gpus, dict):
+        gpus = gpus.get("gpu_data")
+    if not isinstance(gpus, list) or not gpus:
+        return None
+    try:
+        total = sum(int(g["mem_usage"]["total_vram"]["value"]) for g in gpus) * _MIB
+        used = sum(int(g["mem_usage"]["used_vram"]["value"]) for g in gpus) * _MIB
+    except (KeyError, TypeError, ValueError):
+        return None
+    mine, seen = 0, False
+    for gpu in _amd_smi_json("amd-smi", ["process"]) or []:
+        for entry in gpu.get("process_list", []) if isinstance(gpu, dict) else []:
+            info = entry.get("process_info", {}) if isinstance(entry, dict) else {}
+            try:
+                pid, vram = int(info["pid"]), int(info["mem_usage"]["value"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if pid in own:
+                mine, seen = mine + vram, True
+    return MemoryView(total=total, in_use=used, hfl_rss=mine, attributed=seen)
+
+
+def current_gpu_memory() -> MemoryView | None:
+    """GPU memory across all GPUs, with HFL's share, or None.
+
+    NVIDIA through ``nvidia-smi`` (installed with the driver) rather than
+    torch: llama.cpp's CUDA build puts models in VRAM without torch present;
+    AMD through ``rocm-smi``/``amd-smi`` (``_amd_gpu_memory``). All GPUs are
+    summed, because llama.cpp splits layers across them.
     """
     gpus = _nvidia_smi(["--query-gpu=memory.total,memory.used"])
     if not gpus:
-        return None
+        return _amd_gpu_memory()
     try:
         total = sum(int(float(row[0])) for row in gpus) * _MIB
         used = sum(int(float(row[1])) for row in gpus) * _MIB
@@ -345,7 +418,8 @@ _UNMEASURED_GPU: bool | None = None
 def discrete_gpu_unmeasured() -> bool:
     """A GPU that models may be offloaded to, whose memory we cannot read.
 
-    ROCm, or CUDA without ``nvidia-smi``. Admission by RAM alone would then
+    ROCm whose tools answer nothing, or CUDA without ``nvidia-smi``.
+    Admission by RAM alone would then
     put several models into a VRAM it cannot see, so the caller falls back
     to one resident model. Cached: the answer does not change while the
     process runs, and probing may import torch.
@@ -358,7 +432,7 @@ def discrete_gpu_unmeasured() -> bool:
 
     unmeasured = False
     if current_gpu_memory() is None:
-        if shutil.which("rocm-smi") is not None:
+        if shutil.which("rocm-smi") is not None or shutil.which("amd-smi") is not None:
             unmeasured = True
         elif importlib.util.find_spec("torch") is not None:
             try:

@@ -1133,7 +1133,8 @@ def _effective_max_models() -> int:
     if not _WARNED_UNMEASURED_GPU:
         _WARNED_UNMEASURED_GPU = True
         logger.warning(
-            "A GPU is present but its memory cannot be read (no nvidia-smi); keeping one "
+            "A GPU is present but its memory cannot be read (no nvidia-smi, rocm-smi or "
+            "amd-smi answered); keeping one "
             "model loaded at a time. Set HFL_MAX_LOADED_MODELS to allow more."
         )
     return 1

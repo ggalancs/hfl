@@ -142,6 +142,15 @@ def test_every_platform_has_a_default_build():
     assert dist.default_variant(("linux", "x64")) == "cpu"
 
 
+def test_amd_gpus_can_take_the_rocm_build_but_linux_does_not_default_to_it():
+    # The build an MI300X droplet ran HFL's audit with (2026-10-07). Not the
+    # default: a Linux machine without ROCm cannot load it.
+    assert "rocm" in dist.variants(("linux", "x64"))
+    assert dist.default_variant(("linux", "x64")) == "cpu"
+    ((name, size, _sha),) = dist.ASSETS[("linux", "x64", "rocm")]
+    assert "ubuntu-rocm" in name and size == 228214116
+
+
 def test_the_pins_name_the_pinned_release():
     for (_s, _m, _v), assets in dist.ASSETS.items():
         for name, size, sha in assets:

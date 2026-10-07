@@ -239,28 +239,46 @@ def e2(a: Audit) -> str:
     with a.server("--parallel", "4") as base:
         suite(part, base, "chat")
         c = httpx.Client(base_url=base, timeout=600)
-        long = [{"role": "user", "content": "Count from 1 to 200, one number per line."}]
+
+        # 900 tokens of counting: 256 took 0.14 s on an MI300X, too short to
+        # measure overlap against fixed costs. Asked to count to 4096 the
+        # chat model abbreviates ("1, 2, 3, ..., 4096": 35 tokens); to 1000
+        # it counts every number. 900 leaves room for the prompt in one slot
+        # of a 4096-token context shared by four.
+        tokens = 900
+        long = [{"role": "user", "content": "Count from 1 to 1000, one number per line."}]
         body = {
             "model": "chat",
             "stream": False,
             "messages": long,
-            "options": {"num_predict": 256, "temperature": 0},
+            "options": {"num_predict": tokens, "temperature": 0},
         }
+
+        def four_at_once() -> tuple[float, list[int]]:
+            started = time.monotonic()
+            with concurrent.futures.ThreadPoolExecutor(4) as pool:
+                codes = list(
+                    pool.map(lambda _: c.post("/api/chat", json=body).status_code, range(4))
+                )
+            return time.monotonic() - started, codes
+
         c.post("/api/chat", json=body)
+        # Untimed: the first batch of four pays a one-time setup on a GPU (an
+        # MI300X took 1.57 s for four against 0.14 s for one).
+        four_at_once()
         singles = []
         for _ in range(3):  # the median of three: one timing was noise-bound
             started = time.monotonic()
             c.post("/api/chat", json=body)
             singles.append(time.monotonic() - started)
         one = sorted(singles)[1]
-        started = time.monotonic()
-        with concurrent.futures.ThreadPoolExecutor(4) as pool:
-            codes = list(pool.map(lambda _: c.post("/api/chat", json=body).status_code, range(4)))
-        four = time.monotonic() - started
+        four, codes = four_at_once()
         part("4 at once, all answered", lambda: expect(codes == [200] * 4, codes))
         part(
             "a long reply to measure",
-            lambda: expect(one > 0.3, f"one reply took {one:.2f}s: too short to measure"),
+            lambda: expect(
+                one > 0.3, f"one reply of {tokens} tokens took {one:.2f}s: too short to measure"
+            ),
         )
         # Serialized, four take ~4x one; overlapping, less. Measured with
         # llama-server alone on a 4-core CPU (no GPU): -np 1 gave 4.00-4.15x,
@@ -271,7 +289,7 @@ def e2(a: Audit) -> str:
             "4 at once overlap (< 3.5x one)",
             lambda: expect(four < one * 3.5, f"one {one:.2f}s, four {four:.2f}s"),
         )
-    return part.verdict()
+    return part.verdict() + f"; replies of {tokens} tokens: one {one:.2f}s, four {four:.2f}s"
 
 
 def _llama_server_has_gpu(exe: str) -> bool:

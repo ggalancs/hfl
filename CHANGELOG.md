@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AMD GPUs (ROCm).** HFL now reads an AMD GPU's memory through `rocm-smi`
+  (or `amd-smi`), as it reads NVIDIA's through `nvidia-smi`: loads are planned
+  against the card, and several models stay loaded while they fit. Before, a
+  GPU whose memory it could not read kept one model at a time: on an AMD
+  Instinct MI300X with 192 GB, two small models unloaded each other on every
+  request (the audit on AMD's Developer Cloud, 2026-10-07). Parsed from the
+  real `rocm-smi` and `amd-smi` output of that MI300X.
+- `hfl install llama-server --variant rocm` installs llama.cpp's ROCm build
+  (Linux x64), checked against its sha256: the build that MI300X ran HFL's
+  audit with (180 checks passed).
+
 ### Changed
 
 - `fastapi` ceiling raised to `<0.143` (verified against the top of the range,
@@ -16,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `hfl doctor` listed every display device as an AMD ROCm card: a virtual
+  screen and seven unreadable entries made 9 "cards" on a one-GPU droplet,
+  and an NVIDIA or Intel card would have been listed too. It now counts the
+  cards whose PCI vendor is AMD's.
 - **Each load of an MLX model grew HFL's memory for good.** An 8-hour soak
   that swapped an MLX model in and out 7,600 times grew HFL from 1.5 GB to
   9 GB. The cause is MLX's global random state: every random draw splits it

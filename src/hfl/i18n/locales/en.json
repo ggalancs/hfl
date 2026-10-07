@@ -267,7 +267,7 @@
       "llama_server": {
         "description": "llama.cpp's llama-server (official build): GGUF models then answer several requests at once",
         "options": {
-          "variant": "Build: metal, cpu, vulkan or cuda (as llama.cpp publishes them for this platform)",
+          "variant": "Build: metal, cpu, vulkan, cuda or rocm (as llama.cpp publishes them for this platform)",
           "force": "Install even if a llama-server is already found",
           "yes": "Install without asking"
         }

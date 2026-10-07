@@ -267,7 +267,7 @@
       "llama_server": {
         "description": "llama-server de llama.cpp (build oficial): los modelos GGUF atienden varias peticiones a la vez",
         "options": {
-          "variant": "Build: metal, cpu, vulkan o cuda (las que llama.cpp publica para esta plataforma)",
+          "variant": "Build: metal, cpu, vulkan, cuda o rocm (las que llama.cpp publica para esta plataforma)",
           "force": "Instala aunque ya haya un llama-server",
           "yes": "Instala sin preguntar"
         }

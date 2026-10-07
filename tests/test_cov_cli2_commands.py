@@ -224,15 +224,26 @@ class TestDoctorProbes:
         self._drm(monkeypatch, tmp_path)
         assert doctor._probe_rocm() == []
 
-    def test_rocm_lists_cards_with_their_pci_id(self, monkeypatch, tmp_path):
+    def test_rocm_lists_amds_cards_with_their_pci_id(self, monkeypatch, tmp_path):
         root = self._drm(monkeypatch, tmp_path)
-        (root / "card0" / "device").mkdir(parents=True)
-        (root / "card0" / "device" / "device").write_text("0x744c\n")
-        (root / "card1").mkdir()  # no PCI id file
-        (root / "card2" / "device" / "device").mkdir(parents=True)  # unreadable: a dir
-        (root / "card0-DP-1").mkdir()  # a connector, not a card
+
+        def card(name, vendor, device=None):
+            (root / name / "device").mkdir(parents=True)
+            (root / name / "device" / "vendor").write_text(vendor + "\n")
+            if device:
+                (root / name / "device" / "device").write_text(device + "\n")
+
+        # As on the AMD Developer Cloud's one-GPU MI300X droplet, 2026-10-07:
+        # a virtual screen, the GPU, and entries with nothing readable.
+        card("card0", "0x1af4", "0x1050")  # virtio screen
+        card("card1", "0x1002", "0x74b5")  # the MI300X
+        (root / "card2").mkdir()  # no PCI files
+        card("card3", "0x10de", "0x2684")  # an NVIDIA card is not ROCm
+        card("card4", "0x8086", "0x46a6")  # nor an Intel one
+        card("card5", "0x1002")  # AMD, device id unreadable
+        (root / "card1-DP-1").mkdir()  # a connector, not a card
         (root / "renderD128").mkdir()
-        assert doctor._probe_rocm() == ["card0 (0x744c)", "card1", "card2"]
+        assert doctor._probe_rocm() == ["card1 (0x74b5)", "card5"]
 
     def test_probe_optional(self):
         assert doctor._probe_optional("json") is True

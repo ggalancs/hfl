@@ -332,6 +332,144 @@ class TestNvidiaSmi:
         assert residency.discrete_gpu_unmeasured() is False
 
 
+class TestAmdSmi:
+    """AMD GPUs read through rocm-smi (amd-smi as its successor). Without it
+    HFL kept one model at a time on an MI300X with 192 GB (audit E16 on the
+    AMD Developer Cloud, 2026-10-07). The outputs are the real ones from that
+    MI300X with llama-server (PID 28389) holding a model."""
+
+    ROCM_VRAM = (
+        '{"card0": {"VRAM Total Memory (B)": "205822885888", '
+        '"VRAM Total Used Memory (B)": "2654650368"}}'
+    )
+    ROCM_PIDS = '{"system": {"PID28389": "llama-server, 1, 2353860608, 11011, 0"}}'
+    AMD_MEM = (
+        '{"gpu_data": [{"gpu": 0, "mem_usage": {"total_vram": {"value": 196288, "unit": "MB"}, '
+        '"used_vram": {"value": 2531, "unit": "MB"}}}]}'
+    )
+    AMD_PROCS = (
+        '[{"gpu": 0, "process_list": [{"process_info": {"name": "llama-server", '
+        '"pid": 28389, "mem_usage": {"value": 2353860608, "unit": "B"}}}]}]'
+    )
+
+    @staticmethod
+    def _tools(monkeypatch, outputs, present=("rocm-smi",)):
+        import subprocess
+
+        from hfl.engine import residency
+
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            key = (cmd[0].rsplit("/", 1)[-1], *cmd[1:])
+            if key not in outputs:
+                raise subprocess.CalledProcessError(1, cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=outputs[key], stderr="")
+
+        monkeypatch.setattr(
+            "shutil.which", lambda name: "/opt/rocm/bin/" + name if name in present else None
+        )
+        monkeypatch.setattr(subprocess, "run", run)
+        return residency, calls
+
+    def test_rocm_smi_total_used_and_our_share(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {
+                ("rocm-smi", "--showmeminfo", "vram", "--json"): self.ROCM_VRAM,
+                ("rocm-smi", "--showpids", "--json"): self.ROCM_PIDS,
+            },
+        )
+        monkeypatch.setattr(residency, "_own_pids", lambda: {28389})
+        view = residency.current_gpu_memory()
+        assert view == MemoryView(
+            total=205822885888, in_use=2654650368, hfl_rss=2353860608, attributed=True
+        )
+
+    def test_rocm_smi_another_programs_model_is_not_ours(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {
+                ("rocm-smi", "--showmeminfo", "vram", "--json"): self.ROCM_VRAM,
+                ("rocm-smi", "--showpids", "--json"): self.ROCM_PIDS,
+            },
+        )
+        monkeypatch.setattr(residency, "_own_pids", lambda: {1})
+        view = residency.current_gpu_memory()
+        assert view is not None and view.hfl_rss == 0 and view.attributed is False
+
+    def test_no_process_list_still_measures_the_card(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {
+                ("rocm-smi", "--showmeminfo", "vram", "--json"): self.ROCM_VRAM,
+                ("rocm-smi", "--showpids", "--json"): "WARNING: No JSON data to report\n",
+            },
+        )
+        view = residency.current_gpu_memory()
+        assert view is not None and view.total == 205822885888 and view.attributed is False
+
+    def test_amd_smi_when_rocm_smi_is_gone(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {
+                ("amd-smi", "metric", "--mem-usage", "--json"): self.AMD_MEM,
+                ("amd-smi", "process", "--json"): self.AMD_PROCS,
+            },
+            present=("amd-smi",),
+        )
+        monkeypatch.setattr(residency, "_own_pids", lambda: {28389})
+        mib = 1024**2
+        view = residency.current_gpu_memory()
+        assert view == MemoryView(
+            total=196288 * mib, in_use=2531 * mib, hfl_rss=2353860608, attributed=True
+        )
+
+    def test_a_failing_tool_is_no_measurement(self, monkeypatch):
+        residency, _ = self._tools(monkeypatch, {}, present=("rocm-smi", "amd-smi"))
+        assert residency.current_gpu_memory() is None
+
+    def test_garbled_output_is_no_measurement(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {("rocm-smi", "--showmeminfo", "vram", "--json"): '{"card0": {"VRAM": "lots"}}'},
+        )
+        assert residency.current_gpu_memory() is None
+
+    def test_a_readable_amd_gpu_is_measured_not_one_model_at_a_time(self, monkeypatch):
+        residency, _ = self._tools(
+            monkeypatch,
+            {
+                ("rocm-smi", "--showmeminfo", "vram", "--json"): self.ROCM_VRAM,
+                ("rocm-smi", "--showpids", "--json"): self.ROCM_PIDS,
+            },
+        )
+        monkeypatch.setattr(residency, "_UNMEASURED_GPU", None)
+        assert residency.discrete_gpu_unmeasured() is False
+
+    def test_nvidia_is_read_first(self, monkeypatch):
+        residency, calls = self._tools(
+            monkeypatch,
+            {
+                (
+                    "nvidia-smi",
+                    "--query-gpu=memory.total,memory.used",
+                    "--format=csv,noheader,nounits",
+                ): "24576, 2048\n",
+                (
+                    "nvidia-smi",
+                    "--query-compute-apps=pid,used_memory",
+                    "--format=csv,noheader,nounits",
+                ): "",
+            },
+            present=("nvidia-smi", "rocm-smi"),
+        )
+        view = residency.current_gpu_memory()
+        assert view is not None and view.total == 24576 * 1024**2
+        assert not any("rocm-smi" in c[0] for c in calls)
+
+
 class TestChildProcessesAreOurs:
     """llama-server and vLLM run models in child processes. Counted as other
     programs', each model was charged twice at admission and could not be

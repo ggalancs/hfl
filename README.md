@@ -71,7 +71,7 @@ that address, including `/docs`, which loads scripts from a CDN).
   the model will take (weights + KV cache) and keeps the machine under a memory
   budget you set: models load side by side while they fit, idle ones make room,
   one in use is never pulled out from under a request, and one that cannot fit
-  is refused with the numbers — before anything is unloaded. GPU-aware on NVIDIA.
+  is refused with the numbers — before anything is unloaded. GPU-aware on NVIDIA and AMD.
 - **Knows the Hub.** Find models that fit your hardware (`hfl recommend`), pick
   the best community quant for your machine (`hfl pull-smart`), size
   Mixture-of-Experts models by their total parameters, check licenses before
@@ -121,6 +121,13 @@ Homebrew's (`brew install llama.cpp`), a distro package's, or the one inside
 llama-cpp-python (`pip install 'hfl[llama]'`). Nothing is compiled unless none
 of those exists; then it needs **git**, **cmake** and a **C++ compiler**.
 Pre-quantized GGUF and MLX models need none of this.
+
+On an AMD GPU (ROCm, Linux x64), `hfl install llama-server --variant rocm`
+installs llama.cpp's ROCm build for GGUF models. The `transformers` and
+`vllm` extras install PyTorch's NVIDIA build by default, which cannot use an
+AMD GPU: install PyTorch's ROCm build first, as
+[pytorch.org](https://pytorch.org/get-started/locally/) shows for your ROCm
+version.
 
 </details>
 
@@ -225,7 +232,8 @@ Memory: 65.3 of 128.0 GB in use (51%). qwen3-14b needs ~9.0 GB → after loading
 - the room is held by models answering requests → the load waits for them;
 - cannot fit even alone → refused with the numbers (HTTP 507), nothing unloaded.
 
-With an NVIDIA GPU the model must also fit the card (read through `nvidia-smi`).
+With an NVIDIA or AMD GPU the model must also fit the card (read through `nvidia-smi`,
+or `rocm-smi`/`amd-smi` on ROCm).
 Idle models unload after `keep_alive` (default `5m`, renewed on every use).
 `hfl ps` and `GET /api/ps` show what is loaded and how much room is left.
 

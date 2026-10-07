@@ -158,6 +158,16 @@ def doctor(a: Audit) -> str:
         want = "metal"
     elif shutil.which("nvidia-smi"):
         want = "nvidia"
+    elif shutil.which("rocm-smi"):
+        # As many AMD cards as rocm-smi lists: doctor counted every display
+        # device as ROCm, 9 on a one-GPU MI300X droplet (2026-10-07).
+        want = "amd rocm"
+        listed = subprocess.run(
+            ["rocm-smi", "--showproductname", "--json"], capture_output=True, text=True
+        ).stdout
+        gpus = len(json.loads(listed[listed.find("{") :])) if "{" in listed else 0
+        cards = out.count("amd rocm card")
+        expect(cards == gpus, f"doctor lists {cards} AMD cards, rocm-smi {gpus}: {out[-400:]}")
     else:
         want = "cpu only"
     expect(want in out, f"{want!r} not reported: {out[-400:]}")

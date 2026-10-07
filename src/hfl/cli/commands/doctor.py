@@ -164,16 +164,24 @@ def _probe_rocm() -> list[str]:
     cards: list[str] = []
     try:
         for entry in sorted(root.iterdir()):
-            if entry.name.startswith("card") and entry.name[4:].isdigit():
-                # We can read the card's PCI device id as a simple tag.
-                tag = entry.name
-                pci = entry / "device" / "device"
-                if pci.exists():
-                    try:
-                        tag = f"{entry.name} ({pci.read_text().strip()})"
-                    except OSError:
-                        pass
-                cards.append(tag)
+            if not (entry.name.startswith("card") and entry.name[4:].isdigit()):
+                continue
+            # AMD's cards only (PCI vendor 0x1002): every card was listed as
+            # ROCm, a virtual screen (0x1050) and seven unreadable entries
+            # among them, 9 on a one-GPU MI300X droplet; NVIDIA and Intel
+            # cards would have been too.
+            try:
+                vendor = (entry / "device" / "vendor").read_text().strip().lower()
+            except OSError:
+                continue
+            if vendor != "0x1002":
+                continue
+            tag = entry.name
+            try:
+                tag = f"{entry.name} ({(entry / 'device' / 'device').read_text().strip()})"
+            except OSError:
+                pass
+            cards.append(tag)
     except Exception:  # pragma: no cover
         pass
     return cards

@@ -55,6 +55,12 @@ ASSETS: dict[tuple[str, str, str], list[_A]] = {
         ("llama-b10964-bin-ubuntu-vulkan-x64.tar.gz", 30166472,
          "55d1e58e14c11eedea090bf088fdeefbfe7b4b09ee03bf6dba9834651769afcf"),
     ],
+    # AMD GPUs (ROCm): checked on an MI300X droplet, 2026-10-07 — it listed
+    # "ROCm0: AMD Instinct MI300X VF (196288 MiB)" and passed HFL's audit.
+    ("linux", "x64", "rocm"): [
+        ("llama-b10964-bin-ubuntu-rocm-10.0-x64.tar.gz", 228214116,
+         "162b9645b84fa0a354767ccb5379b1457701134dc1ff4cd8b0ecc5ccec248455"),
+    ],
     ("linux", "arm64", "cpu"): [
         ("llama-b10964-bin-ubuntu-arm64.tar.gz", 13451337,
          "5f0e9c95d970892e43380f82ebcab960edfd20a1cd0f7abffa13b29fdb924949"),
