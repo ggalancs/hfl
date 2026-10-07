@@ -166,7 +166,8 @@ def doctor(a: Audit) -> str:
             ["rocm-smi", "--showproductname", "--json"], capture_output=True, text=True
         ).stdout
         gpus = len(json.loads(listed[listed.find("{") :])) if "{" in listed else 0
-        cards = out.count("amd rocm card")
+        # doctor pads its columns: "AMD ROCm        card1 (0x74b5)".
+        cards = len(re.findall(r"amd rocm\s+card\d", out))
         expect(cards == gpus, f"doctor lists {cards} AMD cards, rocm-smi {gpus}: {out[-400:]}")
     else:
         want = "cpu only"
