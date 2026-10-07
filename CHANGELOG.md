@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `fastapi` ceiling raised to `<0.143` (verified against the top of the range,
+  fastapi 0.142.2 with starlette 1.7.0: the full test suite, and a real server
+  answering). `huggingface-hub` stays `<2.0`: tokenizers 0.23.2, diffusers
+  0.41.0 and sentence-transformers 6.1.0 still require it.
+
 ### Fixed
 
 - **Each load of an MLX model grew HFL's memory for good.** An 8-hour soak
