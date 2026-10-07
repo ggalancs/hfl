@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-07
+
 ### Added
 
 - **AMD GPUs (ROCm).** HFL now reads an AMD GPU's memory through `rocm-smi`
