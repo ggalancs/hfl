@@ -764,12 +764,21 @@ def _reload_evaluates(a: Audit, env: dict) -> int:
         deadline = time.monotonic() + 60
         while httpx.get(base + "/api/ps").json()["models"] and time.monotonic() < deadline:
             time.sleep(0.5)
-        httpx.post(base + "/api/chat", json=body, timeout=300)
+        # The model's llama-server log keeps every load's timings, written as
+        # the slot is released: the last one a second after the request was
+        # still the previous load's on a busy Linux run (1 token read, 1860
+        # evaluated). Read the first timing that appears after the request.
+        timing = r"prompt eval time =\s+[\d.]+ ms /\s+(\d+) tokens"
         log = max((a.home / "logs").glob("llama-server-*.log"), key=lambda p: p.stat().st_mtime)
-        time.sleep(1)  # timings are written as the slot is released
-        counts = re.findall(r"prompt eval time =\s+[\d.]+ ms /\s+(\d+) tokens", log.read_text())
-    expect(counts, "no prompt timings in llama-server's log")
-    return int(counts[-1])
+        before = len(re.findall(timing, log.read_text()))
+        httpx.post(base + "/api/chat", json=body, timeout=300)
+        deadline = time.monotonic() + 30
+        counts = re.findall(timing, log.read_text())
+        while len(counts) <= before and time.monotonic() < deadline:
+            time.sleep(0.5)
+            counts = re.findall(timing, log.read_text())
+    expect(len(counts) > before, "no new prompt timing in llama-server's log after the request")
+    return int(counts[before])
 
 
 @probe("D54", "HFL_PROMPT_CACHE_PERSIST")
