@@ -240,56 +240,67 @@ def e2(a: Audit) -> str:
         suite(part, base, "chat")
         c = httpx.Client(base_url=base, timeout=600)
 
-        # 900 tokens of counting: 256 took 0.14 s on an MI300X, too short to
-        # measure overlap against fixed costs. Asked to count to 4096 the
-        # chat model abbreviates ("1, 2, 3, ..., 4096": 35 tokens); to 1000
-        # it counts every number. 900 leaves room for the prompt in one slot
-        # of a 4096-token context shared by four.
+        # 900 tokens, judged by the tokens each reply really has. 256 took
+        # 0.14 s on an MI300X, too short against fixed costs. A chat request
+        # to count is not a fixed length: on an L4 the same request at
+        # temperature 0 gave 49 tokens alone and 900 in a batch of four (the
+        # GPU's batched arithmetic takes another path), so one took 0.29 s
+        # and four 11.29 s. A raw continuation of "1, 2, ..., 40," keeps
+        # counting, and the verdict compares tokens per second.
         tokens = 900
-        long = [{"role": "user", "content": "Count from 1 to 1000, one number per line."}]
+        count = ", ".join(str(i) for i in range(1, 41)) + ","
         body = {
             "model": "chat",
+            "prompt": count,
+            "raw": True,
             "stream": False,
-            "messages": long,
             "options": {"num_predict": tokens, "temperature": 0},
         }
 
-        def four_at_once() -> tuple[float, list[int]]:
+        def generate() -> tuple[float, int, int]:
+            started = time.monotonic()
+            r = c.post("/api/generate", json=body)
+            made = int(r.json().get("eval_count", 0)) if r.status_code == 200 else 0
+            return time.monotonic() - started, r.status_code, made
+
+        def four_at_once() -> tuple[float, list[int], int]:
             started = time.monotonic()
             with concurrent.futures.ThreadPoolExecutor(4) as pool:
-                codes = list(
-                    pool.map(lambda _: c.post("/api/chat", json=body).status_code, range(4))
-                )
-            return time.monotonic() - started, codes
+                replies = list(pool.map(lambda _: generate(), range(4)))
+            return time.monotonic() - started, [r[1] for r in replies], sum(r[2] for r in replies)
 
-        c.post("/api/chat", json=body)
+        generate()
         # Untimed: the first batch of four pays a one-time setup on a GPU (an
         # MI300X took 1.57 s for four against 0.14 s for one).
         four_at_once()
-        singles = []
-        for _ in range(3):  # the median of three: one timing was noise-bound
-            started = time.monotonic()
-            c.post("/api/chat", json=body)
-            singles.append(time.monotonic() - started)
-        one = sorted(singles)[1]
-        four, codes = four_at_once()
+        one, _status, one_tokens = sorted(generate() for _ in range(3))[1]  # the median
+        four, codes, four_tokens = four_at_once()
+        one_rate = one_tokens / max(one, 1e-9)
+        four_rate = four_tokens / max(four, 1e-9)
         part("4 at once, all answered", lambda: expect(codes == [200] * 4, codes))
         part(
             "a long reply to measure",
             lambda: expect(
-                one > 0.3, f"one reply of {tokens} tokens took {one:.2f}s: too short to measure"
+                one > 0.3 and one_tokens >= tokens // 2,
+                f"one reply: {one_tokens} tokens in {one:.2f}s: too short to measure",
             ),
         )
         # Serialized, four take ~4x one; overlapping, less. Measured with
         # llama-server alone on a 4-core CPU (no GPU): -np 1 gave 4.00-4.15x,
         # -np 4 gave 2.85-3.18x; HFL in front added nothing measurable. The
         # 3x this used to demand sat inside that CPU's own spread; 3.5x is
-        # between the two.
+        # between the two. As throughput: four must make over 4/3.5 of one's.
         part(
-            "4 at once overlap (< 3.5x one)",
-            lambda: expect(four < one * 3.5, f"one {one:.2f}s, four {four:.2f}s"),
+            "4 at once overlap (> 4/3.5 the tokens/s of one)",
+            lambda: expect(
+                four_rate > one_rate * 4 / 3.5,
+                f"one {one_rate:.0f} tok/s, four {four_rate:.0f} tok/s",
+            ),
         )
-    return part.verdict() + f"; replies of {tokens} tokens: one {one:.2f}s, four {four:.2f}s"
+    return part.verdict() + (
+        f"; one: {one_tokens} tok in {one:.2f}s ({one_rate:.0f}/s); "
+        f"four: {four_tokens} tok in {four:.2f}s ({four_rate:.0f}/s)"
+    )
 
 
 def _llama_server_has_gpu(exe: str) -> bool:
