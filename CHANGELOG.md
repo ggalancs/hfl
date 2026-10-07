@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **HFL under Rosetta refused to load models for lack of memory.** An x86_64
+  Python on an Apple Silicon Mac (HFL's macOS x86_64 executable, or an x86
+  Anaconda) sees 4 KB pages while macOS counts 16 KB ones, and psutil then
+  reports a quarter of the available memory: on a 128 GB Mac with 77 GB
+  available it read 19 GB, and HFL refused a 0.6 GB model as over the 85 %
+  budget. HFL now detects the translation (`sysctl.proc_translated`) and
+  counts in the machine's pages; native processes are unchanged.
 - `hfl doctor` listed every display device as an AMD ROCm card: a virtual
   screen and seven unreadable entries made 9 "cards" on a one-GPU droplet,
   and an NVIDIA or Intel card would have been listed too. It now counts the

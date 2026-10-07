@@ -332,6 +332,71 @@ class TestNvidiaSmi:
         assert residency.discrete_gpu_unmeasured() is False
 
 
+class TestRosetta:
+    """An x86_64 Python on Apple Silicon sees 4 KB pages while the kernel
+    counts 16 KB ones: psutil reported a quarter of the available memory
+    (19.2 of 77.0 GB) and HFL's x86_64 build refused a 0.6 GB model on a
+    128 GB Mac with 96 % free (local CI of 0.27.0, 2026-10-07)."""
+
+    @staticmethod
+    def _mac(monkeypatch, translated, vm_stat_head, own_page=4096):
+        import resource
+        import subprocess
+        import sys
+
+        from hfl.engine import residency
+
+        def run(cmd, **kw):
+            out = {"sysctl": translated + "\n", "vm_stat": vm_stat_head + "\nPages free: 1.\n"}[
+                cmd[0]
+            ]
+            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(subprocess, "run", run)
+        monkeypatch.setattr(resource, "getpagesize", lambda: own_page)
+        monkeypatch.setattr(residency, "_PAGE_RATIO", None)
+        return residency
+
+    HEAD = "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
+
+    def test_translated_counts_machine_pages(self, monkeypatch):
+        residency = self._mac(monkeypatch, "1", self.HEAD)
+        assert residency._rosetta_page_ratio() == 4
+
+    def test_native_is_one(self, monkeypatch):
+        residency = self._mac(monkeypatch, "0", self.HEAD, own_page=16384)
+        assert residency._rosetta_page_ratio() == 1
+
+    def test_unreadable_is_one(self, monkeypatch):
+        residency = self._mac(monkeypatch, "1", "something else")
+        assert residency._rosetta_page_ratio() == 1
+
+    def test_not_a_mac_is_one(self, monkeypatch):
+        import sys
+
+        from hfl.engine import residency
+
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(residency, "_PAGE_RATIO", None)
+        assert residency._rosetta_page_ratio() == 1
+
+    def test_available_memory_is_corrected(self, monkeypatch):
+        psutil = pytest.importorskip("psutil")
+        from types import SimpleNamespace
+
+        from hfl.engine import residency
+
+        gib = 1024**3
+        # What psutil read under Rosetta on that Mac: 19.2 GB of 77.0 available.
+        fake = SimpleNamespace(total=128 * gib, available=int(19.25 * gib))
+        monkeypatch.setattr(psutil, "virtual_memory", lambda: fake)
+        monkeypatch.setattr(residency, "_own_processes", list)
+        monkeypatch.setattr(residency, "_rosetta_page_ratio", lambda: 4)
+        view = residency.current_memory()
+        assert view is not None and view.in_use == 128 * gib - 77 * gib
+
+
 class TestAmdSmi:
     """AMD GPUs read through rocm-smi (amd-smi as its successor). Without it
     HFL kept one model at a time on an MI300X with 192 GB (audit E16 on the

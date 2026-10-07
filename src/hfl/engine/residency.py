@@ -140,6 +140,49 @@ def _own_pids() -> set[int]:
         return {os.getpid()}
 
 
+_PAGE_RATIO: int | None = None
+
+
+def _rosetta_page_ratio() -> int:
+    """How many of this process's pages make one of the machine's (1 but
+    under Rosetta).
+
+    An x86_64 Python on Apple Silicon runs translated and sees 4 KB pages,
+    while the kernel counts memory in 16 KB ones: psutil multiplied 16 KB
+    page counts by 4 KB and reported a quarter of the available memory
+    (19.2 GB of 77.0 GB), so HFL's x86_64 build refused a 0.6 GB model on a
+    128 GB Mac with 96 % free (local CI of 0.27.0, 2026-10-07). Cached.
+    """
+    global _PAGE_RATIO
+    if _PAGE_RATIO is not None:
+        return _PAGE_RATIO
+    ratio = 1
+    import sys
+
+    if sys.platform == "darwin":
+        import re
+        import resource
+        import subprocess
+
+        try:
+            translated = subprocess.run(
+                ["sysctl", "-n", "sysctl.proc_translated"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()  # fmt: skip
+            if translated == "1":
+                head = subprocess.run(
+                    ["vm_stat"], capture_output=True, text=True, timeout=5
+                ).stdout.splitlines()[0]
+                match = re.search(r"page size of (\d+) bytes", head)
+                own = resource.getpagesize()
+                if match and int(match.group(1)) > own:
+                    ratio = int(match.group(1)) // own
+        except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+            ratio = 1
+    _PAGE_RATIO = ratio
+    return ratio
+
+
 def current_memory() -> MemoryView | None:
     """Measure the machine now, or None when psutil is unavailable."""
     try:
@@ -157,7 +200,8 @@ def current_memory() -> MemoryView | None:
     except Exception as exc:  # pragma: no cover - platform-specific failure
         logger.debug("memory measurement failed: %s", exc)
         return None
-    total, in_use = int(vm.total), int(vm.total - vm.available)
+    available = min(int(vm.total), int(vm.available) * _rosetta_page_ratio())
+    total, in_use = int(vm.total), int(vm.total) - available
     # In a container with a memory limit, the limit is the machine: psutil
     # reads the host's memory, and planning with it admitted models the
     # kernel then killed the container for.
