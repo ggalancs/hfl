@@ -249,18 +249,26 @@ def e2(a: Audit) -> str:
         # counting, and the verdict compares tokens per second.
         tokens = 900
         count = ", ".join(str(i) for i in range(1, 41)) + ","
+        # The 4 slots share one context. Four replies of 150 + 900 tokens
+        # need 4200; the auto-sized context of a 4 GB machine was 4096, and
+        # llama-server cut all four at ~1024 tokens each ("Context size has
+        # been exceeded", measured in the Linux VM). This measures overlap,
+        # so it asks for a context with room for the four.
         body = {
             "model": "chat",
             "prompt": count,
             "raw": True,
             "stream": False,
-            "options": {"num_predict": tokens, "temperature": 0},
+            "options": {"num_predict": tokens, "temperature": 0, "num_ctx": 8192},
         }
+        errors: list[str] = []
 
         def generate() -> tuple[float, int, int]:
             started = time.monotonic()
             r = c.post("/api/generate", json=body)
             made = int(r.json().get("eval_count", 0)) if r.status_code == 200 else 0
+            if r.status_code != 200:
+                errors.append(f"HTTP {r.status_code}: {r.text[:300]}")
             return time.monotonic() - started, r.status_code, made
 
         def four_at_once() -> tuple[float, list[int], int]:
@@ -277,7 +285,10 @@ def e2(a: Audit) -> str:
         four, codes, four_tokens = four_at_once()
         one_rate = one_tokens / max(one, 1e-9)
         four_rate = four_tokens / max(four, 1e-9)
-        part("4 at once, all answered", lambda: expect(codes == [200] * 4, codes))
+        part(
+            "4 at once, all answered",
+            lambda: expect(codes == [200] * 4, f"{codes} {errors[-1] if errors else ''}"),
+        )
         part(
             "a long reply to measure",
             lambda: expect(

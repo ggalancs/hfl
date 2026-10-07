@@ -58,6 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "exited (code 0)": its guard process reported any death by a signal as 0.
   It now reports 128 + the signal, and the log says "was killed (SIGKILL;
   out of memory?)". Found by the Linux benchmark in a 4 GB Docker VM.
+- **A reply llama-server could not finish came back as a complete one.**
+  llama-server's parallel slots share one context; when the requests running
+  together fill it, llama-server stops all of them with an error event
+  ("Context size has been exceeded"). HFL skipped that event and returned
+  the cut text as a normal answer: `done_reason: "stop"`, `eval_count: 0`
+  (four 900-token replies at once with a 4096-token context, in a 4 GB Linux
+  VM). Such a reply now fails as the blocking request already did: HTTP 500
+  with llama-server's reason and how to avoid it (a larger `num_ctx`, fewer
+  `HFL_NUM_PARALLEL` slots), and a stream ends in an error, not in `done`.
 
 ## [0.26.0] - 2026-10-03
 

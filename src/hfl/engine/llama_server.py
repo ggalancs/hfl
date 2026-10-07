@@ -53,6 +53,7 @@ from hfl.engine.base import (
     reasoning_template_vars,
     repeat_penalty_for,
 )
+from hfl.exceptions import GenerationError
 from hfl.utils.self_exec import child_guard_argv
 
 logger = logging.getLogger(__name__)
@@ -512,6 +513,25 @@ def stop_server(proc: subprocess.Popen[bytes] | None) -> None:
 # got "Connection reset by peer"). Sent again only once the process is
 # confirmed dead and started again (``_died``), so no reply is repeated.
 _BEFORE_A_REPLY = (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError)
+
+
+def _raise_stream_error(event: dict[str, Any]) -> None:
+    """A stream llama-server could not finish ends with an ``error`` event,
+    and no final event. Skipped as text, it left the cut reply looking
+    complete: "stop", no token counts (measured: four parallel replies that
+    filled the slots' shared context, "Context size has been exceeded.").
+    The blocking request answers the same failure with an HTTP 500."""
+    error = event.get("error")
+    if error is None:
+        return
+    message = error.get("message") if isinstance(error, dict) else error
+    reason = f"llama-server stopped the reply: {message or error}"
+    if "context size" in str(message).lower():
+        reason += (
+            " (the requests running together filled the context their parallel"
+            " slots share; a larger num_ctx or a lower HFL_NUM_PARALLEL avoids it)"
+        )
+    raise GenerationError(reason)
 
 
 class LlamaServerEngine(InferenceEngine):
@@ -1036,6 +1056,7 @@ class LlamaServerEngine(InferenceEngine):
                     if not line.startswith("data: ") or line == "data: [DONE]":
                         continue
                     event = json.loads(line[6:])
+                    _raise_stream_error(event)
                     usage = event.get("usage")
                     if usage:
                         counted.prompt_tokens = usage.get("prompt_tokens")
@@ -1114,6 +1135,7 @@ class LlamaServerEngine(InferenceEngine):
                     if not line.startswith("data: "):
                         continue
                     event = json.loads(line[6:])
+                    _raise_stream_error(event)
                     if event.get("stop") and "tokens_predicted" in event:
                         counted.prompt_tokens = event.get("tokens_evaluated")
                         counted.completion_tokens = event.get("tokens_predicted")
@@ -1140,7 +1162,9 @@ class LlamaServerEngine(InferenceEngine):
                     raise cancel.GenerationCancelled("request cancelled")
                 if not line.startswith("data: ") or line == "data: [DONE]":
                     continue
-                yield json.loads(line[6:])
+                event = json.loads(line[6:])
+                _raise_stream_error(event)
+                yield event
 
     def _streamed_chat(self, body: dict[str, Any]) -> dict[str, Any]:
         """/v1/chat/completions streamed, reassembled as its blocking answer."""

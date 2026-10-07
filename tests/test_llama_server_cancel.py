@@ -17,6 +17,7 @@ import pytest
 from hfl.engine import cancel
 from hfl.engine.base import ChatMessage, GenerationConfig
 from hfl.engine.llama_server import LlamaServerEngine
+from hfl.exceptions import GenerationError
 
 
 def _sse(events: list[dict]) -> bytes:
@@ -151,3 +152,53 @@ def test_outside_a_dispatched_call_it_stays_one_blocking_request() -> None:
 
     result = _engine(handler).chat([ChatMessage(role="user", content="hi")], GenerationConfig())
     assert result.text == "ok" and "stream" not in seen["body"]
+
+
+# What llama-server sent four parallel replies that filled the context their
+# slots share (b10964, 4096 tokens over 4 slots): text, then this, and no
+# final event. HFL returned the cut text as a whole reply: "stop", 0 tokens.
+CONTEXT_FULL = {
+    "error": {"code": 500, "message": "Context size has been exceeded.", "type": "server_error"}
+}
+CUT_COMPLETION = [{"content": "1,", "stop": False}, {"content": " 2", "stop": False}, CONTEXT_FULL]
+CUT_CHAT = [{"choices": [{"delta": {"content": "Hel"}}]}, CONTEXT_FULL]
+
+
+def _cut(events: list[dict]) -> LlamaServerEngine:
+    return _engine(lambda request: httpx.Response(200, content=_sse(events)))
+
+
+def test_a_dispatched_completion_cut_by_an_error_raises() -> None:
+    with cancel.scope(threading.Event()), pytest.raises(GenerationError) as caught:
+        _cut(CUT_COMPLETION).generate("0", GenerationConfig())
+    assert "Context size has been exceeded." in str(caught.value)
+    assert "HFL_NUM_PARALLEL" in str(caught.value)
+
+
+def test_a_dispatched_chat_cut_by_an_error_raises() -> None:
+    with cancel.scope(threading.Event()), pytest.raises(GenerationError):
+        _cut(CUT_CHAT).chat([ChatMessage(role="user", content="hi")], GenerationConfig())
+
+
+def test_a_streamed_completion_cut_by_an_error_ends_in_the_error() -> None:
+    seen: list[str] = []
+    with pytest.raises(GenerationError):
+        for text in _cut(CUT_COMPLETION).generate_stream("0", GenerationConfig()):
+            seen.append(text)
+    assert seen == ["1,", " 2"]  # what had arrived went out; then the error, not "done"
+
+
+def test_a_streamed_chat_cut_by_an_error_ends_in_the_error() -> None:
+    seen: list[str] = []
+    with pytest.raises(GenerationError):
+        for text in _cut(CUT_CHAT).chat_stream([ChatMessage(role="user", content="hi")]):
+            seen.append(text)
+    assert seen == ["Hel"]
+
+
+def test_any_other_stream_error_raises_without_the_context_hint() -> None:
+    other = {"error": {"code": 500, "message": "something else", "type": "server_error"}}
+    with cancel.scope(threading.Event()), pytest.raises(GenerationError) as caught:
+        _cut([{"content": "1", "stop": False}, other]).generate("0", GenerationConfig())
+    assert "something else" in str(caught.value)
+    assert "HFL_NUM_PARALLEL" not in str(caught.value)
