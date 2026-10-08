@@ -758,9 +758,16 @@ def _reload_evaluates(a: Audit, env: dict) -> int:
         "messages": [{"role": "system", "content": LONG}, {"role": "user", "content": "hi"}],
         "options": {"temperature": 0, "num_predict": 4},
     }
+
+    def chat(base: str, payload: dict, step: str) -> None:
+        # Each answer checked: a reload refused for memory (507) once showed
+        # only as "no new prompt timing" (Linux, 2026-10-08).
+        r = httpx.post(base + "/api/chat", json=payload, timeout=300)
+        expect(r.status_code == 200, f"{step}: HTTP {r.status_code} {r.text[:300]}")
+
     with a.server(env={"HFL_LLM_LIBRARY": "llama-server", **env}) as base:
-        httpx.post(base + "/api/chat", json=body, timeout=300)
-        httpx.post(base + "/api/chat", json={**body, "keep_alive": 0}, timeout=300)
+        chat(base, body, "the first request")
+        chat(base, {**body, "keep_alive": 0}, "the request that unloads it")
         deadline = time.monotonic() + 60
         while httpx.get(base + "/api/ps").json()["models"] and time.monotonic() < deadline:
             time.sleep(0.5)
@@ -771,7 +778,7 @@ def _reload_evaluates(a: Audit, env: dict) -> int:
         timing = r"prompt eval time =\s+[\d.]+ ms /\s+(\d+) tokens"
         log = max((a.home / "logs").glob("llama-server-*.log"), key=lambda p: p.stat().st_mtime)
         before = len(re.findall(timing, log.read_text()))
-        httpx.post(base + "/api/chat", json=body, timeout=300)
+        chat(base, body, "the request after the reload")
         deadline = time.monotonic() + 30
         counts = re.findall(timing, log.read_text())
         while len(counts) <= before and time.monotonic() < deadline:
