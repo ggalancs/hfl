@@ -65,8 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cut text as a normal answer: `done_reason: "stop"`, `eval_count: 0`
   (four 900-token replies at once with a 4096-token context, in a 4 GB Linux
   VM). Such a reply now fails as the blocking request already did: HTTP 500
-  with llama-server's reason and how to avoid it (a larger `num_ctx`, fewer
+  that says what happened and how to avoid it (a larger `num_ctx`, fewer
   `HFL_NUM_PARALLEL` slots), and a stream ends in an error, not in `done`.
+  llama-server's own text goes to the server log under the reference the
+  reply carries, as with every backend error.
 - **A model unloaded and requested again right away could be refused for
   memory.** An unload takes the model out of the loaded set first, then
   stops its process (llama-server saves its prompt cache and exits). A load

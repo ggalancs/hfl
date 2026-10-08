@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -520,18 +521,25 @@ def _raise_stream_error(event: dict[str, Any]) -> None:
     and no final event. Skipped as text, it left the cut reply looking
     complete: "stop", no token counts (measured: four parallel replies that
     filled the slots' shared context, "Context size has been exceeded.").
-    The blocking request answers the same failure with an HTTP 500."""
+    The blocking request answers the same failure with an HTTP 500.
+
+    llama-server's own text goes to the log with a reference, not to the
+    caller (``tests/test_error_exposure.py``): a case HFL recognises it
+    explains in its own words."""
     error = event.get("error")
     if error is None:
         return
     message = error.get("message") if isinstance(error, dict) else error
-    reason = f"llama-server stopped the reply: {message or error}"
+    ref = uuid.uuid4().hex[:12]
+    logger.error("llama-server stopped a reply [ref=%s]: %s", ref, message or error)
     if "context size" in str(message).lower():
-        reason += (
-            " (the requests running together filled the context their parallel"
-            " slots share; a larger num_ctx or a lower HFL_NUM_PARALLEL avoids it)"
+        raise GenerationError(
+            "the requests running together filled the context their parallel slots"
+            f" share; a larger num_ctx or a lower HFL_NUM_PARALLEL avoids it (ref {ref})"
         )
-    raise GenerationError(reason)
+    raise GenerationError(
+        f"llama-server stopped the reply (ref {ref}) — see the hfl server log for detail"
+    )
 
 
 class LlamaServerEngine(InferenceEngine):

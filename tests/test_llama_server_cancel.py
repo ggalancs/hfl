@@ -168,11 +168,13 @@ def _cut(events: list[dict]) -> LlamaServerEngine:
     return _engine(lambda request: httpx.Response(200, content=_sse(events)))
 
 
-def test_a_dispatched_completion_cut_by_an_error_raises() -> None:
+def test_a_dispatched_completion_cut_by_an_error_raises(caplog) -> None:
     with cancel.scope(threading.Event()), pytest.raises(GenerationError) as caught:
         _cut(CUT_COMPLETION).generate("0", GenerationConfig())
-    assert "Context size has been exceeded." in str(caught.value)
-    assert "HFL_NUM_PARALLEL" in str(caught.value)
+    said = str(caught.value)
+    assert "HFL_NUM_PARALLEL" in said  # recognised, explained in HFL's words
+    ref = said.rsplit("(ref ", 1)[1].rstrip(")")
+    assert f"[ref={ref}]: Context size has been exceeded." in caplog.text
 
 
 def test_a_dispatched_chat_cut_by_an_error_raises() -> None:
@@ -196,9 +198,15 @@ def test_a_streamed_chat_cut_by_an_error_ends_in_the_error() -> None:
     assert seen == ["Hel"]
 
 
-def test_any_other_stream_error_raises_without_the_context_hint() -> None:
-    other = {"error": {"code": 500, "message": "something else", "type": "server_error"}}
+def test_any_other_stream_error_raises_and_its_text_stays_in_the_log(caplog) -> None:
+    """llama-server's text is a backend's: to the log, with a reference, and
+    never to the caller (a path in it would tell a remote user the server's
+    layout; tests/test_error_exposure.py)."""
+    secret = "failed to open /Users/secret/.hfl/models/blobs/sha256-deadbeef"
+    other = {"error": {"code": 500, "message": secret, "type": "server_error"}}
     with cancel.scope(threading.Event()), pytest.raises(GenerationError) as caught:
         _cut([{"content": "1", "stop": False}, other]).generate("0", GenerationConfig())
-    assert "something else" in str(caught.value)
-    assert "HFL_NUM_PARALLEL" not in str(caught.value)
+    said = str(caught.value)
+    assert "/Users/secret" not in said and "HFL_NUM_PARALLEL" not in said
+    ref = said.split("(ref ", 1)[1].split(")", 1)[0]
+    assert f"[ref={ref}]: {secret}" in caplog.text
