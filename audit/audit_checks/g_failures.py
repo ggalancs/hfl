@@ -10,6 +10,7 @@ has its own deadline: a check never depends on the thing it breaks to end.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import select
 import shutil
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 from local_audit import (
@@ -161,6 +163,38 @@ def g2(a: Audit) -> str:
     register nothing, and complete once there is room again."""
     if sys.platform != "darwin":
         raise Uncheckable("needs a small volume of its own (hdiutil, macOS)")
+    # The disk is filled from outside while the download runs: a race. Once
+    # the whole file landed before the filler took the rest (2026-10-08): the
+    # pull completed, correctly, and all four parts failed on a scenario that
+    # never happened. Lost, the race is run again on a fresh volume.
+    for attempt in range(1, 4):
+        verdict = _g2_once(a)
+        if verdict is not None:
+            return verdict if attempt == 1 else f"{verdict} (attempt {attempt}; it lost before)"
+    raise Uncheckable("the download finished before the disk could be filled, 3 times")
+
+
+def _g2_file_is_the_hubs(home: Path) -> bool:
+    """Whether the file a completed pull left is the Hub's, byte for byte:
+    sha256 from the Hub's own API, read here, not through HFL."""
+    name = "qwen2.5-0.5b-instruct-q8_0.gguf"
+    tree = httpx.get(
+        "https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main", timeout=60
+    )
+    tree.raise_for_status()
+    want = next(f["lfs"]["oid"] for f in tree.json() if f["path"] == name)
+    found = list(home.glob(f"models/**/{name}"))
+    if len(found) != 1:
+        return False
+    digest = hashlib.sha256()
+    with open(found[0], "rb") as source:
+        for block in iter(lambda: source.read(2**20), b""):
+            digest.update(block)
+    return digest.hexdigest() == want
+
+
+def _g2_once(a: Audit) -> str | None:
+    """One run of G2's scenario; None when the download won the race."""
     part = Parts()
     image = a.work / "g2.dmg"
     volume = a.work / "g2-volume"
@@ -195,7 +229,7 @@ def g2(a: Audit) -> str:
         filled = False
         deadline = time.monotonic() + 600
         while proc.poll() is None and time.monotonic() < deadline:
-            if not filled and free_at_start - shutil.disk_usage(volume).free > 50 * 2**20:
+            if not filled and free_at_start - shutil.disk_usage(volume).free > 10 * 2**20:
                 with open(filler, "wb") as out:
                     chunk = b"\0" * 2**20
                     try:
@@ -212,8 +246,17 @@ def g2(a: Audit) -> str:
             expect(False, "the pull did not stop within 10 minutes of a full disk")
         log.close()
         said = log_path.read_text(errors="replace")
-        expect(filled, f"the download finished before the disk could be filled: {said[-200:]}")
-        part("the pull stops with an error", lambda: expect(proc.returncode != 0, said[-300:]))
+        if not filled:
+            return None  # the download finished before the disk could be filled
+        if proc.returncode == 0:
+            # Completed: the whole file was written before the disk was full
+            # (the race lost), or a failed write went unnoticed. The file
+            # tells them apart.
+            expect(
+                _g2_file_is_the_hubs(home),
+                f"the pull says it completed, but its file is not the Hub's: {said[-300:]}",
+            )
+            return None
         part("no traceback", lambda: expect("Traceback" not in said, said[-500:]))
         part(
             "it says the disk is full",
