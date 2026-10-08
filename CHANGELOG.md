@@ -67,6 +67,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VM). Such a reply now fails as the blocking request already did: HTTP 500
   with llama-server's reason and how to avoid it (a larger `num_ctx`, fewer
   `HFL_NUM_PARALLEL` slots), and a stream ends in an error, not in `done`.
+- **A model unloaded and requested again right away could be refused for
+  memory.** An unload takes the model out of the loaded set first, then
+  stops its process (llama-server saves its prompt cache and exits). A load
+  that measured memory in between took the exiting process for another
+  program's: the reload of a 0.5B model after its `keep_alive: 0` measured
+  0.1-0.4 GB more in use than the load before it, and on a 4 GB Linux VM it
+  was refused (HTTP 507). Loads now wait for unloads still running before
+  they measure (bounded by the usual wait for busy models); the two
+  measurements now agree within 0.1 GB.
 
 ## [0.26.0] - 2026-10-03
 

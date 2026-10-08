@@ -138,6 +138,14 @@ class ServerState:
     _engine_retired: dict[int, "InferenceEngine"] = field(default_factory=dict)
     _engine_ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _lease_released: asyncio.Event = field(default_factory=asyncio.Event)
+    # Unloads running now. A model leaves the resident set before its engine
+    # is unloaded, and its process holds memory until the unload ends: a load
+    # measured meanwhile counted that memory as another program's, and the
+    # same model's reload was refused on a 4 GB machine (its llama-server was
+    # still saving its prompt cache; audit D54, 2026-10-08). Admission waits
+    # for them before it measures (``_wait_for_unloads``).
+    _unloads_in_flight: int = 0
+    _unload_ended: asyncio.Event = field(default_factory=asyncio.Event)
 
     # keep_alive: the duration a model stays loaded after its last use. A
     # value a request set explicitly is remembered per model (None = never
@@ -312,7 +320,7 @@ class ServerState:
             self._engine_inuse.pop(key, None)
             retired = self._engine_retired.pop(key, None)
             if retired is not None and retired.is_loaded:
-                _spawn_unload(retired)
+                self._spawn_unload(retired)
             for resident in self._residents.values():
                 if resident.engine is engine:
                     # The keep_alive clock starts when the model goes idle.
@@ -375,7 +383,7 @@ class ServerState:
                 if pinned:
                     self._engine_retired[id(resident.engine)] = resident.engine
             if not pinned and resident.engine.is_loaded:
-                await asyncio.to_thread(resident.engine.unload)
+                await self._unload_engine(resident.engine)
 
         try:
             dispatcher = self._try_get_dispatcher(resident.engine)
@@ -397,6 +405,44 @@ class ServerState:
             get_metrics().record_model_unload()
         except Exception:  # pragma: no cover — metrics must never break an unload
             logger.debug("failed to record a model unload", exc_info=True)
+
+    async def _unload_engine(self, engine: "InferenceEngine", *, counted: bool = False) -> None:
+        """``engine.unload()`` off-loop, counted in ``_unloads_in_flight``
+        while it runs (``counted``: the caller has already added it)."""
+        if not counted:
+            self._unloads_in_flight += 1
+        try:
+            await asyncio.to_thread(engine.unload)
+        finally:
+            self._unloads_in_flight -= 1
+            self._unload_ended.set()
+
+    def _spawn_unload(self, engine: "InferenceEngine") -> None:
+        """Unload a retired engine off-loop from synchronous code."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            engine.unload()
+            return
+        # Counted now, not when the task first runs: a load measuring in
+        # between would not see it.
+        self._unloads_in_flight += 1
+        task = loop.create_task(self._unload_engine(engine, counted=True))
+        _BACKGROUND.add(task)
+        task.add_done_callback(_BACKGROUND.discard)
+
+    async def _wait_for_unloads(self, deadline: float) -> None:
+        """Until no unload is running, or ``deadline``: what those engines
+        hold is about to be free, not another program's memory."""
+        while self._unloads_in_flight > 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return  # measured as it is, as before
+            self._unload_ended.clear()
+            try:
+                await asyncio.wait_for(self._unload_ended.wait(), min(5.0, remaining))
+            except asyncio.TimeoutError:
+                pass
 
     async def evict(self, name: str, reason: str = "requested") -> bool:
         """Unload one resident LLM by name. False when it is not loaded."""
@@ -464,6 +510,7 @@ class ServerState:
 
         max_models = _effective_max_models()
         while True:
+            await self._wait_for_unloads(deadline)
             self._lease_released.clear()
             checks = not _memory_checks_disabled() and estimate > 0
             memory = current_memory() if checks else None
@@ -539,6 +586,7 @@ class ServerState:
 
         if _memory_checks_disabled():
             return
+        await self._wait_for_unloads(time.monotonic() + _busy_wait_seconds())
         memory = current_memory()
         if memory is None:
             return
@@ -686,7 +734,7 @@ class ServerState:
                 to_unload = self._engine_retired.pop(key, None)
             self._lease_released.set()
         if to_unload is not None and to_unload.is_loaded:
-            await asyncio.to_thread(to_unload.unload)
+            await self._unload_engine(to_unload)
 
     @asynccontextmanager
     async def with_llm_engine(self) -> AsyncIterator["InferenceEngine"]:
@@ -798,6 +846,7 @@ class ServerState:
                 try:
                     async with self._admission_lock:
                         deadline = time.monotonic() + _busy_wait_seconds()
+                        await self._wait_for_unloads(deadline)
                         stale = self._residents.get(model_name)
                         if stale is not None:
                             self._refuse_if_it_never_fits(model_name, estimate)
@@ -1155,18 +1204,6 @@ def _busy_wait_seconds() -> float:
         return float(getattr(config, "queue_acquire_timeout_seconds", 60.0))
     except (TypeError, ValueError):
         return 60.0
-
-
-def _spawn_unload(engine: "InferenceEngine") -> None:
-    """Unload a retired engine off-loop from synchronous code."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        engine.unload()
-        return
-    task = loop.create_task(asyncio.to_thread(engine.unload))
-    _BACKGROUND.add(task)
-    task.add_done_callback(_BACKGROUND.discard)
 
 
 # Strong references to fire-and-forget unload tasks (asyncio keeps only weak

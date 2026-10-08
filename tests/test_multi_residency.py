@@ -17,6 +17,7 @@ a scripted memory reading, and pin the properties that make that safe:
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -959,3 +960,106 @@ async def test_a_resident_whose_process_died_is_loaded_again(world):
 
     assert len(w.engines["a"]) == 2 and w.engines["a"][1].is_loaded
     assert get_state().resident_models()[0].engine is w.engines["a"][1]
+
+
+# An unload still running holds its memory. The model left the resident set
+# first, so a load measured meanwhile took that memory for another
+# program's: on a 4 GB Linux VM the same model's reload, right after its
+# keep_alive=0 unload, was refused (507) while llama-server was still
+# saving its prompt cache (audit D54, 2026-10-08).
+
+
+def _memory_of_what_is_loaded(w):
+    """Memory as the machine sees it: every engine still loaded holds its
+    size, resident or not (an unload in progress has not freed it yet)."""
+
+    def memory() -> MemoryView:
+        held = sum(w.sizes[n] * GB for n, made in w.engines.items() for e in made if e.is_loaded)
+        return MemoryView(total=w.total, in_use=w.others + held, hfl_rss=held)
+
+    return memory
+
+
+def _held_unload(engine) -> threading.Event:
+    """Make ``engine.unload`` wait in its thread until the event is set."""
+    gate = threading.Event()
+    real = engine.unload
+
+    def unload() -> None:
+        gate.wait(10)
+        real()
+
+    engine.unload = unload
+    return gate
+
+
+@pytest.mark.asyncio
+async def test_a_load_waits_for_an_unload_still_running(world, monkeypatch):
+    w = world({"a": 60})
+    monkeypatch.setattr("hfl.engine.residency.current_memory", _memory_of_what_is_loaded(w))
+    # Its own task, as its own request: a load binds the model to the
+    # request's context, and the reload below must not inherit that.
+    await asyncio.create_task(_load("a"))
+    gate = _held_unload(w.engines["a"][0])
+
+    from hfl.api.state import get_state
+
+    evicting = asyncio.create_task(get_state().evict("a", reason="keep_alive=0"))
+    await asyncio.sleep(0.1)
+    assert get_state().resident("a") is None and w.engines["a"][0].is_loaded
+
+    reload = asyncio.create_task(_load("a"))
+    await asyncio.sleep(0.3)
+    assert not reload.done(), "it measured the unloading model as another program's memory"
+    gate.set()
+    await evicting
+    await reload
+    assert len(w.engines["a"]) == 2 and w.engines["a"][1].is_loaded
+
+
+@pytest.mark.asyncio
+async def test_a_load_waits_for_the_unload_a_released_lease_started(world, monkeypatch):
+    """A model unloaded while a request held it is unloaded when that
+    request's lease ends, from synchronous code (a task): counted from the
+    moment it is started, not from when the task first runs."""
+    w = world({"a": 60, "b": 60})
+    monkeypatch.setattr("hfl.engine.residency.current_memory", _memory_of_what_is_loaded(w))
+
+    from hfl.api.state import close_lease_scope, get_state, open_lease_scope
+
+    token = open_lease_scope()
+    await _load("a")
+    gate = _held_unload(w.engines["a"][0])
+    await get_state().evict("a", reason="stop requested")  # leased: deferred
+    assert w.engines["a"][0].is_loaded
+    # The load is scheduled first, then the lease ends (the deferred unload
+    # starts, held open): the load runs before the unload's task does.
+    loading_b = asyncio.create_task(_load("b"))
+    close_lease_scope(token)
+    await asyncio.sleep(0.3)
+    assert not loading_b.done(), "it measured the unloading model as another program's memory"
+    gate.set()
+    await loading_b
+    assert w.engines["b"][0].is_loaded and not w.engines["a"][0].is_loaded
+
+
+@pytest.mark.asyncio
+async def test_an_unload_that_never_ends_delays_a_load_only_until_its_deadline(world, monkeypatch):
+    from hfl.exceptions import MemoryBudgetExceededError
+
+    w = world({"a": 60, "b": 60})
+    monkeypatch.setattr("hfl.engine.residency.current_memory", _memory_of_what_is_loaded(w))
+    monkeypatch.setattr("hfl.api.state._busy_wait_seconds", lambda: 0.5)
+    await asyncio.create_task(_load("a"))  # its own request (see above)
+    gate = _held_unload(w.engines["a"][0])
+
+    from hfl.api.state import get_state
+
+    evicting = asyncio.create_task(get_state().evict("a", reason="keep_alive=0"))
+    await asyncio.sleep(0.1)
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(MemoryBudgetExceededError):  # measured as it is, as before
+        await _load("b")
+    assert asyncio.get_running_loop().time() - started < 3
+    gate.set()
+    await evicting
