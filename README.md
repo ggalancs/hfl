@@ -485,6 +485,17 @@ bash scripts/ci-local.sh        # lint, types and the full test suite, as CI run
 
 If HFL saves you a download–convert–quantize afternoon, a ⭐ helps other people find it.
 
+## Sponsor HFL
+
+HFL is free and open source, built and maintained by one person. Every release
+is tested end to end on macOS, Linux and Windows, and on NVIDIA and AMD GPUs
+rented by the hour. If HFL is useful to you or your company, you can support
+its development on [GitHub Sponsors](https://github.com/sponsors/ggalancs), or
+with a one-off tip on [Ko-fi](https://ko-fi.com/ggalancs).
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ggalancs)
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/ggalancs)
+
 ## Legal notices
 
 **Model licenses.** Models keep their own licenses (Llama, Gemma, OpenRAIL,

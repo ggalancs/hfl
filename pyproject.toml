@@ -270,6 +270,7 @@ Documentation = "https://ggalancs.github.io/hfl/"
 Repository = "https://github.com/ggalancs/hfl"
 Issues = "https://github.com/ggalancs/hfl/issues"
 Changelog = "https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md"
+Funding = "https://github.com/sponsors/ggalancs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hfl"]
