@@ -2,16 +2,20 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| Version                    | Supported          |
+| -------------------------- | ------------------ |
+| Latest release (0.27.x)    | :white_check_mark: |
+| Older releases             | :x:                |
+
+Fixes go into the next release; please upgrade to the latest version.
 
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in hfl, please report it responsibly:
 
 1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. **Email** the maintainer at: [security contact to be added]
+2. **Report it privately** on GitHub: [Report a vulnerability](https://github.com/ggalancs/hfl/security/advisories/new)
+   (the repository's **Security** tab → **Report a vulnerability**). Only the maintainer sees it.
 3. **Include** a detailed description of the vulnerability
 4. **Include** steps to reproduce the issue
 5. **Allow** reasonable time for a fix before public disclosure
@@ -22,9 +26,12 @@ If you discover a security vulnerability in hfl, please report it responsibly:
 
 hfl is designed to handle HuggingFace tokens securely:
 
-- Tokens are read **only** from environment variables (`HF_TOKEN`) or secure prompts
-- Tokens are **never** persisted to disk, configuration files, or logs
-- Tokens are held in memory only for the duration of the process
+- Tokens are read from the `HF_TOKEN` environment variable, or from the token `hfl login` saved
+- `hfl login` stores the token where the Hugging Face libraries keep it (`$HF_HOME/token`, by default
+  `~/.cache/huggingface/token`), as `hf auth login` does; `hfl logout` removes it. Without
+  `hfl login`, nothing is written to disk
+- HFL keeps no copy of the token in its own configuration, and masks it in the errors it logs
+  from Hub uploads (`hfl push`)
 
 ### Network Security
 
