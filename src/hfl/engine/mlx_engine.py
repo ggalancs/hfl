@@ -132,6 +132,31 @@ def _settle_random_state() -> None:
         logger.debug("mlx random state not evaluated", exc_info=True)
 
 
+def _settle_model_arrays(*models: Any) -> None:
+    """Evaluate every array of ``models`` on the loading thread, private
+    ones included.
+
+    Since mlx 0.32 each thread has its own streams, and a lazy array stays
+    tied to the stream of the thread that built it: evaluated from another
+    thread it raises "There is no Stream(gpu, N) in current thread".
+    Loading evaluates only ``parameters()``, which leaves out keys starting
+    with ``_``, such as the ``_freqs`` of mlx-lm's Llama 3, YaRN, LongRoPE
+    and proportional (Gemma 4) RoPEs; and the model is used from the batch
+    thread, or the request's, never the loader's. Every Gemma 4 request
+    failed with HTTP 500 (mlx 0.32.0-0.32.3, mlx-lm 0.31.3-0.32.0).
+    """
+    try:
+        import mlx.core as mx
+        from mlx.utils import tree_flatten
+    except ImportError:  # only test doubles load without mlx
+        return
+    for model in models:
+        if model is not None:
+            # A list of (key, value) without ``destination`` (typed as list or dict).
+            flat = cast("list[tuple[str, Any]]", tree_flatten(model))
+            mx.eval([value for _, value in flat if isinstance(value, mx.array)])
+
+
 class MLXEngine(InferenceEngine):
     """Inference engine wrapping mlx-lm's ``generate`` helper.
 
@@ -190,12 +215,14 @@ class MLXEngine(InferenceEngine):
             self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
         self._draft = self._load_draft(kwargs.get("draft_model_path"))
+        # Everything lazy, evaluated here, before any other thread uses it.
+        _settle_model_arrays(self._model, self._draft)
+        _settle_random_state()
         # The prompt store keeps the target's KV only; speculative decoding
         # needs the draft's beside it, so with a draft each request starts
         # from a fresh cache.
         self._prompt_store = None if self._draft is not None else self._new_prompt_store()
         self._start_batching()
-        _settle_random_state()
         logger.info("MLX model loaded from %s in %.2fs", model_path, time.perf_counter() - start)
 
     def _start_batching(self) -> None:

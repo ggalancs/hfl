@@ -132,10 +132,17 @@ def fake_mx(monkeypatch):
     random.state = ["key"]  # type: ignore[attr-defined]
     core.random = random  # type: ignore[attr-defined]
     core.eval = lambda *arrays: evaluated.extend(arrays)  # type: ignore[attr-defined]
+    # A load also settles the model's arrays (``mx.array``, ``tree_flatten``):
+    # its own ``mlx.utils``, so a real one another test imported is not used.
+    core.array = type("array", (), {})  # type: ignore[attr-defined]
+    utils = ModuleType("mlx.utils")
+    utils.tree_flatten = lambda tree, *a, **k: []  # type: ignore[attr-defined]
     mlx = ModuleType("mlx")
     mlx.core = core  # type: ignore[attr-defined]
+    mlx.utils = utils  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlx", mlx)
     monkeypatch.setitem(sys.modules, "mlx.core", core)
+    monkeypatch.setitem(sys.modules, "mlx.utils", utils)
     return {"evaluated": evaluated, "core": core}
 
 
@@ -146,7 +153,7 @@ def test_a_load_evaluates_mlx_random_state(fake_utils, fake_mx, tmp_path, monkey
     monkeypatch.setattr(engine, "_start_batching", lambda: None)
     monkeypatch.setattr(engine, "_new_prompt_store", lambda: None)
     engine.load(str(path))
-    assert fake_mx["evaluated"] == [fake_mx["core"].random.state]
+    assert fake_mx["core"].random.state in fake_mx["evaluated"]
 
 
 def test_settling_the_random_state_never_fails_a_load(fake_mx, monkeypatch):

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gemma 4 on MLX failed every request** with HTTP 500 ("There is no
+  Stream(gpu, 1) in current thread"). Since mlx 0.32 each thread has its own
+  streams, and a lazy array stays tied to the thread that built it. HFL loads
+  a model on one thread and generates on another, and mlx-lm's RoPEs for
+  Gemma 4 (proportional), Llama 3, YaRN and LongRoPE keep a lazy `_freqs`
+  that loading does not evaluate. HFL now evaluates every array of the model
+  (and of a draft model) on the loading thread, before any other thread uses
+  it. Measured with Gemma 4 31B 4-bit through `hfl serve`: 3 of 3 requests
+  failed before, 8 of 8 answered after, with and without batching. The four
+  RoPEs are tested built on one thread and run on another (mlx 0.32.0-0.32.3,
+  mlx-lm 0.31.3-0.32.0; not fixed upstream as of these versions).
+
 ## [0.27.0] - 2026-10-08
 
 ### Added

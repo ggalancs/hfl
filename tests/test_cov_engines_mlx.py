@@ -83,6 +83,7 @@ class _FakeMx(types.ModuleType):
     """``mlx.core`` with what the engine and the sampler call."""
 
     float32 = "float32"
+    array = type("array", (), {})  # a load settles the model's arrays
 
     def __init__(self):
         super().__init__("mlx.core")
@@ -149,10 +150,16 @@ def mlx(monkeypatch):
     monkeypatch.setitem(sys.modules, "mlx_lm.generate", None)
 
     core = _FakeMx()
+    # Its own ``mlx.utils`` (a load flattens the model): a real one another
+    # test imported would otherwise run against this fake ``mlx.core``.
+    utils = types.ModuleType("mlx.utils")
+    utils.tree_flatten = lambda tree, *a, **k: []  # type: ignore[attr-defined]
     pkg = types.ModuleType("mlx")
     pkg.core = core  # type: ignore[attr-defined]
+    pkg.utils = utils  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlx", pkg)
     monkeypatch.setitem(sys.modules, "mlx.core", core)
+    monkeypatch.setitem(sys.modules, "mlx.utils", utils)
     monkeypatch.setattr(mlx_engine, "is_available", lambda: True)
     state["mx"] = core
     return state

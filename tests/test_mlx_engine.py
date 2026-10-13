@@ -449,10 +449,19 @@ class TestUnloadReleasesMemory:
         core = ModuleType("mlx.core")
         core.metal = ModuleType("mlx.core.metal")  # type: ignore[attr-defined]
         core.metal.clear_cache = lambda: calls.append(1)  # type: ignore[attr-defined]
+        # ``load`` settles the model's arrays (``mx.eval`` over
+        # ``mlx.utils.tree_flatten``): the fake offers both, so a real
+        # ``mlx.utils`` another test imported is not used against it.
+        core.eval = lambda *args: None  # type: ignore[attr-defined]
+        core.array = type("array", (), {})  # type: ignore[attr-defined]
+        utils = ModuleType("mlx.utils")
+        utils.tree_flatten = lambda tree, *a, **k: []  # type: ignore[attr-defined]
         mlx_pkg = ModuleType("mlx")
         mlx_pkg.core = core  # type: ignore[attr-defined]
+        mlx_pkg.utils = utils  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "mlx", mlx_pkg)
         monkeypatch.setitem(sys.modules, "mlx.core", core)
+        monkeypatch.setitem(sys.modules, "mlx.utils", utils)
 
         engine = mlx_engine.MLXEngine()
         engine.load("/fake/model")
@@ -583,3 +592,19 @@ def test_cancel_stops_the_token_stream_and_closes_it():
             engine.cancel()
     assert seen == [0, 1, 2] and closed == [True]
     assert list(engine._cancellable(iter(range(3)))) == [0, 1, 2]
+
+
+def test_the_model_is_settled_before_the_batch_thread_gets_it(fake_mlx, monkeypatch):
+    """Lazy arrays of the model (a RoPE's ``_freqs``) must be evaluated on
+    the loading thread before the batch thread uses the model: every Gemma 4
+    request failed with "There is no Stream(gpu, 1) in current thread"
+    (``tests/test_mlx_threads.py`` runs the real thing)."""
+    order: list[tuple[str, tuple]] = []
+    monkeypatch.setattr(mlx_engine, "_settle_model_arrays", lambda *m: order.append(("settle", m)))
+    monkeypatch.setattr(
+        mlx_engine.MLXEngine, "_start_batching", lambda self: order.append(("batch", ()))
+    )
+    engine = mlx_engine.MLXEngine()
+    engine.load("/fake/model")
+    assert [step for step, _ in order] == ["settle", "batch"]
+    assert order[0][1] == (engine._model, engine._draft)
