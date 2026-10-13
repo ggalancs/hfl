@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-13
+
 ### Fixed
 
 - **Gemma 4 on MLX failed every request** with HTTP 500 ("There is no
