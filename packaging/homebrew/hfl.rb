@@ -21,8 +21,8 @@ class Hfl < Formula
 
   desc "Download, run and try any Hugging Face model on your own machine"
   homepage "https://github.com/ggalancs/hfl"
-  url "https://files.pythonhosted.org/packages/f0/1b/eda5870ee4eed47dc2ec554058b5d6f5ff16cb67de4be4c577a2fafe68a8/hfl-0.27.0.tar.gz"
-  sha256 "f370fc8da77bbce0977331d9273af27a2509b0473ddf06676df4960c221f0d19"
+  url "https://files.pythonhosted.org/packages/ea/be/34de14494334fa53f5871dcca41a96445f559cfa3e5266cc3130593625a3/hfl-0.27.1.tar.gz"
+  sha256 "fbc3badba4ae19242113d873d9c072c366426d8db18923a37db87de61e5cb7a8"
   license "Apache-2.0"
   head "https://github.com/ggalancs/hfl.git", branch: "main"
 
