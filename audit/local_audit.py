@@ -337,6 +337,9 @@ MODELS = [
 ]
 if APPLE_SILICON:
     MODELS.append(("mlxq", "mlx-community/Qwen2.5-0.5B-Instruct-4bit", ()))
+    # Its RoPE (LongRoPE) keeps arrays lazy through mlx-lm's load, unlike
+    # mlxq's plain one: E23.
+    MODELS.append(("mlxphi", "mlx-community/Phi-3.5-mini-instruct-4bit", ()))
 QUESTION = "What is the capital of France? Answer with one word."
 
 

@@ -464,6 +464,48 @@ def e22(a: Audit) -> str:
     return part.verdict() + _speedup(bench.stdout)
 
 
+@check("E23", "MLX: a RoPE that mlx-lm leaves lazy (Phi-3.5), 4 requests at once")
+def e23(a: Audit) -> str:
+    """An unevaluated mlx array can be evaluated only on the thread that built
+    it (mlx ≥ 0.31.2). HFL loads on one thread and generates on another, and
+    mlx-lm's load leaves the frequencies of LongRoPE, Llama 3, YaRN and
+    Gemma 4 RoPEs unevaluated: 0.27.0 answered every request for those models
+    with HTTP 500. The plain RoPE of ``mlxq`` never showed it."""
+    need_apple_silicon("MLX")
+    part = Parts()
+    body = {"model": "mlxphi", "messages": USER, "max_tokens": 20, "temperature": 0}
+    with a.server() as base:
+        with httpx.Client(base_url=base, timeout=600) as c:
+            with concurrent.futures.ThreadPoolExecutor(4) as pool:
+                replies = list(
+                    pool.map(lambda _: c.post("/v1/chat/completions", json=body), range(4))
+                )
+        log = max((a.work / "logs").glob("serve-*.log"), key=lambda p: p.stat().st_mtime)
+        text = log.read_text(errors="replace")
+
+    def answered() -> None:
+        bad = [
+            (r.status_code, r.text[:160])
+            for r in replies
+            if r.status_code != 200 or not _paris(r.json()["choices"][0]["message"]["content"])
+        ]
+        expect(not bad, bad)
+
+    part("4 at once, each answers", answered)
+    part(
+        "served by MLX, batched",
+        lambda: expect(
+            "MLX model loaded" in text and "continuous batching" in text,
+            "no MLX batching in log",
+        ),
+    )
+    part(
+        "no stream of another thread in the log",
+        lambda: expect("in current thread" not in text, "a 'no Stream … in current thread' error"),
+    )
+    return part.verdict()
+
+
 @check("E3", "MLX")
 def e3(a: Audit) -> str:
     need_apple_silicon("MLX")
