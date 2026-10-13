@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 import textwrap
 
 import pytest
@@ -35,16 +36,23 @@ from hfl.core.sandbox import SUPPORTED_MODES, apply_sandbox
 runner = CliRunner()
 
 
+def _plain(text: str) -> str:
+    """Help text without ANSI styles. On GitHub Actions Rich keeps bold even
+    with NO_COLOR, and option names came out split by escape codes (the
+    Tests workflow, 2026-10-13); ``tests/test_cli.py`` strips them too."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 class TestTheFlagExists:
     def test_serve_offers_sandbox(self):
         result = runner.invoke(app, ["serve", "--help"])
         assert result.exit_code == 0
-        assert "--sandbox" in result.stdout
+        assert "--sandbox" in _plain(result.stdout)
 
     def test_the_help_names_the_env_var(self):
         """The module promised HFL_SANDBOX; the flag has to admit it too."""
         result = runner.invoke(app, ["serve", "--help"])
-        assert "HFL_SANDBOX" in result.stdout
+        assert "HFL_SANDBOX" in _plain(result.stdout)
 
 
 class TestOrdering:

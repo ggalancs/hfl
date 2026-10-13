@@ -154,7 +154,10 @@ mypy src/hfl --ignore-missing-imports || fail_step "mypy src/hfl (test_static_an
 # ------------------------------------------------------------------
 
 blue "=> [test] pytest tests/ --cov=hfl --cov-fail-under=90, then 90 % per component"
-pytest tests/ --cov=hfl --cov-report=xml --cov-report=json:coverage.json \
+# As on GitHub's runners: Rich styles its output there (bold survives
+# NO_COLOR), and two --help assertions passed here and failed there
+# (2026-10-13). HFL itself never reads the variable.
+GITHUB_ACTIONS=true pytest tests/ --cov=hfl --cov-report=xml --cov-report=json:coverage.json \
     --cov-report=term-missing --cov-fail-under=90 || fail_step "pytest"
 python scripts/coverage_by_component.py coverage.json --floor 90 \
     || fail_step "coverage per component (90 % each)"

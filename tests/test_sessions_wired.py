@@ -21,6 +21,7 @@ ways a chat really ends.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -28,6 +29,13 @@ from typer.testing import CliRunner
 from hfl.cli.main import app
 
 runner = CliRunner()
+
+
+def _plain(text: str) -> str:
+    """Output without ANSI styles. On GitHub Actions Rich keeps bold even
+    with NO_COLOR, and option names came out split by escape codes (the
+    Tests workflow, 2026-10-13); ``tests/test_cli.py`` strips them too."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 @pytest.fixture
@@ -75,14 +83,14 @@ class TestTheCommandGroupExists:
     def test_run_accepts_a_session_name(self):
         result = runner.invoke(app, ["run", "--help"])
         assert result.exit_code == 0
-        assert "--session" in result.stdout
+        assert "--session" in _plain(result.stdout)
 
 
 class TestListing:
     def test_empty_says_how_to_start_one(self, session_home):
         result = runner.invoke(app, ["sessions", "list"])
         assert result.exit_code == 0
-        assert "--session" in result.stdout, (
+        assert "--session" in _plain(result.stdout), (
             "an empty state that does not say how to leave it is a dead end"
         )
 
