@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 PackageIdentifier: ggalancs.HFL
 PackageVersion: 0.27.1
 InstallerType: wix
@@ -13,4 +13,4 @@ Installers:
     AppsAndFeaturesEntries:
       - UpgradeCode: '{F9FDE6C0-1D4C-4B7B-8C18-5AEA57F3A5C1}'
 ManifestType: installer
-ManifestVersion: 1.9.0
+ManifestVersion: 1.12.0

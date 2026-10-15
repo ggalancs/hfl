@@ -14,10 +14,12 @@ resource was added then (the sdist builds with Homebrew's Python 3.14). The
 other resources are unchanged from 0.21.0 and within 0.27.1's ranges (0.27.0
 only raised fastapi's ceiling to `<0.143`; the formula's fastapi is 0.141.1).
 
-Verified locally on 2026-09-25 (macOS 26, Apple Silicon): `brew install
---build-from-source`, `brew test` and `brew audit --strict --online` pass from
-a local tap; a Homebrew-Python environment with the current code served a GGUF
-through Homebrew's `llama-server`.
+Verified locally on 2026-10-15 with Homebrew 7.0.9 (macOS 26, Apple Silicon),
+the formula as it is here (0.27.1 from PyPI): `brew install --build-from-source`,
+`brew test` and `brew audit --strict --online` pass from a local tap, and the
+installed `hfl` pulled a GGUF and served it through Homebrew's `llama-server`
+(an answer to a chat request). Homebrew 6.0.18 could not install it: it
+stopped while upgrading the dependencies ("already locked … openssl@3").
 
 To publish:
 
@@ -32,13 +34,13 @@ To publish:
 
 ## winget — `winget/manifests/g/ggalancs/HFL/0.27.1/`
 
-Manifests for the 0.27.1 MSI of the GitHub release (sha256 computed from the
-published file, and equal to the one GitHub reports for it). The same
-manifests, at 0.25.0 and differing only in version, URL and hash, passed
-`winget validate` on a real Windows 10 (local audit F7,
-which also builds the MSI and extracts it without installing); `winget
-install` from winget-pkgs needs the PR there. The MSI's executable ran a
-model on GitHub's Windows runner before it was published.
+Manifests for the 0.27.1 MSI of the GitHub release, schema 1.12.0 (what
+winget-pkgs asks for now). Checked on a real Windows 10 on 2026-10-15:
+`winget validate` passes; the published MSI's sha256 equals the manifest's;
+installed silently with msiexec over HFL 0.23.0, it upgraded it (the old
+product found and removed), served a GGUF through its bundled llama-server,
+and uninstalled cleanly. `winget install --manifest` itself was not run: it
+needs the `LocalManifestFiles` admin setting.
 
 To publish: on Windows, `winget validate` and `winget install --manifest` the
 folder, then open a pull request adding it to
