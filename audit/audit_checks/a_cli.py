@@ -593,3 +593,53 @@ def a41(a: Audit) -> str:
         expect('"llm"' in registry.read_text(encoding="utf-8"), "pulled nothing")
         return "offered, pulled qwen2.5:1.5b, answered"
     return "found the model already pulled, answered"
+
+
+def _training_data(a: Audit) -> Path:
+    """Eight prompt/completion rows: enough for a few real training steps."""
+    data = a.scratch / "train.jsonl"
+    rows = [{"prompt": f"What is {i} plus {i}?", "completion": f" {2 * i}."} for i in range(1, 9)]
+    data.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return data
+
+
+@check("A42", "hfl train")
+def a42(a: Audit) -> str:
+    """A LoRA adapter trained for real, a few steps, on the shared
+    safetensors model (``hfq``): the trained model is registered and
+    answers. MLX on Apple Silicon, Transformers elsewhere (``[train]``)."""
+    name = "hfq-lora"
+    a.cli("rm", name, "--yes")
+    try:
+        out = a.ok(
+            "train", "hfq", "--data", str(_training_data(a)), "--name", name,
+            "--iters", "4", "--batch-size", "1", "--num-layers", "2", "--save-every", "2",
+            timeout=3600,
+        )  # fmt: skip
+        expect(name in a.ok("list"), f"{name} not registered: {out[-400:]}")
+        answer = a.ok("run", name, stdin=f"{QUESTION}\n/bye\n", timeout=600)
+        expect("Traceback" not in answer and answer.strip(), answer[-300:])
+    finally:
+        a.cli("rm", name, "--yes")
+    return "4 steps trained, the model registered and answered"
+
+
+@check("B65", "POST /api/train")
+def b65(a: Audit) -> str:
+    """The route behind ``hfl train``, without streaming: a few real steps on
+    ``hfq``; the last event says success and the model is registered."""
+    name = "hfq-lora-api"
+    a.cli("rm", name, "--yes")
+    body = {
+        "model": "hfq", "data": str(_training_data(a)), "name": name, "iters": 4,
+        "batch_size": 1, "num_layers": 2, "save_every": 2, "stream": False,
+    }  # fmt: skip
+    try:
+        with httpx.Client(base_url=a.shared(), timeout=3600) as c:
+            resp = c.post("/api/train", json=body)
+        expect(resp.status_code == 200, f"{resp.status_code}: {resp.text[-300:]}")
+        expect(resp.json().get("status") == "success", resp.text[-300:])
+        expect(name in a.ok("list"), f"{name} not registered")
+    finally:
+        a.cli("rm", name, "--yes")
+    return "trained over the API; success; registered"
