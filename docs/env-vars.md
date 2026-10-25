@@ -153,6 +153,14 @@ DuckDuckGo needs nothing but turns away clients it takes for bots — every
 scripted client, measured (a browser on the same address gets results) — so on
 its own web search may not work; configure SearXNG or a keyed service.
 
+`hfl websearch` sets these without editing an environment, for every server,
+the desktop app's included: `hfl websearch searxng --port N` (or `--url`) points
+at the SearXNG you run, after one test search (HFL never installs or starts
+it), `hfl websearch key <exa|tavily|brave|serpapi>` stores a key after one
+test search, `hfl websearch status` shows what is used and tries it. The choice
+is saved in `$HFL_HOME/web_search.json`, readable by its owner only; the
+variables above take precedence over it.
+
 ## Interface
 
 | HFL        | Default         | What it does |

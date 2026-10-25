@@ -273,6 +273,29 @@
           "yes": "Instala sin preguntar"
         }
       }
+    },
+    "websearch": {
+      "description": "Elige la búsqueda web que usan las herramientas de HFL: SearXNG o un servicio de búsqueda con clave de API",
+      "status": {
+        "description": "Muestra la búsqueda web en uso y la prueba"
+      },
+      "searxng": {
+        "description": "Usa el SearXNG que tú ejecutas: su puerto en esta máquina o su URL (HFL no lo instala)",
+        "options": {
+          "port": "Puerto del SearXNG que ejecutas en esta máquina (http://127.0.0.1:PUERTO)",
+          "url": "URL del SearXNG que ejecutas"
+        }
+      },
+      "key": {
+        "description": "Usa un servicio de búsqueda con su clave de API: brave, tavily, exa o serpapi",
+        "options": {
+          "key": "La clave de API (se pide si no se da)",
+          "check": "Prueba una búsqueda con la clave antes de guardarla"
+        }
+      },
+      "off": {
+        "description": "Olvida la elección guardada (las variables de entorno siguen valiendo)"
+      }
     }
   },
   "messages": {
@@ -346,7 +369,17 @@
     "start_offer": "Modelos que caben en este equipo (Apache-2.0, sin registro):",
     "start_choose": "Elige uno [1]",
     "start_none": "Ahora mismo no se encuentra en el Hub de Hugging Face ninguno de los modelos sugeridos.",
-    "start_ready": "Listo. Chatea con él cuando quieras: hfl run {alias}"
+    "start_ready": "Listo. Chatea con él cuando quieras: hfl run {alias}",
+    "websearch_searxng_used": "SearXNG en {url} respondió ({count} resultados) y la búsqueda web de HFL lo usa.",
+    "websearch_key_saved": "{provider} respondió ({count} resultados); su clave está guardada en {path}, legible solo por ti.",
+    "websearch_key_saved_unchecked": "La clave de {provider} está guardada en {path}, legible solo por ti (sin probar).",
+    "websearch_prompt_key": "Clave de API de {provider}",
+    "websearch_applies": "Un servidor HFL en marcha la usa desde su siguiente búsqueda.",
+    "websearch_off": "Se han borrado los ajustes de búsqueda web guardados.",
+    "websearch_off_none": "No había ajustes de búsqueda web guardados.",
+    "websearch_none": "Nada configurado: HFL prueba DuckDuckGo, que rechaza a los clientes automatizados. Elige uno: `hfl websearch searxng`, o `hfl websearch key <proveedor>`.",
+    "websearch_order": "Orden en que se prueban",
+    "websearch_test": "Búsqueda de prueba"
   },
   "errors": {
     "format_error": "Error de formato: El nombre del modelo es inválido.",
@@ -430,7 +463,10 @@
     "no_models": "No hay modelos descargados. Usa 'hfl pull' para descargar.",
     "no_supported_models": "No hay modelos soportados. Usa 'hfl list' para ver todos los modelos.",
     "type": "Tipo",
-    "unsupported": "No soportado"
+    "unsupported": "No soportado",
+    "setting": "Ajuste",
+    "value": "Valor",
+    "source": "Origen"
   },
   "inspect": {
     "name": "Nombre",

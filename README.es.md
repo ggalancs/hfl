@@ -409,6 +409,27 @@ Los modelos se pueden nombrar por su nombre local, un alias o la referencia del
 Hub de la que se descargaron (`hf.co/org/repo:CUANT`). El servidor nunca descarga
 por su cuenta: lo hacen `hfl pull` o `hfl serve --model <referencia>`.
 
+### Búsqueda web
+
+Las herramientas web de HFL — `/api/web_search`, el `web_search` del servidor
+MCP y el WebSearch de Claude Code con `hfl launch`, que HFL ejecuta él mismo —
+buscan con el proveedor que elijas:
+
+```bash
+hfl websearch searxng --port 8888   # el SearXNG que ejecutas en esta máquina (HFL no lo instala)
+hfl websearch searxng --url http://host:8080   # o la URL del tuyo en otra parte
+hfl websearch key tavily       # o exa, brave, serpapi: pide la clave de API
+hfl websearch status           # qué se usa, y una búsqueda de prueba
+```
+
+SearXNG lo ejecutas tú (en Docker, por ejemplo: docs/env-vars.md explica
+cómo, con la salida JSON que HFL necesita); HFL solo se conecta. La elección
+se guarda en la carpeta de HFL, legible solo por ti; las variables
+de entorno (`HFL_SEARXNG_URL`, `TAVILY_API_KEY`…) mandan sobre ella. Sin
+ninguna, HFL prueba DuckDuckGo, que rechaza a los clientes automatizados; una
+búsqueda que no puede hacerse lo dice, en vez de dejar que el modelo responda
+de memoria.
+
 ## Referencia
 
 <details>

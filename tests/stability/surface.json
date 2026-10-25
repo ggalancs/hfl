@@ -289,7 +289,18 @@
     "verify": [
       "<model>"
     ],
-    "version": []
+    "version": [],
+    "websearch key": [
+      "<provider>",
+      "--check",
+      "--key"
+    ],
+    "websearch off": [],
+    "websearch searxng": [
+      "--port",
+      "--url"
+    ],
+    "websearch status": []
   },
   "env": [
     "HFL_ACCEPT_NETWORK_EXPOSURE",

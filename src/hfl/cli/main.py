@@ -21,7 +21,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 from rich.panel import Panel
@@ -3997,6 +3997,95 @@ def sessions_rm(
         console.print(f"[red]{t('errors.session_not_found', name=name)}[/]")
         raise typer.Exit(1)
     console.print(f"[green]{t('messages.session_deleted', name=name)}[/]")
+
+
+websearch_app = typer.Typer(help=t("commands.websearch.description"), no_args_is_help=True)
+app.add_typer(websearch_app, name="websearch")
+
+
+def _websearch_failed(exc: Exception) -> NoReturn:
+    console.print(f"[red]{escape_markup(str(exc))}[/]")
+    raise typer.Exit(1) from exc
+
+
+@websearch_app.command("status", help=t("commands.websearch.status.description"))
+def websearch_status() -> None:
+    from rich.table import Table
+
+    from hfl.cli.commands import websearch as ws_setup
+
+    report = ws_setup.status()
+    if report["settings"]:
+        table = Table(show_header=True)
+        for column in ("setting", "value", "source"):
+            table.add_column(t(f"table.{column}"))
+        for row in report["settings"]:
+            table.add_row(*(escape_markup(cell) for cell in row))
+        console.print(table)
+    else:
+        console.print(f"[yellow]{t('messages.websearch_none')}[/]")
+    console.print(f"{t('messages.websearch_order')}: {', '.join(report['chain'])}")
+    colour = "green" if report["ok"] else "red"
+    console.print(f"{t('messages.websearch_test')}: [{colour}]{escape_markup(report['test'])}[/]")
+    if not report["ok"]:
+        raise typer.Exit(1)
+
+
+@websearch_app.command("searxng", help=t("commands.websearch.searxng.description"))
+def websearch_searxng(
+    port: int = typer.Option(None, "--port", help=t("commands.websearch.searxng.options.port")),
+    url: str = typer.Option(None, "--url", help=t("commands.websearch.searxng.options.url")),
+) -> None:
+    from hfl.cli.commands import websearch as ws_setup
+
+    try:
+        where = ws_setup.searxng_url(port, url)
+        count = ws_setup.use_searxng(where)
+    except ws_setup.SetupError as exc:
+        _websearch_failed(exc)
+    console.print(f"[green]{t('messages.websearch_searxng_used', url=where, count=count)}[/]")
+    console.print(f"[dim]{t('messages.websearch_applies')}[/]")
+
+
+@websearch_app.command("key", help=t("commands.websearch.key.description"))
+def websearch_key(
+    provider: str = typer.Argument(..., help="brave, tavily, exa, serpapi"),
+    key: str = typer.Option(None, "--key", help=t("commands.websearch.key.options.key")),
+    check: bool = typer.Option(
+        True, "--check/--no-check", help=t("commands.websearch.key.options.check")
+    ),
+) -> None:
+    from hfl.cli.commands import websearch as ws_setup
+    from hfl.tools.web_search import settings_path
+
+    if not key:
+        # Typed where nobody sees it, and never on the command line, which
+        # every local user can read in ``ps``.
+        if stdin_is_terminal():
+            key = typer.prompt(
+                t("messages.websearch_prompt_key", provider=provider), hide_input=True
+            )
+        else:
+            key = sys.stdin.readline().strip()
+    try:
+        count = ws_setup.use_key(provider, key, check=check)
+    except ws_setup.SetupError as exc:
+        _websearch_failed(exc)
+    where = {"provider": provider, "path": str(settings_path())}
+    if count is None:
+        saved = t("messages.websearch_key_saved_unchecked", **where)
+    else:
+        saved = t("messages.websearch_key_saved", count=count, **where)
+    console.print(f"[green]{saved}[/]")
+    console.print(f"[dim]{t('messages.websearch_applies')}[/]")
+
+
+@websearch_app.command("off", help=t("commands.websearch.off.description"))
+def websearch_off() -> None:
+    from hfl.cli.commands import websearch as ws_setup
+
+    had = ws_setup.turn_off()
+    console.print(t("messages.websearch_off") if had else t("messages.websearch_off_none"))
 
 
 def cli_main() -> None:

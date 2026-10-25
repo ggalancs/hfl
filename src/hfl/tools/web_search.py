@@ -29,10 +29,12 @@ so ``/api/web_search`` can forward the payload verbatim.
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -52,6 +54,9 @@ __all__ = [
     "SearXNGBackend",
     "ExaBackend",
     "search",
+    "saved_settings",
+    "save_settings",
+    "settings_path",
 ]
 
 
@@ -71,6 +76,57 @@ class WebSearchUpstreamError(WebSearchError):
 # ----------------------------------------------------------------------
 # Backend protocol
 # ----------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Saved settings (``hfl websearch``)
+# ----------------------------------------------------------------------
+
+
+def settings_path() -> Path:
+    """Where ``hfl websearch`` keeps the chosen provider: in HFL's home, so
+    the server started by the desktop app, which has no shell environment,
+    reads it too."""
+    from hfl.config import config
+
+    return Path(config.home_dir) / "web_search.json"
+
+
+def saved_settings() -> dict[str, str]:
+    """The settings ``hfl websearch`` saved, by the names of the environment
+    variables they stand for; ``{}`` when none (or unreadable)."""
+    try:
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if isinstance(v, str) and v}
+
+
+def save_settings(values: dict[str, str | None]) -> Path:
+    """Merge ``values`` into the saved settings (``None`` removes one) and
+    write them readable by their owner only: they hold API keys."""
+    data: dict[str, str] = saved_settings()
+    for key, value in values.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        json.dump(data, out, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    return path
+
+
+def _setting(name: str) -> str | None:
+    """A provider setting: the environment first, then what ``hfl
+    websearch`` saved."""
+    return os.environ.get(name) or saved_settings().get(name) or None
 
 
 class WebSearchBackend(ABC):
@@ -185,7 +241,7 @@ class TavilyBackend(WebSearchBackend):
     name = "tavily"
 
     async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
-        key = os.environ.get("TAVILY_API_KEY")
+        key = _setting("TAVILY_API_KEY")
         if not key:
             raise WebSearchError("TAVILY_API_KEY not set")
         try:
@@ -225,7 +281,7 @@ class BraveBackend(WebSearchBackend):
     name = "brave"
 
     async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
-        key = os.environ.get("BRAVE_API_KEY")
+        key = _setting("BRAVE_API_KEY")
         if not key:
             raise WebSearchError("BRAVE_API_KEY not set")
         try:
@@ -262,7 +318,7 @@ class SerpAPIBackend(WebSearchBackend):
     name = "serpapi"
 
     async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
-        key = os.environ.get("SERPAPI_API_KEY")
+        key = _setting("SERPAPI_API_KEY")
         if not key:
             raise WebSearchError("SERPAPI_API_KEY not set")
         try:
@@ -332,7 +388,7 @@ class SearXNGBackend(WebSearchBackend):
     name = "searxng"
 
     async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
-        base = (os.environ.get("HFL_SEARXNG_URL") or "").rstrip("/")
+        base = (_setting("HFL_SEARXNG_URL") or "").rstrip("/")
         if not base:
             raise WebSearchError("HFL_SEARXNG_URL not set (the URL of a SearXNG instance)")
         try:
@@ -372,7 +428,7 @@ class ExaBackend(WebSearchBackend):
     name = "exa"
 
     async def search(self, query: str, max_results: int) -> list[dict[str, str]]:
-        key = os.environ.get("EXA_API_KEY")
+        key = _setting("EXA_API_KEY")
         if not key:
             raise WebSearchError("EXA_API_KEY not set")
         try:
@@ -427,7 +483,7 @@ def get_backend(name: str | None = None) -> WebSearchBackend:
     Unknown names fall back to ``duckduckgo`` with a warning so the
     server stays functional rather than 500ing on startup.
     """
-    raw = (name or os.environ.get("HFL_WEB_SEARCH_BACKEND") or "duckduckgo").lower()
+    raw = (name or _setting("HFL_WEB_SEARCH_BACKEND") or "duckduckgo").lower()
     cls = _BACKENDS.get(raw)
     if cls is None:
         logger.warning("Unknown HFL_WEB_SEARCH_BACKEND=%r, falling back to duckduckgo", raw)
@@ -446,11 +502,11 @@ def backend_chain(setting: str | None = None) -> list[WebSearchBackend]:
     httpx, curl, even its own Instant Answer API), so alone it was a search
     that did not work.
     """
-    raw = setting if setting is not None else os.environ.get("HFL_WEB_SEARCH_BACKEND")
+    raw = setting if setting is not None else _setting("HFL_WEB_SEARCH_BACKEND")
     if raw and raw.strip():
         names = [n.strip().lower() for n in raw.split(",") if n.strip()]
     else:
-        names = [n for n, var in _NEEDS.items() if os.environ.get(var)] + ["duckduckgo"]
+        names = [n for n, var in _NEEDS.items() if _setting(var)] + ["duckduckgo"]
     chain: list[WebSearchBackend] = []
     for name in names:
         cls = _BACKENDS.get(name)

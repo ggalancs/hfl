@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Claude Code's WebSearch on a local model returned made-up results.** It
+  asks for Anthropic's web search server tool (`web_search_20250305`), which
+  Anthropic's servers run; HFL ignored it, the search came back empty and the
+  model answered from memory with a source that looked real (Python "3.13.0"
+  while python.org said 3.15.1). HFL now runs that tool with its own web
+  search: the model calls it, HFL searches and answers with Anthropic's
+  `server_tool_use` and `web_search_tool_result` blocks (streamed or not;
+  `max_uses`, `allowed_domains` and `blocked_domains` honoured). With no
+  search available the reply is the `unavailable` error, and Claude Code
+  says "Web search error: unavailable" instead of an invented answer.
 - **Claude Code on Qwen3.8 (and any model whose template wants the system
   message first) failed every request.** Claude Code 2.1 sends a system
   message after the first user turn; Qwen3.8's template raised "System
@@ -79,6 +89,15 @@ reproduced before the fix:
   was reachable through HFL.
 
 ### Added
+- `hfl websearch`: choose the web search HFL's tools use. `searxng` points
+  at the SearXNG you run, by its `--port` on this machine or its `--url`,
+  after one test search (HFL never installs or starts it);
+  `key <exa|tavily|brave|serpapi>` stores an API
+  key after one test search (asked for, never on the command line);
+  `status` shows what is used and tries it; `off` forgets the choice. It is
+  saved in `$HFL_HOME/web_search.json` (readable by its owner only), so the
+  server the desktop app starts uses it too; environment variables take
+  precedence.
 - `HFL_ALLOWED_HOSTS`: the host names the server answers to whatever address
   it is bound to. The DNS-rebinding guard ran only on a loopback bind, and a
   container binds 0.0.0.0 even when its port is published on this machine

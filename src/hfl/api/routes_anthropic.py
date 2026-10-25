@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 from fastapi import APIRouter
 from fastapi.responses import Response, StreamingResponse
 
+from hfl.api import server_tools
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import anthropic_to_generation_config
 from hfl.api.errors import service_unavailable
@@ -84,7 +85,12 @@ def _anthropic_tools_to_payload(req: AnthropicMessagesRequest) -> list[dict] | N
             },
         }
         for t in req.tools
+        # Anthropic's web search server tool is HFL's to run (server_tools),
+        # not a function for the client: offered to the model by that loop.
+        if not server_tools.is_web_search(t)
     ]
+    if not payload:
+        return None
     if isinstance(choice, dict) and choice.get("type") == "tool":
         name = choice.get("name")
         if name:
@@ -182,6 +188,9 @@ def _request_to_messages(req: AnthropicMessagesRequest) -> list[ChatMessage]:
                 )
             elif block.type == "tool_result":
                 tool_results.append(block)
+            elif (seen := server_tools.history_text(block)) is not None:
+                # A web search HFL ran in an earlier turn (server_tools).
+                text_parts.append(seen + "\n")
 
         text = "".join(text_parts)
         if msg.role == "assistant":
@@ -333,6 +342,10 @@ async def create_message(
     # contain a tool_use block (mirrors the OpenAI route).
     tools_disabled = isinstance(req.tool_choice, dict) and req.tool_choice.get("type") == "none"
 
+    search_tool = None if tools_disabled else server_tools.web_search_tool(req.tools)
+    if search_tool is not None:
+        return await _with_web_search(req, model_name, messages, gen_config, tools, search_tool)
+
     if req.stream:
         return await prepare_stream_response(
             lambda slot: _stream_messages(
@@ -413,6 +426,59 @@ async def create_message(
             "output_tokens": result.tokens_generated,
         },
     }
+
+
+async def _with_web_search(
+    req: AnthropicMessagesRequest,
+    model_name: str,
+    messages: list[ChatMessage],
+    gen_config: Any,
+    tools: list[dict] | None,
+    search_tool: server_tools.WebSearchTool,
+) -> dict[str, Any] | StreamingResponse | Response:
+    """A turn with Anthropic's web search server tool, which HFL runs with
+    its own web search. The whole turn is worked out first (searches and
+    model calls), then answered at once, streamed or not."""
+    engine = _get_state().engine
+    if engine is None:
+        return service_unavailable(f"Model '{model_name}' failed to load", path="/v1/messages")
+
+    async def chat(history: list[ChatMessage], offered: list[dict[str, Any]]) -> Any:
+        return await run_dispatched(
+            engine.chat, history, gen_config, tools=offered, operation="anthropic_messages"
+        )
+
+    def resolve(result: Any, offered: list[dict[str, Any]]) -> Any:
+        return resolve_chat_output(
+            result.text, model_name, offered, getattr(result, "tool_calls", None)
+        )
+
+    try:
+        turn = await server_tools.run(
+            search_tool,
+            messages,
+            tools,
+            chat=chat,
+            resolve=resolve,
+            to_tool_use=_to_anthropic_tool_use,
+            stop_reason=_stop_reason_to_anthropic,
+        )
+    except (QueueFullError, QueueTimeoutError) as exc:
+        return queue_response_from_error(exc, path="/v1/messages")
+    message = {
+        "id": f"msg_{uuid.uuid4().hex[:24]}",
+        "type": "message",
+        "role": "assistant",
+        "content": turn.blocks,
+        "model": req.model,
+        "stop_reason": turn.stop_reason,
+        "stop_sequence": None,
+        "usage": turn.usage,
+    }
+    if not req.stream:
+        return message
+    events = [_sse(event, data) for event, data in server_tools.sse_events(message)]
+    return StreamingResponse(iter(events), media_type="text/event-stream")
 
 
 class _AnthropicStream:
