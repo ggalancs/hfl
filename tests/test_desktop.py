@@ -84,6 +84,25 @@ class TestChatUrl:
 
 
 class TestOpenChatWhenReady:
+    @pytest.fixture(autouse=True)
+    def _ours(self, monkeypatch):
+        """This process listens on the port, unless a test says otherwise."""
+        monkeypatch.setattr(desktop, "_listening_here", lambda port: True)
+
+    def test_someone_else_on_the_port_gets_no_browser(self, monkeypatch) -> None:
+        """Another program (another user's) answering /healthz on the port
+        does not get the owner's browser (security review, 2026-10-25)."""
+        monkeypatch.setattr(desktop, "_listening_here", lambda port: False)
+        answer = types.SimpleNamespace(status_code=200)
+        monkeypatch.setattr(httpx, "get", lambda url, timeout: answer)
+        opened: list[str] = []
+        clock = iter(range(0, 1000, 50))
+        monkeypatch.setattr(desktop.webbrowser, "open", opened.append)
+        monkeypatch.setattr(desktop.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(desktop.time, "monotonic", lambda: next(clock))
+        desktop.open_chat_when_ready("127.0.0.1", 11434).join(5)
+        assert opened == []
+
     def test_opens_once_the_server_answers(self, monkeypatch) -> None:
         answers = iter([httpx.ConnectError("not yet"), types.SimpleNamespace(status_code=503)])
         asked: list[str] = []
@@ -117,6 +136,38 @@ class TestOpenChatWhenReady:
         thread.join(5)
         assert not thread.is_alive()
         assert opened == []
+
+
+class TestListeningHere:
+    def test_a_port_this_process_listens_on(self) -> None:
+        import socket
+
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen()
+            assert desktop._listening_here(sock.getsockname()[1]) is True
+
+    def test_a_port_nobody_here_listens_on(self) -> None:
+        import socket
+
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]  # bound, never listening
+        assert desktop._listening_here(port) is False
+
+    def test_old_psutil_without_net_connections(self, monkeypatch) -> None:
+        import psutil
+
+        class _Old:
+            def __init__(self, pid):
+                pass
+
+            def connections(self, kind):
+                addr = types.SimpleNamespace(port=4242)
+                return [types.SimpleNamespace(status=psutil.CONN_LISTEN, laddr=addr)]
+
+        monkeypatch.setattr(psutil, "Process", _Old)
+        assert desktop._listening_here(4242) is True
 
 
 class TestLogToFile:

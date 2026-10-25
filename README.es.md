@@ -100,7 +100,7 @@ los ejecuta:
 |---|---|
 | **pip** (recomendado) | `pip install "hfl[llama,mlx]"` y después `hfl install llama-server` (la build oficial de llama.cpp: los modelos GGUF atienden 4 peticiones a la vez) |
 | **pip en Windows** | `pip install hfl` y después `hfl install llama-server` (sin compilador; `hfl[llama]` necesita las C++ Build Tools de Visual Studio) |
-| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (solo esta máquina; para abrirlo a la red, publica `-p 11434:11434` con `-e HFL_API_KEY=…`). Incluye llama-server: los modelos GGUF atienden 4 peticiones a la vez |
+| **Docker** | `docker run -p 127.0.0.1:11434:11434 -e HFL_ALLOWED_HOSTS=localhost -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (solo esta máquina, y ninguna página web puede alcanzarlo con DNS rebinding; para abrirlo a la red, publica `-p 11434:11434` con `-e HFL_API_KEY=…`). Incluye llama-server: los modelos GGUF atienden 4 peticiones a la vez |
 | **Instaladores** | `.dmg`, `.msi` y binarios independientes en la [página de releases](https://github.com/ggalancs/hfl/releases), con llama-server incluido. Sin terminal: abre **HFL** (la app en un Mac, el menú Inicio en Windows) y sirve desde un icono de la bandeja y abre la página de chat; el comando `hfl` también funciona (`serve --tray --open` es lo que ejecuta la app) |
 | **Desde el código** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
 

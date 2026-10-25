@@ -117,6 +117,22 @@ class TestModelHandlers:
         out = await HFL_TOOLS["model_list"].handler({})
         assert "[]" in out[0]["text"]
 
+    async def test_model_show_hides_the_host_path(self, temp_config):
+        """An SSE peer is anyone: the HTTP API hides host paths from all but
+        the owner, and model_show gave them away (security review, 2026-10-25)."""
+        from hfl.models.manifest import ModelManifest
+        from hfl.models.registry import get_registry, reset_registry
+
+        reset_registry()
+        get_registry().add(
+            ModelManifest(
+                name="m", repo_id="org/m", local_path="/home/someone/models/m.gguf", format="gguf"
+            )
+        )
+        out = await HFL_TOOLS["model_show"].handler({"name": "m"})
+        assert "'name': 'm'" in out[0]["text"]
+        assert "/home/someone" not in out[0]["text"] and "local_path" not in out[0]["text"]
+
     async def test_model_show_rejects_unknown(self, temp_config):
         from hfl.models.registry import reset_registry
 

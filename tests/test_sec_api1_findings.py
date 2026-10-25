@@ -336,9 +336,33 @@ class TestKeepAliveOwnerOnly:
         assert resp.status_code == 200, resp.text
         state.evict.assert_awaited()
 
-    def test_remote_positive_keep_alive_still_applies(self, remote):
+    @pytest.mark.parametrize("value", ["5m", "1ms", "999999h", 30])
+    def test_remote_keep_alive_of_any_length_is_not_stored(self, remote, value):
+        """How long a shared model stays is the owner's: "1ms" unloaded it for
+        everyone at the next reaper pass, "999999h" pinned it for a century."""
+        _install(_ok_engine())
+        state = get_state()
+        state.set_keep_alive = MagicMock()  # type: ignore[method-assign]
+        state.refresh_keep_alive = MagicMock()  # type: ignore[method-assign]
+        resp = remote.post(
+            "/api/generate",
+            json={"model": "m", "prompt": "hi", "stream": False, "keep_alive": value},
+        )
+        assert resp.status_code == 200, resp.text
+        state.set_keep_alive.assert_not_called()  # nothing stored for everyone
+        state.refresh_keep_alive.assert_called_with("m")  # as if omitted
+
+    def test_remote_keep_alive_is_still_validated(self, remote):
         _install(_ok_engine())
         resp = remote.post(
+            "/api/generate",
+            json={"model": "m", "prompt": "hi", "stream": False, "keep_alive": "soon"},
+        )
+        assert resp.status_code == 400
+
+    def test_owner_positive_keep_alive_applies(self, owner):
+        _install(_ok_engine())
+        resp = owner.post(
             "/api/generate",
             json={"model": "m", "prompt": "hi", "stream": False, "keep_alive": "5m"},
         )
@@ -408,6 +432,42 @@ class TestHostValidation:
         monkeypatch.setattr(server, "_bound_host", "127.0.0.1", raising=False)
         assert remote.get("/api/tags", headers={"Host": "evil.example"}).status_code == 403
         assert remote.get("/api/tags", headers={"Host": "127.0.0.1:11434"}).status_code == 200
+
+    @pytest.mark.parametrize(
+        ("host", "status"),
+        [
+            ("rebind.evil.example:11434", 403),
+            ("localhost:11434", 200),
+            ("hfl:11434", 200),  # listed: a container's service name
+            ("models.lan:11434", 200),  # listed with a port
+        ],
+    )
+    def test_allowed_hosts_guard_a_server_bound_to_all_interfaces(
+        self, loopback, monkeypatch, host, status
+    ):
+        """A container binds 0.0.0.0 even when its port is published on the
+        host's loopback only, and a rebound page reached it there (security
+        review, 2026-10-25): HFL_ALLOWED_HOSTS turns the guard on."""
+        from hfl.api import server
+        from hfl.config import config as cfg
+
+        monkeypatch.setattr(server, "_bound_host", "0.0.0.0", raising=False)
+        monkeypatch.setattr(cfg, "allowed_hosts", ["localhost", "hfl", "models.lan:11434"])
+        assert loopback.get("/api/tags", headers={"Host": host}).status_code == status
+
+    def test_allowed_hosts_star_lets_any_host_through(self, loopback, monkeypatch):
+        from hfl.config import config as cfg
+
+        monkeypatch.setattr(cfg, "allowed_hosts", ["*"])
+        assert loopback.get("/api/tags", headers={"Host": "anything.example"}).status_code == 200
+
+    def test_allowed_hosts_read_from_the_environment(self, monkeypatch):
+        from hfl import config as config_module
+
+        monkeypatch.setenv("HFL_ALLOWED_HOSTS", " Localhost , hfl,, ")
+        assert config_module._parse_allowed_hosts_env() == ["localhost", "hfl"]
+        monkeypatch.delenv("HFL_ALLOWED_HOSTS")
+        assert config_module._parse_allowed_hosts_env() is None
 
     def test_server_bound_to_all_interfaces_is_left_alone(self, loopback, monkeypatch):
         import hfl.api.server as server

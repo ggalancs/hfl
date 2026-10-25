@@ -2758,6 +2758,9 @@ def mcp(
                 if transport == "stdio":
                     await serve_stdio(cap_list)
                 elif transport == "sse":
+                    # The SSE server has no API key: off loopback it is as
+                    # exposed as ``hfl serve`` with none, and asks the same.
+                    _confirm_exposure(host, None)
                     await serve_sse(host, port, cap_list)
                 else:
                     console.print(f"[red]Unknown transport:[/] {escape_markup(str(transport))}")

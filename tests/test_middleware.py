@@ -5,7 +5,7 @@
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 
@@ -446,6 +446,60 @@ class TestRequestBodyLimitMiddleware:
         )
         assert response.status_code == 200
         assert response.json()["ok"] is True
+
+    def test_a_large_chunked_audio_upload_is_read_in_linear_time(self):
+        """Audio paths have a 101 MiB budget, and a chunked body (no
+        Content-Length) is read before auth. Built with ``body += chunk`` it
+        cost the square of its size on the event loop: 100 MiB in 16 KiB
+        chunks took 23 s (security review, 2026-10-25), and a few such
+        uploads stalled the server. Driven over raw ASGI, one message per
+        chunk as a server delivers them (TestClient joins an iterator into
+        one message, and the test passed against the quadratic code)."""
+        import asyncio
+        import time
+
+        from hfl.api.middleware import RequestBodyLimitMiddleware
+
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=1024)
+
+        @app.post("/api/transcribe")
+        async def transcribe(request: Request):
+            return {"size": len(await request.body())}
+
+        chunk = b"a" * 8192
+        count = 64 * 1024 * 1024 // len(chunk)
+        scope = {
+            "type": "http", "method": "POST", "path": "/api/transcribe",
+            "raw_path": b"/api/transcribe", "query_string": b"", "root_path": "",
+            "headers": [(b"content-type", b"application/octet-stream")],
+            "http_version": "1.1", "scheme": "http",
+            "server": ("127.0.0.1", 11434), "client": ("127.0.0.1", 50000),
+        }  # fmt: skip
+        sent: list[dict] = []
+
+        async def upload() -> None:
+            left = count
+
+            async def receive() -> dict:
+                nonlocal left
+                if left:
+                    left -= 1
+                    return {"type": "http.request", "body": chunk, "more_body": True}
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            async def send(message: dict) -> None:
+                sent.append(message)
+
+            await app(scope, receive, send)
+
+        started = time.monotonic()
+        asyncio.run(upload())
+        elapsed = time.monotonic() - started
+        assert sent[0]["status"] == 200, sent
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        assert body == b'{"size":%d}' % (count * len(chunk))
+        assert elapsed < 5, f"{elapsed:.1f} s to read 64 MiB"
 
     def test_a_route_valueerror_is_not_taken_for_a_bad_content_length(self):
         """A ValueError raised by the route reached the ``except ValueError``

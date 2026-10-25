@@ -409,9 +409,11 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None, *, o
         the deadline was recorded or the field was omitted.
 
         owner: Whether the caller is the owner. A model is shared by every
-            client, and unloading one or pinning it forever is what
-            ``/api/stop`` keeps for the owner: for anyone else those two
-            values count as an omitted field.
+            client, and how long it stays loaded is the owner's to set: for
+            anyone else ``keep_alive`` counts as an omitted field. Only 0 and
+            -1 were ignored before, and "1ms" unloaded the model for
+            everyone at the next reaper pass, "999999h" pinned it for a
+            century (security review, 2026-10-25).
 
     Raises:
         APIValidationError: The value can't be parsed (maps to 400).
@@ -438,7 +440,7 @@ def apply_keep_alive(model_name: str, keep_alive: str | int | float | None, *, o
     if entry is not None:
         model_name = str(entry.name)
 
-    if not owner and delta is not None and (is_unload_immediately(delta) or is_never_expire(delta)):
+    if not owner:
         delta = None
 
     if delta is None:

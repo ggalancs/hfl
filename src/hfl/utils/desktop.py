@@ -72,10 +72,27 @@ def chat_url(host: str, port: int) -> str:
     return f"http://{host}:{port}/ui"
 
 
+def _listening_here(port: int) -> bool:
+    """Whether this process listens on ``port``: the server this HFL started,
+    not another program (another user's, say) that held the port first."""
+    import psutil
+
+    process = psutil.Process(os.getpid())
+    # ``net_connections`` since psutil 6; 5.9 (still allowed) has ``connections``.
+    listing = getattr(process, "net_connections", None) or process.connections
+    try:
+        connections = listing(kind="inet")
+    except (psutil.Error, OSError):
+        return False
+    return any(c.status == psutil.CONN_LISTEN and c.laddr.port == port for c in connections)
+
+
 def open_chat_when_ready(host: str, port: int, timeout: float = 120.0) -> threading.Thread:
-    """Open the chat page once the server answers ``/healthz``, from a
-    background thread. Gives up after ``timeout`` seconds: the tray icon
-    shows why the server did not start."""
+    """Open the chat page once this process serves on ``port`` and answers
+    ``/healthz``, from a background thread. Anything else answering there
+    does not count: it would have the owner's browser open its page. Gives
+    up after ``timeout`` seconds: the tray icon shows why the server did not
+    start."""
     url = chat_url(host, port)
     health = url[: -len("/ui")] + "/healthz"
 
@@ -85,7 +102,7 @@ def open_chat_when_ready(host: str, port: int, timeout: float = 120.0) -> thread
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                if httpx.get(health, timeout=2).status_code == 200:
+                if _listening_here(port) and httpx.get(health, timeout=2).status_code == 200:
                     logger.info("Opening the chat page: %s", url)
                     webbrowser.open(url)
                     return

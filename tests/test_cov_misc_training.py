@@ -235,7 +235,9 @@ def test_fuse_dequantizes_only_a_quantized_base_when_asked(
     monkeypatch.setattr(trainer, "run", lambda argv, log, on_event: ran.append(argv))
     trainer.fuse(base, tmp_path / "ad", tmp_path / "out", tmp_path / "log", dequantize=dequantize)
     (argv,) = ran
-    assert argv[1:4] == ["-m", "mlx_lm", "fuse"]
+    # Run without the working directory on sys.path (self_exec.module_argv).
+    assert argv[1] == "-c" and "run_module('mlx_lm'" in argv[2] and argv[3] == "fuse"
+    assert "sys.path" in argv[2]
     assert argv[argv.index("--model") + 1] == base.local_path
     assert argv[argv.index("--save-path") + 1] == str(tmp_path / "out")
     assert ("--dequantize" in argv) is flag

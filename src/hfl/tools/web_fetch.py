@@ -59,6 +59,8 @@ class WebFetchError(ValueError):
 
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+# IPv4-translated (RFC 2765), which ``ipaddress`` does not unwrap.
+_TRANSLATED = ipaddress.ip_network("::ffff:0:0:0/96")
 
 
 def _is_private_ip(ip_str: str) -> bool:
@@ -79,10 +81,15 @@ def _is_private_ip(ip_str: str) -> bool:
         embedded = ip.ipv4_mapped or ip.sixtofour
         if embedded is None and ip.teredo is not None:
             embedded = ip.teredo[1]
-        if embedded is None and ip in _NAT64:
+        if embedded is None and (ip in _NAT64 or ip in _TRANSLATED):
             embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
         if embedded is not None:
             ip = embedded
+        elif ip.is_reserved or ip.is_site_local:
+            # ``is_global`` is True for these: IPv4-compatible ``::127.0.0.1``
+            # and ``::a9fe:a9fe`` (the metadata service), and site-local
+            # ``fec0::/10`` (security review, 2026-10-25).
+            return True
     return not ip.is_global or ip.is_multicast
 
 

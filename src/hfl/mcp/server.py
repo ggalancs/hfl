@@ -106,8 +106,9 @@ async def _handle_model_show(args: dict[str, Any]) -> list[dict[str, Any]]:
             "type": "text",
             "text": str(
                 {
+                    # No ``local_path``: the HTTP API hides host paths from
+                    # anyone but the owner, and an SSE peer is anyone.
                     "name": manifest.name,
-                    "local_path": manifest.local_path,
                     "format": manifest.format,
                     "context_length": manifest.context_length,
                     "architecture": manifest.architecture,

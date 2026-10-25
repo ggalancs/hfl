@@ -157,6 +157,16 @@ def _parse_cors_origins_env() -> list[str] | None:
     return [piece for piece in items if piece]
 
 
+def _parse_allowed_hosts_env() -> list[str] | None:
+    """Read ``HFL_ALLOWED_HOSTS``: the host names this server answers to,
+    whatever address it is bound to (the DNS-rebinding guard, which is
+    otherwise on only for a loopback bind). ``None`` when unset."""
+    raw = os.environ.get("HFL_ALLOWED_HOSTS")
+    if raw is None:
+        return None
+    return [piece.strip().lower() for piece in raw.split(",") if piece.strip()]
+
+
 @dataclass
 class SLOConfig:
     """Service Level Objective configuration.
@@ -291,6 +301,9 @@ class HFLConfig:
     # falls back to the documented same-origin default.
     cors_origins: list[str] = field(default_factory=lambda: _parse_cors_origins_env() or [])
     cors_allow_all: bool = field(default_factory=lambda: "*" in (_parse_cors_origins_env() or []))
+    # HFL_ALLOWED_HOSTS: see _parse_allowed_hosts_env. A container binds
+    # 0.0.0.0 even when its port is published on the host's loopback only.
+    allowed_hosts: list[str] | None = field(default_factory=_parse_allowed_hosts_env)
     cors_allow_credentials: bool = False  # Must be False with wildcard origin
     cors_allow_methods: list[str] = field(default_factory=lambda: ["GET", "POST", "OPTIONS"])
     cors_allow_headers: list[str] = field(

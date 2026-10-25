@@ -96,7 +96,7 @@ is left to you. HFL fetches only the files a model needs and runs them:
 |---|---|
 | **pip** (recommended) | `pip install "hfl[llama,mlx]"`, then `hfl install llama-server` (llama.cpp's official build: GGUF models answer 4 requests at once) |
 | **pip on Windows** | `pip install hfl` then `hfl install llama-server` (no compiler needed; `hfl[llama]` needs Visual Studio's C++ Build Tools) |
-| **Docker** | `docker run -p 127.0.0.1:11434:11434 -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`). llama-server included: GGUF models answer 4 requests at once |
+| **Docker** | `docker run -p 127.0.0.1:11434:11434 -e HFL_ALLOWED_HOSTS=localhost -v hfl:/var/lib/hfl ghcr.io/ggalancs/hfl` (this machine only, and no web page can reach it through DNS rebinding; to open it to the network, publish `-p 11434:11434` with `-e HFL_API_KEY=…`). llama-server included: GGUF models answer 4 requests at once |
 | **Installers** | `.dmg`, `.msi` and standalone binaries on the [releases page](https://github.com/ggalancs/hfl/releases), llama-server included. No terminal needed: open **HFL** (the app on a Mac, the Start menu on Windows) and it serves from a tray icon and opens the chat page; the `hfl` command works too (`serve --tray --open` is what the app runs) |
 | **From source** | `git clone https://github.com/ggalancs/hfl && cd hfl && pip install -e ".[llama,mlx]"` |
 

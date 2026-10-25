@@ -29,12 +29,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI tests 3.10–3.14.
 
 ### Security
+Found by a security review of everything changed since 0.25.0, each one
+reproduced before the fix:
+- A chunked upload (no `Content-Length`) to the audio routes was read with
+  a cost in the square of its size, on the event loop and before
+  authentication: 100 MiB in 16 KiB chunks took 23 s and a few such uploads
+  stalled the server. It is read in linear time now.
+- `keep_alive` from anyone but the owner is ignored. Only `0` and `-1` were
+  before: `"1ms"` had a shared model unloaded for everyone at the next
+  reaper pass, `"999999h"` pinned it for a century. (Changed behaviour: a
+  remote client's `keep_alive` no longer applies; the operator sets it with
+  `HFL_KEEP_ALIVE`.)
+- `web_fetch` refuses IPv4-compatible (`::a9fe:a9fe`, the cloud metadata
+  address) and IPv4-translated IPv6 addresses and site-local `fec0::/10`,
+  which counted as public.
+- The MCP server's `model_show` no longer returns the model's path on the
+  host, and `hfl mcp serve --transport sse` bound off loopback (it has no
+  API key) asks, or refuses unattended, as `hfl serve` does.
+- MLX training runs `mlx_lm` without the working directory on the import
+  path, as Transformers training already did: an `mlx_lm/` folder there
+  would have run instead.
+- The desktop app opens the chat page only once this HFL serves on the
+  port, not when another program (another user's) answers there first.
 - Pillow 13.0.0 or later (on Python 3.11+) for the `[tray]` and `[imagegen]`
   extras: 12.3.0 carries 5 critical and 13 high advisories that 13.0.0
   fixes. HFL's own code never decodes a user's image with Pillow, so none
   was reachable through HFL.
 
 ### Added
+- `HFL_ALLOWED_HOSTS`: the host names the server answers to whatever address
+  it is bound to. The DNS-rebinding guard ran only on a loopback bind, and a
+  container binds 0.0.0.0 even when its port is published on this machine
+  only: the README's Docker command sets it now.
 - `hfl serve --open` opens the chat page once the server answers; the tray
   menu has **Open Chat** (also the click on the icon on Windows), and its
   labels follow `HFL_LANG`.

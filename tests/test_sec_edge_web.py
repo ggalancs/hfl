@@ -53,6 +53,12 @@ def _mock_http(monkeypatch, handler):
         "64:ff9b::a9fe:a9fe",  # NAT64 of 169.254.169.254
         "64:ff9b::6464:64c8",  # NAT64 of 100.100.100.200
         "2002:7f00:1::",  # 6to4 of 127.0.0.1
+        # ``is_global`` is True for these (security review, 2026-10-25):
+        "::127.0.0.1",  # IPv4-compatible loopback
+        "::a9fe:a9fe",  # IPv4-compatible 169.254.169.254 (metadata)
+        "::ffff:0:a9fe:a9fe",  # IPv4-translated 169.254.169.254
+        "::ffff:0:127.0.0.1",  # IPv4-translated loopback
+        "fec0::1",  # site-local
         "fd00::1",
         "192.0.0.1",
         "198.18.0.1",  # benchmarking
@@ -64,7 +70,10 @@ def test_non_global_addresses_are_refused(monkeypatch, addr):
         wf._resolve_and_validate("http://example.com/")
 
 
-@pytest.mark.parametrize("addr", ["93.184.216.34", "2606:4700:4700::1111", "64:ff9b::5db8:d822"])
+@pytest.mark.parametrize(
+    "addr",
+    ["93.184.216.34", "2606:4700:4700::1111", "64:ff9b::5db8:d822", "::ffff:0:5db8:d822"],
+)
 def test_global_addresses_pass(monkeypatch, addr):
     monkeypatch.setattr(wf.socket, "getaddrinfo", _resolves_to(addr))
     _, pinned = wf._resolve_and_validate("http://example.com/")

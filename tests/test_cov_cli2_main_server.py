@@ -428,6 +428,21 @@ class TestMcp:
         assert result.exit_code == 0
         server.sse.assert_awaited_once_with("127.0.0.1", 9999, None)
 
+    def test_serve_sse_off_loopback_unattended_is_refused(self, client, server, monkeypatch):
+        """The SSE server has no API key: bound off loopback it asks, as
+        ``hfl serve`` does, and unattended without the opt-in it refuses."""
+        monkeypatch.delenv("HFL_ACCEPT_NETWORK_EXPOSURE", raising=False)
+        monkeypatch.setattr("hfl.cli.main._in_container", lambda: False)
+        result = runner.invoke(app, ["mcp", "serve", "--transport", "sse", "--host", "0.0.0.0"])
+        assert result.exit_code == 1
+        server.sse.assert_not_awaited()
+
+    def test_serve_sse_off_loopback_with_the_opt_in(self, client, server, monkeypatch):
+        monkeypatch.setenv("HFL_ACCEPT_NETWORK_EXPOSURE", "1")
+        result = runner.invoke(app, ["mcp", "serve", "--transport", "sse", "--host", "0.0.0.0"])
+        assert result.exit_code == 0
+        server.sse.assert_awaited_once_with("0.0.0.0", 8765, None)
+
     def test_serve_unknown_transport(self, client, server):
         result = runner.invoke(app, ["mcp", "serve", "--transport", "carrier-pigeon"])
         assert result.exit_code == 1 and "Unknown transport" in result.stdout

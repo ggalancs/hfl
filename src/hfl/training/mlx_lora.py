@@ -34,6 +34,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from hfl.utils.self_exec import module_argv
+
 ELSEWHERE = (
     "Training with MLX runs on macOS with Apple Silicon and the [mlx] extra "
     "(pip install 'hfl[mlx]'); elsewhere HFL trains with Transformers and "
@@ -198,8 +200,10 @@ def parse_line(line: str) -> dict[str, Any] | None:
 
 def command(model_path: str, data: Data, adapter: Path, options: Options) -> list[str]:
     """The ``mlx_lm lora`` command line for this run."""
+    # Without the working directory on sys.path: an ``mlx_lm/`` folder there
+    # would run instead (self_exec.module_argv; hf_lora already used it).
     argv = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        *module_argv("mlx_lm", "lora"),
         "--model", model_path,
         "--train",
         "--data", str(data.folder),
@@ -324,7 +328,7 @@ def _quantized(model_dir: Path) -> bool:
 def fuse(base: Any, adapter: Path, out: Path, log: Path, dequantize: bool = False) -> None:
     """The adapter merged into a copy of the base model (``mlx_lm fuse``)."""
     argv = [
-        sys.executable, "-m", "mlx_lm", "fuse",
+        *module_argv("mlx_lm", "fuse"),
         "--model", str(base.local_path),
         "--adapter-path", str(adapter),
         "--save-path", str(out),

@@ -216,13 +216,16 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
         # then cache it so BaseHTTPMiddleware replays it to the route (its
         # ``_CachedRequest.wrapped_receive`` serves a cached ``_body`` to the
         # downstream app; without this the route would see an empty body).
-        body = b""
+        # A bytearray grows in place: ``bytes += chunk`` copied the whole body
+        # for every chunk, a cost in the square of its size (23 s of event
+        # loop for a 100 MiB audio upload in 16 KiB chunks, before auth).
+        body = bytearray()
         async for chunk in request.stream():
             body += chunk
             if len(body) > budget:
                 return self._too_large_response(budget)
 
-        request._body = body
+        request._body = bytes(body)
         response = await call_next(request)
         return response
 
@@ -512,9 +515,12 @@ class HostValidationMiddleware:
     hosts the operator listed in ``HFL_ORIGINS`` (a reverse proxy that
     forwards the public name).
 
-    A server bound to another address is left alone: its operators reach it
-    by real names this cannot know. Pure ASGI, so HTTP and the WebSocket
-    handshake are both covered.
+    A server bound to another address is left alone (its operators reach it
+    by real names this cannot know) unless ``HFL_ALLOWED_HOSTS`` names them:
+    a container binds 0.0.0.0 even when its port is published on the host's
+    loopback only, and DNS rebinding reached it there (security review,
+    2026-10-25). Pure ASGI, so HTTP and the WebSocket handshake are both
+    covered.
     """
 
     def __init__(self, app: Any, bound_host: Callable[[], str | None]) -> None:
@@ -535,17 +541,20 @@ class HostValidationMiddleware:
         return _is_loopback_address(str(server[0]))
 
     def _allowed(self, scope: dict[str, Any]) -> bool:
-        if not self._loopback_server(scope):
+        from hfl.config import config
+
+        listed = config.allowed_hosts
+        if listed is None and not self._loopback_server(scope):
+            return True
+        if listed is not None and "*" in listed:
             return True
         raw = next((v for n, v in scope.get("headers") or [] if n.lower() == b"host"), None)
         if raw is None:
             # HTTP/1.0 without Host: never a browser, so never a rebinding.
             return True
         name = _host_name(raw.decode("latin-1"))
-        if name in _LOOPBACK_NAMES:
+        if name in _LOOPBACK_NAMES or name in {_host_name(h) for h in listed or []}:
             return True
-        from hfl.config import config
-
         if config.cors_allow_all:
             # "Any web page may call this server": a rebound page gets
             # nothing that CORS does not already hand every page.
@@ -567,7 +576,8 @@ class HostValidationMiddleware:
                 "error": {
                     "error": (
                         "Host header does not name this server. Reach it as localhost or "
-                        "127.0.0.1, or add the host to HFL_ORIGINS if a proxy forwards it."
+                        "127.0.0.1, or add the host to HFL_ALLOWED_HOSTS (or to HFL_ORIGINS "
+                        "if a proxy forwards it)."
                     ),
                     "code": "host_not_allowed",
                     "category": "auth",

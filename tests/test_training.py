@@ -81,6 +81,9 @@ def test_the_command_line(tmp_path) -> None:
     data = trainer.Data(folder=tmp_path, format="chat", train=3, valid=1)
     adapter = tmp_path / "adapter"
     argv = trainer.command("/m", data, adapter, trainer.Options(batch_size=8))
+    # mlx_lm runs without the working directory on sys.path (a planted
+    # ``mlx_lm/`` there would run instead): self_exec.module_argv.
+    assert argv[1] == "-c" and "run_module('mlx_lm'" in argv[2] and argv[3] == "lora"
     assert argv[argv.index("--batch-size") + 1] == "1"  # never more than the data
     assert "--mask-prompt" in argv and "--resume-adapter-file" not in argv
     adapter.mkdir()
