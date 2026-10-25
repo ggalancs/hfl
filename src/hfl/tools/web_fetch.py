@@ -31,6 +31,7 @@ import ipaddress
 import logging
 import re
 import socket
+import zlib
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -265,14 +266,71 @@ async def fetch(
     }
 
 
+# zlib's window bits for each Content-Encoding read: 47 detects a gzip or a
+# zlib header; "deflate" in the wild is also raw deflate (-15), tried next.
+_INFLATE_BITS = {"gzip": (47,), "x-gzip": (47,), "deflate": (47, -15)}
+
+
+async def _read_bounded(resp: httpx.Response, encoding: str, max_bytes: int) -> bytes:
+    """The body, at most ``max_bytes`` of it once decoded. Compressed bodies
+    are inflated piece by piece with zlib's ``max_length``, so a small
+    compressed body that would inflate to gigabytes stops at the budget."""
+    if encoding not in ("", "identity", *_INFLATE_BITS):
+        raise WebFetchError(f"URL returned a body encoded as {encoding!r} — refusing")
+    if resp.is_stream_consumed:
+        # Built in memory (a test's MockTransport): httpx read and decoded it
+        # on creation. Never so for ``client.stream`` over the network.
+        return resp.content[:max_bytes]
+    if encoding in ("", "identity"):
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.aiter_raw():
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= max_bytes:
+                break
+        return b"".join(chunks)[:max_bytes]
+    raw = bytearray()
+    out: list[bytes] = []
+    stream = resp.aiter_raw()  # one iterator: a response streams only once
+    for bits in _INFLATE_BITS[encoding]:
+        inflater = zlib.decompressobj(bits)
+        out, total, failed = [], 0, False
+        try:
+            # The raw bytes read so far first (a retry with raw deflate),
+            # then the rest of the stream.
+            pending = [bytes(raw)] if raw else []
+            while total < max_bytes and not inflater.eof:
+                if pending:
+                    data = pending.pop()
+                else:
+                    try:
+                        data = await stream.__anext__()
+                    except StopAsyncIteration:
+                        break
+                    raw.extend(data)
+                while data and total < max_bytes:
+                    piece = inflater.decompress(data, max_bytes - total)
+                    out.append(piece)
+                    total += len(piece)
+                    data = inflater.unconsumed_tail
+        except zlib.error:
+            failed = True
+        if not failed:
+            return b"".join(out)[:max_bytes]
+    raise WebFetchError(f"URL returned a {encoding} body that does not decode")
+
+
 async def _fetch_body(cleaned_url: str, pinned_ip: str, *, max_bytes: int, timeout: float) -> str:
     """Fetch the (already validated) URL, following redirects; return text."""
     headers = {
         "User-Agent": "Mozilla/5.0 (HFL-bot) Python/httpx",
         "Accept": "text/html,application/xhtml+xml",
-        # httpx decompresses a whole raw chunk before the byte count sees it,
-        # so a gzip bomb overshot max_bytes ~20x. Ask for the bytes as-is.
-        "Accept-Encoding": "identity",
+        # Inflated here, by _read_bounded, never past max_bytes: httpx
+        # decompressed a whole raw chunk before the byte count saw it (a gzip
+        # bomb overshot max_bytes ~20x). Asking for identity was not enough:
+        # python.org's cache sends gzip regardless, and every fetch failed.
+        "Accept-Encoding": "gzip, deflate",
     }
     # Redirects are followed manually so every hop is re-validated by the
     # SSRF guard *and* pinned to its validated IP. httpx's own
@@ -308,19 +366,8 @@ async def _fetch_body(cleaned_url: str, pinned_ip: str, *, max_bytes: int, timeo
                 # Terminal hop (non-redirect, or redirect without Location):
                 # pull the body until the budget is reached, then stop.
                 encoding = resp.headers.get("content-encoding", "").strip().lower()
-                if encoding not in ("", "identity"):
-                    # Sent compressed although we asked for identity:
-                    # refuse rather than inflate an unbounded body.
-                    raise WebFetchError("URL returned a compressed body — refusing")
                 charset = resp.charset_encoding or "utf-8"
-                total = 0
-                chunks: list[bytes] = []
-                async for chunk in resp.aiter_bytes():
-                    chunks.append(chunk)
-                    total += len(chunk)
-                    if total >= max_bytes:
-                        break
-                body_bytes = b"".join(chunks)[:max_bytes]
+                body_bytes = await _read_bounded(resp, encoding, max_bytes)
                 break
         else:
             raise WebFetchError("too many redirects")

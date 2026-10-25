@@ -47,6 +47,39 @@ class TestAnthropicMessages:
         state.engine = None
         state.current_model = None
 
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_a_refused_request_is_a_clean_error(self, stream):
+        """llama-server refusing a request (a template that raises) becomes a
+        GenerationError in the engine; the route answers it as an error, with
+        the reference, never as an unhandled exception (Claude Code on
+        Qwen3.8 got "Exception in ASGI application")."""
+        from hfl.exceptions import GenerationError
+
+        refusal = GenerationError("llama-server stopped the reply (ref 0123456789ab)")
+        engine = _make_engine()
+        engine.chat.side_effect = refusal
+        engine.chat_stream.side_effect = refusal
+        state = get_state()
+        state.engine = engine
+        state.current_model = _make_model()
+
+        client = TestClient(app)  # raises on an unhandled exception in the app
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "qwen-coder",
+                "max_tokens": 64,
+                "stream": stream,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+        if stream:
+            assert response.status_code == 200
+            assert "event: error" in response.text
+        else:
+            assert response.status_code >= 400
+        assert "Traceback" not in response.text
+
     def test_basic_message(self):
         """Test basic non-streaming message creation."""
         engine = _make_engine()

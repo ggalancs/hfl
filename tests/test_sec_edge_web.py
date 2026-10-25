@@ -27,6 +27,17 @@ def _resolves_to(addr: str):
     return _gai
 
 
+def _streamed(body: bytes, size: int = 16 * 1024):
+    """A body that arrives in pieces, as over a network: MockTransport reads
+    a ``bytes`` body on creation, and the streaming path never runs."""
+
+    async def pieces():
+        for start in range(0, len(body), size):
+            yield body[start : start + size]
+
+    return pieces()
+
+
 def _mock_http(monkeypatch, handler):
     transport = httpx.MockTransport(handler)
     original = httpx.AsyncClient
@@ -113,19 +124,79 @@ async def test_a_trickling_server_hits_the_overall_deadline(monkeypatch):
         await asyncio.wait_for(wf.fetch("https://example.com/"), timeout=10)
 
 
-async def test_compressed_bodies_are_not_inflated(monkeypatch):
+async def test_a_compression_bomb_stops_at_the_budget(monkeypatch):
+    """~64 KiB of gzip that inflates to 64 MiB: read, but never past
+    max_bytes (inflated piece by piece; httpx's own decoding overshot ~20x)."""
     monkeypatch.setattr(wf.socket, "getaddrinfo", _resolves_to("93.184.216.34"))
-    bomb = gzip.compress(b"\0" * (64 * 1024 * 1024))  # ~64 KiB → 64 MiB
+    bomb = gzip.compress(b"a" * (64 * 1024 * 1024))
     seen: dict[str, str] = {}
 
     def handler(req):
         seen["accept-encoding"] = req.headers.get("accept-encoding", "")
-        return httpx.Response(200, content=bomb, headers={"content-encoding": "gzip"})
+        return httpx.Response(200, content=_streamed(bomb), headers={"content-encoding": "gzip"})
 
     _mock_http(monkeypatch, handler)
-    with pytest.raises(wf.WebFetchError):
-        await wf.fetch("https://example.com/", max_bytes=1024 * 1024)
-    assert seen["accept-encoding"] == "identity"
+    budget = 1024 * 1024
+    produced: list[int] = []
+    real = wf.zlib.decompressobj
+
+    class _Counting:
+        """zlib's inflater, counting every byte it hands out."""
+
+        def __init__(self, bits):
+            self._inner = real(bits)
+
+        def decompress(self, data, max_length=0):
+            piece = self._inner.decompress(data, max_length)
+            produced.append(len(piece))
+            return piece
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(wf.zlib, "decompressobj", _Counting)
+    await wf.fetch("https://example.com/", max_bytes=budget)
+    assert sum(produced) == budget  # never inflated past the budget
+    assert seen["accept-encoding"] == "gzip, deflate"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "pack"),
+    [
+        ("gzip", gzip.compress),
+        ("deflate", __import__("zlib").compress),  # zlib-wrapped
+        ("deflate", lambda b: __import__("zlib").compressobj(9, 8, -15).compress(b) + b""),
+    ],
+    ids=["gzip", "deflate-zlib", "deflate-raw"],
+)
+async def test_a_compressed_page_is_read(monkeypatch, encoding, pack):
+    """python.org's cache sends gzip although HFL asked for identity: every
+    fetch of it failed with "compressed body — refusing"."""
+    monkeypatch.setattr(wf.socket, "getaddrinfo", _resolves_to("93.184.216.34"))
+    html = b"<html><body><p>Latest Python 3.15.1</p></body></html>"
+    if encoding == "deflate" and pack is not __import__("zlib").compress:
+        packer = __import__("zlib").compressobj(9, 8, -15)
+        body = packer.compress(html) + packer.flush()
+    else:
+        body = pack(html)
+    _mock_http(
+        monkeypatch,
+        lambda req: httpx.Response(
+            200, content=_streamed(body, 7), headers={"content-encoding": encoding}
+        ),
+    )
+    out = await wf.fetch("https://example.com/")
+    assert "Latest Python 3.15.1" in str(out)
+
+
+async def test_an_encoding_it_cannot_bound_is_refused(monkeypatch):
+    monkeypatch.setattr(wf.socket, "getaddrinfo", _resolves_to("93.184.216.34"))
+    _mock_http(
+        monkeypatch,
+        lambda req: httpx.Response(200, content=b"\x0b\x00", headers={"content-encoding": "br"}),
+    )
+    with pytest.raises(wf.WebFetchError, match="br"):
+        await wf.fetch("https://example.com/")
 
 
 # ----------------------------------------------------------------------

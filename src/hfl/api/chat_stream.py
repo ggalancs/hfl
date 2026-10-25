@@ -127,7 +127,15 @@ async def run_chat_stream(
             yield renderer.not_loaded()
             return
         turn = Turn(model=model, config=config, tools=tools)
-        turn.stream = _engine_stream(engine, messages, config, tools)
+        try:
+            turn.stream = _engine_stream(engine, messages, config, tools)
+        except Exception:
+            # An engine that refuses the turn at once: the same error event as
+            # a stream that fails later. Raised from here, it reached an SSE
+            # response already started ("Exception in ASGI application").
+            logger.exception("%s stream failed for model %s", renderer.log_label, model)
+            yield renderer.failed()
+            return
         preamble = renderer.start(turn)
         if preamble:
             yield preamble

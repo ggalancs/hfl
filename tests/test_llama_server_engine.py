@@ -100,6 +100,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"n_restored": len(saved.read()) // 3})
         with open(os.environ["FAKE_ARGV_OUT"] + ".body", "w") as out:  # the last request
             json.dump(body, out)
+        refuse = os.environ.get("FAKE_REFUSE")  # as a template that raises does
+        if refuse and self.path in ("/v1/chat/completions", "/completion"):
+            return self._send(500, {"error": {"code": 500, "message": refuse}})
         usage = {"prompt_tokens": 7, "completion_tokens": 2}
         timings = {"prompt_ms": 10.0, "predicted_ms": 20.0}
         if self.path == "/v1/chat/completions":
@@ -977,3 +980,35 @@ def test_a_windows_path_reaches_llama_server_whole(engine, fake_server, tmp_path
     engine.apply_lora(str(adapter), 0.25)
     last = _launches(fake_server)[-1]
     assert "--lora-scaled" not in last and _adapters(last) == str(adapter)
+
+
+class TestRefusals:
+    """A request llama-server refuses before streaming answers an HTTP 500
+    with a JSON body. The bare HTTPStatusError reached the client as an
+    unhandled exception (Claude Code on Qwen3.8, whose template raised)."""
+
+    REFUSAL = "raise_exception('System message must be at the beginning.')"
+
+    @pytest.mark.parametrize("path", ["chat", "chat_stream", "generate", "generate_stream"])
+    def test_a_refusal_is_a_generation_error_with_a_reference(
+        self, fake_server, monkeypatch, caplog, path
+    ):
+        from hfl.engine.llama_server import GenerationError
+
+        monkeypatch.setenv("FAKE_REFUSE", self.REFUSAL)
+        eng = _loaded(fake_server)
+        messages = [ChatMessage(role="user", content="hi")]
+        try:
+            with pytest.raises(GenerationError, match=r"ref [0-9a-f]{12}") as raised:
+                if path == "chat":
+                    eng.chat(messages)
+                elif path == "chat_stream":
+                    list(eng.chat_stream(messages))
+                elif path == "generate":
+                    eng.generate("hi")
+                else:
+                    list(eng.generate_stream("hi"))
+        finally:
+            eng.unload()
+        assert "System message" not in str(raised.value)  # llama-server's text: the log only
+        assert "System message must be at the beginning" in caplog.text

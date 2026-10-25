@@ -542,6 +542,22 @@ def _raise_stream_error(event: dict[str, Any]) -> None:
     )
 
 
+def _refused(response: httpx.Response) -> None:
+    """A request llama-server refuses answers an HTTP error, not a stream: a
+    chat template that raises (Qwen3.8 on a late system message), a context
+    it cannot hold. The bare HTTPStatusError reached the client as an
+    unhandled exception; its text goes to the log with a reference, as a
+    stream's ``error`` event does."""
+    if response.status_code < 400:
+        return
+    try:
+        response.read()
+        error = response.json().get("error")
+    except Exception:
+        error = None
+    _raise_stream_error({"error": error or f"HTTP {response.status_code}"})
+
+
 class LlamaServerEngine(InferenceEngine):
     """One ``llama-server`` child process serving one GGUF model."""
 
@@ -1012,7 +1028,7 @@ class LlamaServerEngine(InferenceEngine):
             data = self._streamed_chat(body)
         else:
             response = self._post("/v1/chat/completions", json=body)
-            response.raise_for_status()
+            _refused(response)
             data = response.json()
         choice = data["choices"][0]
         message = choice.get("message") or {}
@@ -1059,7 +1075,7 @@ class LlamaServerEngine(InferenceEngine):
 
         def _stream() -> Iterator[str]:
             with self._stream("POST", "/v1/chat/completions", json=body) as response:
-                response.raise_for_status()
+                _refused(response)
                 for line in response.iter_lines():
                     if not line.startswith("data: ") or line == "data: [DONE]":
                         continue
@@ -1104,7 +1120,7 @@ class LlamaServerEngine(InferenceEngine):
             data = self._streamed_completion(body)
         else:
             response = self._post("/completion", json=body)
-            response.raise_for_status()
+            _refused(response)
             data = response.json()
         # Current builds say ``stop_type: "limit"``; older ones ``stopped_limit``.
         hit_limit = data.get("stop_type") == "limit" or bool(data.get("stopped_limit"))
@@ -1138,7 +1154,7 @@ class LlamaServerEngine(InferenceEngine):
 
         def _stream() -> Iterator[str]:
             with self._stream("POST", "/completion", json=body) as response:
-                response.raise_for_status()
+                _refused(response)
                 for line in response.iter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -1164,7 +1180,7 @@ class LlamaServerEngine(InferenceEngine):
     def _events(self, path: str, body: dict[str, Any]) -> Iterator[dict[str, Any]]:
         """The server-sent events of ``path`` streamed, until done or cancelled."""
         with self._stream("POST", path, json={**body, "stream": True}) as response:
-            response.raise_for_status()
+            _refused(response)
             for line in response.iter_lines():
                 if cancel.cancelled():
                     raise cancel.GenerationCancelled("request cancelled")

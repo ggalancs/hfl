@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine now joins the system messages into one at the start. Checked with
   Claude Code 2.1.303 on Qwen3.8-27B: it read a page with WebFetch and
   answered.
+- `web_fetch` (the route, the MCP tool, agents) read no page that came
+  compressed: python.org's cache sends gzip even when asked not to, and HFL
+  refused every such body. Compressed bodies are now inflated piece by
+  piece, never past the byte budget (a compression bomb stops there).
+- A request llama-server refused before streaming (a chat template that
+  raises, a context it cannot hold) ended in an unhandled exception and a
+  bare 500. It is a generation error now, with a reference; the reply in a
+  stream is an error event, as for a stream that fails later.
 - **The installers work without a terminal.** HFL.app from the DMG ran
   `hfl` with no arguments when opened from Finder: it printed the help to no
   terminal and quit, so double-clicking it did nothing. Opened from Finder it
