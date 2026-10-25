@@ -215,11 +215,14 @@ train = [
 # faster-whisper (CPU+GPU); openai-whisper stays as a fallback.
 stt = [
     "faster-whisper>=1.0.0,<2.0",
-    # PyAV 19.0.0 (2026-09-29) dropped av.open's `metadata_errors`, which
-    # faster-whisper 1.2.1 passes to decode every file: each transcription
-    # failed with a TypeError (local audit B32/B54/E8, on an L4). faster-whisper
-    # asks only av>=11; capped until a release of it works with 19.
-    "av>=11,<19",
+    # PyAV 19 bundles FFmpeg 9.0.2; 18.1 bundles 8.1.2, which carries
+    # CVE-2026-107695 (high) among others, on audio any API client uploads.
+    # faster-whisper 1.2.1's decoder passes av.open a `metadata_errors`
+    # argument 19 dropped (every transcription failed: local audit B32/B54/E8),
+    # so HFL decodes the audio itself (whisper_engine._decode_audio) and the
+    # cap is gone. PyAV 19 needs Python 3.12 (18: 3.11): older Pythons get
+    # whatever faster-whisper's own av>=11 resolves to there.
+    "av>=19.0.2; python_version >= '3.12'",
 ]
 
 # Image generation (SDXL / FLUX) — Phase 16 / V2 row 17. Heavy: a

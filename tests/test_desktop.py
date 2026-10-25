@@ -73,7 +73,7 @@ class TestChatUrl:
         [
             ("127.0.0.1", "http://127.0.0.1:11434/ui"),
             ("0.0.0.0", "http://127.0.0.1:11434/ui"),  # noqa: S104
-            ("::", "http://127.0.0.1:11434/ui"),
+            ("::", "http://[::1]:11434/ui"),  # an IPv6-only bind
             ("", "http://127.0.0.1:11434/ui"),
             ("::1", "http://[::1]:11434/ui"),
             ("hfl.local", "http://hfl.local:11434/ui"),
@@ -87,12 +87,12 @@ class TestOpenChatWhenReady:
     @pytest.fixture(autouse=True)
     def _ours(self, monkeypatch):
         """This process listens on the port, unless a test says otherwise."""
-        monkeypatch.setattr(desktop, "_listening_here", lambda port: True)
+        monkeypatch.setattr(desktop, "_listening_here", lambda port, address: True)
 
     def test_someone_else_on_the_port_gets_no_browser(self, monkeypatch) -> None:
         """Another program (another user's) answering /healthz on the port
         does not get the owner's browser (security review, 2026-10-25)."""
-        monkeypatch.setattr(desktop, "_listening_here", lambda port: False)
+        monkeypatch.setattr(desktop, "_listening_here", lambda port, address: False)
         answer = types.SimpleNamespace(status_code=200)
         monkeypatch.setattr(httpx, "get", lambda url, timeout: answer)
         opened: list[str] = []
@@ -139,13 +139,33 @@ class TestOpenChatWhenReady:
 
 
 class TestListeningHere:
-    def test_a_port_this_process_listens_on(self) -> None:
+    @staticmethod
+    def _listen(host: str):
         import socket
 
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            sock.listen()
-            assert desktop._listening_here(sock.getsockname()[1]) is True
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        sock = socket.socket(family)
+        sock.bind((host, 0))
+        sock.listen()
+        return sock
+
+    def test_the_address_this_process_listens_on(self) -> None:
+        with self._listen("127.0.0.1") as sock:
+            assert desktop._listening_here(sock.getsockname()[1], "127.0.0.1") is True
+
+    def test_a_wildcard_bind_covers_its_family(self) -> None:
+        with self._listen("0.0.0.0") as sock:
+            assert desktop._listening_here(sock.getsockname()[1], "127.0.0.1") is True
+
+    def test_the_port_at_another_address_is_not_ours(self) -> None:
+        """``--host ::`` binds IPv6 only: a program on 127.0.0.1 at the same
+        port would get the browser (security review, second pass)."""
+        with self._listen("::1") as sock:
+            assert desktop._listening_here(sock.getsockname()[1], "127.0.0.1") is False
+
+    def test_a_name_goes_by_the_port(self) -> None:
+        with self._listen("127.0.0.1") as sock:
+            assert desktop._listening_here(sock.getsockname()[1], "localhost") is True
 
     def test_a_port_nobody_here_listens_on(self) -> None:
         import socket
@@ -153,7 +173,7 @@ class TestListeningHere:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]  # bound, never listening
-        assert desktop._listening_here(port) is False
+        assert desktop._listening_here(port, "127.0.0.1") is False
 
     def test_old_psutil_without_net_connections(self, monkeypatch) -> None:
         import psutil
@@ -163,11 +183,11 @@ class TestListeningHere:
                 pass
 
             def connections(self, kind):
-                addr = types.SimpleNamespace(port=4242)
+                addr = types.SimpleNamespace(ip="127.0.0.1", port=4242)
                 return [types.SimpleNamespace(status=psutil.CONN_LISTEN, laddr=addr)]
 
         monkeypatch.setattr(psutil, "Process", _Old)
-        assert desktop._listening_here(4242) is True
+        assert desktop._listening_here(4242, "127.0.0.1") is True
 
 
 class TestLogToFile:

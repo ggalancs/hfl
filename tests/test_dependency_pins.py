@@ -153,11 +153,13 @@ class TestStaticPyprojectPins:
         assert ">=0.17" in pin.replace(" ", "") and "<1.0" in pin.replace(" ", ""), pin
         assert "train" in deps["all"][0], deps["all"]
 
-    def test_stt_keeps_a_pyav_faster_whisper_can_call(self):
-        """PyAV 19 dropped av.open(metadata_errors=...), which faster-whisper
-        1.2.1 passes: every transcription failed (local audit B32/B54/E8)."""
-        pin = _find_pin(_load_pyproject()["project"]["optional-dependencies"]["stt"], "av")
-        assert "<19" in pin.replace(" ", ""), pin
+    def test_stt_takes_the_pyav_with_the_fixed_ffmpeg(self):
+        """PyAV 19 (FFmpeg 9.0.2) where it installs, Python 3.12+: 18.1's FFmpeg
+        8.1.2 carries CVE-2026-107695. HFL decodes the audio itself, so
+        faster-whisper 1.2.1's decoder, which PyAV 19 breaks, never runs."""
+        stt = _load_pyproject()["project"]["optional-dependencies"]["stt"]
+        pins = [p for p in stt if p.replace(" ", "").startswith("av>")]
+        assert pins == ["av>=19.0.2; python_version >= '3.12'"], pins
 
     def test_llama_cpp_python_pin_supports_gemma4(self):
         """The ``[llama]`` extra must require a llama-cpp-python build

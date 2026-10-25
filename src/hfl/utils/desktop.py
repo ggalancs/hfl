@@ -62,19 +62,32 @@ def log_to_file(path: Path = MAC_APP_LOG) -> Path:
     return path
 
 
+def _browser_address(host: str) -> str:
+    """The address a browser on this machine uses for a server bound to
+    ``host``: loopback of the same family for a wildcard bind (``::`` is
+    IPv6-only, so not 127.0.0.1)."""
+    if host in ("", "0.0.0.0"):
+        return "127.0.0.1"
+    if host == "::":
+        return "::1"
+    return host
+
+
 def chat_url(host: str, port: int) -> str:
-    """The chat page as a browser on this machine reaches it: a server
-    bound to every interface answers on loopback."""
-    if host in ("", "0.0.0.0", "::"):
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"http://{host}:{port}/ui"
+    """The chat page as a browser on this machine reaches it."""
+    address = _browser_address(host)
+    if ":" in address and not address.startswith("["):
+        address = f"[{address}]"
+    return f"http://{address}:{port}/ui"
 
 
-def _listening_here(port: int) -> bool:
-    """Whether this process listens on ``port``: the server this HFL started,
-    not another program (another user's, say) that held the port first."""
+def _listening_here(port: int, address: str) -> bool:
+    """Whether this process listens on ``port`` at ``address``, the one the
+    browser will use: the server this HFL started, not another program
+    (another user's, say) holding that address. A wildcard listener covers
+    its own family; for a name (``localhost``) the port decides."""
+    import ipaddress
+
     import psutil
 
     process = psutil.Process(os.getpid())
@@ -84,7 +97,19 @@ def _listening_here(port: int) -> bool:
         connections = listing(kind="inet")
     except (psutil.Error, OSError):
         return False
-    return any(c.status == psutil.CONN_LISTEN and c.laddr.port == port for c in connections)
+    version: int
+    try:
+        version = ipaddress.ip_address(address.strip("[]")).version
+    except ValueError:
+        version = 0  # a name
+    wildcard = {4: "0.0.0.0", 6: "::"}.get(version)
+    for c in connections:
+        if c.status != psutil.CONN_LISTEN or c.laddr.port != port:
+            continue
+        ip = str(c.laddr.ip).split("%", 1)[0]
+        if not version or ip in (address.strip("[]"), wildcard):
+            return True
+    return False
 
 
 def open_chat_when_ready(host: str, port: int, timeout: float = 120.0) -> threading.Thread:
@@ -94,6 +119,7 @@ def open_chat_when_ready(host: str, port: int, timeout: float = 120.0) -> thread
     up after ``timeout`` seconds: the tray icon shows why the server did not
     start."""
     url = chat_url(host, port)
+    address = _browser_address(host)
     health = url[: -len("/ui")] + "/healthz"
 
     def _wait() -> None:
@@ -102,7 +128,8 @@ def open_chat_when_ready(host: str, port: int, timeout: float = 120.0) -> thread
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                if _listening_here(port) and httpx.get(health, timeout=2).status_code == 200:
+                ours = _listening_here(port, address)
+                if ours and httpx.get(health, timeout=2).status_code == 200:
                     logger.info("Opening the chat page: %s", url)
                     webbrowser.open(url)
                     return

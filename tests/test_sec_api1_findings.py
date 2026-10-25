@@ -440,6 +440,9 @@ class TestHostValidation:
             ("localhost:11434", 200),
             ("hfl:11434", 200),  # listed: a container's service name
             ("models.lan:11434", 200),  # listed with a port
+            ("[fd00::5]:11434", 200),  # listed without brackets
+            ("[FD00:0::5]", 200),  # the same address written another way
+            ("[fd00::6]:11434", 403),
         ],
     )
     def test_allowed_hosts_guard_a_server_bound_to_all_interfaces(
@@ -452,7 +455,9 @@ class TestHostValidation:
         from hfl.config import config as cfg
 
         monkeypatch.setattr(server, "_bound_host", "0.0.0.0", raising=False)
-        monkeypatch.setattr(cfg, "allowed_hosts", ["localhost", "hfl", "models.lan:11434"])
+        monkeypatch.setattr(
+            cfg, "allowed_hosts", ["localhost", "hfl", "models.lan:11434", "fd00::5"]
+        )
         assert loopback.get("/api/tags", headers={"Host": host}).status_code == status
 
     def test_allowed_hosts_star_lets_any_host_through(self, loopback, monkeypatch):

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -83,16 +84,25 @@ class TestTranscribe:
                 pass
 
             def transcribe(self, audio, language=None, beam_size=1):
+                received.append(audio)
                 segs = [_Segment(0.0, 1.0, "hello "), _Segment(1.0, 2.0, "world")]
                 return iter(segs), SimpleNamespace(language="en")
 
         fake_module = ModuleType("faster_whisper")
         fake_module.WhisperModel = _FakeModel  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+        received: list = []
+        samples = object()
+        decoded: list[bytes] = []
+        monkeypatch.setattr(
+            whisper_engine, "_decode_audio", lambda audio: decoded.append(audio) or samples
+        )
 
         engine = WhisperEngine()
         engine.load("small")
         result = engine.transcribe(b"fake_audio", include_segments=True)
+        # HFL decodes; faster-whisper gets the samples, never the bytes.
+        assert decoded == [b"fake_audio"] and received == [samples]
         assert result.text == "hello world"
         assert result.language == "en"
         assert result.segments is not None
@@ -178,3 +188,52 @@ class TestTranscribeRoute:
             files={"file": ("x.wav", b"A" * 32, "audio/wav")},
         )
         assert resp.status_code == 413
+
+
+def _wav(rate: int = 44100, channels: int = 2, seconds: float = 0.5) -> bytes:
+    """A 440 Hz tone at half scale, 16-bit PCM."""
+    import math
+    import struct
+    import wave
+
+    frames = bytearray()
+    for i in range(int(rate * seconds)):
+        value = int(16383 * math.sin(2 * math.pi * 440 * i / rate))
+        frames += struct.pack("<h", value) * channels
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+    return out.getvalue()
+
+
+class TestDecodeAudio:
+    """HFL's own decoder (PyAV), which lets [stt] use PyAV 19: faster-whisper
+    1.2.1's decoder passes av.open an argument PyAV 19 dropped."""
+
+    def test_mono_16k_float32(self):
+        pytest.importorskip("av")
+        import numpy as np
+
+        samples = whisper_engine._decode_audio(_wav())
+        assert samples.dtype == np.float32 and samples.ndim == 1
+        assert abs(len(samples) - 8000) <= 80  # 0.5 s at 16 kHz
+        assert 0.4 < float(np.abs(samples).max()) < 0.6  # the tone at half scale
+
+    def test_the_same_samples_as_faster_whispers_decoder(self):
+        av = pytest.importorskip("av")
+        audio_module = pytest.importorskip("faster_whisper.audio")
+        import numpy as np
+
+        if int(av.__version__.split(".")[0]) >= 19:
+            pytest.skip("faster-whisper's own decoder does not run on PyAV 19")
+        ours = whisper_engine._decode_audio(_wav())
+        theirs = audio_module.decode_audio(io.BytesIO(_wav()))
+        assert np.array_equal(ours, theirs)
+
+    def test_not_audio_raises_as_before(self):
+        av = pytest.importorskip("av")
+        with pytest.raises(av.error.FFmpegError):
+            whisper_engine._decode_audio(b"this is not audio")

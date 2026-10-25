@@ -21,12 +21,16 @@ services:
     container_name: hfl
     restart: unless-stopped
     # Published on this machine only by default: HFL runs without a key
-    # unless HFL_API_KEY is set. HFL_PUBLISH=0.0.0.0 opens it to the network.
+    # unless HFL_API_KEY is set. HFL_PUBLISH=0.0.0.0 opens it to the network;
+    # then list in HFL_ALLOWED_HOSTS the names it is reached by (or "*").
     ports:
       - "${HFL_PUBLISH:-127.0.0.1}:${HFL_PORT:-11434}:11434"
     environment:
       HFL_HOST: "0.0.0.0"
       HFL_PORT: "11434"
+      # The Host names it answers to: this machine, and "hfl" for the other
+      # containers. A web page cannot reach it through DNS rebinding.
+      HFL_ALLOWED_HOSTS: "${HFL_ALLOWED_HOSTS:-localhost,hfl}"
       HFL_LANG: "${HFL_LANG:-en}"
       # Optional API key — set HFL_API_KEY in .env to lock the server.
       HFL_API_KEY: "${HFL_API_KEY:-}"

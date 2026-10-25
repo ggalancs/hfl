@@ -569,3 +569,27 @@ def pull_smart(a: Audit) -> str:
     listed = a.ok("list")
     expect(chosen and chosen.group(1).split("/")[-1].lower()[:20] in listed.lower(), listed[-400:])
     return f"chose {chosen.group(1)} for this machine; registered"
+
+
+@check("A41", "hfl start")
+def a41(a: Audit) -> str:
+    """The first run as the README's quick start has it: in an HFL home with
+    no model, ``hfl start --yes`` describes the machine, offers models that
+    fit, pulls the first (``qwen2.5:1.5b``, Apache-2.0) and opens a chat that
+    answers. Its home is kept between runs, so a later run finds the model
+    and goes straight to the chat: both paths end in an answer."""
+    home = a.work / "start-home"
+    registry = home / "models.json"
+    fresh = not registry.exists() or '"llm"' not in registry.read_text(encoding="utf-8")
+    done = a.cli(
+        "start", "--yes", stdin=f"{QUESTION}\n/bye\n", timeout=3600, env={"HFL_HOME": str(home)}
+    )
+    out = done.stdout + done.stderr
+    expect(done.returncode == 0, f"exit {done.returncode}: {out[-400:]}")
+    expect("Traceback" not in out, out[-400:])
+    expect("paris" in out.lower(), f"no answer: {out[-300:]}")
+    if fresh:
+        expect("qwen2.5:1.5b" in out, f"not offered the 1.5b model first: {out[:400]}")
+        expect('"llm"' in registry.read_text(encoding="utf-8"), "pulled nothing")
+        return "offered, pulled qwen2.5:1.5b, answered"
+    return "found the model already pulled, answered"

@@ -32,6 +32,44 @@ logger = logging.getLogger(__name__)
 __all__ = ["WhisperEngine", "WhisperResult", "is_available"]
 
 
+def _decode_audio(audio: bytes, rate: int = 16000) -> Any:
+    """Mono float32 samples at ``rate``, as faster-whisper's own decoder
+    returns them (the same steps: invalid frames skipped, grouped, resampled
+    to 16-bit). HFL decodes them itself because that decoder passes
+    ``av.open`` a ``metadata_errors`` argument PyAV 19 dropped (faster-whisper
+    1.2.1), and PyAV 19 is the release whose FFmpeg (9.0) fixes the CVEs that
+    18.1's (8.1.2) still has, on audio any API client can upload."""
+    import av
+    import numpy as np
+
+    resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=rate)
+    fifo = av.audio.fifo.AudioFifo()
+    pieces: list[Any] = []
+
+    def keep(frames: Any) -> None:
+        pieces.extend(frame.to_ndarray().reshape(-1) for frame in frames)
+
+    with av.open(io.BytesIO(audio), mode="r") as container:
+        decoded = container.decode(audio=0)
+        while True:
+            try:
+                frame = next(decoded)
+            except StopIteration:
+                break
+            except av.error.InvalidDataError:
+                continue
+            frame.pts = None  # no timestamp checks across grouped frames
+            fifo.write(frame)
+            if fifo.samples >= 500_000:
+                keep(resampler.resample(fifo.read()))
+        if fifo.samples > 0:
+            keep(resampler.resample(fifo.read()))
+        keep(resampler.resample(None))  # flush
+    if not pieces:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(pieces).astype(np.float32) / 32768.0
+
+
 def is_available() -> bool:
     """True iff either Whisper backend is importable."""
     for module in ("faster_whisper", "whisper"):
@@ -167,10 +205,8 @@ class WhisperEngine:
         language: str | None,
     ) -> tuple[str, str | None, list[WhisperSegment]]:
 
-        # faster-whisper accepts file paths and bytesio; pass an
-        # in-memory path-like to avoid hitting disk.
         segments_iter, info = self._model.transcribe(
-            io.BytesIO(audio),
+            _decode_audio(audio),
             language=language,
             beam_size=1,
         )

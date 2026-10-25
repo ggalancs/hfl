@@ -226,6 +226,9 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
                 return self._too_large_response(budget)
 
         request._body = bytes(body)
+        # One copy for the route, not two for the whole request (the wait for
+        # a dispatcher slot included).
+        del body
         response = await call_next(request)
         return response
 
@@ -474,6 +477,16 @@ def _is_loopback_address(host: str | None) -> bool:
         return False
 
 
+def _canonical_host(value: str) -> str:
+    """A host as ``_host_name`` returns it, an IPv6 address written one way:
+    ``fd00::5``, ``[FD00:0::5]`` and ``[fd00::5]:11434`` are the same host
+    (an ``HFL_ALLOWED_HOSTS`` entry may come without brackets)."""
+    try:
+        return str(ipaddress.ip_address(value.strip().strip("[]")))
+    except ValueError:
+        return _host_name(value)
+
+
 def _host_name(value: str) -> str:
     """The name in a ``Host`` header (or an origin's authority), lower-case,
     without the port; IPv6 without its brackets. Anything unparsable comes
@@ -553,7 +566,9 @@ class HostValidationMiddleware:
             # HTTP/1.0 without Host: never a browser, so never a rebinding.
             return True
         name = _host_name(raw.decode("latin-1"))
-        if name in _LOOPBACK_NAMES or name in {_host_name(h) for h in listed or []}:
+        if name in _LOOPBACK_NAMES or _canonical_host(name) in {
+            _canonical_host(h) for h in listed or []
+        }:
             return True
         if config.cors_allow_all:
             # "Any web page may call this server": a rebound page gets

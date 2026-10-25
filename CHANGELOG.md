@@ -49,8 +49,15 @@ reproduced before the fix:
 - MLX training runs `mlx_lm` without the working directory on the import
   path, as Transformers training already did: an `mlx_lm/` folder there
   would have run instead.
-- The desktop app opens the chat page only once this HFL serves on the
-  port, not when another program (another user's) answers there first.
+- The desktop app opens the chat page only once this HFL listens at the
+  address the browser will use, not when another program (another user's)
+  answers there first; with `--host ::` it opens `[::1]`, where an IPv6-only
+  server is.
+- Speech-to-text (`[stt]`) takes PyAV 19, whose FFmpeg 9.0.2 fixes what
+  PyAV 18.1's 8.1.2 still carries (CVE-2026-107695, high), on audio any API
+  client uploads. faster-whisper 1.2.1's decoder does not run on PyAV 19, so
+  HFL decodes the audio itself (the same samples, checked against it).
+  PyAV 19 needs Python 3.12: on 3.10 and 3.11 the older PyAV stays.
 - Pillow 13.0.0 or later (on Python 3.11+) for the `[tray]` and `[imagegen]`
   extras: 12.3.0 carries 5 critical and 13 high advisories that 13.0.0
   fixes. HFL's own code never decodes a user's image with Pillow, so none
@@ -60,7 +67,7 @@ reproduced before the fix:
 - `HFL_ALLOWED_HOSTS`: the host names the server answers to whatever address
   it is bound to. The DNS-rebinding guard ran only on a loopback bind, and a
   container binds 0.0.0.0 even when its port is published on this machine
-  only: the README's Docker command sets it now.
+  only: the README's Docker command and `docker-compose.yml` set it now.
 - `hfl serve --open` opens the chat page once the server answers; the tray
   menu has **Open Chat** (also the click on the icon on Windows), and its
   labels follow `HFL_LANG`.

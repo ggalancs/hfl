@@ -805,3 +805,24 @@ def d55(a: Audit) -> str:
     )
     expect(tiny > 10, f"a 1 MB budget still restored the prefix ({tiny} tokens evaluated)")
     return f"a 1 MB budget keeps nothing: the prefix is evaluated again ({tiny} tokens)"
+
+
+@probe("D56", "HFL_ALLOWED_HOSTS")
+def d56(a: Audit) -> str:
+    """A container binds 0.0.0.0 even when its port is published on this
+    machine only, and a DNS-rebound page reached it there (the guard ran on
+    loopback binds only). With the variable, a ``Host`` the server was not
+    given gets 403 whatever the bind; without it (the control) a 0.0.0.0
+    server answers any ``Host``."""
+    env = {"HFL_ACCEPT_NETWORK_EXPOSURE": "true"}
+
+    def status(base: str, host: str) -> int:
+        return httpx.get(base + "/api/tags", headers={"Host": host}, timeout=60).status_code
+
+    with a.server("--host", "0.0.0.0", env=env) as base:
+        control = status(base, "rebind.example")
+    expected = {"rebind.example": 403, "hfl:11434": 200, "localhost": 200, "127.0.0.1": 200}
+    with a.server("--host", "0.0.0.0", env={**env, "HFL_ALLOWED_HOSTS": "localhost,hfl"}) as base:
+        got = {host: status(base, host) for host in expected}
+    expect(control == 200 and got == expected, (control, got))
+    return "on 0.0.0.0 a rebound Host is 403 with it (200 without), listed and loopback names 200"
