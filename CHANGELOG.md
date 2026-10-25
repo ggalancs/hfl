@@ -87,6 +87,15 @@ reproduced before the fix:
   extras: 12.3.0 carries 5 critical and 13 high advisories that 13.0.0
   fixes. HFL's own code never decodes a user's image with Pillow, so none
   was reachable through HFL.
+- The Docker images take Debian's security fixes published after their base
+  image (`apt-get upgrade`) and upgrade the base image's pip: 0.27.1's image
+  carried 29 advisories with a fix, 5 of them critical (curl, certifi). Built
+  for both architectures, slim and `-all`: no fixed critical or high
+  advisory left but one in the `-all` images, the FFmpeg bundled in
+  PyNvVideoCodec 2.0.4, which vLLM 0.32.0 requires exactly. vLLM decodes
+  video with it and HFL hands vLLM text only, so it is not reachable
+  through HFL. `scripts/scan_image.sh` runs that check (grype; exceptions
+  in `scripts/grype-exceptions.yaml`, each with its reason).
 
 ### Added
 - `hfl websearch`: choose the web search HFL's tools use. `searxng` points

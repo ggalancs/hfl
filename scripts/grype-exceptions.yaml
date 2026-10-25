@@ -1,0 +1,11 @@
+# What scripts/scan_image.sh lets through, each with why it cannot reach
+# HFL. Re-read them when one goes.
+ignore:
+  # ffmpeg 8.1.1, bundled in PyNvVideoCodec 2.0.4: vLLM 0.32.0 (the latest)
+  # requires exactly that version, and 2.2.3 carries the fixes. vLLM decodes
+  # video input with it; HFL hands vLLM text prompts only
+  # (engine/vllm_engine.py; tests/test_dependency_pins.py keeps it so). In
+  # the -all images only, which carry the [vllm] extra.
+  - package:
+      location: "**/site-packages/PyNvVideoCodec/**"
+    reason: "vLLM's exact pin; HFL never hands vLLM video"

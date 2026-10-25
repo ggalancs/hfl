@@ -295,3 +295,16 @@ def test_hfl_never_uses_a_disk_cache():
     pattern = re.compile(r"\bdiskcache\b|LlamaDiskCache")
     users = [p.name for p in src.rglob("*.py") if pattern.search(p.read_text(encoding="utf-8"))]
     assert users == []
+
+
+def test_hfl_never_hands_vllm_video():
+    """scripts/grype-exceptions.yaml excepts the ffmpeg bundled in
+    PyNvVideoCodec (vLLM requires that exact version) because HFL hands vLLM
+    text prompts only. Multimodal input to vLLM would make that exception
+    false."""
+    src = Path(__file__).resolve().parents[1] / "src" / "hfl"
+    imports_vllm = re.compile(r"^\s*(from|import) vllm\b", re.MULTILINE)
+    multimodal = re.compile(r"multi_modal_data|limit_mm_per_prompt|\bvideo\b", re.IGNORECASE)
+    modules = [p for p in src.rglob("*.py") if imports_vllm.search(p.read_text(encoding="utf-8"))]
+    assert "vllm_engine.py" in [p.name for p in modules]
+    assert [p.name for p in modules if multimodal.search(p.read_text(encoding="utf-8"))] == []

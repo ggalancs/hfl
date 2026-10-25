@@ -31,11 +31,15 @@ local machine.
      exceptions each say why they cannot reach HFL.
    - gitleaks over the history and CodeQL over the tracked files (the CodeQL
      bundle runs locally; a local 0 matched GitHub's result before).
-   - grype over the published images, after the Docker workflow:
-     `grype registry:ghcr.io/ggalancs/hfl:X.Y.Z --only-fixed` (and `-all`).
-     An image is a frozen copy of Debian and of every wheel: 0.27.1's carried
-     curl's critical CVEs a rebuild would have fixed. Rebuild the images when
-     a fixed critical or high advisory shows up, release or not.
+   - `bash scripts/scan_image.sh IMAGE...`: grype over the images, the four
+     built locally (item 5) before tagging and the published ones
+     (`registry:ghcr.io/ggalancs/hfl:X.Y.Z`, and `-all`) after the Docker
+     workflow. It fails on any critical or high advisory that has a fix,
+     except those in `scripts/grype-exceptions.yaml`, each with why it
+     cannot reach HFL. An image is a frozen copy of Debian and of every
+     wheel: 0.27.1's carried curl's critical CVEs a rebuild would have
+     fixed. Rebuild the images when a fixed critical or high advisory shows
+     up, release or not.
 5. **Every changed workflow, reproduced locally.** What the packaging
    workflows check is in scripts that run anywhere:
    - `scripts/image_check.py <image>` — the Docker image as a user runs it;
