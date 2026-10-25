@@ -550,6 +550,33 @@ class TestSmallHelpers:
             *parts,
         ]
 
+    def test_system_first(self):
+        """All system text in one message at the start; the rest in order."""
+        plain = [{"role": "system", "content": "S"}, {"role": "user", "content": "q"}]
+        assert lc._system_first(plain) is plain  # already right: untouched
+        assert lc._system_first([{"role": "user", "content": "q"}]) == [
+            {"role": "user", "content": "q"}
+        ]
+        late = [
+            {"role": "system", "content": "S1"},
+            {"role": "user", "content": "q1"},
+            {"role": "system", "content": [{"type": "text", "text": "S2"}]},
+            {"role": "assistant", "content": "a"},
+            {"role": "system", "content": "  "},
+        ]
+        assert lc._system_first(late) == [
+            {"role": "system", "content": "S1\n\nS2"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a"},
+        ]
+        only_late = [{"role": "user", "content": "q"}, {"role": "system", "content": "S"}]
+        assert lc._system_first(only_late) == [
+            {"role": "system", "content": "S"},
+            {"role": "user", "content": "q"},
+        ]
+        empty = [{"role": "user", "content": "q"}, {"role": "system", "content": ""}]
+        assert lc._system_first(empty) == [{"role": "user", "content": "q"}]
+
     def test_glm_history_keeps_the_text_beside_a_call(self):
         template = "{{ metadata }} observation"
         msgs = [

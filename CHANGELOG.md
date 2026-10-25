@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Claude Code on Qwen3.8 (and any model whose template wants the system
+  message first) failed every request.** Claude Code 2.1 sends a system
+  message after the first user turn; Qwen3.8's template raised "System
+  message must be at the beginning" and llama-server answered 500. Every
+  engine now joins the system messages into one at the start. Checked with
+  Claude Code 2.1.303 on Qwen3.8-27B: it read a page with WebFetch and
+  answered.
 - **The installers work without a terminal.** HFL.app from the DMG ran
   `hfl` with no arguments when opened from Finder: it printed the help to no
   terminal and quit, so double-clicking it did nothing. Opened from Finder it

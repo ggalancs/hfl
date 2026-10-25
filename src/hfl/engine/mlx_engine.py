@@ -489,6 +489,7 @@ class MLXEngine(InferenceEngine):
         from hfl.engine.llama_cpp import (
             _fold_system,
             _history_for_template,
+            _system_first,
             _template_renders_tools,
             _template_takes_system,
             _tools_as_text,
@@ -508,6 +509,7 @@ class MLXEngine(InferenceEngine):
             dicts.append(entry)
         template = getattr(self._tokenizer, "chat_template", None)
         template = template if isinstance(template, str) else ""
+        dicts = _system_first(dicts)
         extras: dict[str, Any] = reasoning_template_vars(reasoning)
         if _template_renders_tools(template, None):
             dicts = _history_for_template(dicts, template)

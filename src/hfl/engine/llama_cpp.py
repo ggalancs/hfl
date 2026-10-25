@@ -764,6 +764,33 @@ def _template_takes_system(template: str) -> bool:
     return not template or _probe_template(template)[1]
 
 
+def _text_of(content: Any) -> str:
+    """A message's text: a string, or the text parts of a content list."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return "" if content is None else str(content)
+
+
+def _system_first(msgs: list[dict]) -> list[dict]:
+    """Every system message as one, at the start. Clients send them later in
+    a conversation too (Claude Code 2.1 puts one after the first user turn),
+    and most templates raise unless the system message comes first: Qwen3.8's
+    "System message must be at the beginning" failed every Claude Code
+    request. Everything else keeps its order."""
+    systems = [m for m in msgs if m.get("role") == "system"]
+    if not systems or (len(systems) == 1 and msgs[0] is systems[0]):
+        return msgs
+    text = "\n\n".join(t for t in (_text_of(m.get("content")).strip() for m in systems) if t)
+    rest = [m for m in msgs if m.get("role") != "system"]
+    return [{"role": "system", "content": text}, *rest] if text else rest
+
+
 def _fold_system(msgs: list[dict]) -> list[dict]:
     """System messages as the start of the first user message, for a
     template that takes none (Mistral: "Only user and assistant roles")."""
@@ -2601,7 +2628,7 @@ class LlamaCppEngine(InferenceEngine):
         """The messages for ``create_chat_completion``, the tools to hand the
         template (None when HFL wrote them in itself), and whether to keep
         the model's control tokens in the text for the tool parsers."""
-        msgs = self._messages_to_llama_cpp(messages)
+        msgs = _system_first(self._messages_to_llama_cpp(messages))
         markers = bool(tools)
         if self._template_knows_tools:
             msgs = _history_for_template(msgs, self._chat_template)

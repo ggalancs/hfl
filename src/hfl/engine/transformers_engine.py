@@ -208,6 +208,9 @@ class TransformersEngine(InferenceEngine):
             if m.tool_call_id:
                 entry["tool_call_id"] = m.tool_call_id
             msgs.append(entry)
+        from hfl.engine.llama_cpp import _system_first
+
+        msgs = _system_first(msgs)
 
         if hasattr(self._tokenizer, "apply_chat_template"):
             template_kwargs: dict = {

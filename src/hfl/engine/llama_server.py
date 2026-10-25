@@ -966,10 +966,10 @@ class LlamaServerEngine(InferenceEngine):
     def _chat_body(
         self, messages: list[ChatMessage], cfg: GenerationConfig, tools: list[dict] | None
     ) -> dict[str, Any]:
-        from hfl.engine.llama_cpp import _history_for_template, _tools_as_text
+        from hfl.engine.llama_cpp import _history_for_template, _system_first, _tools_as_text
 
         penalty = repeat_penalty_for(cfg, messages, tools)
-        wire = _wire_messages(messages, vision=self._projector is not None)
+        wire = _system_first(_wire_messages(messages, vision=self._projector is not None))
         if self._template_knows_tools:
             wire = _history_for_template(wire, self._chat_template)
         else:

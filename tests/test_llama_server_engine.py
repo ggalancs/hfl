@@ -687,6 +687,25 @@ class TestTemplates:
         assert "<tool_call>" in messages[2]["content"] and "tool_calls" not in messages[2]
         assert messages[3] == {"role": "user", "content": "<tool_response>\n31C\n</tool_response>"}
 
+    def test_a_late_system_message_joins_the_first(self, fake_server):
+        """Claude Code 2.1 sends a system message after the first user turn;
+        Qwen3.8's template raised "System message must be at the beginning"
+        and llama-server answered 500 to every request."""
+        eng = _loaded(fake_server)
+        history = [
+            ChatMessage(role="system", content="You are an agent."),
+            ChatMessage(role="user", content="hello"),
+            ChatMessage(role="system", content="Today is Sunday."),
+            ChatMessage(role="user", content="what day is it?"),
+        ]
+        try:
+            eng.chat(history)
+        finally:
+            eng.unload()
+        sent = _last_body(fake_server)["messages"]
+        assert [m["role"] for m in sent] == ["system", "user", "user"]
+        assert sent[0]["content"] == "You are an agent.\n\nToday is Sunday."
+
     def test_bos_is_added_when_the_template_forgets_it(self, fake_server, monkeypatch):
         """llama-server does not add BOS to a template's prompt: Hermes-3
         answered garbage without it. HFL relaunches with a template that
