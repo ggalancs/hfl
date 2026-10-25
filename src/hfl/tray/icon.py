@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import sys
+import webbrowser
 from typing import TYPE_CHECKING, Any
 
 from hfl import __version__
@@ -81,6 +82,12 @@ def _build_menu(controller: TrayServerController) -> Any:
     """
     import pystray
 
+    from hfl.i18n import t
+    from hfl.utils.desktop import chat_url
+
+    def on_open_chat(icon: Any, item: Any) -> None:
+        webbrowser.open(chat_url(controller.host, controller.port))
+
     def on_start(icon: Any, item: Any) -> None:
         if controller.start():
             icon.icon = _generate_icon_image(ServerStatus.STARTING)
@@ -104,21 +111,24 @@ def _build_menu(controller: TrayServerController) -> Any:
     def status_text(item: Any) -> str:
         status = controller.status.value.capitalize()
         if controller.status == ServerStatus.ERROR and controller.error_message:
-            return f"Status: {status} ({controller.error_message})"
-        return f"Status: {status}"
+            status = f"{status} ({controller.error_message})"
+        return t("tray.status", status=status)
 
     def url_text(item: Any) -> str:
         return controller.url
 
     return pystray.Menu(
-        pystray.MenuItem("Start Server", on_start, enabled=is_start_enabled),
-        pystray.MenuItem("Stop Server", on_stop, enabled=is_stop_enabled),
+        # The default item: a click on the icon (Windows) opens the chat.
+        pystray.MenuItem(t("tray.open_chat"), on_open_chat, enabled=is_stop_enabled, default=True),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(t("tray.start"), on_start, enabled=is_start_enabled),
+        pystray.MenuItem(t("tray.stop"), on_stop, enabled=is_stop_enabled),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(status_text, None, enabled=False),
         pystray.MenuItem(url_text, None, enabled=False),
         pystray.MenuItem(f"HFL v{__version__}", None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Exit", on_exit),
+        pystray.MenuItem(t("tray.exit"), on_exit),
     )
 
 
@@ -210,6 +220,7 @@ def run_tray(
     log_level: str = "info",
     json_logs: bool = False,
     auto_start: bool = True,
+    open_ui: bool = False,
 ) -> None:
     """Convenience function to create controller + tray and run.
 
@@ -221,6 +232,7 @@ def run_tray(
         log_level: Logging level
         json_logs: Enable JSON log format
         auto_start: Start server automatically on launch
+        open_ui: Open the chat page in the browser once the server answers
     """
     controller = TrayServerController(
         host=host,
@@ -253,5 +265,9 @@ def run_tray(
                     _schedule_icon_update(tray._icon, controller)
 
             threading.Thread(target=_deferred_update, daemon=True).start()
+        if open_ui:
+            from hfl.utils.desktop import open_chat_when_ready
+
+            open_chat_when_ready(host, port)
 
     tray.run()

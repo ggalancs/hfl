@@ -49,7 +49,7 @@ jobs:
           HFL_PYI_ICON: packaging\windows\hfl.ico
           HFL_PYI_LLAMA_CPP: build\llama.cpp
         run: |
-          pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -e ".[llama]"
+          pip install --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -e ".[llama,tray]"
           # llama.cpp's llama-server, bundled (the pinned Vulkan build, which
           # carries the CPU backends too; sha256 checked): GGUF models answer
           # several requests at once, on any GPU or none.

@@ -1341,7 +1341,13 @@ def _apply_sandbox(sandbox: str | None) -> None:
 
 
 def _run_tray(
-    host: str, port: int, api_key: str | None, model: str | None, log_level: str, json_logs: bool
+    host: str,
+    port: int,
+    api_key: str | None,
+    model: str | None,
+    log_level: str,
+    json_logs: bool,
+    open_ui: bool = False,
 ) -> None:
     """``serve --tray``: the server under a system tray icon."""
     # On a Linux with no desktop session (a server, SSH, a container)
@@ -1355,6 +1361,10 @@ def _run_tray(
     try:
         from hfl.tray.icon import run_tray
 
+        if sys.platform == "win32":
+            from hfl.utils.desktop import hide_own_console
+
+            hide_own_console()
         run_tray(
             host=host,
             port=port,
@@ -1363,6 +1373,7 @@ def _run_tray(
             log_level=log_level,
             json_logs=json_logs,
             auto_start=True,
+            open_ui=open_ui,
         )
         return
     except ImportError:
@@ -1489,6 +1500,7 @@ def serve(
     sandbox: str = typer.Option(None, "--sandbox", help=t("commands.serve.options.sandbox")),
     backend: str = typer.Option("auto", "--backend", help=t("commands.serve.options.backend")),
     parallel: int = typer.Option(0, "--parallel", help=t("commands.serve.options.parallel")),
+    open_ui: bool = typer.Option(False, "--open", help=t("commands.serve.options.open")),
 ):
     """Start the API server (OpenAI + Ollama + Anthropic compatible)."""
     from hfl.api.server import start_server
@@ -1523,7 +1535,7 @@ def serve(
     _confirm_exposure(host, api_key)
 
     if tray:
-        _run_tray(host, port, api_key, model, log_level, json_logs)
+        _run_tray(host, port, api_key, model, log_level, json_logs, open_ui)
         return
 
     # Store context size override in state for lazy-load path
@@ -1541,6 +1553,10 @@ def serve(
     console.print("  Ollama:    POST /api/chat")
     if api_key:
         console.print(f"  [cyan]{t('messages.auth_required')}[/]")
+    if open_ui:
+        from hfl.utils.desktop import open_chat_when_ready
+
+        open_chat_when_ready(host, port)
     start_server(host=host, port=port, api_key=api_key)
 
 
@@ -3992,6 +4008,13 @@ def cli_main() -> None:
         from hfl.engine import _child_guard
 
         raise SystemExit(_child_guard.main([sys.argv[0], *sys.argv[2:]]))
+    from hfl.utils import desktop
+
+    if desktop.opened_as_mac_app(sys.argv):
+        # HFL.app opened from Finder: serve under the tray icon and open the
+        # chat, instead of printing the help to no terminal at all.
+        desktop.log_to_file()
+        sys.argv[1:] = desktop.APP_ARGS
     from hfl.utils.self_exec import watch_onefile_launcher
 
     watch_onefile_launcher()

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The installers work without a terminal.** HFL.app from the DMG ran
+  `hfl` with no arguments when opened from Finder: it printed the help to no
+  terminal and quit, so double-clicking it did nothing. Opened from Finder it
+  now serves under a menu-bar icon (no Dock icon), opens the chat page in the
+  browser and logs to `~/Library/Logs/HFL/hfl.log`; quitting it stops the
+  server. Run in a terminal with no arguments it still prints the help. The
+  MSI adds **HFL** to the Start menu, which does the same and hides the
+  console it starts in.
+- `serve --tray` failed in the standalone executables, the DMG and the MSI
+  ("Tray mode requires pystray and Pillow"): the macOS and Windows builds
+  now carry the tray.
+- HFL.app had no icon (`packaging/macos/hfl.icns` did not exist and the
+  workflow skipped it silently).
+
+### Added
+- `hfl serve --open` opens the chat page once the server answers; the tray
+  menu has **Open Chat** (also the click on the icon on Windows), and its
+  labels follow `HFL_LANG`.
+
 ## [0.27.1] - 2026-10-13
 
 ### Fixed

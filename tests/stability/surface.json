@@ -218,6 +218,7 @@
       "--json-logs",
       "--log-level",
       "--model",
+      "--open",
       "--parallel",
       "--port",
       "--sandbox",

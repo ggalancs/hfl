@@ -66,8 +66,9 @@ class TestBuildMenu:
         menu = _build_menu(ctrl)
         # pystray.Menu items are accessible
         items = list(menu)
-        # Should have: Start, Stop, separator, Status, URL, Version, separator, Exit
-        assert len(items) == 8
+        # Open Chat, separator, Start, Stop, separator, Status, URL, Version,
+        # separator, Exit
+        assert len(items) == 10
 
     def test_start_enabled_when_stopped(self):
         from hfl.tray.icon import _build_menu
@@ -76,7 +77,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.STOPPED
         menu = _build_menu(ctrl)
         items = list(menu)
-        start_item = items[0]
+        start_item = items[2]
         # pystray resolves callables via property
         assert start_item.enabled is True
 
@@ -87,7 +88,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.RUNNING
         menu = _build_menu(ctrl)
         items = list(menu)
-        start_item = items[0]
+        start_item = items[2]
         assert start_item.enabled is False
 
     def test_stop_enabled_when_running(self):
@@ -97,7 +98,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.RUNNING
         menu = _build_menu(ctrl)
         items = list(menu)
-        stop_item = items[1]
+        stop_item = items[3]
         assert stop_item.enabled is True
 
     def test_stop_disabled_when_stopped(self):
@@ -107,7 +108,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.STOPPED
         menu = _build_menu(ctrl)
         items = list(menu)
-        stop_item = items[1]
+        stop_item = items[3]
         assert stop_item.enabled is False
 
     def test_start_enabled_when_error(self):
@@ -117,7 +118,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.ERROR
         menu = _build_menu(ctrl)
         items = list(menu)
-        start_item = items[0]
+        start_item = items[2]
         assert start_item.enabled is True
 
     def test_status_text_shows_running(self):
@@ -127,7 +128,7 @@ class TestBuildMenu:
         ctrl._status = ServerStatus.RUNNING
         menu = _build_menu(ctrl)
         items = list(menu)
-        status_item = items[3]
+        status_item = items[5]
         # pystray resolves text callable via property
         assert "Running" in status_item.text
 
@@ -139,7 +140,7 @@ class TestBuildMenu:
         ctrl._error_message = "Port in use"
         menu = _build_menu(ctrl)
         items = list(menu)
-        status_item = items[3]
+        status_item = items[5]
         assert "Error" in status_item.text
         assert "Port in use" in status_item.text
 
@@ -149,7 +150,7 @@ class TestBuildMenu:
         ctrl = TrayServerController(host="0.0.0.0", port=8080)
         menu = _build_menu(ctrl)
         items = list(menu)
-        url_item = items[4]
+        url_item = items[6]
         assert url_item.text == "http://0.0.0.0:8080"
 
     def test_version_item_shows_version(self):
@@ -159,7 +160,7 @@ class TestBuildMenu:
         ctrl = TrayServerController()
         menu = _build_menu(ctrl)
         items = list(menu)
-        version_item = items[5]
+        version_item = items[7]
         assert version_item.text == f"HFL v{__version__}"
         # Informational only — must not be clickable.
         assert version_item.enabled is False
@@ -181,7 +182,7 @@ class TestMenuCallbacks:
 
         menu = _build_menu(ctrl)
         items = list(menu)
-        start_item = items[0]
+        start_item = items[2]
 
         mock_icon = MagicMock()
         # pystray's __call__(icon) calls action(icon, self)
@@ -198,7 +199,7 @@ class TestMenuCallbacks:
 
         menu = _build_menu(ctrl)
         items = list(menu)
-        stop_item = items[1]
+        stop_item = items[3]
 
         mock_icon = MagicMock()
         stop_item(mock_icon)
@@ -213,7 +214,7 @@ class TestMenuCallbacks:
 
         menu = _build_menu(ctrl)
         items = list(menu)
-        exit_item = items[7]
+        exit_item = items[9]
 
         mock_icon = MagicMock()
         exit_item(mock_icon)

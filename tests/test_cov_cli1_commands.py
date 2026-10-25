@@ -127,6 +127,28 @@ class TestTray:
         assert exc.value.exit_code == 1
         assert "needs a desktop session" in out()
 
+    def test_windows_hides_a_console_of_its_own_and_passes_open(self, monkeypatch):
+        from hfl.utils import desktop
+
+        calls: list[dict] = []
+        hid: list[bool] = []
+        icon = SimpleNamespace(run_tray=lambda **kw: calls.append(kw))
+        monkeypatch.setitem(sys.modules, "hfl.tray.icon", icon)
+        monkeypatch.setattr(main.sys, "platform", "win32")
+        monkeypatch.setattr(desktop, "hide_own_console", lambda: hid.append(True))
+        main._run_tray(*self._args(), True)
+        assert hid == [True]
+        assert calls[0]["open_ui"] is True
+
+    def test_macos_leaves_the_console_alone(self, monkeypatch):
+        from hfl.utils import desktop
+
+        icon = SimpleNamespace(run_tray=lambda **kw: None)
+        monkeypatch.setitem(sys.modules, "hfl.tray.icon", icon)
+        monkeypatch.setattr(main.sys, "platform", "darwin")
+        monkeypatch.setattr(desktop, "hide_own_console", lambda: pytest.fail("hidden"))
+        main._run_tray(*self._args())
+
     def test_runs_the_tray_with_the_servers_settings(self, monkeypatch):
         calls: list[dict] = []
         icon = SimpleNamespace(run_tray=lambda **kw: calls.append(kw))
@@ -142,6 +164,7 @@ class TestTray:
                 "log_level": "DEBUG",
                 "json_logs": True,
                 "auto_start": True,
+                "open_ui": False,
             }
         ]
 

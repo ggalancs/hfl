@@ -57,7 +57,7 @@ jobs:
           HFL_PYI_ICON: packaging/macos/hfl.icns
           HFL_PYI_LLAMA_CPP: build/llama.cpp
         run: |
-          pip install -e ".[llama]"
+          pip install -e ".[llama,tray]"
           # llama.cpp's llama-server, bundled (the pinned release, sha256
           # checked): GGUF models answer several requests at once.
           python scripts/fetch_llama_server.py build/llama.cpp
@@ -86,7 +86,7 @@ jobs:
           mkdir -p build/HFL.app/Contents/Resources
           cp dist/hfl build/HFL.app/Contents/MacOS/hfl
           chmod +x build/HFL.app/Contents/MacOS/hfl
-          cp packaging/macos/hfl.icns build/HFL.app/Contents/Resources/ || true
+          cp packaging/macos/hfl.icns build/HFL.app/Contents/Resources/
           cat > build/HFL.app/Contents/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -99,6 +99,8 @@ jobs:
             <key>CFBundleIconFile</key><string>hfl.icns</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>13.0</string>
+            <!-- A menu-bar app: the tray icon, no Dock icon. -->
+            <key>LSUIElement</key><true/>
           </dict></plist>
           PLIST
 

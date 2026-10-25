@@ -39,7 +39,8 @@
         "api_key": "Clave API para autenticación (recomendado para exposición en red)",
         "sandbox": "Endurecimiento del proceso al arrancar: none (por defecto), seccomp (Linux), macos. También HFL_SANDBOX.",
         "backend": "Backend: auto (según el modelo), llama-cpp, llama-server, transformers, vllm, mlx",
-        "parallel": "Peticiones que atiende a la vez cada modelo GGUF (usa llama-server de llama.cpp)"
+        "parallel": "Peticiones que atiende a la vez cada modelo GGUF (usa llama-server de llama.cpp)",
+        "open": "Abrir la página de chat en el navegador cuando el servidor responda"
       }
     },
     "list": {
@@ -724,5 +725,12 @@
       "confirm": "¿Descargarlo e instalarlo?",
       "done": "Instalado: {path}. hfl serve ya sirve los modelos GGUF con 4 peticiones a la vez."
     }
+  },
+  "tray": {
+    "open_chat": "Abrir el chat",
+    "start": "Arrancar el servidor",
+    "stop": "Parar el servidor",
+    "status": "Estado: {status}",
+    "exit": "Salir"
   }
 }

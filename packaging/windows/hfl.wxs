@@ -43,14 +43,32 @@
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="HFL" />
       </Directory>
+      <Directory Id="ProgramMenuFolder" />
     </Directory>
+
+    <Icon Id="HflIcon" SourceFile="packaging\windows\hfl.ico" />
+    <Property Id="ARPPRODUCTICON" Value="HflIcon" />
 
     <ComponentGroup Id="HflFiles" Directory="INSTALLFOLDER">
       <Component Id="HflExecutable" Guid="*" Win64="yes">
         <File
           Id="HflExe"
           Source="dist\hfl.exe"
-          KeyPath="yes" />
+          KeyPath="yes">
+          <!-- "HFL" in the Start menu: the server under its tray icon, and
+               the chat page in the browser. The console it starts in is
+               hidden by HFL itself once the tray is up. -->
+          <Shortcut
+            Id="HflStartMenu"
+            Directory="ProgramMenuFolder"
+            Name="HFL"
+            Description="Run Hugging Face models on this computer"
+            WorkingDirectory="INSTALLFOLDER"
+            Arguments="serve --tray --open"
+            Icon="HflIcon"
+            Show="minimized"
+            Advertise="yes" />
+        </File>
         <!-- Put the install dir on PATH so ``hfl`` works from any shell. -->
         <Environment
           Id="PathEnv"

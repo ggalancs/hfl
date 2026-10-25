@@ -194,6 +194,15 @@ def f6(a: Audit) -> str:
         timeout=900,
     )
     expect(added.returncode == 0, added.stderr[-300:])
+    if not sys.platform.startswith("linux"):
+        # The tray, which macos-dmg.yml, windows-msi.yml and build-executables.yml
+        # install on macOS and Windows: HFL.app and the Start-menu shortcut run it.
+        tray = subprocess.run(
+            ["uv", "pip", "install", "-q", "--python", str(python),
+             f"hfl[tray] @ {a.wheel().as_uri()}"],
+            capture_output=True, text=True, timeout=900,
+        )  # fmt: skip
+        expect(tray.returncode == 0, tray.stderr[-300:])
     out_dir = a.work / "pyi"
     # The audited install's own Python runs the fetch: the [llama] venv may
     # hold an older wheel.
@@ -262,7 +271,8 @@ _MSI_TABLES = r"""
 $wi = New-Object -ComObject WindowsInstaller.Installer
 $db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($args[0], 0))
 foreach ($q in @("SELECT Name, Value FROM Environment",
-                 "SELECT Property, Value FROM Property WHERE Property='ALLUSERS'")) {
+                 "SELECT Property, Value FROM Property WHERE Property='ALLUSERS'",
+                 "SELECT Shortcut, Arguments FROM Shortcut")) {
   $v = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($q))
   $v.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $v, $null)
   while ($r = $v.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $v, $null)) {
@@ -293,8 +303,9 @@ def f7(a: Audit) -> str:
     (build / "dist").mkdir()
     (build / "packaging" / "windows").mkdir(parents=True)
     shutil.copyfile(exe, build / "dist" / "hfl.exe")
-    rtf = Path("packaging") / "windows" / "LICENSE.rtf"
-    shutil.copyfile(REPO / rtf, build / rtf)
+    for asset in ("LICENSE.rtf", "hfl.ico"):
+        source = Path("packaging") / "windows" / asset
+        shutil.copyfile(REPO / source, build / source)
     import re
 
     pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
@@ -337,9 +348,12 @@ def f7(a: Audit) -> str:
         capture_output=True,
         text=True,
         timeout=120,
-    ).stdout.split()
+    ).stdout.splitlines()
+    tables = [t.strip() for t in tables if t.strip()]
     expect(any("PATH=" in t and "[INSTALLFOLDER]" in t for t in tables), f"no PATH entry: {tables}")
     expect("ALLUSERS=1" in tables, f"not for all users: {tables}")
+    # The Start-menu "HFL": the tray and the chat page (an advertised shortcut).
+    expect("HflStartMenu=serve --tray --open" in tables, f"no Start-menu shortcut: {tables}")
     manifest = REPO / "packaging" / "winget" / "manifests" / "g" / "ggalancs" / "HFL" / version
     winget = "winget manifest not checked (no winget here)"
     if shutil.which("winget") and manifest.is_dir():
@@ -349,4 +363,121 @@ def f7(a: Audit) -> str:
         expect(valid.returncode == 0, f"winget validate exit {valid.returncode}")
         winget = "winget manifest valid"
     size = msi.stat().st_size // 2**20
-    return f"{msi.name} {size} MB: ICE passed, extracts F6's hfl.exe, runs, on PATH; {winget}"
+    return (
+        f"{msi.name} {size} MB: ICE passed, extracts F6's hfl.exe, runs, on PATH, "
+        f"Start-menu shortcut; {winget}"
+    )
+
+
+# The audit's HFL.app answers to its own bundle id: quitting it must never
+# reach an HFL.app the user has open.
+_AUDIT_BUNDLE = "com.ggalancs.hfl.audit"
+
+
+@check("F8", "HFL.app opened from Finder: tray, server, chat page", needs=("F6",))
+def f8(a: Audit) -> str:
+    """The app in the DMG as Finder opens it: F6's executable in an HFL.app
+    with macos-dmg.yml's own Info.plist, opened with ``open``. It must serve,
+    show its tray icon, open the chat page in the browser (``BROWSER``, a
+    script that writes the address down) and log to ~/Library/Logs/HFL;
+    quitting it as macOS does (an Apple Event) must stop the server and
+    leave nothing running. Run in a terminal with no arguments, the same
+    executable still prints the help. Until 0.27.1 the app printed the help
+    to no terminal and quit: double-clicking it did nothing."""
+    if sys.platform != "darwin":
+        raise Uncheckable("HFL.app: needs macOS")
+    import plistlib
+    import re
+    import socket
+    import tempfile
+    import textwrap
+
+    binary = a.work / "pyi" / "dist" / "hfl"
+    expect(binary.exists(), "F6 built no executable")
+    root = Path(tempfile.mkdtemp(prefix="app-", dir=a.work))
+    app = root / "HFL.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    (app / "Contents" / "Resources").mkdir()
+    shutil.copy2(binary, app / "Contents" / "MacOS" / "hfl")
+    icon = REPO / "packaging" / "macos" / "hfl.icns"
+    shutil.copyfile(icon, app / "Contents" / "Resources" / icon.name)
+    workflow = (REPO / ".github" / "workflows" / "macos-dmg.yml").read_text(encoding="utf-8")
+    found = re.search(r"<<'PLIST'\n(.*?)\n\s*PLIST\n", workflow, re.S)
+    expect(found, "macos-dmg.yml writes no Info.plist")
+    plist = textwrap.dedent(found.group(1)).replace("com.ggalancs.hfl", _AUDIT_BUNDLE)  # type: ignore[union-attr]
+    (app / "Contents" / "Info.plist").write_text(plist, encoding="utf-8")
+    info = plistlib.loads(plist.encode())
+    part = Parts()
+    part("a menu-bar app (LSUIElement)", lambda: expect(info.get("LSUIElement") is True, info))
+    home = root / "home"
+    home.mkdir()
+    opened = root / "browser.txt"
+    recorder = root / "browser.sh"
+    recorder.write_text(f'#!/bin/sh\necho "$1" >> "{opened}"\n')
+    recorder.chmod(0o755)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+
+    def answers() -> bool:
+        try:
+            return httpx.get(base + "/healthz", timeout=2).status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    def running() -> list[str]:
+        found = subprocess.run(["pgrep", "-f", str(app)], capture_output=True, text=True)
+        return found.stdout.split()
+
+    def wait(what, seconds: float) -> bool:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if what():
+                return True
+            time.sleep(0.5)
+        return bool(what())
+
+    env = {"HFL_PORT": str(port), "HOME": str(home), "HFL_HOME": str(home / ".hfl"),
+           "BROWSER": f"{recorder} %s"}  # fmt: skip
+    launch = ["open", "-n", *[x for k, v in env.items() for x in ("--env", f"{k}={v}")], str(app)]
+    started = subprocess.run(launch, capture_output=True, text=True, timeout=60)
+    expect(started.returncode == 0, f"open: {started.stderr[-300:]}")
+    log = home / "Library" / "Logs" / "HFL" / "hfl.log"
+    try:
+        part("serves", lambda: expect(wait(answers, 120), f"no answer on {base}"))
+        wanted = f"{base}/ui"
+        part(
+            "opens the chat page",
+            lambda: expect(
+                wait(lambda: opened.exists() and wanted in opened.read_text(), 30),
+                opened.read_text() if opened.exists() else "the browser was never asked",
+            ),
+        )
+        part(
+            "tray icon, and its log",
+            lambda: expect(
+                log.exists() and "Starting tray icon" in log.read_text(errors="replace"),
+                log.read_text(errors="replace")[-300:] if log.exists() else f"no {log}",
+            ),
+        )
+    finally:
+        subprocess.run(
+            ["osascript", "-e", f'tell application id "{_AUDIT_BUNDLE}" to quit'],
+            capture_output=True, timeout=60,
+        )  # fmt: skip
+        stopped = wait(lambda: not running(), 30)
+        if not stopped:  # the harness ends what it started
+            for pid in running():
+                subprocess.run(["kill", "-9", pid], capture_output=True)
+    part("quitting stops everything", lambda: expect(stopped and not answers(), running()))
+    term = subprocess.run(
+        ["script", "-q", "/dev/null", str(app / "Contents" / "MacOS" / "hfl")],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
+    )  # fmt: skip
+    shown = term.stdout.decode(errors="replace")
+    part(
+        "a terminal still gets the help",
+        lambda: expect("Usage" in shown and not answers(), shown[-300:]),
+    )
+    return part.verdict()

@@ -131,6 +131,18 @@ hidden_imports = [
     'encodings.latin_1',
 ]
 
+# The tray (``serve --tray``, which HFL.app and the Start-menu shortcut run):
+# pystray and Pillow, and pyobjc on macOS. Only when installed: the macOS and
+# Windows builds install the ``tray`` extra; Linux has no desktop session to
+# show it in. pystray picks its backend at run time, so it is named here.
+tray_imports = []
+if importlib.util.find_spec('pystray') is not None:
+    tray_imports = ['pystray', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont']
+    if sys.platform == 'darwin':
+        tray_imports += ['pystray._darwin', 'AppKit', 'Foundation', 'objc', 'PyObjCTools.MachSignals']
+    elif sys.platform == 'win32':
+        tray_imports += ['pystray._win32']
+
 # Additional data to include
 datas = rich_data + hfl_data + native_datas
 
@@ -145,7 +157,6 @@ excludes = [
     'matplotlib',
     'scipy',
     'pandas',
-    'PIL',
     'cv2',
     'IPython',
     'jupyter',
@@ -156,13 +167,15 @@ excludes = [
     'wheel',
     'pip',
 ]
+if not tray_imports:
+    excludes.append('PIL')
 
 a = Analysis(
     ['src/hfl/cli/main.py'],
     pathex=[],
     binaries=native_binaries,
     datas=datas,
-    hiddenimports=hidden_imports + rich_imports + native_imports,
+    hiddenimports=hidden_imports + rich_imports + native_imports + tray_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

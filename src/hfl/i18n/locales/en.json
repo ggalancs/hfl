@@ -39,7 +39,8 @@
         "api_key": "API key for authentication (recommended for network exposure)",
         "sandbox": "Process hardening at startup: none (default), seccomp (Linux), macos. Also HFL_SANDBOX.",
         "backend": "Backend: auto (chosen per model), llama-cpp, llama-server, transformers, vllm, mlx",
-        "parallel": "Requests each GGUF model serves at once (uses llama.cpp's llama-server)"
+        "parallel": "Requests each GGUF model serves at once (uses llama.cpp's llama-server)",
+        "open": "Open the chat page in the browser once the server answers"
       }
     },
     "list": {
@@ -724,5 +725,12 @@
       "confirm": "Download and install it?",
       "done": "Installed: {path}. hfl serve now serves GGUF models with 4 requests at once."
     }
+  },
+  "tray": {
+    "open_chat": "Open Chat",
+    "start": "Start Server",
+    "stop": "Stop Server",
+    "status": "Status: {status}",
+    "exit": "Exit"
   }
 }

@@ -51,8 +51,9 @@ class _Menu:
 
 
 class _MenuItem:
-    def __init__(self, text, action, enabled=True) -> None:
+    def __init__(self, text, action, enabled=True, default=False) -> None:
         self.text, self.action, self.enabled = text, action, enabled
+        self.default = default
 
 
 class _Icon:
@@ -110,6 +111,7 @@ class _Ctrl:
         self.status = status
         self.error_message: str | None = None
         self.url = "http://127.0.0.1:11434"
+        self.host, self.port = "127.0.0.1", 11434
         self._start, self._stop = start, stop
         self.started = self.stopped = 0
 
@@ -180,11 +182,26 @@ def _items(menu: _Menu) -> dict:
     return named
 
 
+def test_open_chat_is_the_default_item_and_opens_the_chat_page(gui, monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(tray_icon.webbrowser, "open", opened.append)
+    ctrl = _Ctrl(ServerStatus.STOPPED)
+    menu = tray_icon._build_menu(ctrl)  # type: ignore[arg-type]
+    chat = menu.items[0]
+    assert chat.text == "Open Chat" and chat.default is True
+    assert [item for item in menu.items if getattr(item, "default", False)] == [chat]
+    assert chat.enabled(None) is False
+    ctrl.status = ServerStatus.RUNNING
+    assert chat.enabled(None) is True
+    chat.action(None, None)
+    assert opened == ["http://127.0.0.1:11434/ui"]
+
+
 def test_the_menu_and_what_is_enabled(gui) -> None:
     ctrl = _Ctrl(ServerStatus.STOPPED)
     menu = tray_icon._build_menu(ctrl)  # type: ignore[arg-type]
     items = _items(menu)
-    assert menu.items.count(_Menu.SEPARATOR) == 2
+    assert menu.items.count(_Menu.SEPARATOR) == 3
     start, stop = items["Start Server"], items["Stop Server"]
     assert start.enabled(None) is True and stop.enabled(None) is False
     ctrl.status = ServerStatus.ERROR
@@ -378,6 +395,29 @@ def test_run_tray_whose_icon_never_appears_gives_up(gui, monkeypatch, sync_threa
     monkeypatch.setattr(tray_icon.HFLTrayIcon, "run", lambda self: None)  # never builds an icon
     tray_icon.run_tray()
     sync_threads[0]()  # waits its 20 turns, schedules nothing
+
+
+def test_run_tray_open_ui_opens_the_chat_once_started(gui, monkeypatch, sync_threads) -> None:
+    from hfl.utils import desktop
+
+    ctrl = _Ctrl()
+    opened: list[tuple[str, int]] = []
+    monkeypatch.setattr(tray_icon, "TrayServerController", lambda **kw: ctrl)
+    monkeypatch.setattr(tray_icon, "_stop_on_macos_quit", lambda c: None)
+    monkeypatch.setattr(desktop, "open_chat_when_ready", lambda h, p: opened.append((h, p)))
+    tray_icon.run_tray(host="0.0.0.0", port=8080, open_ui=True)  # noqa: S104
+    assert ctrl.started == 1 and opened == [("0.0.0.0", 8080)]  # noqa: S104
+
+
+def test_run_tray_without_open_ui_opens_nothing(gui, monkeypatch, sync_threads) -> None:
+    from hfl.utils import desktop
+
+    ctrl = _Ctrl()
+    monkeypatch.setattr(tray_icon, "TrayServerController", lambda **kw: ctrl)
+    monkeypatch.setattr(tray_icon, "_stop_on_macos_quit", lambda c: None)
+    monkeypatch.setattr(desktop, "open_chat_when_ready", lambda h, p: pytest.fail("opened"))
+    tray_icon.run_tray()
+    assert ctrl.started == 1
 
 
 def test_run_tray_without_auto_start(gui, monkeypatch, sync_threads) -> None:

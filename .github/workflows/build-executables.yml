@@ -49,6 +49,12 @@ jobs:
           pip install pyinstaller
           pip install -e .
 
+      # The tray, which `serve --tray` needs: macOS and Windows only (Linux
+      # executables run without a desktop session).
+      - name: Install the tray
+        if: ${{ matrix.platform != 'linux' }}
+        run: pip install -e ".[tray]"
+
       # llama.cpp is always in the executable: without it no GGUF model runs
       # (the 0.22.0 executables could not run any). Linux and Windows take the
       # prebuilt CPU wheel, built for any x86-64 CPU. macOS builds from
