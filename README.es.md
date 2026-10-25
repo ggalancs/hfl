@@ -13,7 +13,7 @@ con OpenAI, Ollama y Anthropic. Sin cuenta. Sin nube propia, por diseño.
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fggalancs%2Fhfl-2496ED.svg)](https://github.com/ggalancs/hfl/pkgs/container/hfl)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 
-[Empezar](#empezar) · [Por qué HFL](#por-qué-hfl) · [Instalación](#instalación) · [Uso](#uso) · [API](#conecta-tus-herramientas) · [Documentación](#documentación) · **[English](README.md)**
+[Empezar](#empezar) · [Qué puedes hacer](#qué-puedes-hacer-con-hfl) · [Por qué HFL](#por-qué-hfl) · [Instalación](#instalación) · [Uso](#uso) · [API](#conecta-tus-herramientas) · [Documentación](#documentación) · **[English](README.md)**
 
 </div>
 
@@ -47,6 +47,29 @@ modelos busca en el Hub, descarga (con progreso) y borra modelos: son operacione
 dueño, así que la página solo puede hacerlas si arrancas HFL con
 `HFL_ORIGINS=http://127.0.0.1:11434` (eso confía en todas las páginas servidas en esa
 dirección, también `/docs`, que carga scripts de un CDN).
+
+## Qué puedes hacer con HFL
+
+- **Chatear con cualquier modelo del Hub, en privado y sin conexión**:
+  `hfl start` elige uno que cabe en esta máquina; `hfl run <repo>` ejecuta el
+  que digas.
+- **Dar un modelo local a tus aplicaciones**: todo lo que hable OpenAI,
+  Ollama o Anthropic — Open WebUI, Continue, aider, LangChain, LiteLLM, tu
+  propio código — habla con `http://localhost:11434` (`hfl serve`).
+  [Recetas](https://github.com/ggalancs/hfl/blob/main/docs/integrations.md), cada una probada de verdad.
+- **Agentes de código en tu propia máquina**: `hfl launch claude -m <modelo>`
+  (o `codex`).
+- **Búsqueda y RAG sobre tus documentos**: embeddings en `/v1/embeddings` y
+  `/api/embed`, con un modelo de embeddings del Hub.
+- **Voz e imágenes**: transcripción (`/v1/audio/transcriptions`), síntesis
+  (`hfl tts`) y generación de imágenes (`/v1/images/generations`), con los
+  extras `stt`, `tts` e `imagegen`.
+- **Encontrar lo que cabe**: `hfl search "coding assistant 7b"`,
+  `hfl recommend`.
+- **Sin terminal**: la app de Mac y la entrada del menú Inicio de Windows
+  sirven desde un icono de la bandeja y abren una página de chat.
+- **Como servicio**: systemd, Docker Compose, Kubernetes, detrás de TLS —
+  [la guía de producción](https://github.com/ggalancs/hfl/blob/main/docs/production.md).
 
 ## Por qué HFL
 
@@ -475,9 +498,11 @@ cubre los módulos, la selección del motor, el proceso de conversión y cada en
 - [Contrato de estabilidad](https://github.com/ggalancs/hfl/blob/main/docs/stability.md) — qué es público y cómo cambia (primero se depreca; SemVer desde 1.0)
 - [Registro de cambios](CHANGELOG.md)
 
-**Estado:** beta, con más de 4.000 tests y ~90 % de cobertura. La auditoría
-local completa (`audit/`) se ejecuta en macOS, Linux y Windows 10; los
-instaladores de Windows (MSI, winget) están menos probados que el resto.
+**Estado:** beta, con 1.0 en preparación: más de 6.000 tests y un 96 % de
+cobertura (el 90 % es obligatorio, en total y por componente). La auditoría
+local completa (`audit/`, 217 comprobaciones ejecutadas de verdad) corre en
+macOS, Linux y Windows 10, y en GPUs NVIDIA y AMD; los instaladores de Windows
+(MSI, winget) están menos probados que el resto.
 
 ## Contribuir
 

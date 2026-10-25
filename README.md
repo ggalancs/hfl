@@ -13,7 +13,7 @@ Ollama- and Anthropic-compatible API. No account. No cloud of its own — by des
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fggalancs%2Fhfl-2496ED.svg)](https://github.com/ggalancs/hfl/pkgs/container/hfl)
 [![CI](https://github.com/ggalancs/hfl/actions/workflows/ci.yml/badge.svg)](https://github.com/ggalancs/hfl/actions/workflows/ci.yml)
 
-[Quick start](#quick-start) · [Why HFL](#why-hfl) · [Install](#install) · [Use it](#use-it) · [API](#connect-your-tools) · [Docs](#documentation) · **[Español](https://github.com/ggalancs/hfl/blob/main/README.es.md)**
+[Quick start](#quick-start) · [What you can do](#what-you-can-do-with-it) · [Why HFL](#why-hfl) · [Install](#install) · [Use it](#use-it) · [API](#connect-your-tools) · [Docs](#documentation) · **[Español](https://github.com/ggalancs/hfl/blob/main/README.es.md)**
 
 </div>
 
@@ -47,6 +47,26 @@ them. Its model panel searches the Hub, downloads (with progress) and deletes
 models — owner operations, so the page is allowed them only once you start HFL
 with `HFL_ORIGINS=http://127.0.0.1:11434` (that trusts every page served at
 that address, including `/docs`, which loads scripts from a CDN).
+
+## What you can do with it
+
+- **Chat with any model on the Hub, privately and offline**: `hfl start` picks
+  one that fits this machine; `hfl run <repo>` runs the one you name.
+- **Give your apps a local model**: anything that speaks OpenAI, Ollama or
+  Anthropic — Open WebUI, Continue, aider, LangChain, LiteLLM, your own code
+  — talks to `http://localhost:11434` (`hfl serve`). [Recipes](https://github.com/ggalancs/hfl/blob/main/docs/integrations.md), each run for real.
+- **Run coding agents on your own machine**: `hfl launch claude -m <model>`
+  (or `codex`).
+- **Search and RAG over your documents**: embeddings at `/v1/embeddings` and
+  `/api/embed`, from an embedding model on the Hub.
+- **Speech and images**: transcription (`/v1/audio/transcriptions`), speech
+  (`hfl tts`), image generation (`/v1/images/generations`), with the
+  `stt`, `tts` and `imagegen` extras.
+- **Find what fits**: `hfl search "coding assistant 7b"`, `hfl recommend`.
+- **No terminal needed**: the Mac app and the Windows Start menu entry serve
+  from a tray icon and open a chat page.
+- **Run it as a service**: systemd, Docker Compose, Kubernetes, behind TLS —
+  [the production guide](https://github.com/ggalancs/hfl/blob/main/docs/production.md).
 
 ## Why HFL
 
@@ -469,9 +489,11 @@ covers the modules, engine selection, the conversion pipeline and every endpoint
 - [Stability contract](https://github.com/ggalancs/hfl/blob/main/docs/stability.md) — what is public, and how it changes (deprecation first; SemVer from 1.0)
 - [Changelog](https://github.com/ggalancs/hfl/blob/main/CHANGELOG.md)
 
-**Status:** beta — 4,000+ tests at ~90% coverage. The full local audit
-(`audit/`) runs on macOS, Linux and Windows 10; the Windows installers
-(MSI, winget) are less tested than the rest.
+**Status:** beta, with 1.0 in preparation — 6,000+ tests at 96% coverage
+(90% enforced, in total and per component). The full local audit (`audit/`,
+217 checks run for real) runs on macOS, Linux and Windows 10, and on NVIDIA
+and AMD GPUs; the Windows installers (MSI, winget) are less tested than the
+rest.
 
 ## Contributing
 
