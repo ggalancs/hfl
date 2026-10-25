@@ -24,7 +24,19 @@ local machine.
    recipe in `audit/README.md`) and Windows. "Not checkable here" is fine;
    "broken" is not. Do not bump the version while an audit runs (B36
    compares the built wheel with `pyproject.toml`).
-4. **Every changed workflow, reproduced locally.** What the packaging
+4. **Security, beyond what CI scans**, all at 0 findings:
+   - `bash scripts/audit_extras.sh`: pip-audit over `hfl[all]` resolved for
+     Linux, macOS and Windows (security.yml's own scan covers the core only;
+     Pillow's advisories in `[tray]`/`[imagegen]` went unseen that way). Its
+     exceptions each say why they cannot reach HFL.
+   - gitleaks over the history and CodeQL over the tracked files (the CodeQL
+     bundle runs locally; a local 0 matched GitHub's result before).
+   - grype over the published images, after the Docker workflow:
+     `grype registry:ghcr.io/ggalancs/hfl:X.Y.Z --only-fixed` (and `-all`).
+     An image is a frozen copy of Debian and of every wheel: 0.27.1's carried
+     curl's critical CVEs a rebuild would have fixed. Rebuild the images when
+     a fixed critical or high advisory shows up, release or not.
+5. **Every changed workflow, reproduced locally.** What the packaging
    workflows check is in scripts that run anywhere:
    - `scripts/image_check.py <image>` — the Docker image as a user runs it;
      build both variants (`HFL_EXTRAS=llama` and `all`) for both

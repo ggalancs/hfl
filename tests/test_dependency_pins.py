@@ -285,3 +285,13 @@ def test_transformers_brings_bitsandbytes_off_macos() -> None:
     assert not bnb.marker.evaluate({"sys_platform": "darwin", "extra": ""})
     for platform in ("linux", "win32"):
         assert bnb.marker.evaluate({"sys_platform": platform, "extra": ""}), platform
+
+
+def test_hfl_never_uses_a_disk_cache():
+    """scripts/audit_extras.sh excepts diskcache's advisory (it unpickles its
+    cache directory; it comes with llama-cpp-python) because HFL never uses a
+    disk cache. A use of one would make that exception false."""
+    src = Path(__file__).resolve().parents[1] / "src" / "hfl"
+    pattern = re.compile(r"\bdiskcache\b|LlamaDiskCache")
+    users = [p.name for p in src.rglob("*.py") if pattern.search(p.read_text(encoding="utf-8"))]
+    assert users == []

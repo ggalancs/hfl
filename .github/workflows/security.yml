@@ -37,6 +37,25 @@ jobs:
       - name: Run pip-audit
         run: pip-audit --strict
 
+  extras-scan:
+    name: Dependency Scan (every extra, every platform)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit and uv
+        run: python -m pip install --upgrade "pip>=26.1" pip-audit uv
+
+      # dependency-scan above installs the core alone: Pillow 12.3.0's
+      # advisories in [tray] and [imagegen] went unseen that way.
+      - name: Audit hfl[all] for Linux, macOS and Windows
+        run: bash scripts/audit_extras.sh
+
   secrets-scan:
     name: Secrets Detection
     runs-on: ubuntu-latest
