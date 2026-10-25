@@ -612,9 +612,31 @@ def api_draft(a: Audit) -> str:
 
 @check("B24", "GET /api/recommend")
 def api_recommend(a: Audit) -> str:
-    out = _c(a).get("/api/recommend", params={"task": "chat", "top_n": 3})
-    expect(out.status_code == 200 and "/" in out.text, out.text[:300])
-    return out.text[:120]
+    """Models that fit this machine. The default list scores the Hub's 60
+    most popular, and on a small machine (the 4 GB Linux VM) none of
+    today's may fit (2026-10-25): then small Qwen GGUFs (published from 0.5B
+    up) must be recommended. What is recommended must fit the budget."""
+    c = _c(a)
+    out = c.get("/api/recommend", params={"task": "chat", "top_n": 3})
+    expect(out.status_code == 200, out.text[:300])
+    data = out.json()
+    hw = data["hardware_profile"]
+    gpu = hw["gpu_kind"] in ("cuda", "metal") and hw["gpu_vram_gb"]
+    budget = hw["gpu_vram_gb"] if gpu else round((hw["system_ram_gb"] or 8.0) * 0.7, 1)
+    recs = data["recommendations"]
+    if not recs:
+        out = c.get(
+            "/api/recommend",
+            params={"task": "chat", "family": "qwen", "quantization": "gguf", "top_n": 3},
+        )
+        expect(out.status_code == 200, out.text[:300])
+        recs = out.json()["recommendations"]
+        expect(recs, f"nothing recommended for {budget} GB, not even a small Qwen GGUF")
+    over = [r["repo_id"] for r in recs if r["estimated_vram_gb"] > budget]
+    expect(not over, f"recommended beyond the {budget} GB budget: {over}")
+    picks = ", ".join(f"{r['repo_id']} ({r['estimated_vram_gb']} GB)" for r in recs)
+    scope = "" if data["recommendations"] else "none of the most popular fits; "
+    return f"{scope}{picks} within {budget} GB"
 
 
 @check("B21", "POST /api/pull")

@@ -115,6 +115,19 @@ class TestHardwareFit:
         assert score > 0.0
         assert vram < 11.2
 
+    def test_a_gguf_repo_is_sized_as_the_file_hfl_pulls(self):
+        """The format is not a level: a GGUF repo is pulled as its Q4_K_M.
+        Sized as f16, a 0.6B GGUF overflowed a 4 GB machine (2.66 GB
+        budget), which was recommended nothing."""
+        small = _profile(kind="none", vram=None, ram=3.8)
+        score, vram, _ = _hardware_fit(_entry(parameter_estimate_b=0.6, quantization="gguf"), small)
+        assert score > 0.0
+        assert (
+            vram == _hardware_fit(_entry(parameter_estimate_b=0.6, quantization="q4_k_m"), small)[1]
+        )
+        # The same model as safetensors stays f16: that is what it weighs.
+        assert _hardware_fit(_entry(parameter_estimate_b=0.6), small)[0] == 0.0
+
 
 # --- _capability_fit --------------------------------------------------------
 

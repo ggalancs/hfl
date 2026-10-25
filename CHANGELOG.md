@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now carry the tray.
 - HFL.app had no icon (`packaging/macos/hfl.icns` did not exist and the
   workflow skipped it silently).
+- `hfl recommend` and `/api/recommend` sized a GGUF repository as f16, about
+  three times the Q4_K_M file `hfl pull` downloads from it, and left out
+  what fits: a 4 GB machine was recommended nothing (a 0.6B GGUF counted
+  2.8 GB). Measured on the Hub: with 3.8 GB, Qwen2.5-Coder 0.5B and 1.5B
+  GGUF (1.8 and 2.5 GB) are recommended now.
 
 ### Changed
 - Dependencies: `huggingface-hub` 2.x is allowed (`<3.0`; transformers,

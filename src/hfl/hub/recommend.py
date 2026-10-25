@@ -62,6 +62,13 @@ class Recommendation:
 # ---------------------------------------------------------------------------
 
 
+# ``DiscoveryEntry.quantization`` is a repo's format, not a level. A GGUF
+# repo holds several files, and ``hfl pull`` takes its Q4_K_M: sized as the
+# table's f16 fallback instead, a 0.6B GGUF needed 2.8 GB, and a 4 GB
+# machine was recommended nothing (Linux audit, 2026-10-25).
+_LEVEL_PULLED = {"gguf": "q4_k_m"}
+
+
 def _hardware_fit(
     entry: DiscoveryEntry, profile: HardwareProfile
 ) -> tuple[float, float, list[str]]:
@@ -73,6 +80,7 @@ def _hardware_fit(
     reasons: list[str] = []
     params_b = entry.parameter_estimate_b or 7.0  # default to 7B
     quant = entry.quantization or "f16"
+    quant = _LEVEL_PULLED.get(quant.lower(), quant)
 
     # Pick a budget. CUDA: VRAM. Apple Silicon: 70% of unified RAM.
     # CPU-only / unknown: 70% of system RAM.
