@@ -35,6 +35,26 @@ class TestWiXRecipe:
         assert "PATH" in self.text
         assert 'Action="set"' in self.text
 
+    def test_the_start_menu_shortcut_builds(self):
+        """An advertised shortcut failed light's ICE50 (its icon must be
+        named like the target, an .exe), so the 0.28.0 candidate's MSI did
+        not build: found on Windows, which this test cannot run."""
+        import xml.etree.ElementTree as ET
+
+        ns = {"w": "http://schemas.microsoft.com/wix/2006/wi"}
+        root = ET.fromstring(self.text)
+        (shortcut,) = root.findall(".//w:Shortcut", ns)
+        assert shortcut.get("Advertise") in (None, "no")
+        assert shortcut.get("Target") == "[#HflExe]"
+        assert shortcut.get("Arguments") == "serve --tray --open"
+        icons = {i.get("Id") for i in root.findall(".//w:Icon", ns)}
+        assert shortcut.get("Icon") in icons and shortcut.get("Icon", "").endswith(".ico")
+        (component,) = [
+            c for c in root.findall(".//w:Component", ns) if c.find("w:Shortcut", ns) is not None
+        ]
+        (key,) = [r for r in component.findall("w:RegistryValue", ns) if r.get("KeyPath") == "yes"]
+        assert key.get("Root") == "HKCU"  # ICE38 / ICE43
+
 
 class TestWindowsWorkflow:
     def setup_method(self):

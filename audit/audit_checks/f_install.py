@@ -48,6 +48,18 @@ def f3(a: Audit) -> str:
     vLLM brings, broke the load's stderr silencing): CI caught it at release."""
     if shutil.which("docker") is None:
         raise Uncheckable("docker not installed")
+    # Installed but not running (Docker Desktop closed) cannot build either:
+    # not a broken image, an image that could not be built here.
+    engine = subprocess.run(
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=120,
+    )
+    if engine.returncode != 0:
+        said = (engine.stderr.strip().splitlines() or ["no output"])[-1]
+        raise Uncheckable(f"Docker's engine is not running: {said[:200]}")
     pruned = _prune_build_cache("first")
     part = Parts()
     try:
@@ -272,7 +284,9 @@ $wi = New-Object -ComObject WindowsInstaller.Installer
 $db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($args[0], 0))
 foreach ($q in @("SELECT Name, Value FROM Environment",
                  "SELECT Property, Value FROM Property WHERE Property='ALLUSERS'",
-                 "SELECT Shortcut, Arguments FROM Shortcut")) {
+                 "SELECT Shortcut, Arguments FROM Shortcut",
+                 "SELECT Shortcut, Target FROM Shortcut",
+                 "SELECT Shortcut, Icon_ FROM Shortcut")) {
   $v = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($q))
   $v.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $v, $null)
   while ($r = $v.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $v, $null)) {
@@ -352,8 +366,12 @@ def f7(a: Audit) -> str:
     tables = [t.strip() for t in tables if t.strip()]
     expect(any("PATH=" in t and "[INSTALLFOLDER]" in t for t in tables), f"no PATH entry: {tables}")
     expect("ALLUSERS=1" in tables, f"not for all users: {tables}")
-    # The Start-menu "HFL": the tray and the chat page (an advertised shortcut).
+    # The Start-menu "HFL": the tray and the chat page. A shortcut to the
+    # file (an advertised one targets the feature), with an icon whose name
+    # ends in .ico, which Explorer reads it by.
     expect("HflStartMenu=serve --tray --open" in tables, f"no Start-menu shortcut: {tables}")
+    expect("HflStartMenu=[#HflExe]" in tables, f"the shortcut does not run hfl.exe: {tables}")
+    expect("HflStartMenu=HflIcon.ico" in tables, f"the shortcut's icon: {tables}")
     manifest = REPO / "packaging" / "winget" / "manifests" / "g" / "ggalancs" / "HFL" / version
     winget = "winget manifest not checked (no winget here)"
     if shutil.which("winget") and manifest.is_dir():
