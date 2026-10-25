@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HFL.app had no icon (`packaging/macos/hfl.icns` did not exist and the
   workflow skipped it silently).
 
+### Changed
+- Dependencies: `huggingface-hub` 2.x is allowed (`<3.0`; transformers,
+  tokenizers, diffusers and sentence-transformers accept it now), fastapi up
+  to 0.162 and pydantic 2.14. Checked on Python 3.10, 3.12, 3.13 and 3.14;
+  CI tests 3.10–3.14.
+
+### Security
+- Pillow 13.0.0 or later (on Python 3.11+) for the `[tray]` and `[imagegen]`
+  extras: 12.3.0 carries 5 critical and 13 high advisories that 13.0.0
+  fixes. HFL's own code never decodes a user's image with Pillow, so none
+  was reachable through HFL.
+
 ### Added
 - `hfl serve --open` opens the chat page once the server answers; the tray
   menu has **Open Chat** (also the click on the icon on Windows), and its

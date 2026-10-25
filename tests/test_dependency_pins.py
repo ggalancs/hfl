@@ -72,7 +72,7 @@ class TestStaticPyprojectPins:
         deps = _load_pyproject()["project"]["dependencies"]
         assert _find_pin(deps, "psutil"), "psutil must be a core dependency"
 
-    def test_huggingface_hub_pin_targets_1x(self):
+    def test_huggingface_hub_pin_targets_1x_and_2x(self):
         cfg = _load_pyproject()
         deps = cfg["project"]["dependencies"]
         pin = _find_pin(deps, "huggingface-hub")
@@ -85,10 +85,10 @@ class TestStaticPyprojectPins:
             "Dropping below 1.5 re-introduces the is_offline_mode "
             "ImportError chain that crashed convert_hf_to_gguf.py."
         )
-        # <2.0 until tokenizers & co allow 2.x: with <3.0, [stt] resolved
-        # tokenizers 0.13.3 (no wheel, needs Rust). See pyproject.
-        assert "<2.0" in pin or "<2," in pin, (
-            f"huggingface-hub pin must stay below 2.0 until the ecosystem allows it: {pin!r}"
+        # <3.0: transformers, tokenizers, diffusers and sentence-transformers
+        # all ask <3.0 since October 2026. See pyproject.
+        assert "<3.0" in pin or "<3," in pin, (
+            f"huggingface-hub pin must stay below 3.0 until the ecosystem allows it: {pin!r}"
         )
 
     @pytest.mark.parametrize("extra_name", ["transformers", "tts"])
@@ -231,11 +231,11 @@ class TestTransformersImportChain:
         tx_major = int(transformers.__version__.split(".")[0])
         hh_major = int(huggingface_hub.__version__.split(".")[0])
         if tx_major == 5:
-            assert hh_major == 1, (
-                f"transformers 5.x requires huggingface_hub 1.x, got "
+            assert hh_major in (1, 2), (
+                f"transformers 5.x requires huggingface_hub 1.x or 2.x, got "
                 f"{huggingface_hub.__version__}. Run "
                 f"``pip install --upgrade --force-reinstall "
-                f"'huggingface-hub>=1.0.0,<2.0'``."
+                f"'huggingface-hub>=1.5.0,<3.0'``."
             )
         elif tx_major == 4:
             pytest.fail(
@@ -243,7 +243,7 @@ class TestTransformersImportChain:
                 "longer supported by HFL. Upgrade with "
                 "``pip install --upgrade "
                 "'transformers>=5.0.0,<6.0' "
-                "'huggingface-hub>=1.0.0,<2.0'``."
+                "'huggingface-hub>=1.5.0,<3.0'``."
             )
         else:
             pytest.fail(f"unexpected transformers major: {tx_major}")

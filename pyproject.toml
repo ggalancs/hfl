@@ -40,6 +40,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -49,16 +50,15 @@ dependencies = [
     # PRs — after a full-suite green run. Bump the cap deliberately, not with ~=.
     "typer>=0.15.0,<1.0",
     "rich>=13.0,<16",
-    # huggingface_hub 1.x. HFL's code also runs on 2.0 (checked 2026-09-28:
-    # the suite, Hub timeouts, offline detection, pull/serve for real), but
-    # the cap stays <2.0: tokenizers, transformers 5.x, diffusers and
-    # sentence-transformers still require <2.0, and with <3.0 a resolver
-    # took hub 2.0 and backtracked [stt]'s tokenizers to 0.13.3, which has
-    # no wheel for Python 3.12 and needs a Rust compiler (the local audit's
-    # C13). Raise it when they allow 2.x. Floor >=1.5.0: transformers 5.x
-    # requires it. See ``test_dependency_pins.py`` for the static guard.
-    "huggingface-hub>=1.5.0,<2.0",
-    "fastapi>=0.135.0,<0.143",
+    # huggingface_hub 1.x and 2.x. The cap was <2.0 while tokenizers,
+    # transformers, diffusers and sentence-transformers asked for <2.0 (with
+    # <3.0 a resolver backtracked [stt]'s tokenizers to 0.13.3: no wheel for
+    # Python 3.12, local audit C13). Since October 2026 they all ask <3.0;
+    # checked 2026-10-25 with hub 2.3.0: the suite on Python 3.10-3.14, and
+    # every extra resolves with tokenizers 0.23.3. Floor >=1.5.0: transformers
+    # 5.x requires it. See ``test_dependency_pins.py`` for the static guard.
+    "huggingface-hub>=1.5.0,<3.0",
+    "fastapi>=0.135.0,<0.163",
     # Floor at 1.3.1: 1.0.x–1.2.x carry CVE-2026-48817/48818/54282/54283 +
     # PYSEC-2026-161 (DoS / multipart). Cap at the next major; fastapi carries
     # the precise compatible range.
@@ -66,7 +66,7 @@ dependencies = [
     # Floor at 0.0.31: < 0.0.31 carries CVE-2026-42561/53538/53539/53540.
     "python-multipart>=0.0.31",
     "uvicorn[standard]>=0.34.0,<0.55",
-    "pydantic>=2.12.0,<2.14",
+    "pydantic>=2.12.0,<2.15",
     "httpx~=0.28.0",
     "pyyaml~=6.0",
     # The memory admission (HFL_MEMORY_BUDGET: what fits, what to unload),
@@ -162,14 +162,14 @@ audio = [
 
 tray = [
     "pystray>=0.19.0",
-    # Floor at 12.3.0: 12.2.x and earlier carry 13 advisories, incl. HIGH
-    # heap out-of-bounds writes in Image.paste()/crop(), ImageCmsTransform
-    # and ImageFilter.RankFilter, plus five decompression-bomb bypasses.
-    # HFL only uses PIL to draw the tray icon (api/image_validator.py
+    # Floor at 13.0.0: 12.3.0 carries 5 critical and 13 high advisories
+    # (GHSA-v9pv-5gc8-w2m6 and others) that 13.0.0 fixes; 12.2.x and earlier
+    # 13 more. HFL only uses PIL to draw the tray icon (api/image_validator.py
     # parses image headers by hand and never hands user bytes to PIL), so
-    # none were reachable — this is defence in depth for any future code
-    # that does decode a user-supplied image. See local security audit L-15.
-    "Pillow>=12.3.0",
+    # none were reachable — this is defence in depth (local security audit
+    # L-15). Pillow 13 needs Python 3.11: on 3.10, 12.3.0 is the newest.
+    "Pillow>=13.0.0; python_version >= '3.11'",
+    "Pillow>=12.3.0; python_version < '3.11'",
 ]
 
 # Model Context Protocol client/server (Phase 9+). 1.x and 2.x both work:
@@ -228,14 +228,14 @@ imagegen = [
     "diffusers>=0.30.0,<1.0",
     "torch>=2.5.0,<3.0",
     "safetensors>=0.4.0,<1.0",
-    # Floor at 12.3.0: 12.2.x and earlier carry 13 advisories, incl. HIGH
-    # heap out-of-bounds writes in Image.paste()/crop(), ImageCmsTransform
-    # and ImageFilter.RankFilter, plus five decompression-bomb bypasses.
-    # HFL only uses PIL to draw the tray icon (api/image_validator.py
+    # Floor at 13.0.0: 12.3.0 carries 5 critical and 13 high advisories
+    # (GHSA-v9pv-5gc8-w2m6 and others) that 13.0.0 fixes; 12.2.x and earlier
+    # 13 more. HFL only uses PIL to draw the tray icon (api/image_validator.py
     # parses image headers by hand and never hands user bytes to PIL), so
-    # none were reachable — this is defence in depth for any future code
-    # that does decode a user-supplied image. See local security audit L-15.
-    "Pillow>=12.3.0",
+    # none were reachable — this is defence in depth (local security audit
+    # L-15). Pillow 13 needs Python 3.11: on 3.10, 12.3.0 is the newest.
+    "Pillow>=13.0.0; python_version >= '3.11'",
+    "Pillow>=12.3.0; python_version < '3.11'",
     "accelerate>=1.2.0,<2.0",
 ]
 

@@ -32,11 +32,11 @@
 # install for you — run them yourself before a release:
 #   security.yml       CodeQL (~1 GB bundle), gitleaks, pip-audit --strict
 #   license-check.yml  pip-licenses --fail-on="GPL;AGPL;LGPL;..."
-#   the matrix         CI covers Python 3.10/3.11/3.12 x ubuntu/macOS; this
+#   the matrix         CI covers Python 3.10-3.14 x ubuntu/macOS; this
 #                      script runs one interpreter on this machine (see below)
 #
 # Matrix note:
-#   CI runs tests on Python 3.10/3.11/3.12 × ubuntu/macOS. This script
+#   CI runs tests on Python 3.10-3.14 × ubuntu/macOS. This script
 #   only runs the host Python version. If you want to catch a
 #   Python-version regression before pushing, rerun with
 #   ``HFL_CI_PY=python3.10 scripts/ci-local.sh`` (etc.) on a machine
@@ -165,4 +165,4 @@ python scripts/coverage_by_component.py coverage.json --floor 90 \
 green ""
 green "✓ ci.yml + lint.yml + test.yml all pass locally. Safe to push."
 blue  "  Not covered here: security.yml, license-check.yml, and the"
-blue  "  3.10/3.11/3.12 x ubuntu/macOS matrix. See the header."
+blue  "  3.10-3.14 x ubuntu/macOS matrix. See the header."
