@@ -62,6 +62,13 @@ class TestDockerfile:
         runtime = self.text.split("AS runtime", 1)[1]
         assert "libgomp1" in runtime
 
+    def test_the_runtime_takes_the_security_fixes(self):
+        """0.27.1's image shipped curl with critical CVEs Debian had fixed
+        after the base image was built, and the base image's own pip."""
+        runtime = self.text.split("AS runtime", 1)[1]
+        assert "apt-get upgrade -y" in runtime
+        assert "pip install --no-cache-dir --upgrade pip" in runtime
+
     def test_pinned_python_version(self):
         assert "ARG PYTHON_VERSION=3.12" in self.text
 

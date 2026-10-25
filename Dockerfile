@@ -94,13 +94,18 @@ ENV PATH="/opt/venv/bin:/opt/llama.cpp:${PATH}" \
     HFL_HOME=/var/lib/hfl \
     HFL_HOST=0.0.0.0
 
+# The upgrade takes the security fixes published after the base image was
+# built (0.27.1's image shipped curl with two critical CVEs Debian had
+# fixed); the base image's own pip is upgraded for the same reason.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         libgomp1 \
         tini \
  && rm -rf /var/lib/apt/lists/* \
+ && python -m pip install --no-cache-dir --upgrade pip \
  && groupadd --system --gid 1000 hfl \
  && useradd --system --uid 1000 --gid hfl --home /var/lib/hfl --shell /bin/bash hfl \
  && mkdir -p /var/lib/hfl \

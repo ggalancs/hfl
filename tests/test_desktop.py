@@ -153,9 +153,24 @@ class TestListeningHere:
         with self._listen("127.0.0.1") as sock:
             assert desktop._listening_here(sock.getsockname()[1], "127.0.0.1") is True
 
-    def test_a_wildcard_bind_covers_its_family(self) -> None:
-        with self._listen("0.0.0.0") as sock:
-            assert desktop._listening_here(sock.getsockname()[1], "127.0.0.1") is True
+    def test_a_wildcard_bind_covers_its_family(self, monkeypatch) -> None:
+        """psutil's listing, faked: a real wildcard bind would listen on every
+        interface of the machine running the tests (CodeQL flags it)."""
+        import psutil
+
+        def listening_at(ip: str) -> None:
+            conn = types.SimpleNamespace(
+                status=psutil.CONN_LISTEN, laddr=types.SimpleNamespace(ip=ip, port=8123)
+            )
+            process = types.SimpleNamespace(net_connections=lambda kind: [conn])
+            monkeypatch.setattr(psutil, "Process", lambda pid: process)
+
+        listening_at("0.0.0.0")
+        assert desktop._listening_here(8123, "127.0.0.1") is True
+        assert desktop._listening_here(8123, "::1") is False
+        listening_at("::")
+        assert desktop._listening_here(8123, "::1") is True
+        assert desktop._listening_here(8123, "127.0.0.1") is False
 
     def test_the_port_at_another_address_is_not_ours(self) -> None:
         """``--host ::`` binds IPv6 only: a program on 127.0.0.1 at the same
