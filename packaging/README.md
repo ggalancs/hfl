@@ -7,19 +7,21 @@ maintainer's step: each one goes out under the maintainer's name.
 
 A tap formula: HFL and its Python dependencies in a virtualenv, GGUF models
 served by Homebrew's `llama.cpp` (without llama-cpp-python, HFL serves GGUF
-through `llama-server`, since 0.22.0). The formula points at the 0.27.1 sdist
+through `llama-server`, since 0.22.0). The formula points at the 0.28.0 sdist
 on PyPI (sha256 checked against a download and PyPI's digest). 0.26.0
 declared `psutil`, which earlier releases imported without declaring; its
 resource was added then (the sdist builds with Homebrew's Python 3.14). The
-other resources are unchanged from 0.21.0 and within 0.27.1's ranges (0.27.0
-only raised fastapi's ceiling to `<0.143`; the formula's fastapi is 0.141.1).
+other resources are unchanged from 0.21.0 and within 0.28.0's ranges (0.28.0
+only raised ceilings: huggingface-hub `<3.0`, fastapi `<0.163`, pydantic
+`<2.15`; the formula keeps 1.33.0, 0.141.1 and 2.13.5).
 
 Verified locally on 2026-10-15 with Homebrew 7.0.9 (macOS 26, Apple Silicon),
-the formula as it is here (0.27.1 from PyPI): `brew install --build-from-source`,
+the formula at 0.27.1 from PyPI: `brew install --build-from-source`,
 `brew test` and `brew audit --strict --online` pass from a local tap, and the
 installed `hfl` pulled a GGUF and served it through Homebrew's `llama-server`
 (an answer to a chat request). Homebrew 6.0.18 could not install it: it
 stopped while upgrading the dependencies ("already locked … openssl@3").
+The 0.28.0 formula has not been installed with `brew` yet.
 
 To publish:
 
@@ -32,14 +34,16 @@ To publish:
    resources first with `brew update-python-resources` — at least a day after
    the PyPI upload: Homebrew ignores packages younger than that.
 
-## winget — `winget/manifests/g/ggalancs/HFL/0.27.1/`
+## winget — `winget/manifests/g/ggalancs/HFL/0.28.0/`
 
-Manifests for the 0.27.1 MSI of the GitHub release, schema 1.12.0 (what
-winget-pkgs asks for now). Checked on a real Windows 10 on 2026-10-15:
-`winget validate` passes; the published MSI's sha256 equals the manifest's;
-installed silently with msiexec over HFL 0.23.0, it upgraded it (the old
-product found and removed), served a GGUF through its bundled llama-server,
-and uninstalled cleanly. `winget install --manifest` itself was not run: it
+Manifests for the 0.28.0 MSI of the GitHub release, schema 1.12.0 (what
+winget-pkgs asks for now); its sha256 equals a download's and GitHub's
+digest. The 0.27.1 manifests were checked on a real Windows 10 on
+2026-10-15: `winget validate` passed; installed silently with msiexec over
+HFL 0.23.0, the MSI upgraded it (the old product found and removed), served a
+GGUF through its bundled llama-server, and uninstalled cleanly. The 0.28.0
+manifests have not been through `winget validate` yet (only their version,
+URL and hash changed). `winget install --manifest` itself was not run: it
 needs the `LocalManifestFiles` admin setting.
 
 To publish: on Windows, `winget validate` and `winget install --manifest` the
