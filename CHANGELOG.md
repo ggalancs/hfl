@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-26
+
 ### Fixed
 - **Claude Code's WebSearch on a local model returned made-up results.** It
   asks for Anthropic's web search server tool (`web_search_20250305`), which
