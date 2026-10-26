@@ -136,21 +136,22 @@ class Paced(Counted):
 
 def test_a_stream_records_its_first_token_time_and_decode_speed(fresh_metrics, monkeypatch):
     """The prompt's 200 ms go to time-to-first-token, not into the speed:
-    10 tokens after the first in ~0.1 s is ~100 tok/s, not 11 tok / 0.3 s."""
+    10 tokens after the first over the time after it, not 11 over the whole.
+    Checked against the stream's own measured times, not fixed rates: on
+    GitHub's macOS runners ``sleep(0.01)`` lasts several times longer, and
+    the 40-110 tok/s this asserted read 17-36."""
     import hfl.engine.base as base
 
     monkeypatch.setattr(base, "stream_counts", lambda s: (s.prompt_tokens, s.generated_tokens))
     _drain(Paced([str(i) for i in range(11)], prompt=5, generated=11))
     out = fresh_metrics.export_prometheus()
-    ttft = float(
-        next(x for x in out.splitlines() if x.startswith("hfl_time_to_first_token_ms_sum")).split()[
-            -1
-        ]
-    )
-    speed = float(
-        next(
-            x for x in out.splitlines() if x.startswith("hfl_generation_tokens_per_second_sum")
-        ).split()[-1]
-    )
-    assert 180 <= ttft <= 1000, ttft
-    assert 40 <= speed <= 110, speed  # tokens ÷ total time would be ~35
+
+    def total(name: str) -> float:
+        return float(next(x for x in out.splitlines() if x.startswith(f"{name}_sum")).split()[-1])
+
+    ttft = total("hfl_time_to_first_token_ms")
+    whole_ms = total("hfl_generation_latency_ms")
+    speed = total("hfl_generation_tokens_per_second")
+    assert ttft >= 180, ttft
+    assert speed == pytest.approx(10 / ((whole_ms - ttft) / 1000), rel=0.01)
+    assert speed > 11 / (whole_ms / 1000)  # what tokens ÷ total time gives
