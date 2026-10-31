@@ -38,7 +38,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from hfl.api.chat_core import resolve_chat_output
-from hfl.api.errors import structured_output_unsupported
+from hfl.api.errors import images_unsupported, structured_output_unsupported
 from hfl.api.helpers import prepare_stream_response, run_dispatched
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.engine.base import ChatMessage, GenerationConfig
@@ -103,8 +103,8 @@ def _input_to_messages(
     - A list of dicts is forwarded with ``role`` defaulting to ``user``
       and ``content`` flattened to text. List-of-parts content (the
       OpenAI multimodal shape) is reduced by concatenating the
-      ``input_text`` / ``text`` fields; image parts are dropped here
-      because /v1/responses' image support is not in scope yet.
+      ``input_text`` / ``text`` fields; ``input_image`` parts become the
+      message's images (``_content_images``).
     - ``function_call`` / ``function_call_output`` items become an
       assistant turn with ``tool_calls`` and ``tool`` results; the
       ``developer`` role becomes ``system``; ``reasoning`` items are skipped.
@@ -155,7 +155,10 @@ def _input_to_messages(
         role = str(raw.get("role") or "user")
         if role == "developer":
             role = "system"  # chat templates know no "developer" role
-        messages.append(ChatMessage(role=role, content=_content_text(raw.get("content"))))
+        content = raw.get("content")
+        messages.append(
+            ChatMessage(role=role, content=_content_text(content), images=_content_images(content))
+        )
     return messages
 
 
@@ -199,9 +202,41 @@ def _not_found(previous: str) -> JSONResponse:
     )
 
 
+def _content_images(content: Any) -> list[bytes] | None:
+    """The images of a Responses ``content``: its ``input_image`` parts, as
+    base64 data URIs validated as /v1/chat/completions' are. They were
+    dropped, and the model answered about an image it never saw. A file or
+    audio part is refused rather than dropped."""
+    if not isinstance(content, list):
+        return None
+    from hfl.api.image_validator import validate_image
+    from hfl.exceptions import ValidationError
+
+    images: list[bytes] = []
+    for index, part in enumerate(content):
+        kind = part.get("type") if isinstance(part, dict) else None
+        if kind == "input_image":
+            url = part.get("image_url")
+            if isinstance(url, dict):
+                url = url.get("url")
+            if not isinstance(url, str) or not url.startswith("data:"):
+                raise ValidationError(
+                    f"content[{index}].image_url must be a base64 data URI "
+                    "(data:image/...;base64,...): HFL fetches no URL and keeps no files"
+                )
+            try:
+                images.append(validate_image(url).data)
+            except ValidationError as exc:
+                raise ValidationError(f"content[{index}]: {exc}") from exc
+        elif kind in ("input_file", "input_audio"):
+            raise ValidationError(f"content[{index}].type={kind!r} is not supported")
+    return images or None
+
+
 def _content_text(content: Any) -> str:
     """Text of a Responses ``content``: a string, or a list of typed parts
-    (``input_text`` / ``output_text`` / legacy ``text``; images dropped)."""
+    (``input_text`` / ``output_text`` / legacy ``text``; the images are
+    ``_content_images``')."""
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
@@ -664,6 +699,8 @@ async def responses(req: ResponsesRequest) -> dict[str, Any] | StreamingResponse
     new = _input_to_messages(req.input, None, _call_names(history))
     cfg = _build_gen_config(req)
     refused = structured_output_unsupported(state.engine, cfg, "/v1/responses")
+    if refused is None:
+        refused = images_unsupported(state.engine, new, "/v1/responses")
     if refused is not None:
         return refused
     # A created model's Modelfile: SYSTEM when there are no instructions,

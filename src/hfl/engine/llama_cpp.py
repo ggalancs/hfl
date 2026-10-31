@@ -371,7 +371,11 @@ def _kv_cache_kwargs(kv_type: str | None) -> dict[str, Any]:
 
 
 def _vision_handler(
-    clip_model_path: str | None, path: "Path", architecture: str | None, verbose: bool
+    clip_model_path: str | None,
+    path: "Path",
+    architecture: str | None,
+    verbose: bool,
+    has_template: bool = False,
 ) -> Any:
     """The multimodal chat handler for a vision GGUF, or None. Its CLIP
     projector (usually ``mmproj-*.gguf``) is the caller's, or one found
@@ -389,6 +393,7 @@ def _vision_handler(
         architecture=architecture,
         clip_model_path=clip_model_path,
         verbose=verbose,
+        has_template=has_template,
     )
 
 
@@ -801,10 +806,141 @@ def _fold_system(msgs: list[dict]) -> list[dict]:
     if not system:
         return rest
     for i, m in enumerate(rest):
-        if m.get("role") == "user" and isinstance(m.get("content"), str):
-            rest[i] = {**m, "content": f"{system}\n\n{m['content']}"}
+        if m.get("role") == "user":
+            # Into the first user message, an image's included: skipping it
+            # left the system as a user message of its own before it, two
+            # user turns in a row, which such templates refuse.
+            rest[i] = {**m, "content": _join_content(system, m.get("content"))}
             return rest
     return [{"role": "user", "content": system}, *rest]
+
+
+def _join_content(first: Any, second: Any) -> Any:
+    """Two messages' contents as one: text joined by a blank line, or the
+    parts of both when either carries images."""
+    if not isinstance(first, list) and not isinstance(second, list):
+        a, b = _text_of(first), _text_of(second)
+        return f"{a}\n\n{b}" if a and b else a or b
+    return [*_typed_parts(first), *_typed_parts(second)]
+
+
+def _typed_parts(content: Any) -> list[Any]:
+    """``content`` as a list of typed parts (``[]`` for none)."""
+    if isinstance(content, list):
+        return list(content)
+    text = _text_of(content)
+    return [{"type": "text", "text": text}] if text else []
+
+
+_TURN_PROBE = "hfl-probe-turn-7f3a"
+
+
+@functools.lru_cache(maxsize=64)
+def _probe_turns(template: str) -> tuple[bool, bool, bool]:
+    """``(refuses two user messages in a row, refuses a conversation that
+    opens with the assistant, drops a message whose content is a plain
+    string)``, found by rendering ``template`` as ``_probe_template`` does.
+
+    Clients send all three: two user turns in a row (an app that adds
+    context as a message), a greeting from the assistant first, and plain
+    strings. Mistral's and Gemma 3's templates raise on the first two, and
+    MLX then swapped the model's format for an invented one without a word;
+    SmolVLM's renders no text at all from a plain string, and the model
+    answered a question it never got (measured, 2026-10-31). llama-server's
+    llama.cpp adapts the content to such templates; HFL now does for every
+    engine. A template that cannot be rendered here is left as it is.
+    """
+    from hfl.models.chat_template import template_env
+
+    env = template_env()
+    if env is None:
+        return False, False, False
+
+    def render(messages: list[dict]) -> str | None:
+        try:
+            return str(
+                env.from_string(template).render(
+                    messages=messages, add_generation_prompt=True, bos_token="", eos_token=""
+                )
+            )
+        except Exception:
+            return None
+
+    plain = render([{"role": "user", "content": _TURN_PROBE}])
+    typed = False
+    if plain is None or _TURN_PROBE not in plain:
+        shown = render([{"role": "user", "content": [{"type": "text", "text": _TURN_PROBE}]}])
+        typed = shown is not None and _TURN_PROBE in shown
+        if not typed:
+            return False, False, False
+
+    def message(role: str, text: str) -> dict:
+        return {"role": role, "content": [{"type": "text", "text": text}] if typed else text}
+
+    in_a_row = render([message("user", "a"), message("user", _TURN_PROBE)]) is None
+    opening = render([message("assistant", "a"), message("user", _TURN_PROBE)]) is None
+    return in_a_row, opening, typed
+
+
+def _fit_turns(msgs: list[dict], in_a_row: bool, opening: bool) -> list[dict]:
+    """The turns as a template that refuses them takes them (see
+    ``_probe_turns``): user (or plain assistant) messages in a row joined
+    into one, and an empty user turn before an opening assistant one."""
+    out: list[dict] = []
+    for m in msgs:
+        prev = out[-1] if out else None
+        if (
+            in_a_row
+            and prev is not None
+            and prev.get("role") == m.get("role")
+            and m.get("role") in ("user", "assistant")
+            and not prev.get("tool_calls")
+            and not m.get("tool_calls")
+        ):
+            out[-1] = {**prev, "content": _join_content(prev.get("content"), m.get("content"))}
+            continue
+        out.append(m)
+    if opening:
+        first = next((i for i, m in enumerate(out) if m.get("role") != "system"), None)
+        if first is not None and out[first].get("role") == "assistant":
+            out.insert(first, {"role": "user", "content": ""})
+    return out
+
+
+def _fit_template(
+    msgs: list[dict],
+    tools: list[dict] | None,
+    template: str,
+    knows_tools: bool,
+    typed_content: bool = True,
+    takes_system: bool | None = None,
+) -> tuple[list[dict], list[dict] | None]:
+    """The messages, and the tools to hand the template (None when written
+    in as text), as ``template`` takes them: every engine through here. Each
+    did part of it — llama-server and Transformers never folded a system
+    message for a template that takes none, Transformers handed tools to a
+    template that never shows them, and none fitted the turns.
+    ``typed_content=False`` and ``takes_system=True`` leave plain strings and
+    the system message to llama-server's llama.cpp, which adapts both
+    itself; ``takes_system`` otherwise comes from the template."""
+    msgs = _system_first(msgs)
+    if knows_tools:
+        msgs = _history_for_template(msgs, template)
+    else:
+        msgs, tools = _tools_as_text(msgs, tools), None
+    in_a_row, opening, typed = _probe_turns(template) if template else (False, False, False)
+    if in_a_row or opening:
+        msgs = _fit_turns(msgs, in_a_row, opening)
+    if not (_template_takes_system(template) if takes_system is None else takes_system):
+        msgs = _fold_system(msgs)
+    if typed and typed_content:
+        msgs = [
+            {**m, "content": _typed_parts(m.get("content"))}
+            if not isinstance(m.get("content"), list)
+            else m
+            for m in msgs
+        ]
+    return msgs, tools
 
 
 # The tool prompt HFL writes in when the model's template has none: the
@@ -1737,20 +1873,70 @@ def _preflight_memory_check(
         raise err
 
 
+def _model_template_handler(base: type) -> type:
+    """``base`` (llama-cpp-python's ``MTMDChatHandler``) serving the GGUF's
+    own template as HFL serves it on text: corrected when it has a known
+    mistake (``repair_chat_template``), and with the request's template
+    variables (``enable_thinking``...), set on ``template_vars`` per request
+    like the text formatters'. ``base`` already renders the model's template
+    with the tools; it only lacked these two."""
+
+    class ModelTemplateVisionHandler(base):
+        uses_model_template = True
+        hfl_name = ""  # not the text formatter ``_template_prompt`` renders with
+        template_vars: dict[str, Any] = {}
+
+        def _get_chat_template(self, llama_model: Any) -> str:
+            from hfl.models.chat_template import repair_chat_template
+
+            return repair_chat_template(super()._get_chat_template(llama_model))
+
+        def __call__(self, **kwargs: Any) -> Any:
+            return super().__call__(**{**self.template_vars, **kwargs})
+
+    return ModelTemplateVisionHandler
+
+
+def _projector_loads(handler: Any, model: Any) -> bool:
+    """Whether ``handler``'s image projector loads with ``model``, tried at
+    load: the handlers load it at their first request, so a projector this
+    llama-cpp-python cannot read failed every request, text ones too."""
+    init = getattr(handler, "_init_mtmd_context", None)
+    if init is None:
+        return True
+    try:
+        init(model)
+    except Exception as exc:
+        logger.warning(
+            "The image projector %s does not load with this llama-cpp-python (%s): "
+            "loading the model without images. llama-server may read it "
+            "(hfl install llama-server).",
+            os.path.basename(str(getattr(handler, "clip_model_path", ""))),
+            exc,
+        )
+        return False
+    return True
+
+
 def _build_vision_chat_handler(
     *,
     architecture: str | None,
     clip_model_path: str,
     verbose: bool = False,
+    has_template: bool = False,
 ) -> object | None:
-    """Instantiate the right multimodal chat handler for this arch.
+    """The multimodal chat handler for a vision GGUF, or ``None`` to load it
+    text-only.
 
-    Phase 4 P0-6. llama-cpp-python ships one ``chat_handler``
-    subclass per vision family; the arch name we detected from the
-    GGUF header picks which one. Returns ``None`` (with a warning
-    log) when the local llama-cpp-python install is too old to
-    expose the handlers, or has none for this family, so load falls
-    back to text-only mode instead of crashing or guessing.
+    A GGUF with its own chat template gets llama-cpp-python's generic
+    ``MTMDChatHandler`` with that template, whatever the architecture — what
+    llama-server does with ``--jinja``. The per-family handlers bring a
+    fixed template that replaced the model's on every request, text ones
+    too: Qwen3.8, given LLaVA 1.5's, answered empty replies, and SmolVLM
+    (a ``llama`` architecture) answered "1." to "What is the capital of
+    France?" (both measured, 2026-10-31). They remain for GGUFs without a
+    template (old LLaVA, Moondream). ``None`` when this llama-cpp-python has
+    no handler for the family, or none at all.
 
     Arguments:
         architecture: ``general.architecture`` value from the GGUF
@@ -1759,6 +1945,7 @@ def _build_vision_chat_handler(
         clip_model_path: Absolute path to the CLIP projector GGUF
             (typically ``mmproj-*.gguf``).
         verbose: Passed through to the handler for logging.
+        has_template: Whether the GGUF embeds ``tokenizer.chat_template``.
     """
     arch = (architecture or "").lower()
 
@@ -1778,6 +1965,11 @@ def _build_vision_chat_handler(
             arch or "model",
         )
         return None
+
+    generic = getattr(_lcf, "MTMDChatHandler", None)
+    if has_template and generic is not None:
+        handler_cls: Any = _model_template_handler(generic)
+        return cast("object | None", handler_cls(clip_model_path=clip_model_path, verbose=verbose))
 
     # The Gemma vision handler was renamed ``Gemma3ChatHandler`` ->
     # ``Gemma4ChatHandler`` across llama-cpp-python releases. Resolve it
@@ -1805,16 +1997,15 @@ def _build_vision_chat_handler(
         handler_cls = MoondreamChatHandler
     elif "llava-v1.6" in arch or "llava_1.6" in arch or "llava16" in arch:
         handler_cls = Llava16ChatHandler
-    elif "llava" in arch or arch == "llama":
+    elif "llava" in arch or (arch == "llama" and not has_template):
         # A LLaVA 1.5 GGUF names its language model's architecture (a
-        # Llama / Vicuna): the case this handler was guessed for.
+        # Llama / Vicuna) and often has no template: the case this handler
+        # was made for.
         handler_cls = Llava15ChatHandler
     else:
-        # No handler here for this family (Qwen3.5 / Qwen3.8's ``qwen35``,
-        # Llama 4, Mistral 3...). LLaVA 1.5's used to be tried: it brings its
-        # own chat template, which replaced the model's on every request,
-        # text ones too, and Qwen3.8 answered empty replies (2026-10-30).
-        # Text-only keeps the model's own template.
+        # Nothing here renders this family. LLaVA 1.5's handler used to be
+        # tried: its template replaced the model's and Qwen3.8 answered
+        # empty replies (2026-10-30). Text-only keeps the model's own.
         logger.warning(
             "llama-cpp-python has no chat handler for the %r vision architecture: "
             "loading it without images, with its own chat template. llama-server "
@@ -2057,7 +2248,13 @@ class LlamaCppEngine(InferenceEngine):
             flash_attn,
             architecture,
         )
-        chat_handler = _vision_handler(kwargs.get("clip_model_path"), path, architecture, verbose)
+        chat_handler = _vision_handler(
+            kwargs.get("clip_model_path"),
+            path,
+            architecture,
+            verbose,
+            has_template=bool(gguf_info and gguf_info.get("has_chat_template")),
+        )
 
         self._cpu_only = not _offloads_to_gpu(n_gpu_layers)
         threads = _threads_for(kwargs.get("n_threads", hfl_config.default_threads), self._cpu_only)
@@ -2099,6 +2296,9 @@ class LlamaCppEngine(InferenceEngine):
                 self._model = Llama(**llama_kwargs)
                 # Track the draft so ``unload`` releases its memory too.
                 self._draft_model = draft_llama
+                if chat_handler is not None and not _projector_loads(chat_handler, self._model):
+                    self._model.chat_handler = None
+                    chat_handler = None
             self._finish_load(
                 model_path, architecture, gguf_info, n_ctx, chat_handler, chat_format, lora_paths
             )
@@ -2159,14 +2359,18 @@ class LlamaCppEngine(InferenceEngine):
                 # system messages, the tools HFL wrote there with them,
                 # and bypassed the BOS fix and the reasoning switch.
                 self._model.chat_format = "chat_template.default"
-        # A vision chat handler has its own fixed format, never tools.
+        model_template = bool(getattr(chat_handler, "uses_model_template", False))
+        if model_template:
+            # The request's template variables reach it as the formatters'.
+            self._formatters = [chat_handler]
+        # A per-family vision handler has its own fixed format, never tools;
+        # the generic one renders the model's template, tools and all.
+        fixed = chat_handler is not None and not model_template
         template = (getattr(self._model, "metadata", None) or {}).get("tokenizer.chat_template", "")
-        if not isinstance(template, str) or chat_handler is not None or chat_format:
-            template = ""  # a static format or a vision handler is used instead
+        if not isinstance(template, str) or fixed or chat_format:
+            template = ""  # a static format or a fixed vision handler is used instead
         self._chat_template = template
-        self._template_knows_tools = chat_handler is None and _template_renders_tools(
-            template, chat_format
-        )
+        self._template_knows_tools = not fixed and _template_renders_tools(template, chat_format)
         self._template_takes_system = _template_takes_system(template)
 
     def _report_acceleration(self, loader_log: str, verbose: bool) -> None:
@@ -2391,6 +2595,10 @@ class LlamaCppEngine(InferenceEngine):
     @property
     def supports_structured_output(self) -> bool:
         return True  # a GBNF grammar on chat and on plain completions
+
+    @property
+    def supports_images(self) -> bool:
+        return self._is_multimodal
 
     def cancel(self) -> None:
         """Stop the running generation at its next token.
@@ -2634,14 +2842,14 @@ class LlamaCppEngine(InferenceEngine):
         """The messages for ``create_chat_completion``, the tools to hand the
         template (None when HFL wrote them in itself), and whether to keep
         the model's control tokens in the text for the tool parsers."""
-        msgs = _system_first(self._messages_to_llama_cpp(messages))
         markers = bool(tools)
-        if self._template_knows_tools:
-            msgs = _history_for_template(msgs, self._chat_template)
-        else:
-            msgs, tools = _tools_as_text(msgs, tools), None
-        if not self._template_takes_system:
-            msgs = _fold_system(msgs)
+        msgs, tools = _fit_template(
+            self._messages_to_llama_cpp(messages),
+            tools,
+            self._chat_template,
+            self._template_knows_tools,
+            takes_system=self._template_takes_system,
+        )
         return msgs, tools, markers
 
     @staticmethod
@@ -2662,12 +2870,17 @@ class LlamaCppEngine(InferenceEngine):
             if not m.images:
                 entry: dict = {"role": m.role, "content": m.content or ""}
             else:
-                parts: list[dict] = []
+                # The images before the text, as Ollama puts them: the
+                # generic handler draws each as a marker where its part is,
+                # and SmolVLM, asked the colour of a red, a blue and a green
+                # image, named all three with them first and none after the
+                # question (measured, 2026-10-31).
+                parts: list[dict] = [
+                    {"type": "image_url", "image_url": {"url": _image_data_uri(image_bytes)}}
+                    for image_bytes in m.images
+                ]
                 if m.content:
                     parts.append({"type": "text", "text": m.content})
-                for image_bytes in m.images:
-                    uri = _image_data_uri(image_bytes)
-                    parts.append({"type": "image_url", "image_url": {"url": uri}})
                 entry = {"role": m.role, "content": parts}
             if m.tool_calls:
                 entry["tool_calls"] = m.tool_calls

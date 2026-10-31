@@ -543,11 +543,19 @@ class TestSmallHelpers:
             {"role": "assistant", "content": "a"},
             {"role": "user", "content": "S1\n\nS2\n\nq"},
         ]
-        # No user turn with text to fold into: the system text becomes one.
+        # A first user turn of parts (an image) takes it as its first part: a
+        # user turn of its own before it was two user turns in a row, which
+        # the templates that take no system message refuse.
         parts = [{"role": "user", "content": [{"type": "text", "text": "q"}]}]
         assert lc._fold_system([{"role": "system", "content": "S"}, *parts]) == [
-            {"role": "user", "content": "S"},
-            *parts,
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "S"}, {"type": "text", "text": "q"}],
+            },
+        ]
+        # No user turn at all: the system text becomes one.
+        assert lc._fold_system([{"role": "system", "content": "S"}]) == [
+            {"role": "user", "content": "S"}
         ]
 
     def test_system_first(self):

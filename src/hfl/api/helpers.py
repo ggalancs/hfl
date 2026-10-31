@@ -35,6 +35,21 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
+def warn_if_nothing_generated(operation: str, tokens_in: int, tokens_out: int) -> None:
+    """A warning for a reply of no tokens to a real prompt: the model ended
+    it at once and the client got an empty answer. It was an INFO line among
+    many ("generated 0 tok"), and 17 such replies from Qwen3.8 went unseen
+    (2026-10-30)."""
+    if tokens_out == 0 and tokens_in > 0:
+        logger.warning(
+            "%s generated nothing: the model ended its reply at once (prompt of %d "
+            "tokens) and the client got an empty answer. If it repeats, the chat "
+            "template may not suit the model.",
+            operation,
+            tokens_in,
+        )
+
+
 def _account_generation(result: Any, operation: str) -> None:
     """Record token counters and log the prefill/generation split.
 
@@ -89,6 +104,7 @@ def _account_generation(result: Any, operation: str) -> None:
         )
     except Exception:  # pragma: no cover — metrics must never break a request
         logger.debug("failed to record generation metrics", exc_info=True)
+    warn_if_nothing_generated(operation, tokens_in, tokens_out)
 
     if not logger.isEnabledFor(logging.INFO):
         return

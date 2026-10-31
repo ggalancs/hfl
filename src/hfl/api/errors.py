@@ -468,6 +468,21 @@ STRUCTURED_OUTPUT_UNSUPPORTED = (
 )
 
 
+def images_unsupported(engine: Any, messages: Any, path: str) -> JSONResponse | None:
+    """A 400 when a message carries images its model cannot see; ``None``
+    when it can, or there are none. Before any stream starts: engines
+    without vision dropped the images and the model answered about one it
+    never saw (``InferenceEngine.supports_images``)."""
+    if not any(getattr(m, "images", None) for m in messages or ()):
+        return None
+    if getattr(engine, "supports_images", False) is True:
+        return None
+    from hfl.engine.base import IMAGES_UNSUPPORTED
+
+    flat = {"error": IMAGES_UNSUPPORTED, "code": "IMAGES_UNSUPPORTED"}
+    return JSONResponse(status_code=400, content=render_envelope(path, 400, flat))
+
+
 def structured_output_unsupported(engine: Any, config: Any, path: str) -> JSONResponse | None:
     """A 400 when the request asks for a response format its engine cannot
     enforce (MLX, Transformers used to ignore it and answer prose); ``None``

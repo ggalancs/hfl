@@ -419,15 +419,43 @@ class VLLMEngine(InferenceEngine):
         config: GenerationConfig | None = None,
         tools: list[dict] | None = None,
     ) -> GenerationResult:
-        """Chat completion using PromptBuilder for format detection.
+        """Chat completion in the model's own chat template (``_chat_prompt``).
 
-        ``tools`` is accepted but currently injected into the prompt only
-        via PromptBuilder when supported. Structured tool-call parsing for
-        vLLM output is handled upstream by the per-family parser, so the
-        route layer still gets canonical tool_calls back.
+        Structured tool-call parsing for vLLM output is handled upstream by
+        the per-family parser, so the route layer still gets canonical
+        tool_calls back.
         """
-        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
-        return self.generate(prompt, config)
+        return self.generate(self._chat_prompt(messages, config, tools), config)
+
+    def _tokenizer(self) -> Any:
+        tokenizer = self._engine.get_tokenizer()
+        if inspect.isawaitable(tokenizer):  # AsyncLLMEngine: a coroutine
+            tokenizer = self._run_async(tokenizer)
+        return tokenizer
+
+    def _chat_prompt(
+        self,
+        messages: list[ChatMessage],
+        config: GenerationConfig | None,
+        tools: list[dict] | None,
+    ) -> str:
+        """The prompt in the model's own chat template, as the other engines
+        render it. PromptBuilder's fixed formats, picked by the model's path,
+        gave everything but Llama a ChatML prompt (Gemma, Mistral, Phi...);
+        they remain for a model without a template."""
+        from hfl.engine.transformers_engine import template_chat_prompt
+
+        tokenizer = self._tokenizer() if self._engine is not None else None
+        reasoning = (config or GenerationConfig()).reasoning
+        prompt = template_chat_prompt(tokenizer, messages, tools, reasoning) if tokenizer else None
+        if prompt is None:
+            return PromptBuilder.build(messages, self._prompt_format, tools=tools)
+        # vLLM adds BOS as it tokenizes the prompt: one the template wrote
+        # too would be doubled.
+        bos = getattr(tokenizer, "bos_token", None)
+        if isinstance(bos, str) and bos and prompt.startswith(bos):
+            prompt = prompt[len(bos) :]
+        return prompt
 
     @property
     def reserved_bytes(self) -> int:
@@ -444,11 +472,8 @@ class VLLMEngine(InferenceEngine):
         vLLM tokenizes a prompt (special tokens added)."""
         if self._engine is None:
             raise RuntimeError("no model loaded")
-        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
-        tokenizer = self._engine.get_tokenizer()
-        if inspect.isawaitable(tokenizer):  # AsyncLLMEngine: a coroutine
-            tokenizer = self._run_async(tokenizer)
-        return len(tokenizer.encode(prompt))
+        prompt = self._chat_prompt(messages, config, tools)
+        return len(self._tokenizer().encode(prompt))
 
     def chat_stream(
         self,
@@ -457,5 +482,4 @@ class VLLMEngine(InferenceEngine):
         tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Streaming chat completion."""
-        prompt = PromptBuilder.build(messages, self._prompt_format, tools=tools)
-        yield from self.generate_stream(prompt, config)
+        yield from self.generate_stream(self._chat_prompt(messages, config, tools), config)

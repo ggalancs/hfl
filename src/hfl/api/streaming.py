@@ -260,6 +260,9 @@ def _record_stream_generation(
 
         prompt_n, generated = stream_counts(sync_iterator)
         tokens_out = generated if generated is not None else chunks
+        from hfl.api.helpers import warn_if_nothing_generated
+
+        warn_if_nothing_generated("stream", prompt_n or 0, tokens_out)
         if first_token_s is None:  # nothing was sent
             get_metrics().record_generation(seconds * 1000, prompt_n or 0, tokens_out)
             return

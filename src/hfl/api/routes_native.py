@@ -16,7 +16,11 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import ollama_to_generation_config
-from hfl.api.errors import service_unavailable, structured_output_unsupported
+from hfl.api.errors import (
+    images_unsupported,
+    service_unavailable,
+    structured_output_unsupported,
+)
 from hfl.api.helpers import (
     apply_keep_alive,
     caller_is_owner,
@@ -49,6 +53,10 @@ logger = logging.getLogger(__name__)
 UNSUPPORTED = (
     "This model's backend cannot do what was asked: logprobs need the default GGUF "
     "backend, llama-server or MLX, and cannot be combined with a response format."
+)
+RAW_WITH_IMAGES = (
+    "A raw prompt cannot carry images: they go into the model's chat template. "
+    "Send them without raw."
 )
 
 router = APIRouter(tags=["Ollama API"])
@@ -381,33 +389,60 @@ async def api_generate(
     else:
         final_prompt = req.prompt
 
+    # Images (Ollama's /api/generate takes them for vision models) were
+    # ignored: the model answered "green" about a red image it never saw.
+    # They go as one user turn through the chat template, as Ollama does.
+    chat: list[ChatMessage] | None = None
+    if req.images:
+        from hfl.api.vision import decode_ollama_images
+
+        chat = [
+            ChatMessage(role="user", content=req.prompt, images=decode_ollama_images(req.images))
+        ]
+        refused = images_unsupported(state.engine, chat, "/api/generate")
+        if refused is not None:
+            return refused
+        if req.raw:
+            return JSONResponse(status_code=400, content={"error": RAW_WITH_IMAGES})
+        if system:
+            chat.insert(0, ChatMessage(role="system", content=system))
+
     if req.stream:
         return await prepare_stream_response(
-            lambda slot: _stream_generate(req.model, final_prompt, gen_config, slot),
+            lambda slot: _stream_generate(req.model, final_prompt, gen_config, slot, chat),
             media_type="application/x-ndjson",
         )
 
     # Run sync engine call in thread pool with timeout, serialized by
     # the inference dispatcher (spec §5.3).
     try:
-        result = await run_dispatched(
-            state.engine.generate,
-            final_prompt,
-            gen_config,
-            operation="generate",
-        )
+        if chat is not None:
+            result = await run_dispatched(state.engine.chat, chat, gen_config, operation="generate")
+        else:
+            result = await run_dispatched(
+                state.engine.generate,
+                final_prompt,
+                gen_config,
+                operation="generate",
+            )
     except (QueueFullError, QueueTimeoutError) as exc:
         return queue_response_from_error(exc)
     except NotImplementedError:  # e.g. logprobs on a backend without them
         # A fixed sentence, never the exception's text (py/stack-trace-exposure).
         return JSONResponse(status_code=400, content={"error": UNSUPPORTED})
+    text, thinking = result.text, None
+    if chat is not None:
+        # A chat's reply carries its reasoning in the text (``<think>``):
+        # split as /api/chat does, shown when asked.
+        out = resolve_chat_output(result.text, req.model, None, None)
+        text, thinking = out.content, out.reasoning
     # Phase 5 P1-3: real nanosecond timings (was hard-coded to 0
     # pre-0.5.1). Clients keying off these fields now see the
     # engine's actual measurements.
     envelope: dict[str, Any] = {
         "model": req.model,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "response": result.text,
+        "response": text,
         "done": True,
         # Ollama-parity: non-empty ``done_reason`` on every completed
         # reply. Mirrors the engine's ``stop_reason`` ("stop", "length",
@@ -424,6 +459,8 @@ async def api_generate(
     # Phase 7 P2-4: opt-in legacy ``context`` token array for
     # multi-turn continuation. Only surfaces when the client sent
     # ``options.keep_context=true``.
+    if thinking and gen_config.expose_reasoning:
+        envelope["thinking"] = thinking
     if gen_config.keep_context and result.context_tokens is not None:
         envelope["context"] = result.context_tokens
     # Phase 12 P1 — V2 row 7. Attach logprobs when the engine
@@ -439,8 +476,11 @@ async def _stream_generate(
     prompt: str,
     config: GenerationConfig,
     slot_cm: Any | None = None,
+    chat: list[ChatMessage] | None = None,
 ) -> AsyncIterator[str]:
     """Stream text generation in Ollama NDJSON format with backpressure.
+
+    ``chat``: a request with images, generated as that chat instead.
 
     ``slot_cm`` is an already-entered dispatcher slot context manager
     (from :func:`_acquire_stream_slot`). It is released at the end of
@@ -479,7 +519,11 @@ async def _stream_generate(
         }
         return json.dumps(chunk) + "\n"
 
-    stream = state.engine.generate_stream(prompt, config)
+    stream = (
+        state.engine.chat_stream(chat, config)
+        if chat is not None
+        else state.engine.generate_stream(prompt, config)
+    )
 
     def format_done() -> str:
         ft = first_token_ns[0]
@@ -599,6 +643,9 @@ async def api_chat(
         background_tasks.add_task(unload_after_response, req.model)
 
     messages = _to_chat_messages(req)
+    refused = images_unsupported(state.engine, messages, "/api/chat")
+    if refused is not None:
+        return refused
     gen_config = _options_to_config(req.options)
     tools = _tools_payload(req)
     # Phase 9 P0: fold MCP tools into the tools list so every

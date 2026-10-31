@@ -533,6 +533,7 @@ class TestVLLMEngineChat:
     """Tests for chat completion."""
 
     def test_chat_uses_prompt_builder(self, mock_vllm):
+        """A model with no chat template: PromptBuilder's format."""
         from hfl.engine.base import ChatMessage
         from hfl.engine.vllm_engine import VLLMEngine
 
@@ -543,6 +544,7 @@ class TestVLLMEngineChat:
         mock_output.outputs = [MagicMock(text="Response", token_ids=[1])]
         engine._engine = MagicMock()
         engine._engine.generate.return_value = [mock_output]
+        engine._engine.get_tokenizer.return_value = MagicMock(chat_template=None)
 
         messages = [
             ChatMessage(role="system", content="You are helpful"),
@@ -555,6 +557,41 @@ class TestVLLMEngineChat:
         call_args = engine._engine.generate.call_args
         prompt = call_args[0][0][0]
         assert "<|im_start|>" in prompt
+
+    def test_chat_is_in_the_models_own_template(self, mock_vllm):
+        """PromptBuilder's formats were picked by the model's path, and
+        everything but Llama got ChatML: a Gemma or a Mistral was prompted
+        in a format it does not know. The tokenizer's template now, BOS
+        left to vLLM, which adds it as it tokenizes."""
+        jinja2 = pytest.importorskip("jinja2")
+
+        from hfl.engine.base import ChatMessage
+        from hfl.engine.vllm_engine import VLLMEngine
+
+        class Tokenizer:
+            bos_token = "<bos>"
+            chat_template = (
+                "{{ bos_token }}{% for m in messages %}<start_of_turn>{{ m.role }}\n"
+                "{{ m.content }}<end_of_turn>\n{% endfor %}<start_of_turn>model\n"
+            )
+
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+                env = jinja2.Environment(keep_trailing_newline=True)
+                return env.from_string(self.chat_template).render(
+                    messages=messages, bos_token=self.bos_token
+                )
+
+        engine = VLLMEngine()
+        engine._is_async = False
+        mock_output = MagicMock()
+        mock_output.outputs = [MagicMock(text="Response", token_ids=[1])]
+        engine._engine = MagicMock()
+        engine._engine.generate.return_value = [mock_output]
+        engine._engine.get_tokenizer.return_value = Tokenizer()
+
+        engine.chat([ChatMessage(role="user", content="Hello")])
+        prompt = engine._engine.generate.call_args[0][0][0]
+        assert prompt == "<start_of_turn>user\nHello<end_of_turn>\n<start_of_turn>model\n"
 
     def test_chat_stream(self, mock_vllm):
         from hfl.engine.base import ChatMessage
@@ -587,6 +624,7 @@ class TestVLLMEngineChat:
         mock_output.outputs = [MagicMock(text="Response", token_ids=[1])]
         engine._engine = MagicMock()
         engine._engine.generate.return_value = [mock_output]
+        engine._engine.get_tokenizer.return_value = MagicMock(chat_template=None)
 
         messages = [ChatMessage(role="user", content="Hello")]
         engine.chat(messages)
@@ -608,6 +646,7 @@ class TestVLLMEngineChat:
         mock_output.outputs = [MagicMock(text="Response", token_ids=[1])]
         engine._engine = MagicMock()
         engine._engine.generate.return_value = [mock_output]
+        engine._engine.get_tokenizer.return_value = MagicMock(chat_template=None)
 
         messages = [
             ChatMessage(role="system", content="Be helpful"),

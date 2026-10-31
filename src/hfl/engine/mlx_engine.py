@@ -157,6 +157,18 @@ def _settle_model_arrays(*models: Any) -> None:
             mx.eval([value for _, value in flat if isinstance(value, mx.array)])
 
 
+def _template_failed(exc: Exception) -> None:
+    """Say that the model's chat template refused the conversation. The
+    plain transcript used instead is not the model's format, and it was
+    logged at DEBUG only: answers degraded with nothing in the log (a
+    Mistral template refusing two user turns in a row, 2026-10-31)."""
+    logger.warning(
+        "The model's chat template refused this conversation (%s): it gets a "
+        "plain transcript instead of its own format, and may answer poorly.",
+        exc,
+    )
+
+
 class MLXEngine(InferenceEngine):
     """Inference engine wrapping mlx-lm's ``generate`` helper.
 
@@ -486,14 +498,7 @@ class MLXEngine(InferenceEngine):
         (They were all dropped: on MLX a model never saw its tools.) The
         reasoning switch (``think`` & co.) reaches the template too.
         """
-        from hfl.engine.llama_cpp import (
-            _fold_system,
-            _history_for_template,
-            _system_first,
-            _template_renders_tools,
-            _template_takes_system,
-            _tools_as_text,
-        )
+        from hfl.engine.llama_cpp import _fit_template, _template_renders_tools
 
         if self._tokenizer is None:
             raise RuntimeError("tokenizer not loaded")
@@ -509,16 +514,12 @@ class MLXEngine(InferenceEngine):
             dicts.append(entry)
         template = getattr(self._tokenizer, "chat_template", None)
         template = template if isinstance(template, str) else ""
-        dicts = _system_first(dicts)
         extras: dict[str, Any] = reasoning_template_vars(reasoning)
-        if _template_renders_tools(template, None):
-            dicts = _history_for_template(dicts, template)
-            if tools:
-                extras["tools"] = tools
-        else:
-            dicts = _tools_as_text(dicts, tools)
-        if not _template_takes_system(template):
-            dicts = _fold_system(dicts)
+        dicts, template_tools = _fit_template(
+            dicts, tools, template, _template_renders_tools(template, None)
+        )
+        if template_tools:
+            extras["tools"] = template_tools
         apply = getattr(self._tokenizer, "apply_chat_template", None)
         if callable(apply):
             try:
@@ -527,10 +528,10 @@ class MLXEngine(InferenceEngine):
                 # An old tokenizer without extra template variables.
                 try:
                     return cast(str, apply(dicts, tokenize=False, add_generation_prompt=True))
-                except Exception:
-                    logger.debug("apply_chat_template failed; manual", exc_info=True)
-            except Exception:
-                logger.debug("apply_chat_template failed; falling back to manual", exc_info=True)
+                except Exception as exc:
+                    _template_failed(exc)
+            except Exception as exc:
+                _template_failed(exc)
         parts: list[str] = []
         for m in messages:
             parts.append(f"{m.role}: {m.content}")

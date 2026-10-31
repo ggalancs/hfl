@@ -21,7 +21,7 @@ from fastapi.responses import Response, StreamingResponse
 from hfl.api import server_tools
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import anthropic_to_generation_config
-from hfl.api.errors import service_unavailable
+from hfl.api.errors import images_unsupported, service_unavailable
 from hfl.api.helpers import (
     prepare_stream_response,
     queue_response_from_error,
@@ -336,6 +336,9 @@ async def create_message(
         return service_unavailable(f"Model '{model_name}' failed to load", path="/v1/messages")
 
     messages, gen_config = _prepared(req, state.current_model)
+    refused = images_unsupported(state.engine, messages, "/v1/messages")
+    if refused is not None:
+        return refused
     tools = _anthropic_tools_to_payload(req)
     # ``tool_choice: {"type": "none"}`` is a hard opt-out: tools are not
     # advertised and the marker parser is suppressed, so the reply can never

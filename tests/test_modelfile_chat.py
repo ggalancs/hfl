@@ -208,6 +208,10 @@ class _Engine(InferenceEngine):
     def is_loaded(self) -> bool:
         return True
 
+    @property
+    def supports_images(self) -> bool:
+        return True  # a vision model: a message with images reaches its own template
+
 
 def test_every_engines_chat_goes_through_the_template() -> None:
     engine = _Engine()

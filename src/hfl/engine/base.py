@@ -391,6 +391,16 @@ class InferenceEngine(ABC):
         return False
 
     @property
+    def supports_images(self) -> bool:
+        """Whether the model sees a message's images.
+
+        ``False`` by default: Transformers, MLX and vLLM dropped them and the
+        model answered about an image it never saw; llama.cpp without a
+        projector failed with a bare 500. ``chat`` refuses images instead
+        (``IMAGES_UNSUPPORTED``), and the routes do before streaming."""
+        return False
+
+    @property
     def supports_concurrent_inference(self) -> bool:
         """Whether two inferences may run against this engine at once.
 
@@ -598,11 +608,22 @@ class AudioEngine(ABC):
             await asyncio.to_thread(self.unload)
 
 
+IMAGES_UNSUPPORTED = (
+    "This model cannot see images: it is not a vision model, or it was loaded "
+    "without its image projector (mmproj). Send the request without images, or "
+    "use a vision model."
+)
+
+
 def _through_modelfile_template(method: Any, completion: str) -> Any:
     @functools.wraps(method)
     def chat(
         self: "InferenceEngine", messages: list[ChatMessage], *args: Any, **kwargs: Any
     ) -> Any:
+        if not self.supports_images and any(m.images for m in messages):
+            from hfl.exceptions import ValidationError
+
+            raise ValidationError(IMAGES_UNSUPPORTED)
         # The call is passed on exactly as made: not every engine takes tools.
         config = args[0] if args else kwargs.get("config")
         if isinstance(config, GenerationConfig) and config.modelfile_template:

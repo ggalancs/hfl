@@ -46,6 +46,70 @@ def _configured_quant() -> str | None:
     return value
 
 
+def template_chat_prompt(
+    tokenizer: Any,
+    messages: list[ChatMessage],
+    tools: list[dict] | None = None,
+    reasoning: str | None = None,
+) -> str | None:
+    """The prompt in ``tokenizer``'s own chat template, the messages fitted
+    to it (``_fit_template``) and the reasoning switch passed on; None when
+    it has no template, for the caller's fallback. Transformers and vLLM
+    both render through here."""
+    msgs: list[dict] = []
+    for m in messages:
+        entry: dict = {"role": m.role, "content": m.content or ""}
+        if m.tool_calls:
+            entry["tool_calls"] = m.tool_calls
+        if m.name:
+            entry["name"] = m.name
+        if m.tool_call_id:
+            entry["tool_call_id"] = m.tool_call_id
+        msgs.append(entry)
+    from hfl.engine.llama_cpp import _fit_template, _system_first, _template_renders_tools
+
+    # ``None`` or empty: a tokenizer with no template, whose
+    # ``apply_chat_template`` raises (a base model). An attribute that is
+    # not there at all is a stand-in: handed over as it is.
+    raw_template = getattr(tokenizer, "chat_template", ...)
+    if not hasattr(tokenizer, "apply_chat_template") or raw_template in (None, ""):
+        return None
+    template = _chat_template_of(tokenizer, bool(tools))
+    if template is not None:
+        msgs, template_tools = _fit_template(
+            msgs, tools, template, _template_renders_tools(template, None)
+        )
+    else:  # a template this cannot read: handed over as it is
+        msgs, template_tools = _system_first(msgs), tools
+    template_kwargs: dict = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+    }
+    if template_tools:
+        template_kwargs["tools"] = template_tools
+    # ``think`` & co. reach the template (``enable_thinking``...).
+    extras = reasoning_template_vars(reasoning)
+    template_kwargs.update(extras)
+    try:
+        return cast(str, tokenizer.apply_chat_template(msgs, **template_kwargs))
+    except TypeError:
+        # Older transformers / templates without ``tools`` kwarg
+        template_kwargs.pop("tools", None)
+        for key in extras:
+            template_kwargs.pop(key, None)
+        return cast(str, tokenizer.apply_chat_template(msgs, **template_kwargs))
+
+
+def _chat_template_of(tokenizer: Any, tools: bool) -> str | None:
+    """The chat template ``apply_chat_template`` will use, or None when the
+    tokenizer has none (a base model). A tokenizer with several picks
+    ``tool_use`` for a request with tools, else ``default``, as it does."""
+    template = getattr(tokenizer, "chat_template", None)
+    if isinstance(template, dict):
+        template = (template.get("tool_use") if tools else None) or template.get("default")
+    return template if isinstance(template, str) and template else None
+
+
 class TransformersEngine(InferenceEngine):
     """HuggingFace Transformers inference engine."""
 
@@ -198,40 +262,18 @@ class TransformersEngine(InferenceEngine):
         ``apply_chat_template`` so models that have tool-aware templates
         (qwen, llama3, mistral, ...) emit their native tool-call markers.
         """
-        msgs: list[dict] = []
-        for m in messages:
-            entry: dict = {"role": m.role, "content": m.content or ""}
-            if m.tool_calls:
-                entry["tool_calls"] = m.tool_calls
-            if m.name:
-                entry["name"] = m.name
-            if m.tool_call_id:
-                entry["tool_call_id"] = m.tool_call_id
-            msgs.append(entry)
-        from hfl.engine.llama_cpp import _system_first
+        prompt = template_chat_prompt(self._tokenizer, messages, tools, reasoning)
+        if prompt is not None:
+            return prompt
 
-        msgs = _system_first(msgs)
-
-        if hasattr(self._tokenizer, "apply_chat_template"):
-            template_kwargs: dict = {
-                "tokenize": False,
-                "add_generation_prompt": True,
-            }
-            if tools:
-                template_kwargs["tools"] = tools
-            # ``think`` & co. reach the template (``enable_thinking``...).
-            extras = reasoning_template_vars(reasoning)
-            template_kwargs.update(extras)
-            try:
-                return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
-            except TypeError:
-                # Older transformers / templates without ``tools`` kwarg
-                template_kwargs.pop("tools", None)
-                for key in extras:
-                    template_kwargs.pop(key, None)
-                return cast(str, self._tokenizer.apply_chat_template(msgs, **template_kwargs))
-
-        # Generic fallback (no template, no tool awareness)
+        # Generic fallback (no template, no tool awareness). A tokenizer with
+        # no chat template used to raise here instead: a 500 on every chat.
+        if not getattr(self, "_said_no_template", False):
+            self._said_no_template = True
+            logger.warning(
+                "This model has no chat template: chats get a generic [INST] "
+                "format, which may not be the one it was trained on."
+            )
         parts = []
         for m in messages:
             if m.role == "system":

@@ -76,7 +76,7 @@ def vision_engine(sample_manifest):
         captured.append(list(messages))
         return MagicMock(text="described", tokens_generated=1, tokens_prompt=1, stop_reason="stop")
 
-    engine = MagicMock(is_loaded=True)
+    engine = MagicMock(is_loaded=True, supports_images=True)
     engine.chat = MagicMock(side_effect=_record_chat)
     state.engine = engine
     state.current_model = sample_manifest

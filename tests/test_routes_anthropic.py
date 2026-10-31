@@ -1190,6 +1190,7 @@ class TestAnthropicImages:
 
     def _post(self, source):
         engine = _make_engine()
+        engine.supports_images = True  # a vision model
         state = get_state()
         state.engine = engine
         state.current_model = _make_model()

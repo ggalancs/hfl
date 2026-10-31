@@ -17,7 +17,11 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hfl.api.chat_core import resolve_chat_output
 from hfl.api.converters import openai_to_generation_config
-from hfl.api.errors import service_unavailable, structured_output_unsupported
+from hfl.api.errors import (
+    images_unsupported,
+    service_unavailable,
+    structured_output_unsupported,
+)
 from hfl.api.helpers import (
     prepare_stream_response,
     queue_response_from_error,
@@ -215,6 +219,9 @@ async def chat_completions(
     messages = apply_to_chat(
         state.current_model, messages, gen_config, explicit_fields(req, OPENAI_OPTIONS)
     )
+    refused = images_unsupported(state.engine, messages, "/v1/chat/completions")
+    if refused is not None:
+        return refused
 
     # OLLAMA_PARITY_PLAN P0-5: honour OpenAI ``response_format``.
     if req.response_format is not None:

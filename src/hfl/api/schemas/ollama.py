@@ -177,6 +177,15 @@ class GenerateRequest(BaseModel):
             "Modelfile defined. Ollama-parity (P1-1)."
         ),
     )
+    images: list[str] | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "Base64 images for a vision model, as Ollama's /api/generate "
+            "takes them. They were ignored, and the model answered about "
+            "an image it never saw."
+        ),
+    )
     think: bool | str | None = Field(
         None,
         description=(

@@ -51,11 +51,12 @@ class TestMessagesConversion:
 
         parts = out[0]["content"]
         assert isinstance(parts, list)
-        # Text part first, then image part(s)
-        assert parts[0] == {"type": "text", "text": "what is this?"}
-        assert parts[1]["type"] == "image_url"
+        # Image part(s) first, then the text: SmolVLM named the colour of
+        # three images with them first, and of none after the question.
+        assert parts[1] == {"type": "text", "text": "what is this?"}
+        assert parts[0]["type"] == "image_url"
         # MIME was sniffed as PNG
-        assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert parts[0]["image_url"]["url"].startswith("data:image/png;base64,")
 
     def test_mime_sniffed_per_image(self):
         png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
@@ -100,7 +101,7 @@ class TestMessagesConversion:
         parts = LlamaCppEngine._messages_to_llama_cpp(
             [ChatMessage(role="user", content="x", images=[png])]
         )[0]["content"]
-        url = parts[1]["image_url"]["url"]
+        url = parts[0]["image_url"]["url"]
         b64 = url.split(",", 1)[1]
         assert base64.b64decode(b64) == png
 
@@ -220,6 +221,15 @@ class TestVisionHandlerDispatch:
             architecture="llava-v1.6", clip_model_path="/tmp/mmproj.gguf"
         )
         assert type(h).__name__ == "Llava16ChatHandler"
+
+    def test_a_llama_with_its_own_template_never_gets_llava15s(self):
+        """Without the generic handler (an older llama-cpp-python), a
+        ``llama`` GGUF with a template (SmolVLM) stays text-only with it:
+        LLaVA 1.5's template had it answer "1." to a question about France."""
+        h = _build_vision_chat_handler(
+            architecture="llama", clip_model_path="/tmp/mmproj.gguf", has_template=True
+        )
+        assert h is None
 
     def test_plain_llava_gets_v15(self):
         h = _build_vision_chat_handler(architecture="llava", clip_model_path="/tmp/mmproj.gguf")
@@ -408,3 +418,104 @@ def _dummy_path():
     """Empty path helper — silences the ``imported but unused`` lint
     on ``pathlib.Path`` when a test shape evolves."""
     return Path("/")
+
+
+# ----------------------------------------------------------------------
+# The model's own template (MTMDChatHandler) for a GGUF that has one
+# ----------------------------------------------------------------------
+
+
+class TestTheModelsOwnTemplate:
+    """A per-family handler brings a fixed template that replaced the
+    model's on every request, text ones too: Qwen3.8 under LLaVA 1.5's
+    answered empty replies, SmolVLM (a ``llama`` architecture) answered
+    "1." to "What is the capital of France?" (measured, 2026-10-31). A GGUF
+    with its own template keeps it, whatever its architecture."""
+
+    @pytest.fixture(autouse=True)
+    def fake(self):
+        with _fake_handlers() as fake:
+
+            class MTMDChatHandler:
+                def __init__(self, *, clip_model_path, verbose=False, **_):
+                    self.clip_model_path = clip_model_path
+
+                def _get_chat_template(self, llama_model):
+                    return llama_model.metadata["tokenizer.chat_template"]
+
+                def __call__(self, **kwargs):
+                    return kwargs
+
+            fake.MTMDChatHandler = MTMDChatHandler
+            yield fake
+
+    @pytest.mark.parametrize("arch", ["qwen35", "llama", "gemma3", "qwen2vl", "llava", None])
+    def test_any_architecture_with_a_template_keeps_it(self, fake, arch):
+        h = _build_vision_chat_handler(
+            architecture=arch, clip_model_path="/p/mm.gguf", has_template=True
+        )
+        assert isinstance(h, fake.MTMDChatHandler)
+        assert h.uses_model_template is True and h.clip_model_path == "/p/mm.gguf"
+
+    def test_without_a_template_the_family_handlers_remain(self):
+        h = _build_vision_chat_handler(architecture="llama", clip_model_path="/p")
+        assert type(h).__name__ == "Llava15ChatHandler"  # an old LLaVA 1.5 GGUF
+        assert _build_vision_chat_handler(architecture="qwen35", clip_model_path="/p") is None
+
+    def test_it_gets_the_request_variables_and_the_repaired_template(self, monkeypatch):
+        import types
+
+        h = _build_vision_chat_handler(
+            architecture="qwen35", clip_model_path="/p", has_template=True
+        )
+        h.template_vars = {"enable_thinking": False}
+        assert h(messages=[])["enable_thinking"] is False
+        monkeypatch.setattr("hfl.models.chat_template.repair_chat_template", lambda t: t + "!")
+        model = types.SimpleNamespace(metadata={"tokenizer.chat_template": "T"})
+        assert h._get_chat_template(model) == "T!"
+
+    def _load(self, tmp_path, metadata, handler_init=None):
+        model = tmp_path / "qwen3.8.gguf"
+        model.write_bytes(b"GGUF" + b"\x00" * 64)
+        (tmp_path / "mmproj-F16.gguf").write_bytes(b"GGUF" + b"\x00" * 64)
+
+        class FakeLlama:
+            def __init__(self, **kwargs):
+                self.chat_handler = kwargs.get("chat_handler")
+                self.metadata = metadata
+
+            def close(self):
+                pass
+
+        info = {"architecture": "qwen35", "has_chat_template": True}
+        with (
+            patch("hfl.engine.llama_cpp.Llama", FakeLlama),
+            patch("hfl.engine.llama_cpp._read_gguf_model_info", return_value=info),
+            patch("hfl.engine.llama_cpp._preflight_memory_check", return_value=None),
+        ):
+            if handler_init is not None:
+                import sys
+
+                generic = sys.modules["llama_cpp.llama_chat_format"].MTMDChatHandler
+                generic._init_mtmd_context = handler_init
+            engine = LlamaCppEngine()
+            engine.load(str(model))
+        return engine
+
+    def test_the_engine_hands_its_template_the_tools(self, tmp_path):
+        pytest.importorskip("jinja2")  # the template probe renders it
+        template = "{% for t in tools %}{{ t.function.name }}{% endfor %}{{ messages[-1].content }}"
+        engine = self._load(tmp_path, {"tokenizer.chat_template": template})
+        assert engine.supports_images is True
+        assert engine._model.chat_handler.uses_model_template is True
+        assert engine._formatters == [engine._model.chat_handler]  # gets template_vars
+        assert engine._template_knows_tools is True
+
+    def test_a_projector_that_does_not_load_leaves_the_model_text_only(self, tmp_path, caplog):
+        def refuse(self, model):
+            raise ValueError("Failed to load mtmd context")
+
+        with caplog.at_level(logging.WARNING, logger="hfl.engine.llama_cpp"):
+            engine = self._load(tmp_path, {"tokenizer.chat_template": "x"}, refuse)
+        assert engine.supports_images is False and engine._model.chat_handler is None
+        assert "does not load" in caplog.text

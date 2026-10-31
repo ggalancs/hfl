@@ -411,8 +411,13 @@ class TestRequests:
         assert list(engine.generate_stream("x")) == ["a", "b"]
 
     def test_images_are_refused_plainly_without_a_projector(self, engine):
-        with pytest.raises(ValueError, match="no image projector"):
+        """A 400 with a message: as a ValueError it was a bare 500."""
+        from hfl.exceptions import ValidationError
+
+        assert engine.supports_images is False
+        with pytest.raises(ValidationError, match="cannot see images") as refused:
             engine.chat([ChatMessage(role="user", content="x", images=[b"\x89PNG"])])
+        assert refused.value.status_code == 400
 
 
 class TestSelection:

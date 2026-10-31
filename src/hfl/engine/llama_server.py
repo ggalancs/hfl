@@ -304,7 +304,10 @@ def _wire_messages(messages: list[ChatMessage], vision: bool = False) -> list[di
         content: Any = message.content
         if message.images:
             if not vision:
-                raise ValueError(
+                from hfl.exceptions import ValidationError
+
+                # A 400 with this message: as a ValueError it was a bare 500.
+                raise ValidationError(
                     "this model cannot see images: it has no image projector (mmproj) "
                     "beside it; pull the model again to fetch it"
                 )
@@ -982,17 +985,20 @@ class LlamaServerEngine(InferenceEngine):
     def _chat_body(
         self, messages: list[ChatMessage], cfg: GenerationConfig, tools: list[dict] | None
     ) -> dict[str, Any]:
-        from hfl.engine.llama_cpp import _history_for_template, _system_first, _tools_as_text
+        from hfl.engine.llama_cpp import _fit_template
 
         penalty = repeat_penalty_for(cfg, messages, tools)
-        wire = _system_first(_wire_messages(messages, vision=self._projector is not None))
-        if self._template_knows_tools:
-            wire = _history_for_template(wire, self._chat_template)
-        else:
-            # The same as the in-process backend: llama-server's own
-            # handling of such a template did not get Hermes-3 or
-            # DeepSeek-R1 to call a tool at all (measured).
-            wire, tools = _tools_as_text(wire, tools), None
+        # Tools the template cannot show are written in, as the in-process
+        # backend does: llama-server's own handling of such a template did
+        # not get Hermes-3 or DeepSeek-R1 to call a tool at all (measured).
+        wire, tools = _fit_template(
+            _wire_messages(messages, vision=self._projector is not None),
+            tools,
+            self._chat_template,
+            self._template_knows_tools,
+            typed_content=False,
+            takes_system=True,
+        )
         body: dict[str, Any] = {
             "messages": wire,
             "max_tokens": cfg.max_tokens,
@@ -1411,6 +1417,10 @@ class LlamaServerEngine(InferenceEngine):
     @property
     def supports_structured_output(self) -> bool:
         return True  # json_schema / grammar on both /v1/chat and /completion
+
+    @property
+    def supports_images(self) -> bool:
+        return self._projector is not None
 
     @property
     def parallel_slots(self) -> int:

@@ -84,6 +84,9 @@ def _validate_chat_frame(frame: dict[str, Any]) -> tuple[str, list[dict]]:
     for m in messages:
         if not isinstance(m, dict) or "role" not in m or "content" not in m:
             raise ValueError("each message needs 'role' and 'content'")
+        # A list of parts (an image) reached the model as its Python repr.
+        if m["content"] is not None and not isinstance(m["content"], str):
+            raise ValueError("each message's 'content' must be text: this socket takes no images")
     return model.strip(), messages
 
 

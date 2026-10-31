@@ -8,14 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Qwen3.8 (and any vision GGUF llama-cpp-python has no handler for)
-  answered empty replies.** With a projector beside it, an unknown vision
-  architecture got LLaVA 1.5's handler, whose chat template replaced the
-  model's on every request, text ones too: Qwen3.8 (`qwen35`) got
-  "USER: … ASSISTANT:" prompts and returned 0 tokens on a request after a
-  tool result 6 times out of 6. Such a model now loads text-only with its own
-  template (the same request: 6 tool calls out of 6); llama-server serves its
-  images.
+- **Vision GGUFs answered with another model's chat format, and Qwen3.8 with
+  empty replies.** In llama-cpp-python (`--backend llama-cpp`, or with no
+  llama-server installed) a model with a projector beside it got a
+  per-family handler whose fixed template replaced the model's on every
+  request, text ones too: Qwen3.8 (`qwen35`, unknown, so LLaVA 1.5's) returned
+  0 tokens after a tool result 6 times out of 6; SmolVLM answered "1." to
+  "What is the capital of France?". A GGUF with its own template now keeps
+  it, with its tools and images, as llama-server does: Qwen3.8 called the
+  next tool 3 times out of 3 and named a red image; SmolVLM answered "Paris."
+  and named a red, a blue and a green image (it named none with the
+  question before the image: images now go first, as Ollama puts them). A
+  projector this llama-cpp-python cannot load leaves the model text-only
+  with a warning, instead of failing every request.
 - **The desktop apps did not use llama-server.** `serve --tray` (what HFL.app
   and the Start-menu shortcut run) started the server before choosing the
   backend: GGUF models went through llama-cpp-python one request at a time,
@@ -23,6 +28,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--ctx` were ignored. It chooses as `serve` does now (Qwen3.8 through the
   tray: llama-server, 4 slots, a repeated 832-token prompt read in 0.1 s
   instead of 4.9 s).
+- **Images a model cannot see are refused, not dropped.** Transformers, MLX
+  and vLLM dropped them and the model answered about an image it never saw;
+  llama.cpp without a projector failed with a bare 500, llama-server's clear
+  message was lost in one. Every chat route now answers 400 ("This model
+  cannot see images...") before any stream starts.
+- **`/api/generate` ignored `images`**: Qwen3.8 called a red image "green"
+  (through `/api/chat`: "Red"). They go through the chat template as one user
+  turn, as Ollama does (not with `raw`: a 400 says why).
+- **`/v1/responses` dropped `input_image` parts.** They reach the model now;
+  `input_file` and `input_audio` parts are refused instead of dropped. The
+  WebSocket chat refuses non-text content, which reached the model as a
+  Python list.
+- **Conversations a chat template refuses.** Two user messages in a row (an
+  app adding context as a message) or a greeting from the assistant first:
+  Mistral's and Gemma 3's templates raise on both, and MLX then swapped the
+  model's format for an invented "user: … assistant:" with only a DEBUG line.
+  SmolVLM's template draws no text from a plain-string message: the model
+  answered a question it never got. Every engine now fits the messages to
+  the template (turns joined, an empty user turn first, typed text parts),
+  found by rendering it, as llama.cpp does; a template that still refuses is
+  a warning.
+- **vLLM prompted every model but Llama in ChatML**: its format was picked by
+  the model's path. It uses the model's own chat template now, with the
+  reasoning switch; the fixed formats remain for a model without one.
+- **Transformers failed every chat on a model with no chat template** (a
+  ValueError, a 500), and handed tools to templates that never show them:
+  it falls back to its generic format with a warning, and writes such tools
+  in, as the other engines do; and it folds the system message in for a
+  template that takes none.
+- A reply of no tokens to a real prompt is a warning in the log ("generated
+  nothing"): Qwen3.8's 17 empty replies were INFO lines among many.
 
 ## [0.28.0] - 2026-10-26
 
