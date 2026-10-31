@@ -401,6 +401,13 @@ class InferenceEngine(ABC):
         return False
 
     @property
+    def thinking_controls(self) -> dict[str, Any] | None:
+        """The reasoning controls of the loaded model's template as this
+        engine renders it (``hfl.models.thinking``'s shape), or None to read
+        them from the model file instead."""
+        return None
+
+    @property
     def supports_concurrent_inference(self) -> bool:
         """Whether two inferences may run against this engine at once.
 

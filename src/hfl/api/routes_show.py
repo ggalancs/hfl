@@ -26,6 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from hfl.api.state import get_state
 from hfl.converter.modelfile import render_modelfile
 from hfl.exceptions import ModelNotFoundError
 from hfl.models.capabilities import detect_capabilities
@@ -161,7 +162,11 @@ async def show_model(req: ShowRequest, request: Request) -> dict[str, Any]:
         "capabilities": detect_capabilities(manifest),
         "license": manifest.license_name or manifest.license or "",
     }
-    thinking = thinking_controls(manifest)
+    # A loaded model's engine may know them without jinja2 (llama-server).
+    resident = get_state().resident(manifest.name)
+    thinking = getattr(resident.engine, "thinking_controls", None) if resident else None
+    if not isinstance(thinking, dict):
+        thinking = thinking_controls(manifest)
     if thinking is not None:  # Ollama omits it for a model that does not reason
         body["thinking"] = thinking
     return body

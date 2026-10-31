@@ -243,3 +243,17 @@ class TestNothingGenerated:
         with caplog.at_level(logging.WARNING, logger="hfl.api.helpers"):
             _record_stream_generation(iter(()), 0, 12.0, None)
         assert "generated nothing" in caplog.text
+
+
+def test_the_engines_reasoning_controls_come_first(monkeypatch):
+    """Without jinja2 the model file says nothing: llama-server's own
+    reading decides what an omitted ``think`` means."""
+    import types
+
+    import hfl.models.thinking as thinking
+    from hfl.api.routes_native import _default_thinking_level
+
+    monkeypatch.setattr(thinking, "thinking_controls", lambda manifest: None)
+    engine = types.SimpleNamespace(thinking_controls={"values": [False, True], "default": True})
+    assert _default_thinking_level(object(), engine) == "medium"
+    assert _default_thinking_level(object(), None) == "off"

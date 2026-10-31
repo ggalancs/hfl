@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from hfl.models.capabilities import detect_capabilities
 from hfl.models.chat_template import model_template, template_env
@@ -55,6 +55,15 @@ def _from_template(template: str) -> dict[str, Any] | None:
         except Exception:
             return None
 
+    return controls_from(render)
+
+
+def controls_from(render: Callable[..., str | None]) -> dict[str, Any] | None:
+    """The reasoning controls a template shows, given ``render(**variables)``:
+    the prompt of a one-message chat (``hi``) with those template variables,
+    or None when it cannot be made. Rendered here with jinja2, or by
+    llama-server itself (``LlamaServerEngine.thinking_controls``), which
+    needs no template engine in HFL."""
     unset = render()
     if unset is None:
         return None

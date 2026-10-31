@@ -255,3 +255,25 @@ class TestRenderModelfile:
     def test_render_is_deterministic(self, registered_llm):
         """Twice in a row → byte-identical output (snapshot stability)."""
         assert render_modelfile(registered_llm) == render_modelfile(registered_llm)
+
+
+def test_a_loaded_models_engine_gives_its_reasoning_controls(client, registered_llm, monkeypatch):
+    """llama-server renders them itself: without jinja2 the model file gave
+    none, and a model that reasons by default had its reasoning dropped."""
+    import types
+
+    from hfl.api import routes_show
+    from hfl.api.state import ResidentModel, get_state, reset_state
+
+    monkeypatch.setattr(routes_show, "thinking_controls", lambda manifest: None)  # no jinja2
+    assert "thinking" not in client.post("/api/show", json={"model": "qwen-coder:7b"}).json()
+    controls = {"values": ["low", "medium", "high"], "default": "high"}
+    engine = types.SimpleNamespace(thinking_controls=controls)
+    get_state()._residents[registered_llm.name] = ResidentModel(
+        registered_llm.name, engine, registered_llm, 0
+    )
+    try:
+        body = client.post("/api/show", json={"model": "qwen-coder:7b"}).json()
+        assert body["thinking"] == controls
+    finally:
+        reset_state()

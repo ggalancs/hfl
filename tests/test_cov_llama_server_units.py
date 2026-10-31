@@ -289,10 +289,17 @@ class TestTemplateProbes:
         monkeypatch.setattr(
             lc, "_template_renders_tools", lambda t, fmt: seen.append((t, fmt)) or True
         )
-        engine = _engine({"/props": _Resp({"chat_template": "T", "n_ctx": 1024})})
+        # An older llama-server: no caps, and no /apply-template to probe with.
+        engine = _engine(
+            {
+                "/props": _Resp({"chat_template": "T", "n_ctx": 1024}),
+                "/apply-template": _Resp({"error": "not found"}, status=404),
+            }
+        )
         engine._template_knows_tools = False
         engine._read_template()
         assert engine._template_knows_tools is True and seen == [("T", None)]
+        assert engine._turns is None and engine.thinking_controls is None
         assert engine._reported_ctx() == 1024
 
 

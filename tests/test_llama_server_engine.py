@@ -84,8 +84,16 @@ class H(BaseHTTPRequestHandler):
             bos = [1] if body.get("add_special") and ADDS_BOS else []
             return self._send(200, {"tokens": bos + [64] * max(1, len(body["content"].split()))})
         if self.path == "/apply-template":  # one word per message, and per tool
-            words = ["<m>"] * len(body["messages"]) + ["<t>"] * len(body.get("tools") or [])
             kwargs = body.get("chat_template_kwargs") or {}
+            roles = [m["role"] for m in body["messages"] if m["role"] != "system"]
+            alternate = os.environ.get("FAKE_ALTERNATE") == "1"  # Mistral's rule
+            if alternate and any(r != ("user", "assistant")[i % 2] for i, r in enumerate(roles)):
+                return self._send(400, {"error": {"code": 400, "message": "roles must alternate"}})
+            if os.environ.get("FAKE_RENDER") == "1":  # the text, and a thinking switch
+                words = [str(m["content"]) for m in body["messages"]]
+                words += ["<nothink>" if kwargs.get("enable_thinking") is False else "<think>"]
+                return self._send(200, {"prompt": " ".join(words)})
+            words = ["<m>"] * len(body["messages"]) + ["<t>"] * len(body.get("tools") or [])
             words += ["<nothink>"] if kwargs.get("enable_thinking") is False else []
             return self._send(200, {"prompt": " ".join(words)})
         if self.path.startswith("/slots/"):  # slot 1 holds a prompt, the others none
@@ -658,6 +666,58 @@ def _last_body(fake_server) -> dict:
 def _launches(fake_server) -> list[list[str]]:
     lines = Path(str(fake_server[1]) + ".all").read_text().splitlines()
     return [json.loads(line) for line in lines]
+
+
+class TestTheServerRendersItsOwnProbes:
+    """llama-server renders the probes of its template (``/apply-template``),
+    so HFL runs no downloaded template in its own process and needs no
+    jinja2: without it, two user turns failed with a 400 on a template that
+    refuses them, and Qwen3.8's reasoning was dropped (a reply cut short
+    came back empty). Measured 2026-10-31."""
+
+    def test_turns_a_template_refuses_are_fitted(self, fake_server, monkeypatch):
+        monkeypatch.setenv("FAKE_RENDER", "1")
+        monkeypatch.setenv("FAKE_ALTERNATE", "1")
+        eng = _loaded(fake_server)
+        try:
+            assert eng._turns == (True, True, False)
+            eng.chat(
+                [
+                    ChatMessage(role="assistant", content="How can I help?"),
+                    ChatMessage(role="user", content="a"),
+                    ChatMessage(role="user", content="b"),
+                ]
+            )
+        finally:
+            eng.unload()
+        sent = _last_body(fake_server)["messages"]
+        assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+        assert sent[-1]["content"] == "a\n\nb"
+
+    def test_a_template_that_takes_them_is_left_alone(self, fake_server, monkeypatch):
+        monkeypatch.setenv("FAKE_RENDER", "1")
+        eng = _loaded(fake_server)
+        try:
+            assert eng._turns == (False, False, False)
+            eng.chat([ChatMessage(role="user", content="a"), ChatMessage(role="user", content="b")])
+        finally:
+            eng.unload()
+        assert [m["role"] for m in _last_body(fake_server)["messages"]] == ["user", "user"]
+
+    def test_the_reasoning_controls_come_from_the_server(self, fake_server, monkeypatch):
+        monkeypatch.setenv("FAKE_RENDER", "1")
+        eng = _loaded(fake_server)
+        try:
+            assert eng.thinking_controls == {"values": [False, True], "default": True}
+        finally:
+            eng.unload()
+
+    def test_a_server_that_cannot_render_them_leaves_it_to_the_template(self, fake_server):
+        eng = _loaded(fake_server)  # the fake's default: no message text in its prompts
+        try:
+            assert eng._turns is None and eng.thinking_controls is None
+        finally:
+            eng.unload()
 
 
 class TestTemplates:

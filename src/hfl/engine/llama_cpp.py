@@ -914,6 +914,7 @@ def _fit_template(
     knows_tools: bool,
     typed_content: bool = True,
     takes_system: bool | None = None,
+    turns: tuple[bool, bool, bool] | None = None,
 ) -> tuple[list[dict], list[dict] | None]:
     """The messages, and the tools to hand the template (None when written
     in as text), as ``template`` takes them: every engine through here. Each
@@ -922,13 +923,17 @@ def _fit_template(
     template that never shows them, and none fitted the turns.
     ``typed_content=False`` and ``takes_system=True`` leave plain strings and
     the system message to llama-server's llama.cpp, which adapts both
-    itself; ``takes_system`` otherwise comes from the template."""
+    itself; ``takes_system`` otherwise comes from the template. ``turns``:
+    ``_probe_turns``' answer found otherwise (llama-server renders the
+    probes itself); None probes ``template`` here, with jinja2."""
     msgs = _system_first(msgs)
     if knows_tools:
         msgs = _history_for_template(msgs, template)
     else:
         msgs, tools = _tools_as_text(msgs, tools), None
-    in_a_row, opening, typed = _probe_turns(template) if template else (False, False, False)
+    if turns is None:
+        turns = _probe_turns(template) if template else (False, False, False)
+    in_a_row, opening, typed = turns
     if in_a_row or opening:
         msgs = _fit_turns(msgs, in_a_row, opening)
     if not (_template_takes_system(template) if takes_system is None else takes_system):

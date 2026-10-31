@@ -210,16 +210,20 @@ def _resolve_thinking_level(think: bool | str | None) -> str:
     return "off"
 
 
-def _default_thinking_level(manifest: Any) -> str:
+def _default_thinking_level(manifest: Any, engine: Any = None) -> str:
     """What an omitted ``think`` means for this model, as Ollama resolves it:
     the model's default (``/api/show``'s ``thinking.default``), so a model
     that reasons unless told not to (Qwen3) has its reasoning returned in
     ``thinking`` — HFL hid it, and a reply whose budget went on reasoning
-    came back empty (Qwen3-8B in the compatibility sweep, measured)."""
+    came back empty (Qwen3-8B in the compatibility sweep, measured). The
+    engine's own reading first (llama-server renders the template itself),
+    else the model file's (which needs jinja2)."""
     try:
         from hfl.models.thinking import thinking_controls
 
-        controls = thinking_controls(manifest)
+        controls = getattr(engine, "thinking_controls", None)
+        if not isinstance(controls, dict):
+            controls = thinking_controls(manifest)
     except Exception:
         return "off"
     default = (controls or {}).get("default")
@@ -351,7 +355,7 @@ async def api_generate(
     gen_config.thinking_level = (
         _resolve_thinking_level(req.think)
         if req.think is not None
-        else _default_thinking_level(state.current_model)
+        else _default_thinking_level(state.current_model, state.engine)
     )
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True
@@ -670,7 +674,7 @@ async def api_chat(
     gen_config.thinking_level = (
         _resolve_thinking_level(req.think)
         if req.think is not None
-        else _default_thinking_level(state.current_model)
+        else _default_thinking_level(state.current_model, state.engine)
     )
     if gen_config.thinking_level != "off":
         gen_config.expose_reasoning = True

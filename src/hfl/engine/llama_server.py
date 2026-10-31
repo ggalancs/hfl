@@ -577,6 +577,8 @@ class LlamaServerEngine(InferenceEngine):
         # itself; when not, HFL writes them in (``_tools_as_text``).
         self._chat_template = ""
         self._template_knows_tools = True
+        self._turns: tuple[bool, bool, bool] | None = None
+        self._thinking: dict[str, Any] | None = None
         # The image projector served with the model (None: text only).
         self._projector: Path | None = None
         # What the process is started with, to start it again with other
@@ -868,7 +870,13 @@ class LlamaServerEngine(InferenceEngine):
 
     def _read_template(self) -> None:
         """What the running template does with tools (llama.cpp's own
-        probe of it, ``chat_template_caps``)."""
+        probe of it, ``chat_template_caps``), with conversations
+        (``_probe_turns``) and with reasoning (``thinking_controls``) —
+        rendered by llama-server itself, so HFL runs no template of a
+        downloaded model in its own process, and needs no jinja2: without
+        it these were unknown, two user turns in a row failed with a 400 on
+        a template that refuses them, and Qwen3.8's reasoning was dropped
+        (a reply cut short came back empty, measured 2026-10-31)."""
         props = self._props()
         template = props.get("chat_template")
         caps = props.get("chat_template_caps")
@@ -879,6 +887,49 @@ class LlamaServerEngine(InferenceEngine):
             from hfl.engine.llama_cpp import _template_renders_tools
 
             self._template_knows_tools = _template_renders_tools(self._chat_template, None)
+        self._turns = self._probe_turns()
+        self._thinking = None
+        if self._turns is not None:
+            from hfl.models.thinking import controls_from
+
+            self._thinking = controls_from(
+                lambda **variables: self._render([{"role": "user", "content": "hi"}], **variables)
+            )
+
+    def _render(self, messages: list[dict[str, Any]], **variables: Any) -> str | None:
+        """The prompt llama-server's template engine makes of ``messages``
+        with those template variables (``/apply-template``, nothing
+        generated), or None when the template refuses them or the server
+        has no such endpoint."""
+        body: dict[str, Any] = {"messages": messages}
+        if variables:
+            body["chat_template_kwargs"] = variables
+        try:
+            response = self._post("/apply-template", json=body, timeout=10)
+            prompt = response.json().get("prompt") if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
+        return prompt if isinstance(prompt, str) else None
+
+    def _probe_turns(self) -> tuple[bool, bool, bool] | None:
+        """``_probe_turns``' answer from llama-server's own rendering, or
+        None when it cannot render (an older llama-server): then the
+        template is probed with jinja2, if there is one."""
+        from hfl.engine.llama_cpp import _TURN_PROBE
+
+        def message(role: str, text: str) -> dict[str, Any]:
+            return {"role": role, "content": text}
+
+        alone = self._render([message("user", _TURN_PROBE)])
+        if alone is None or _TURN_PROBE not in alone:
+            return None
+        in_a_row = self._render([message("user", "a"), message("user", _TURN_PROBE)]) is None
+        opening = self._render([message("assistant", "a"), message("user", _TURN_PROBE)]) is None
+        return in_a_row, opening, False  # typed content: llama.cpp adapts it itself
+
+    @property
+    def thinking_controls(self) -> dict[str, Any] | None:
+        return self._thinking
 
     def _reported_ctx(self) -> int:
         """The context llama-server chose, from ``/props`` (0 if unknown)."""
@@ -998,6 +1049,7 @@ class LlamaServerEngine(InferenceEngine):
             self._template_knows_tools,
             typed_content=False,
             takes_system=True,
+            turns=self._turns,
         )
         body: dict[str, Any] = {
             "messages": wire,

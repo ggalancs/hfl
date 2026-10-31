@@ -59,6 +59,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template that takes none.
 - A reply of no tokens to a real prompt is a warning in the log ("generated
   nothing"): Qwen3.8's 17 empty replies were INFO lines among many.
+- **Without jinja2** (`pip install hfl` with llama-server, the Homebrew
+  formula) HFL could not read a model's template: a model that reasons by
+  default had its reasoning dropped, and a reply cut short came back
+  completely empty (Qwen3.8, 20 tokens: nothing, where with jinja2 the
+  reasoning came back); two user turns on a template that refuses them were
+  a 400 from llama-server. llama-server now renders those probes itself
+  (`/apply-template`, `/props`): the reasoning comes back and the turns are
+  fitted, with no template of a downloaded model run in HFL's process and
+  no new dependency. `/api/show` gives a loaded model's reasoning controls
+  the same way.
 
 ## [0.28.0] - 2026-10-26
 
