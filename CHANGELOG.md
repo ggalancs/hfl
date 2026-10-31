@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Qwen3.8 (and any vision GGUF llama-cpp-python has no handler for)
+  answered empty replies.** With a projector beside it, an unknown vision
+  architecture got LLaVA 1.5's handler, whose chat template replaced the
+  model's on every request, text ones too: Qwen3.8 (`qwen35`) got
+  "USER: … ASSISTANT:" prompts and returned 0 tokens on a request after a
+  tool result 6 times out of 6. Such a model now loads text-only with its own
+  template (the same request: 6 tool calls out of 6); llama-server serves its
+  images.
+- **The desktop apps did not use llama-server.** `serve --tray` (what HFL.app
+  and the Start-menu shortcut run) started the server before choosing the
+  backend: GGUF models went through llama-cpp-python one request at a time,
+  re-reading the whole prompt each time, and `--backend`, `--parallel` and
+  `--ctx` were ignored. It chooses as `serve` does now (Qwen3.8 through the
+  tray: llama-server, 4 slots, a repeated 832-token prompt read in 0.1 s
+  instead of 4.9 s).
+
 ## [0.28.0] - 2026-10-26
 
 ### Fixed

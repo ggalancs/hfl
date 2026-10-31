@@ -60,3 +60,37 @@ def test_serve_parallel_one_is_one(cfg, monkeypatch) -> None:
     monkeypatch.delenv("HFL_LLM_LIBRARY")
     _choose_backend("llama-server", 1)
     assert made.parallel_explicit and _slots() == 1
+
+
+@pytest.mark.parametrize("tray", [False, True])
+def test_serve_chooses_its_backend_with_the_tray_too(cfg, monkeypatch, tray) -> None:
+    """The desktop apps run ``serve --tray --open``. The tray branch returned
+    before the backend was chosen: with llama-server installed they served
+    GGUF through llama-cpp-python, one request at a time, and ``--ctx`` was
+    lost (Qwen3.8, 2026-10-30)."""
+    import os
+
+    from typer.testing import CliRunner
+
+    from hfl.api.state import get_state
+    from hfl.cli import main
+
+    made = cfg()
+    monkeypatch.setattr("hfl.engine.llama_server.binary", lambda: "/opt/llama-server")
+    # Recorded as unset now, so the value _choose_backend writes is undone.
+    monkeypatch.setenv("HFL_LLM_LIBRARY", "")
+    monkeypatch.delenv("HFL_LLM_LIBRARY")
+    monkeypatch.setattr(get_state(), "context_size_override", 0)
+    started: list[str | None] = []
+
+    def start(*args, **kwargs) -> None:
+        started.append(os.environ.get("HFL_LLM_LIBRARY"))
+
+    monkeypatch.setattr(main, "_run_tray", start)
+    monkeypatch.setattr("hfl.api.server.start_server", start)
+    argv = ["serve", "--port", "18081", "--ctx", "8192", *(["--tray"] if tray else [])]
+    result = CliRunner().invoke(main.app, argv)
+    assert result.exit_code == 0, result.output
+    assert started == ["llama-server"]
+    assert made.queue_max_inflight == 4
+    assert get_state().context_size_override == 8192

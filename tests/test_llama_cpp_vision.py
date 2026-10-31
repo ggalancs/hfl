@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -228,11 +229,19 @@ class TestVisionHandlerDispatch:
         h = _build_vision_chat_handler(architecture="moondream", clip_model_path="/tmp/mmproj.gguf")
         assert type(h).__name__ == "MoondreamChatHandler"
 
-    def test_unknown_arch_falls_back_to_llava15(self):
-        h = _build_vision_chat_handler(
-            architecture="mystery-vision", clip_model_path="/tmp/mmproj.gguf"
-        )
+    def test_a_llava15_gguf_names_its_language_model(self):
+        h = _build_vision_chat_handler(architecture="llama", clip_model_path="/tmp/mmproj.gguf")
         assert type(h).__name__ == "Llava15ChatHandler"
+
+    @pytest.mark.parametrize("arch", ["qwen35", "llama4", "mistral3", "mystery-vision"])
+    def test_a_family_without_a_handler_is_text_only(self, arch, caplog):
+        """LLaVA 1.5's handler was tried for these: its chat template
+        replaced the model's on every request, and Qwen3.8 (``qwen35``)
+        answered empty replies. Text-only keeps the model's template."""
+        with caplog.at_level(logging.WARNING, logger="hfl.engine.llama_cpp"):
+            h = _build_vision_chat_handler(architecture=arch, clip_model_path="/tmp/mmproj.gguf")
+        assert h is None
+        assert "without images" in caplog.text and arch in caplog.text
 
 
 class TestVisionHandlerImportFallback:

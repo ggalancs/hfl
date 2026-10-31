@@ -1534,15 +1534,19 @@ def serve(
     # question asked.
     _confirm_exposure(host, api_key)
 
-    if tray:
-        _run_tray(host, port, api_key, model, log_level, json_logs, open_ui)
-        return
-
     # Store context size override in state for lazy-load path
     state = get_state()
     if ctx > 0:
         state.context_size_override = ctx
+    # Before the tray branch too: the tray runs this same server in-process,
+    # and returning into it first ignored --backend, --parallel and --ctx and
+    # never chose llama-server, so the desktop apps served GGUF through
+    # llama-cpp-python one request at a time (Qwen3.8 there, 2026-10-30).
     _choose_backend(backend, parallel)
+
+    if tray:
+        _run_tray(host, port, api_key, model, log_level, json_logs, open_ui)
+        return
 
     if model:
         _preload(model, ctx, state)

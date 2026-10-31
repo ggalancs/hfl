@@ -774,7 +774,7 @@ class TestVisionHandler:
             "moondream": "MoondreamChatHandler",
             "llava16": "Llava16ChatHandler",
             "llava": "Llava15ChatHandler",
-            "mystery": "Llava15ChatHandler",
+            "llama": "Llava15ChatHandler",
         }
         for arch, name in cases.items():
             handler = lc._build_vision_chat_handler(architecture=arch, clip_model_path="/p/mm.gguf")

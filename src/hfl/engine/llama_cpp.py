@@ -1749,8 +1749,8 @@ def _build_vision_chat_handler(
     subclass per vision family; the arch name we detected from the
     GGUF header picks which one. Returns ``None`` (with a warning
     log) when the local llama-cpp-python install is too old to
-    expose the handlers, so load falls back to text-only mode
-    instead of crashing.
+    expose the handlers, or has none for this family, so load falls
+    back to text-only mode instead of crashing or guessing.
 
     Arguments:
         architecture: ``general.architecture`` value from the GGUF
@@ -1805,17 +1805,23 @@ def _build_vision_chat_handler(
         handler_cls = MoondreamChatHandler
     elif "llava-v1.6" in arch or "llava_1.6" in arch or "llava16" in arch:
         handler_cls = Llava16ChatHandler
-    elif "llava" in arch:
+    elif "llava" in arch or arch == "llama":
+        # A LLaVA 1.5 GGUF names its language model's architecture (a
+        # Llama / Vicuna): the case this handler was guessed for.
         handler_cls = Llava15ChatHandler
     else:
-        # Unknown architecture but we have a CLIP projector — try
-        # the most common (LLaVA 1.5) and let the model complain at
-        # first inference if it mismatches.
+        # No handler here for this family (Qwen3.5 / Qwen3.8's ``qwen35``,
+        # Llama 4, Mistral 3...). LLaVA 1.5's used to be tried: it brings its
+        # own chat template, which replaced the model's on every request,
+        # text ones too, and Qwen3.8 answered empty replies (2026-10-30).
+        # Text-only keeps the model's own template.
         logger.warning(
-            "Unknown vision architecture %r; falling back to Llava15 handler",
+            "llama-cpp-python has no chat handler for the %r vision architecture: "
+            "loading it without images, with its own chat template. llama-server "
+            "serves its images (hfl install llama-server).",
             architecture,
         )
-        handler_cls = Llava15ChatHandler
+        return None
 
     return cast("object | None", handler_cls(clip_model_path=clip_model_path, verbose=verbose))
 
