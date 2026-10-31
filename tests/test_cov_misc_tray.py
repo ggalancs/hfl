@@ -62,8 +62,9 @@ class _Icon:
         self.ran = 0
         self.stopped = 0
 
-    def run(self) -> None:
+    def run(self, setup=None) -> None:
         self.ran += 1
+        self.setup = setup
 
     def stop(self) -> None:
         self.stopped += 1
@@ -263,7 +264,15 @@ def test_exit_stops_the_server_then_the_icon(gui) -> None:
 # -- the icon follows the server ---------------------------------------------------------
 
 
-def test_the_icon_updates_once_the_status_settles(gui, sync_threads) -> None:
+@pytest.fixture
+def main_thread_now(monkeypatch):
+    """The main-thread hop (``_on_main_thread``) run in place."""
+    monkeypatch.setattr(tray_icon, "_on_main_thread", lambda action: action())
+
+
+def test_the_icon_updates_once_the_status_settles(gui, sync_threads, monkeypatch) -> None:
+    hops: list = []
+    monkeypatch.setattr(tray_icon, "_on_main_thread", hops.append)
     ctrl = _Ctrl(ServerStatus.STARTING)
     icon = SimpleNamespace(icon=None)
     tray_icon._schedule_icon_update(icon, ctrl)  # type: ignore[arg-type]
@@ -271,11 +280,13 @@ def test_the_icon_updates_once_the_status_settles(gui, sync_threads) -> None:
     assert icon.icon is None  # only on its thread
     ctrl.status = ServerStatus.RUNNING
     update()
+    assert icon.icon is None and len(hops) == 1  # set on the main thread, not this one
+    hops[0]()
     assert icon.icon.draw.calls[0][2] == "#22C55E"
 
 
 def test_a_status_that_never_settles_still_updates_after_the_wait(
-    gui, sync_threads, monkeypatch
+    gui, sync_threads, monkeypatch, main_thread_now
 ) -> None:
     naps: list[float] = []
     monkeypatch.setattr(time, "sleep", naps.append)
@@ -285,6 +296,34 @@ def test_a_status_that_never_settles_still_updates_after_the_wait(
     sync_threads[0]()
     assert sum(naps) == 15.0  # 30 × 0.5 s, then gives up
     assert icon.icon.draw.calls[0][2] == "#FFA500"
+
+
+def test_on_macos_the_icon_is_set_on_the_main_thread(monkeypatch) -> None:
+    """Set from the worker thread, it raced AppKit laying out the new
+    menu-bar item: the app aborted on 1 start in 10 from Finder."""
+    queued: list = []
+    helper = SimpleNamespace(callAfter=queued.append)
+    monkeypatch.setitem(sys.modules, "PyObjCTools", SimpleNamespace(AppHelper=helper))
+    monkeypatch.setitem(sys.modules, "PyObjCTools.AppHelper", helper)
+    monkeypatch.setattr(tray_icon.sys, "platform", "darwin")
+    done: list = []
+    tray_icon._on_main_thread(lambda: done.append(1))
+    assert done == [] and len(queued) == 1  # queued for AppKit's own loop
+    queued[0]()
+    assert done == [1]
+    monkeypatch.setattr(tray_icon.sys, "platform", "linux")  # pystray marshals there
+    tray_icon._on_main_thread(lambda: done.append(2))
+    assert done == [1, 2]
+
+
+def test_the_icon_is_shown_through_the_main_thread(monkeypatch) -> None:
+    hops: list = []
+    monkeypatch.setattr(tray_icon, "_on_main_thread", hops.append)
+    icon = SimpleNamespace(visible=False)
+    tray_icon._show_icon(icon)
+    assert icon.visible is False and len(hops) == 1  # not from pystray's setup thread
+    hops[0]()
+    assert icon.visible is True
 
 
 # -- a macOS quit stops the server ----------------------------------------------------------
@@ -358,6 +397,7 @@ def test_the_tray_runs_an_icon_for_the_current_status(gui, monkeypatch, caplog) 
         tray.run()
     icon = tray._icon
     assert (icon.name, icon.title, icon.ran) == ("hfl", "HFL Server", 1)
+    assert icon.setup is tray_icon._show_icon  # not pystray's, off the main thread
     assert icon.icon.draw.calls[0][2] == "#EF4444"
     assert isinstance(icon.menu, _Menu)
     assert observers == [ctrl] and tray._terminate_observer == "obs"

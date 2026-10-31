@@ -132,6 +132,31 @@ def _build_menu(controller: TrayServerController) -> Any:
     )
 
 
+def _on_main_thread(action: Any) -> None:
+    """Run ``action`` on the main thread on macOS, where AppKit may only be
+    touched there: pystray sets the image from the calling thread, and the
+    icon set from this module's worker thread raced AppKit laying out the
+    new menu-bar item, which aborted the app ("!view->_hasCachedVisibleRect",
+    1 start in 10 from Finder, measured 2026-10-31). pystray marshals on the
+    other platforms itself."""
+    if sys.platform == "darwin":
+        try:
+            from PyObjCTools import AppHelper
+        except ImportError:  # pragma: no cover — pystray brings it on macOS
+            action()
+            return
+        AppHelper.callAfter(action)
+        return
+    action()
+
+
+def _show_icon(icon: Any) -> None:
+    """pystray's setup callback. Its default makes the icon visible from the
+    setup thread, AppKit off the main thread again, as the start-up race
+    above: so through ``_on_main_thread``."""
+    _on_main_thread(lambda: setattr(icon, "visible", True))
+
+
 def _schedule_icon_update(icon: Any, controller: TrayServerController) -> None:
     """Schedule a delayed icon update after status change."""
     import threading
@@ -145,7 +170,8 @@ def _schedule_icon_update(icon: Any, controller: TrayServerController) -> None:
             settled = (ServerStatus.RUNNING, ServerStatus.ERROR, ServerStatus.STOPPED)
             if controller.status in settled:
                 break
-        icon.icon = _generate_icon_image(controller.status)
+        image = _generate_icon_image(controller.status)
+        _on_main_thread(lambda: setattr(icon, "icon", image))
 
     t = threading.Thread(target=_update, daemon=True)
     t.start()
@@ -204,7 +230,7 @@ class HFLTrayIcon:
 
         logger.info("Starting tray icon")
         self._terminate_observer = _stop_on_macos_quit(self._controller)
-        self._icon.run()
+        self._icon.run(setup=_show_icon)
 
     def stop(self) -> None:
         """Stop the tray icon."""

@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--ctx` were ignored. It chooses as `serve` does now (Qwen3.8 through the
   tray: llama-server, 4 slots, a repeated 832-token prompt read in 0.1 s
   instead of 4.9 s).
+- **HFL.app crashed at start, once in about ten.** The menu-bar icon was set
+  from worker threads (HFL's status update, and pystray's own setup making
+  it visible), and AppKit, laying out the new menu-bar item on the main
+  thread, aborted ("!view->_hasCachedVisibleRect"; 1 of 10 opens from
+  Finder). Both go through the main thread now: 0 of 60.
 - **Images a model cannot see are refused, not dropped.** Transformers, MLX
   and vLLM dropped them and the model answered about an image it never saw;
   llama.cpp without a projector failed with a bare 500, llama-server's clear
