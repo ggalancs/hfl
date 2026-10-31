@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fitted, with no template of a downloaded model run in HFL's process and
   no new dependency. `/api/show` gives a loaded model's reasoning controls
   the same way.
+- Unloading a vLLM model logged an ERROR traceback ("Event loop is closed")
+  and "Task was destroyed but it is pending!" every time: the loop was
+  stopped under a running engine. The engine is shut down first now and its
+  tasks are cancelled before the loop stops. The GPU was freed all the same
+  (measured on an L4).
 
 ## [0.28.0] - 2026-10-26
 

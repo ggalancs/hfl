@@ -148,6 +148,15 @@ def _vllm_args(model_path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     return args
 
 
+async def _cancel_pending() -> None:
+    """Cancel every other task on the running loop and wait for them."""
+    current = asyncio.current_task()
+    tasks = [task for task in asyncio.all_tasks() if task is not current]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
 class VLLMEngine(InferenceEngine):
     """vLLM-based inference engine with true async streaming.
 
@@ -253,14 +262,33 @@ class VLLMEngine(InferenceEngine):
             logger.info("vLLM sync engine loaded (streaming limited): %s", model_path)
 
     def unload(self) -> None:
-        """Unload the model and clean up resources."""
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            if self._loop_thread is not None:
-                self._loop_thread.join(timeout=_hfl_config.vllm_shutdown_join_timeout)
+        """Unload the model and clean up resources.
+
+        The engine is shut down first, then the loop's remaining tasks are
+        cancelled and awaited, then the loop stops. Stopping the loop under
+        a running engine left vLLM's output handler pending: an ERROR "Event
+        loop is closed" traceback and "Task was destroyed but it is
+        pending!" at every unload (the GPU was freed all the same; measured
+        on an L4, 2026-10-31). Every wait is bounded."""
+        engine, self._engine = self._engine, None
+        shutdown = getattr(engine, "shutdown", None)
+        if callable(shutdown):
+            with contextlib.suppress(Exception):
+                shutdown()
+        loop, thread = self._loop, self._loop_thread
+        if loop is not None:
+            timeout = _hfl_config.vllm_shutdown_join_timeout
+            if loop.is_running():
+                with contextlib.suppress(Exception):
+                    asyncio.run_coroutine_threadsafe(_cancel_pending(), loop).result(timeout)
+            loop.call_soon_threadsafe(loop.stop)
+            if thread is not None:
+                thread.join(timeout=timeout)
+            if thread is None or not thread.is_alive():
+                with contextlib.suppress(Exception):
+                    loop.close()
             self._loop = None
             self._loop_thread = None
-        self._engine = None
         self._is_async = False
 
     def _build_sampling_params(self, config: GenerationConfig | None = None):

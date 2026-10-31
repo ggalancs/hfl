@@ -1008,3 +1008,33 @@ def test_the_load_asks_for_the_models_share_unless_given_one(mock_vllm, monkeypa
     assert vllm_engine._vllm_args(str(tmp_path), {})["gpu_memory_utilization"] == 0.33
     given = vllm_engine._vllm_args(str(tmp_path), {"gpu_memory_utilization": 0.7})
     assert given["gpu_memory_utilization"] == 0.7
+
+
+def test_unload_shuts_the_engine_down_then_cancels_its_tasks():
+    """Stopping the loop under a running engine left vLLM's output handler
+    pending: an ERROR "Event loop is closed" traceback and "Task was destroyed
+    but it is pending!" at every unload (measured on an L4, 2026-10-31)."""
+    import asyncio
+    import time
+    import types
+
+    from hfl.engine.vllm_engine import VLLMEngine
+
+    engine = VLLMEngine()
+    engine._ensure_loop()
+    loop = engine._loop
+    order: list[str] = []
+
+    async def output_handler():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            order.append("handler cancelled")
+            raise
+
+    loop.call_soon_threadsafe(lambda: loop.create_task(output_handler()))
+    time.sleep(0.1)
+    engine._engine = types.SimpleNamespace(shutdown=lambda: order.append("shutdown"))
+    engine.unload()
+    assert order == ["shutdown", "handler cancelled"]
+    assert loop.is_closed() and engine._engine is None and engine._loop is None
