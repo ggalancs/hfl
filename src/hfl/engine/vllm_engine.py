@@ -31,6 +31,7 @@ from hfl.engine.base import (
     GenerationConfig,
     GenerationResult,
     InferenceEngine,
+    output_cap,
     refuse_logprobs,
 )
 from hfl.engine.prompt_builder import PromptBuilder, PromptFormat
@@ -300,7 +301,8 @@ class VLLMEngine(InferenceEngine):
             temperature=cfg.temperature,
             top_p=cfg.top_p,
             top_k=cfg.top_k,
-            max_tokens=cfg.max_tokens,
+            # None: until a stop or the model's context (max_model_len) is full.
+            max_tokens=output_cap(cfg),
             stop=cfg.stop,
             repetition_penalty=cfg.repeat_penalty,
             # ENG-10: honour the request seed for reproducible output

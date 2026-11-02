@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from hfl.engine.base import GenerationConfig
+from hfl.engine.base import OPEN_ENDED, GenerationConfig
 
 if TYPE_CHECKING:
     from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
@@ -33,6 +33,17 @@ def clamp(value: float | int, min_val: float | int, max_val: float | int) -> flo
     return max(min_val, min(max_val, value))
 
 
+def num_predict_tokens(value: Any) -> int:
+    """Ollama's ``num_predict`` as ``GenerationConfig.max_tokens``. Ollama
+    reads -1 (its default) as "until a stop", -2 as "until the context is
+    full", and 0 as unset: all three are open-ended here. They were clamped
+    to 1, and a client sending Ollama's own default got one token."""
+    if value is None:
+        return OPEN_ENDED
+    tokens = int(value)
+    return int(clamp(tokens, 1, 128000)) if tokens > 0 else OPEN_ENDED
+
+
 def openai_to_generation_config(
     req: ChatCompletionRequest | CompletionRequest,
 ) -> GenerationConfig:
@@ -47,10 +58,12 @@ def openai_to_generation_config(
     # Handle stop sequences - can be string or list
     stop = req.stop if isinstance(req.stop, list) else ([req.stop] if req.stop else None)
 
+    limit = getattr(req, "max_completion_tokens", None) or req.max_tokens
     config = GenerationConfig(
         temperature=req.temperature,
         top_p=req.top_p,
-        max_tokens=req.max_tokens or 2048,
+        # None: until the model stops or the context is full, as OpenAI.
+        max_tokens=limit or OPEN_ENDED,
         stop=stop,
         seed=req.seed or -1,
         reasoning=_openai_reasoning(getattr(req, "reasoning_effort", None)),
@@ -91,7 +104,7 @@ def ollama_to_generation_config(options: dict[str, Any] | None) -> GenerationCon
     temperature = clamp(float(opts.get("temperature", 0.7)), 0.0, 2.0)
     top_p = clamp(float(opts.get("top_p", 0.9)), 0.0, 1.0)
     top_k = clamp(int(opts.get("top_k", 40)), 1, 1000)
-    max_tokens = clamp(int(opts.get("num_predict", 2048)), 1, 128000)
+    max_tokens = num_predict_tokens(opts.get("num_predict"))
     repeat_penalty = clamp(float(opts.get("repeat_penalty", 1.1)), 0.0, 2.0)
     repeat_penalty_chosen = opts.get("repeat_penalty") is not None
     seed = int(opts.get("seed", -1))
@@ -140,7 +153,7 @@ def generation_config_to_openai(config: GenerationConfig) -> dict[str, Any]:
         result["temperature"] = config.temperature
     if config.top_p is not None:
         result["top_p"] = config.top_p
-    if config.max_tokens is not None:
+    if config.max_tokens is not None and config.max_tokens > 0:  # no limit: no field
         result["max_tokens"] = config.max_tokens
     if config.stop:
         result["stop"] = config.stop

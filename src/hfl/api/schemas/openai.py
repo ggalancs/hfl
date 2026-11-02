@@ -192,6 +192,14 @@ class ChatCompletionRequest(BaseModel):
         le=128000,
         description="Maximum tokens to generate",
     )
+    # OpenAI's current name for max_tokens (the SDKs send it); it was
+    # ignored, and the reply cut at HFL's default instead.
+    max_completion_tokens: int | None = Field(
+        None,
+        ge=1,
+        le=128000,
+        description="Maximum tokens to generate (OpenAI's current name for max_tokens)",
+    )
     stream: bool = Field(
         False,
         description="Whether to stream the response",

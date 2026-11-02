@@ -51,6 +51,7 @@ from hfl.engine.base import (
     GenerationResult,
     InferenceEngine,
     completion_prompt,
+    output_cap,
     reasoning_template_vars,
     repeat_penalty_for,
 )
@@ -1053,7 +1054,7 @@ class LlamaServerEngine(InferenceEngine):
         )
         body: dict[str, Any] = {
             "messages": wire,
-            "max_tokens": cfg.max_tokens,
+            "max_tokens": output_cap(cfg) or -1,  # -1: until a stop or the context is full
             **_sampling(cfg),
             "repeat_penalty": penalty,
         }
@@ -1155,7 +1156,7 @@ class LlamaServerEngine(InferenceEngine):
         return counted.feed(_stream())
 
     def _completion_body(self, prompt: str, cfg: GenerationConfig) -> dict[str, Any]:
-        body = {"prompt": completion_prompt(prompt, cfg), "n_predict": cfg.max_tokens,
+        body = {"prompt": completion_prompt(prompt, cfg), "n_predict": output_cap(cfg) or -1,
                 **_sampling(cfg)}  # fmt: skip
         if cfg.logprobs is not None:
             body["n_probs"] = max(1, cfg.logprobs)  # the drawn token is one of them

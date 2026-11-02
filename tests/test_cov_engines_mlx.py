@@ -312,7 +312,9 @@ def test_batched_generate_reads_its_own_stream_with_its_own_signal(mlx):
     with cancel.scope(signal):
         result = engine.generate("abc", GenerationConfig(max_tokens=0, temperature=0))
     call = batch.calls[0]
-    assert call["tokens"] == [1, 2, 3] and call["max_tokens"] == 2048  # 0 means the default
+    # 0: no limit, so what the model's context leaves after the prompt
+    # (-1 ended the batch at once; it is 32768 when the context is unknown).
+    assert call["tokens"] == [1, 2, 3] and call["max_tokens"] == 32768
     assert call["logprobs"] is False and call["cancelled"]() is False
     signal.set()
     assert call["cancelled"]() is True  # its own signal, not the engine's

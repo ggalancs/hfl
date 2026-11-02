@@ -79,6 +79,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stopped under a running engine. The engine is shut down first now and its
   tasks are cancelled before the loop stops. The GPU was freed all the same
   (measured on an L4).
+- **A conversation was read again from its first token every turn** when the
+  client sent its tools with the keys in another order each time, as a Swift
+  app does (Swift's JSONEncoder wrote one dictionary in 3 orders in 50
+  encodings). Qwen3.8's template, like most, puts the tools first, so
+  llama-server found no slot sharing the prompt and re-read all of it:
+  20-38 s per turn of an agent's conversation. The same tools now give the
+  same prompt (the order first sent is kept): measured on Qwen3.8 27B,
+  turns 2 and 3 went from 21.0 s and 23.7 s to 1.6 s and 0.9 s (21 new
+  tokens read instead of 3,600).
+- **A reply that is not streamed went on generating after its client had
+  gone.** A client that gave up at its timeout left the model decoding to
+  the end for nobody, holding a slot the other requests shared (380 s on
+  Qwen3.8). The generation now stops when the client closes the connection
+  (llama-server: "cancel task" at once; logged with status 499).
+- `/v1/chat/completions` reads `max_completion_tokens`, OpenAI's current
+  name for the limit (it was ignored), and takes the `developer` role as
+  `system`, as `/v1/responses` did: in-process, Phi-3.5's template dropped a
+  `developer` message from the prompt.
+- Ollama's `num_predict` -1 (its default, "until a stop"), -2 ("fill the
+  context") and 0 were clamped to **one** token, and `PARAMETER num_predict
+  -1` in a Modelfile made every reply "cut".
+
+### Changed
+- **No output limit unless the client sets one**, as OpenAI and Ollama:
+  `/v1/chat/completions` without `max_tokens`, `/v1/responses` without
+  `max_output_tokens` and Ollama's API without `num_predict` generate until
+  the model stops or its context is full. They were cut at 2048 tokens, and
+  a reasoning model spends that much thinking: Project Hub's cards on
+  Qwen3.8 came back cut or empty (2048 of 2048 tokens, four times).
+  `HFL_GENERATION_TIMEOUT` still bounds every request; HFL's WebSocket keeps
+  its 2048 default.
 
 ## [0.28.0] - 2026-10-26
 

@@ -18,6 +18,9 @@ from hfl.engine.base import (
     GenerationResult,
     InferenceEngine,
     held,
+    hit_cap,
+    output_budget,
+    output_cap,
     reasoning_template_vars,
     refuse_logprobs,
 )
@@ -217,6 +220,19 @@ class TransformersEngine(InferenceEngine):
         with self._native:
             self._unload()
 
+    def _new_tokens(self, cfg: GenerationConfig, inputs: Any) -> int:
+        """``cfg``'s limit, or for a request with none what the model's
+        context leaves after the prompt: ``generate`` given none stops at the
+        model's own default, often 20 tokens."""
+        if output_cap(cfg) is not None:
+            return cfg.max_tokens
+        config = getattr(self._model, "config", None)
+        context = getattr(config, "max_position_embeddings", None)
+        if not isinstance(context, int):
+            context = getattr(getattr(config, "text_config", None), "max_position_embeddings", None)
+        prompt_tokens = int(inputs["input_ids"].shape[1])
+        return output_budget(cfg, context if isinstance(context, int) else None, prompt_tokens)
+
     def _unload(self) -> None:
         if self._model:
             del self._model
@@ -356,7 +372,7 @@ class TransformersEngine(InferenceEngine):
         with torch.no_grad():
             outputs = self._model.generate(
                 **inputs,
-                max_new_tokens=cfg.max_tokens,
+                max_new_tokens=self._new_tokens(cfg, inputs),
                 temperature=cfg.temperature if cfg.temperature > 0 else None,
                 top_p=cfg.top_p,
                 top_k=cfg.top_k,
@@ -379,7 +395,7 @@ class TransformersEngine(InferenceEngine):
             tokens_prompt=prompt_tokens,
             tokens_per_second=n_gen / decoding if decoding > 0 else 0,
             # generate() returns no reason; all max_new_tokens used = cut.
-            stop_reason="length" if cfg.max_tokens and n_gen >= cfg.max_tokens else "stop",
+            stop_reason="length" if hit_cap(cfg, n_gen) else "stop",
             total_duration=int(elapsed * 1e9),
             prompt_eval_duration=int(prefill * 1e9),
             eval_duration=int(decoding * 1e9),
@@ -412,7 +428,7 @@ class TransformersEngine(InferenceEngine):
 
         gen_kwargs = {
             **inputs,
-            "max_new_tokens": cfg.max_tokens,
+            "max_new_tokens": self._new_tokens(cfg, inputs),
             "temperature": cfg.temperature if cfg.temperature > 0 else None,
             "top_p": cfg.top_p,
             # ENG-6: match the non-streaming generate() so streaming samples

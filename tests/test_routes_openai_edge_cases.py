@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from hfl.api.routes_openai import _to_gen_config
 from hfl.api.server import app
 from hfl.api.state import get_state
+from hfl.engine.base import OPEN_ENDED
 
 
 class TestToGenConfigEdgeCases:
@@ -40,18 +41,19 @@ class TestToGenConfigEdgeCases:
 
         assert config.stop is None
 
-    def test_max_tokens_none_uses_default(self):
-        """Test max_tokens None uses default 2048."""
+    def test_max_tokens_none_is_open_ended(self):
+        """No limit given: until the model stops or the context is full."""
         req = MagicMock()
         req.stop = None
         req.temperature = 0.7
         req.top_p = 0.9
         req.max_tokens = None
+        req.max_completion_tokens = None
         req.seed = 42
 
         config = _to_gen_config(req)
 
-        assert config.max_tokens == 2048
+        assert config.max_tokens == OPEN_ENDED
 
     def test_seed_none_uses_default(self):
         """Test seed None uses default -1."""
@@ -60,6 +62,7 @@ class TestToGenConfigEdgeCases:
         req.temperature = 0.7
         req.top_p = 0.9
         req.max_tokens = 100
+        req.max_completion_tokens = None
         req.seed = None
 
         config = _to_gen_config(req)
@@ -73,6 +76,7 @@ class TestToGenConfigEdgeCases:
         req.temperature = 0.5
         req.top_p = 0.8
         req.max_tokens = 500
+        req.max_completion_tokens = None
         req.seed = 123
 
         config = _to_gen_config(req)

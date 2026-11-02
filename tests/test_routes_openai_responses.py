@@ -416,12 +416,13 @@ class TestResponsesStreamingDispatcher:
 
 class TestResponsesDefaults:
     def test_default_max_tokens_matches_chat_route(self):
-        """API-11: when max_output_tokens is omitted, default to a sane cap
-        (2048, matching the chat route) instead of 0/unbounded."""
+        """API-11: when max_output_tokens is omitted, as the chat route:
+        open-ended (OPEN_ENDED, which every engine reads; not a bare 0)."""
         from hfl.api.routes_openai_responses import ResponsesRequest, _build_gen_config
+        from hfl.engine.base import OPEN_ENDED
 
         cfg = _build_gen_config(ResponsesRequest(model="m", input="hi"))
-        assert cfg.max_tokens == 2048
+        assert cfg.max_tokens == OPEN_ENDED
 
     def test_explicit_max_output_tokens_is_honoured(self):
         from hfl.api.routes_openai_responses import ResponsesRequest, _build_gen_config

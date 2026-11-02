@@ -144,7 +144,9 @@ def test_the_live_enforcer_is_helpers_not_the_timeout_module():
 
     source = inspect.getsource(helpers.run_dispatched)
     assert "generation_timeout" in source
-    assert "wait_for" in source
+    assert "_worker_result(" in source
+    waiting = inspect.getsource(helpers._worker_result)
+    assert "wait_for" in waiting and "timeout=timeout" in waiting
 
     routers_importing = 0
     from pathlib import Path

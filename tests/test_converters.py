@@ -10,7 +10,7 @@ from hfl.api.converters import (
     openai_to_generation_config,
 )
 from hfl.api.schemas import ChatCompletionRequest
-from hfl.engine.base import GenerationConfig
+from hfl.engine.base import OPEN_ENDED, GenerationConfig
 
 
 class TestClamp:
@@ -59,8 +59,9 @@ class TestOpenAIToGenerationConfig:
         assert config.temperature == 0.7
         assert config.max_tokens == 1000
 
-    def test_default_max_tokens(self):
-        """Should use default max_tokens if not specified."""
+    def test_no_max_tokens_means_no_limit(self):
+        """As OpenAI and Ollama: until the model stops or the context is
+        full. 2048 cut Qwen3.8's answers mid-reasoning (2048 of 2048)."""
         req = ChatCompletionRequest(
             model="test-model",
             messages=[{"role": "user", "content": "Hello"}],
@@ -68,7 +69,17 @@ class TestOpenAIToGenerationConfig:
 
         config = openai_to_generation_config(req)
 
-        assert config.max_tokens == 2048
+        assert config.max_tokens == OPEN_ENDED
+
+    def test_max_completion_tokens_is_read(self):
+        """OpenAI's current name for the limit: it was ignored."""
+        msgs = [{"role": "user", "content": "Hello"}]
+        req = ChatCompletionRequest(model="m", messages=msgs, max_completion_tokens=77)
+        assert openai_to_generation_config(req).max_tokens == 77
+        req = ChatCompletionRequest(
+            model="m", messages=msgs, max_completion_tokens=77, max_tokens=500
+        )
+        assert openai_to_generation_config(req).max_tokens == 77
 
     def test_string_stop_sequence(self):
         """Should convert string stop to list."""
@@ -154,7 +165,7 @@ class TestOllamaToGenerationConfig:
         assert config.temperature == 0.7
         assert config.top_p == 0.9
         assert config.top_k == 40
-        assert config.max_tokens == 2048
+        assert config.max_tokens == OPEN_ENDED  # Ollama's default, num_predict -1
 
     def test_defaults_for_empty(self):
         """Should use defaults for empty options."""
@@ -194,10 +205,12 @@ class TestOllamaToGenerationConfig:
         assert config.top_k == 1000
 
     def test_clamps_max_tokens(self):
-        """Should clamp max_tokens to valid range."""
-        options = {"num_predict": 0}
-        config = ollama_to_generation_config(options)
-        assert config.max_tokens == 1
+        """Ollama's -1 (its default), -2 (fill the context) and 0 (unset)
+        are open-ended: they were clamped to one token."""
+        for value in (-1, -2, 0):
+            config = ollama_to_generation_config({"num_predict": value})
+            assert config.max_tokens == OPEN_ENDED, value
+        assert ollama_to_generation_config({"num_predict": 100}).max_tokens == 100
 
         options = {"num_predict": 500000}
         config = ollama_to_generation_config(options)

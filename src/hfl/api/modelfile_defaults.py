@@ -79,6 +79,10 @@ def apply_parameters(manifest: Any, config: GenerationConfig, explicit: Iterable
         try:
             if name == "stop":
                 value = [value] if isinstance(value, str) else [str(v) for v in value]
+            elif name == "num_predict":
+                from hfl.api.converters import num_predict_tokens
+
+                value = num_predict_tokens(value)  # -1, -2, 0: open-ended
             elif name in _INTS:
                 value = int(value)
             else:

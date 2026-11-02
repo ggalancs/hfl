@@ -41,7 +41,7 @@ from hfl.api.chat_core import resolve_chat_output
 from hfl.api.errors import images_unsupported, structured_output_unsupported
 from hfl.api.helpers import prepare_stream_response, run_dispatched
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
-from hfl.engine.base import ChatMessage, GenerationConfig
+from hfl.engine.base import OPEN_ENDED, ChatMessage, GenerationConfig
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -322,9 +322,10 @@ def _build_gen_config(req: ResponsesRequest) -> GenerationConfig:
     cfg = GenerationConfig(
         temperature=req.temperature,
         top_p=req.top_p,
-        # API-11: default to a sane cap (matching the chat route's 2048) rather
-        # than 0/unbounded when the client omits max_output_tokens.
-        max_tokens=req.max_output_tokens or 2048,
+        # As the chat route: no limit given, until the model stops or the
+        # context is full (OPEN_ENDED, which every engine reads; a bare 0
+        # meant "nothing" to some, API-11). 2048 cut reasoning models.
+        max_tokens=req.max_output_tokens or OPEN_ENDED,
     )
     level = _resolve_thinking(req.reasoning)
     if level is not None:

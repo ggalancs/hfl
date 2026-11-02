@@ -11,9 +11,11 @@ This middleware implements privacy-safe logging that:
 - Only logs metadata: method, path, status, duration
 """
 
+import asyncio
 import ipaddress
 import time
 from collections import defaultdict
+from contextvars import ContextVar
 from typing import Any, Callable
 
 from fastapi import Request
@@ -601,3 +603,65 @@ class HostValidationMiddleware:
             },
         )
         await response(scope, receive, send)
+
+
+# The running request's "the client has gone" signal (see ClientGoneMiddleware).
+_client_gone: ContextVar[asyncio.Event | None] = ContextVar("hfl_client_gone", default=None)
+
+
+def client_gone() -> asyncio.Event | None:
+    """Set once the client of the running request closes its connection;
+    None outside a request."""
+    return _client_gone.get()
+
+
+class ClientGoneMiddleware:
+    """Tell the request when its client goes away.
+
+    Uvicorn never cancels a handler whose client disconnects: a reply that
+    is not streamed went on generating to the end for nobody. Project Hub
+    gave up on a card at its 300 s timeout and Qwen3.8 decoded on to 2048
+    tokens, 380 s, holding a slot the other requests shared (measured,
+    2026-11-01). Once the request's body has been read, the next message
+    from the client can only be its disconnect: one task waits for it and
+    sets ``client_gone()``, which ``run_dispatched`` watches. Later reads
+    by the app get that same message, so nothing reads the connection
+    twice. Before the body ends nothing is buffered here.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        gone = asyncio.Event()
+        watcher: asyncio.Future[Any] | None = None
+
+        async def until_disconnect() -> Any:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                gone.set()
+            return message
+
+        async def watched_receive() -> Any:
+            nonlocal watcher
+            if watcher is not None:
+                # Shielded: one reader giving up must not cancel the wait
+                # for the others (Starlette reads in a cancelled scope).
+                return await asyncio.shield(watcher)
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                gone.set()
+            elif not message.get("more_body", False):
+                watcher = asyncio.ensure_future(until_disconnect())
+            return message
+
+        token = _client_gone.set(gone)
+        try:
+            await self.app(scope, watched_receive, send)
+        finally:
+            _client_gone.reset(token)
+            if watcher is not None and not watcher.done():
+                watcher.cancel()

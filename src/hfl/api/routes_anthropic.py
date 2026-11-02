@@ -29,7 +29,7 @@ from hfl.api.helpers import (
 )
 from hfl.api.modelfile_defaults import apply_to_chat, explicit_fields
 from hfl.api.schemas.anthropic import AnthropicMessagesRequest
-from hfl.engine.base import ChatMessage
+from hfl.engine.base import ChatMessage, hit_cap
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -578,8 +578,8 @@ class _AnthropicStream:
 
     def _plain_stop(self, turn: Any) -> str:
         # API-10: max_tokens when the cap was hit, else end_turn.
-        cap = turn.config.max_tokens
-        return "max_tokens" if (cap and self._usage(turn)["output_tokens"] >= cap) else "end_turn"
+        output = self._usage(turn)["output_tokens"]
+        return "max_tokens" if hit_cap(turn.config, output) else "end_turn"
 
     def done(self, turn: Any) -> str:
         if not turn.tool_aware:

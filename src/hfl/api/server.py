@@ -47,6 +47,7 @@ from starlette.requests import HTTPConnection
 from hfl import __version__
 from hfl.api.exception_handlers import register_exception_handlers
 from hfl.api.middleware import (
+    ClientGoneMiddleware,
     HostValidationMiddleware,
     JSONBodyMiddleware,
     RequestBodyLimitMiddleware,
@@ -460,6 +461,10 @@ class _ClientStalled(Exception):
 
 
 app.add_middleware(ModelLeaseMiddleware)
+
+# Just outside the leases: a request learns when its client has gone, and
+# run_dispatched stops a generation nobody will read (see the class).
+app.add_middleware(ClientGoneMiddleware)
 
 # R9 - Add disclaimer middleware
 app.add_middleware(DisclaimerMiddleware)

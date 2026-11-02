@@ -35,7 +35,7 @@ from hfl.api.modelfile_defaults import (
 )
 from hfl.api.schemas import ChatCompletionRequest, CompletionRequest
 from hfl.core.container import get_registry
-from hfl.engine.base import ChatMessage, GenerationConfig, stream_counts
+from hfl.engine.base import ChatMessage, GenerationConfig, hit_cap, stream_counts
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 
 if TYPE_CHECKING:
@@ -68,6 +68,7 @@ OPENAI_OPTIONS = {
     "temperature": "temperature",
     "top_p": "top_p",
     "max_tokens": "num_predict",
+    "max_completion_tokens": "num_predict",
     "stop": "stop",
     "seed": "seed",
 }
@@ -138,7 +139,10 @@ def _openai_messages_to_chat(req: ChatCompletionRequest) -> list[ChatMessage]:
                 tool_calls.append({"function": {"name": tc.function.name, "arguments": args}})
         out.append(
             ChatMessage(
-                role=m.role,
+                # OpenAI's SDKs send "developer" for "system" now, a role
+                # templates do not know: Phi-3.5's dropped the message from
+                # the prompt in-process (measured). /v1/responses mapped it.
+                role="system" if m.role == "developer" else m.role,
                 content=text,
                 images=images,
                 tool_calls=tool_calls,
@@ -604,7 +608,7 @@ async def _stream_completion(
         # saw a stop reason at all.
         prompt_n, generated = stream_counts(stream)
         count = generated if generated is not None else emitted[0]
-        finish = "length" if (config.max_tokens and count >= config.max_tokens) else "stop"
+        finish = "length" if hit_cap(config, count) else "stop"
         final: dict[str, Any] = {
             "id": completion_id,
             "object": "text_completion",

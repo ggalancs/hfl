@@ -10,6 +10,7 @@ Supports CPU, CUDA, Metal, and Vulkan.
 import atexit
 import contextlib
 import functools
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import sys
 import threading
 import time
 import weakref
+from collections import OrderedDict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, cast
 
@@ -28,6 +30,7 @@ from hfl.engine.base import (
     InferenceEngine,
     completion_prompt,
     held,
+    output_budget,
     reasoning_template_vars,
     repeat_penalty_for,
 )
@@ -907,6 +910,39 @@ def _fit_turns(msgs: list[dict], in_a_row: bool, opening: bool) -> list[dict]:
     return out
 
 
+# The tools of recent requests as first sent, by their content: see
+# ``_stable_tools``. Bounded; a stored copy is never handed out itself.
+_TOOLS_SEEN: "OrderedDict[str, str]" = OrderedDict()
+_TOOLS_SEEN_LOCK = threading.Lock()
+
+
+def _stable_tools(tools: list[dict] | None) -> list[dict] | None:
+    """``tools`` as they were first sent: the same tools in another key or
+    list order give the same prompt.
+
+    JSON members have no order (RFC 8259), and a client may change it every
+    request: Swift's JSONEncoder wrote one dictionary's keys in 3 orders in
+    50 encodings (measured). Templates put the tools first, so Project Hub's
+    conversation on Qwen3.8 changed in its first tokens every turn, and
+    llama-server re-read the whole prompt each time (20-38 s, 4-7k tokens)
+    instead of the new part (2026-11-01). A client that keeps one order
+    keeps it: it is the first seen.
+    """
+    if not tools:
+        return tools
+    try:
+        key = json.dumps(sorted(json.dumps(tool, sort_keys=True) for tool in tools))
+        sent = json.dumps(tools)
+    except (TypeError, ValueError):
+        return tools
+    with _TOOLS_SEEN_LOCK:
+        first = _TOOLS_SEEN.setdefault(key, sent)
+        _TOOLS_SEEN.move_to_end(key)
+        while len(_TOOLS_SEEN) > 64:
+            _TOOLS_SEEN.popitem(last=False)
+    return tools if first == sent else cast("list[dict]", json.loads(first))
+
+
 def _fit_template(
     msgs: list[dict],
     tools: list[dict] | None,
@@ -926,7 +962,7 @@ def _fit_template(
     itself; ``takes_system`` otherwise comes from the template. ``turns``:
     ``_probe_turns``' answer found otherwise (llama-server renders the
     probes itself); None probes ``template`` here, with jinja2."""
-    msgs = _system_first(msgs)
+    msgs, tools = _system_first(msgs), _stable_tools(tools)
     if knows_tools:
         msgs = _history_for_template(msgs, template)
     else:
@@ -2513,6 +2549,9 @@ class LlamaCppEngine(InferenceEngine):
         entries: list[dict] = []
         text = b""
         finish = "length"
+        # A request with no limit ends where the context does.
+        n_ctx = getattr(model, "n_ctx", None)
+        limit = output_budget(cfg, n_ctx() if callable(n_ctx) else None, len(tokens))
 
         def piece(token: int) -> tuple[bytes, dict]:
             raw = model.detokenize([token], prev_tokens=out, special=special)
@@ -2555,7 +2594,7 @@ class LlamaCppEngine(InferenceEngine):
                 if cuts:
                     text, finish = decoded[: min(cuts)].encode("utf-8"), "stop"
                     break
-                if cfg.max_tokens and len(out) >= cfg.max_tokens:
+                if len(out) >= limit:
                     break
         finally:
             steps.close()

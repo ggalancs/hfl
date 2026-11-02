@@ -41,7 +41,7 @@ from hfl.api.modelfile_defaults import (
 from hfl.api.schemas import ChatRequest, GenerateRequest
 from hfl.api.tool_parsers import dispatch as parse_tool_calls
 from hfl.core.container import get_registry
-from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult
+from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult, hit_cap
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.models.capabilities import detect_capabilities
 
@@ -537,9 +537,7 @@ async def _stream_generate(
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "response": "",
             "done": True,
-            "done_reason": "length"
-            if (config.max_tokens and generated >= config.max_tokens)
-            else "stop",
+            "done_reason": "length" if hit_cap(config, generated) else "stop",
             "total_duration": time.monotonic_ns() - start_ns,
             "load_duration": 0,
             "prompt_eval_count": prompt_n,
@@ -896,9 +894,7 @@ class _OllamaChatStream:
                 "message": message,
                 "done": True,
                 # API-5: the non-streaming envelope's keys and units (ns).
-                "done_reason": "length"
-                if (turn.config.max_tokens and generated >= turn.config.max_tokens)
-                else "stop",
+                "done_reason": "length" if hit_cap(turn.config, generated) else "stop",
                 "total_duration": time.monotonic_ns() - turn.start_ns,
                 "load_duration": 0,
                 "prompt_eval_count": prompt_n,

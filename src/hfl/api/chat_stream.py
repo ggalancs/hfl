@@ -68,7 +68,9 @@ class Turn:
 
     def hit_cap(self) -> bool:
         """Whether generation stopped at ``max_tokens``."""
-        return bool(self.config.max_tokens) and self.generated() >= self.config.max_tokens
+        from hfl.engine.base import hit_cap
+
+        return hit_cap(self.config, self.generated())
 
     def resolved(self) -> ChatOutput:
         """The whole reply as content, tool calls and reasoning."""

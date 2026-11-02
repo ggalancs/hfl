@@ -163,3 +163,16 @@ class TestLlamaCppSampling:
             [0], GenerationConfig(logprobs=0, max_tokens=1), 1.0, special=False
         )
         assert (text, n, finish, entries[0]["top_logprobs"]) == ("A", 1, "length", [])
+
+    def test_no_limit_ends_where_the_context_does(self, monkeypatch):
+        """An open-ended request (no max_tokens) stops when the context is
+        full: ``hit_cap`` alone never ends it, and llama.cpp then decodes
+        past the window."""
+        from hfl.engine.base import OPEN_ENDED
+
+        engine = self._engine(monkeypatch)
+        engine._model.n_ctx = lambda: 3  # the prompt is one token: two more fit
+        text, _, n, finish = engine._sample_with_logprobs(
+            [0], GenerationConfig(logprobs=0, max_tokens=OPEN_ENDED), 1.0, special=False
+        )
+        assert (text, n, finish) == ("AB", 2, "length")

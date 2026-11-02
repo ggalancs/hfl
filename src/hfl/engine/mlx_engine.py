@@ -29,9 +29,13 @@ from hfl.engine.base import (
     GenerationResult,
     InferenceEngine,
     held,
+    hit_cap,
+    output_budget,
+    output_cap,
     reasoning_template_vars,
     repeat_penalty_for,
 )
+from hfl.engine.footprint import advertised_context
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +189,9 @@ class MLXEngine(InferenceEngine):
         self._model: Any = None
         self._tokenizer: Any = None
         self._model_path: str | None = None
+        # The model's own context length (0 when unknown): where a reply
+        # with no limit has to end.
+        self._context = 0
         # KV of recent prompts (``mlx_lm``'s LRUPromptCache), or None when
         # disabled or when the installed mlx-lm predates it. None means the
         # engine runs exactly the pre-cache code paths.
@@ -226,6 +233,7 @@ class MLXEngine(InferenceEngine):
         else:
             self._model, self._tokenizer, *_ = load(model_path)
         self._model_path = model_path
+        self._context = advertised_context(model_path)
         self._draft = self._load_draft(kwargs.get("draft_model_path"))
         # Everything lazy, evaluated here, before any other thread uses it.
         _settle_model_arrays(self._model, self._draft)
@@ -305,6 +313,7 @@ class MLXEngine(InferenceEngine):
         self._model = None
         self._tokenizer = None
         self._model_path = None
+        self._context = 0
         self._draft = None
         # The cached KV belongs to the model being dropped; keeping it would
         # pin memory and could never be matched against another model.
@@ -408,7 +417,7 @@ class MLXEngine(InferenceEngine):
                 self._tokenizer,
                 prompt=rest,
                 prompt_cache=cache,
-                **self._build_sampling(cfg),
+                **self._build_sampling(cfg, tokens),
             ):
                 token = getattr(response, "token", None)
                 if token is None:
@@ -461,11 +470,12 @@ class MLXEngine(InferenceEngine):
         cancellation signal (``hfl.engine.cancel``), never another's."""
         from hfl.engine import cancel
 
-        sampling = self._build_sampling(cfg)
+        tokens = [int(t) for t in self._tokenizer.encode(prompt)]
+        sampling = self._build_sampling(cfg, tokens)
         signal = cancel.current()
         return cast(Iterator[Any], self._batch.stream(
-            [int(t) for t in self._tokenizer.encode(prompt)],
-            max_tokens=max(1, int(cfg.max_tokens or 2048)),
+            tokens,
+            max_tokens=sampling["max_tokens"],
             sampler=sampling["sampler"],
             processors=sampling["logits_processors"],
             cancelled=signal.is_set if signal is not None else (lambda: False),
@@ -542,7 +552,23 @@ class MLXEngine(InferenceEngine):
     # Generation
     # ------------------------------------------------------------------
 
-    def _build_sampling(self, cfg: GenerationConfig) -> dict[str, Any]:
+    def _output_tokens(self, cfg: GenerationConfig, prompt: str | list[int] | None) -> int:
+        """``cfg``'s limit on generated tokens, or for a request with none
+        what the model's context leaves after ``prompt``: mlx-lm reads -1 as
+        no end at all, and its batch as the end at once."""
+        if output_cap(cfg) is not None:
+            return cfg.max_tokens
+        if prompt is None:
+            n = 0
+        elif isinstance(prompt, str):
+            n = len(self._tokenizer.encode(prompt))
+        else:
+            n = len(prompt)
+        return output_budget(cfg, self._context, n)
+
+    def _build_sampling(
+        self, cfg: GenerationConfig, prompt: str | list[int] | None = None
+    ) -> dict[str, Any]:
         """Translate HFL's GenerationConfig to mlx-lm 0.31+ kwargs.
 
         mlx-lm 0.30+ moved sampling parameters off the top-level
@@ -568,7 +594,7 @@ class MLXEngine(InferenceEngine):
                 mlx_processor(self._tokenizer, cfg.response_format),
             ]
         kwargs: dict[str, Any] = {
-            "max_tokens": cfg.max_tokens,
+            "max_tokens": self._output_tokens(cfg, prompt),
             "sampler": sampler,
             "logits_processors": logits_processors,
         }
@@ -643,7 +669,7 @@ class MLXEngine(InferenceEngine):
         from mlx_lm import stream_generate
 
         start_ns = time.monotonic_ns()
-        kwargs = self._build_sampling(cfg)
+        kwargs = self._build_sampling(cfg, prompt)
         try:
             steps = stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
             text = "".join(
@@ -705,7 +731,7 @@ class MLXEngine(InferenceEngine):
             tokens_per_second=n_gen / elapsed if elapsed > 0 else 0,
             # mlx_lm.generate returns only text; n_gen re-tokenises it, so
             # reaching max_tokens is the best available sign it was cut.
-            stop_reason="length" if cfg.max_tokens and n_gen >= cfg.max_tokens else "stop",
+            stop_reason="length" if hit_cap(cfg, n_gen) else "stop",
             total_duration=total_ns,
             load_duration=0,
             prompt_eval_duration=int(total_ns * n_prompt / max(1, n_prompt + n_gen)),
@@ -728,7 +754,7 @@ class MLXEngine(InferenceEngine):
                 from mlx_lm import stream_generate
 
                 responses = stream_generate(
-                    self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg)
+                    self._model, self._tokenizer, prompt=prompt, **self._build_sampling(cfg, prompt)
                 )
             responses = self._cancellable(responses)
         top = max(0, min(20, int(cfg.logprobs or 0)))
@@ -911,7 +937,7 @@ class MLXEngine(InferenceEngine):
         else:
             from mlx_lm import stream_generate
 
-            kwargs = self._build_sampling(cfg)
+            kwargs = self._build_sampling(cfg, prompt)
             gen = self._cancellable(
                 stream_generate(self._model, self._tokenizer, prompt=prompt, **kwargs)
             )

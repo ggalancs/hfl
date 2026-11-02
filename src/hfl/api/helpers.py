@@ -195,6 +195,30 @@ def suggest_parallel(dispatcher: Any, engine: Any) -> None:
     )
 
 
+class _ClientGone(Exception):
+    """The request's client closed its connection before the answer."""
+
+
+async def _worker_result(worker: Any, timeout: float, gone: asyncio.Event | None) -> Any:
+    """``worker``'s result, raising ``asyncio.TimeoutError`` past
+    ``timeout`` and ``_ClientGone`` once the client has left. Neither
+    cancels the worker: the caller stops the engine and waits for it."""
+    if gone is None:
+        return await asyncio.wait_for(asyncio.shield(worker), timeout=timeout)
+    left = asyncio.ensure_future(gone.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {worker, left}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        left.cancel()
+    if worker in done:
+        return worker.result()
+    if gone.is_set():
+        raise _ClientGone
+    raise asyncio.TimeoutError
+
+
 def _cancel_engine(engine: Any) -> None:
     """Ask ``engine`` to stop its running generation, if it can: its result
     will be thrown away, and until it stops it holds the model."""
@@ -235,12 +259,18 @@ async def run_dispatched(
     dispatcher = dispatcher_for(engine)
     suggest_parallel(dispatcher, engine)
     effective_timeout = timeout if timeout is not None else config.generation_timeout
+    from hfl.api.middleware import client_gone
+
+    gone = client_gone()
 
     # Acquire the slot manually (not via ``dispatcher.run``) so we control WHEN
     # it is released. ``__aenter__`` raises QueueFull / QueueTimeout on
     # rejection, which propagates to the route layer as 429 / 503 — unchanged.
     slot_cm = dispatcher.slot()
     await slot_cm.__aenter__()
+    if gone is not None and gone.is_set():  # it left while the request queued
+        await slot_cm.__aexit__(None, None, None)
+        raise HTTPException(status_code=499, detail="the client closed the request")
 
     # One span covers every inference in the process: chat, generate and
     # embeddings from all three API dialects funnel through here, and the
@@ -281,7 +311,15 @@ async def run_dispatched(
 
     try:
         try:
-            result = await asyncio.wait_for(asyncio.shield(worker), timeout=effective_timeout)
+            result: T = await _worker_result(worker, effective_timeout, gone)
+        except _ClientGone:
+            # Nobody will read the answer: stop the engine now rather than
+            # generate it to the end (see ClientGoneMiddleware).
+            signal.set()
+            _cancel_engine(engine)
+            asyncio.ensure_future(_release_when_worker_exits())
+            logger.info("%s: the client closed the connection; generation stopped", operation)
+            raise HTTPException(status_code=499, detail="the client closed the request") from None
         except asyncio.TimeoutError:
             signal.set()
             _cancel_engine(engine)
@@ -582,7 +620,11 @@ def options_to_config(options: dict[str, Any] | None) -> GenerationConfig:
     if "top_k" in options and options["top_k"] is not None:
         config.top_k = _validate_int("top_k", options["top_k"], 0)
     if "num_predict" in options and options["num_predict"] is not None:
-        config.max_tokens = _validate_int("num_predict", options["num_predict"], 1)
+        from hfl.api.converters import num_predict_tokens
+
+        # Ollama's -1 / -2 / 0 are open-ended, not an error.
+        num_predict = _validate_int("num_predict", options["num_predict"], -(2**31))
+        config.max_tokens = num_predict_tokens(num_predict)
     if "repeat_penalty" in options and options["repeat_penalty"] is not None:
         config.repeat_penalty = _validate_float(
             "repeat_penalty",

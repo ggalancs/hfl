@@ -131,6 +131,38 @@ class GenerationConfig:
     repeat_penalty_chosen: bool = False
 
 
+# ``max_tokens`` when the client set no limit: generate until the model
+# stops or its context is full, as Ollama (``num_predict`` -1, its default)
+# and OpenAI do. HFL cut such replies at 2048 tokens, and a reasoning model
+# spends that much thinking: Qwen3.8's answers came back cut or empty
+# (2048 of 2048 tokens, measured 2026-11-01). HFL_GENERATION_TIMEOUT still
+# bounds every request.
+OPEN_ENDED = -1
+
+
+def output_cap(cfg: GenerationConfig) -> int | None:
+    """The request's limit on generated tokens, None when it has none."""
+    return cfg.max_tokens if cfg.max_tokens > 0 else None
+
+
+def hit_cap(cfg: GenerationConfig, generated: int) -> bool:
+    """Whether ``generated`` tokens reached the request's limit (a "length"
+    stop). A reply with no limit never did: ``max_tokens and n >= max_tokens``
+    called every open-ended reply cut."""
+    cap = output_cap(cfg)
+    return cap is not None and generated >= cap
+
+
+def output_budget(cfg: GenerationConfig, context: int | None, prompt_tokens: int) -> int:
+    """A finite limit for an engine that needs one: the request's own, or
+    what the context leaves after the prompt (32768 when the context is
+    unknown)."""
+    cap = output_cap(cfg)
+    if cap is not None:
+        return cap
+    return max(1, context - prompt_tokens) if context else 32768
+
+
 def held(lock: "threading.Lock", chunks: Iterator[str]) -> Iterator[str]:
     """``chunks`` read with ``lock`` held, from the first item until the
     stream is exhausted or closed — by the thread doing the native work.
