@@ -206,6 +206,31 @@ def _stop_on_macos_quit(controller: TrayServerController) -> Any:
     )
 
 
+def _quit_on_sigterm(quit_app: Any) -> None:
+    """Run ``quit_app`` (the menu's Exit) on SIGTERM: ``kill``, launchd, a
+    launcher restarting the app. Python's default ended the process on the
+    spot, exit 143, with nothing stopped or unloaded, and HFL.app's launcher
+    then reported that the tray had failed to start (2026-11-02). On macOS
+    the main thread sits in AppKit's run loop, where a plain Python handler
+    never runs: PyObjC's MachSignals delivers it there, as pystray does for
+    SIGINT."""
+    import signal
+
+    def handler(*_args: Any) -> None:
+        quit_app()
+
+    if sys.platform == "darwin":
+        try:
+            from PyObjCTools import MachSignals
+
+            MachSignals.signal(signal.SIGTERM, handler)
+            return
+        except ImportError:  # pragma: no cover — pystray brings it on macOS
+            pass
+    with contextlib.suppress(ValueError):  # only the main thread may set one
+        signal.signal(signal.SIGTERM, handler)
+
+
 class HFLTrayIcon:
     """Cross-platform system tray icon for HFL."""
 
@@ -230,7 +255,15 @@ class HFLTrayIcon:
 
         logger.info("Starting tray icon")
         self._terminate_observer = _stop_on_macos_quit(self._controller)
+        _quit_on_sigterm(self._quit)
         self._icon.run(setup=_show_icon)
+
+    def _quit(self) -> None:
+        """As the menu's Exit: the server stopped, then the icon."""
+        logger.info("SIGTERM: stopping the server and the tray")
+        with contextlib.suppress(Exception):
+            self._controller.stop()
+        self.stop()
 
     def stop(self) -> None:
         """Stop the tray icon."""

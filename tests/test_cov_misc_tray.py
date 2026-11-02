@@ -19,6 +19,17 @@ import pytest
 from hfl.tray import icon as tray_icon
 from hfl.tray.controller import ServerStatus, TrayServerController
 
+_REAL_QUIT_ON_SIGTERM = tray_icon._quit_on_sigterm
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sigterm_handler(monkeypatch):
+    """``run()`` would set this test process's own SIGTERM handler."""
+    installed: list = []
+    monkeypatch.setattr(tray_icon, "_quit_on_sigterm", installed.append)
+    return installed
+
+
 # -- fakes ---------------------------------------------------------------------------
 
 
@@ -387,7 +398,9 @@ def test_a_macos_quit_survives_failures_while_stopping(appkit) -> None:
 # -- the tray --------------------------------------------------------------------------------
 
 
-def test_the_tray_runs_an_icon_for_the_current_status(gui, monkeypatch, caplog) -> None:
+def test_the_tray_runs_an_icon_for_the_current_status(
+    gui, monkeypatch, caplog, _no_real_sigterm_handler
+) -> None:
     observers: list = []
     monkeypatch.setattr(tray_icon, "_stop_on_macos_quit", lambda c: observers.append(c) or "obs")
     ctrl = _Ctrl(ServerStatus.ERROR)
@@ -404,6 +417,65 @@ def test_the_tray_runs_an_icon_for_the_current_status(gui, monkeypatch, caplog) 
     assert "Starting tray icon" in caplog.text
     tray.stop()
     assert icon.stopped == 1
+    # SIGTERM quits as the menu's Exit does: the server, then the icon.
+    (quit_app,) = _no_real_sigterm_handler
+    quit_app()
+    assert ctrl.stopped == 1 and icon.stopped == 2
+
+
+def test_sigterm_quits_even_if_the_server_fails_to_stop(gui) -> None:
+    class _Failing(_Ctrl):
+        def stop(self) -> bool:
+            raise RuntimeError("stuck")
+
+    tray = tray_icon.HFLTrayIcon(_Failing())  # type: ignore[arg-type]
+    tray.run()
+    tray._quit()
+    assert tray._icon.stopped == 1
+
+
+def test_on_macos_sigterm_reaches_the_run_loop(monkeypatch) -> None:
+    """A plain handler never runs while AppKit holds the main thread
+    (exit 143, measured): PyObjC's MachSignals delivers it there."""
+    import signal
+
+    seen: list = []
+    mach = SimpleNamespace(signal=lambda signum, handler: seen.append((signum, handler)))
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setitem(sys.modules, "PyObjCTools", SimpleNamespace(MachSignals=mach))
+    monkeypatch.setitem(sys.modules, "PyObjCTools.MachSignals", mach)
+    monkeypatch.setattr(signal, "signal", lambda *a: pytest.fail("not the plain handler"))
+    quits: list = []
+    _REAL_QUIT_ON_SIGTERM(lambda: quits.append(1))
+    ((signum, handler),) = seen
+    assert signum == signal.SIGTERM
+    handler(signal.SIGTERM, None)
+    assert quits == [1]
+
+
+def test_elsewhere_sigterm_has_a_plain_handler(monkeypatch) -> None:
+    import signal
+
+    seen: list = []
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(signal, "signal", lambda signum, handler: seen.append((signum, handler)))
+    quits: list = []
+    _REAL_QUIT_ON_SIGTERM(lambda: quits.append(1))
+    ((signum, handler),) = seen
+    assert signum == signal.SIGTERM
+    handler(signal.SIGTERM, None)
+    assert quits == [1]
+
+
+def test_off_the_main_thread_no_handler_is_set(monkeypatch) -> None:
+    import signal
+
+    def refuse(*_args):
+        raise ValueError("signal only works in main thread of the main interpreter")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(signal, "signal", refuse)
+    _REAL_QUIT_ON_SIGTERM(lambda: pytest.fail("never called"))  # no error
 
 
 def test_run_tray_starts_the_server_and_follows_its_icon(gui, monkeypatch, sync_threads) -> None:

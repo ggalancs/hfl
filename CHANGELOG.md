@@ -97,6 +97,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name for the limit (it was ignored), and takes the `developer` role as
   `system`, as `/v1/responses` did: in-process, Phi-3.5's template dropped a
   `developer` message from the prompt.
+- **`serve --tray` died on SIGTERM** (`kill`, launchd, a launcher
+  restarting it): the main thread sits in the desktop's run loop, where
+  Python's handler never ran, so the process ended on the spot with exit
+  143, nothing stopped or unloaded. It now quits as the menu's Exit does —
+  the server shut down, its llama-server stopped, exit 0 (measured with a
+  model loaded).
 - Ollama's `num_predict` -1 (its default, "until a stop"), -2 ("fill the
   context") and 0 were clamped to **one** token, and `PARAMETER num_predict
   -1` in a Modelfile made every reply "cut".
