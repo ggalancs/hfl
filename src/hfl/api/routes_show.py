@@ -31,10 +31,19 @@ from hfl.converter.modelfile import render_modelfile
 from hfl.exceptions import ModelNotFoundError
 from hfl.models.capabilities import detect_capabilities
 from hfl.models.chat_template import model_template
+from hfl.models.file_facts import architecture, file_facts
 from hfl.models.registry import get_registry
 from hfl.models.thinking import thinking_controls
 
 router = APIRouter(tags=["Ollama"])
+
+# ``file_facts`` keys after the context, and their GGUF names under ``<arch>.``.
+_LAYOUT_KEYS = (
+    ("embedding_length", "embedding_length"),
+    ("block_count", "block_count"),
+    ("head_count", "attention.head_count"),
+    ("head_count_kv", "attention.head_count_kv"),
+)
 
 
 class ShowRequest(BaseModel):
@@ -84,18 +93,20 @@ def _model_info(manifest: Any, verbose: bool) -> dict[str, Any]:
 
     Ollama's ``model_info`` is a loose bag of GGUF metadata:
     ``general.architecture``, ``general.parameter_count``,
-    ``<arch>.context_length``, ``<arch>.embedding_length``, etc. HFL
-    doesn't currently parse all of GGUF's metadata into the manifest,
-    so we surface the fields we do track, keyed in the same style.
-    Unknown fields are simply absent — ``ollama-python`` treats
-    missing keys as ``None``.
+    ``<arch>.context_length``, ``<arch>.embedding_length``, etc. The
+    architecture and layout come from the model's own files
+    (:func:`hfl.models.file_facts.file_facts`), as Ollama's do: clients
+    size their prompts from ``<arch>.context_length``. The manifest fills
+    in only what the files cannot give. Unknown fields are simply absent
+    — ``ollama-python`` treats missing keys as ``None``.
 
     ``verbose=True`` is a pass-through today (we don't store tensor
     statistics). The flag is preserved for forward compatibility so
     future callers can opt in without a schema change.
     """
+    facts = file_facts(manifest.local_path)
     info: dict[str, Any] = {}
-    arch = manifest.architecture or "unknown"
+    arch = facts.get("architecture") or manifest.architecture or "unknown"
     info["general.architecture"] = arch
     if manifest.parameters:
         info["general.parameter_count"] = manifest.parameters
@@ -103,8 +114,14 @@ def _model_info(manifest: Any, verbose: bool) -> dict[str, Any]:
         info["general.quantization"] = manifest.quantization
     if manifest.size_bytes:
         info["general.size"] = manifest.size_bytes
-    if manifest.context_length and manifest.context_length > 0:
-        info[f"{arch}.context_length"] = manifest.context_length
+    # The trained window, as the header says; the window the owner pinned
+    # only when the files cannot be read (it goes in ``parameters`` too).
+    context = facts.get("context_length") or max(manifest.context_length or 0, 0)
+    if context:
+        info[f"{arch}.context_length"] = context
+    for fact, key in _LAYOUT_KEYS:
+        if fact in facts:
+            info[f"{arch}.{key}"] = facts[fact]
     if manifest.file_hash:
         info["general.digest"] = manifest.file_hash
 
@@ -121,10 +138,11 @@ def _details(manifest: Any) -> dict[str, Any]:
     Kept in sync with ``routes_ps._manifest_details`` manually (the
     schemas are intentionally identical per Ollama's contract).
     """
+    family = architecture(manifest)
     return {
         "format": manifest.format or "unknown",
-        "family": manifest.architecture or "unknown",
-        "families": [manifest.architecture] if manifest.architecture else None,
+        "family": family or "unknown",
+        "families": [family] if family else None,
         "parameter_size": manifest.parameters,
         "quantization_level": manifest.quantization,
     }

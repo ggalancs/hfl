@@ -106,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ollama's `num_predict` -1 (its default, "until a stop"), -2 ("fill the
   context") and 0 were clamped to **one** token, and `PARAMETER num_predict
   -1` in a Modelfile made every reply "cut".
+- **`/api/show` named every model's architecture `unknown` and gave no
+  context length**, so clients that size prompts from
+  `model_info["<arch>.context_length"]` fell back to their default:
+  Copilot Chat's Ollama provider offered qwen3-coder 32,768 tokens of its
+  262,144. HFL read both from the manifest, where no pull records them.
+  `model_info` now carries the architecture, the trained window and the
+  layout from the GGUF header (or `config.json`), as Ollama's does, and
+  `details.family` in `/api/show`, `/api/ps` and `/api/tags` names the
+  architecture. A window pinned for the model stays in `parameters`.
 
 ### Changed
 - **No output limit unless the client sets one**, as OpenAI and Ollama:

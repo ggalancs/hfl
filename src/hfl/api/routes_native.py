@@ -44,6 +44,7 @@ from hfl.core.container import get_registry
 from hfl.engine.base import ChatMessage, GenerationConfig, GenerationResult, hit_cap
 from hfl.engine.dispatcher import QueueFullError, QueueTimeoutError
 from hfl.models.capabilities import detect_capabilities
+from hfl.models.file_facts import architecture
 
 if TYPE_CHECKING:
     from hfl.api.state import ServerState
@@ -947,7 +948,7 @@ async def api_tags() -> dict[str, Any]:
                 "details": {
                     "parent_model": m.repo_id,
                     "format": m.format,
-                    "family": m.architecture,  # None instead of ""
+                    "family": architecture(m),  # None instead of ""
                     "parameter_size": m.parameters,  # None instead of ""
                     "quantization_level": m.quantization,  # None instead of ""
                 },

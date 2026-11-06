@@ -87,10 +87,13 @@ def _manifest_details(manifest: "ModelManifest", engine: Any | None = None) -> d
     context, and which engine runs it?" is answerable over the API instead
     of only by re-reading the server log.
     """
+    from hfl.models.file_facts import architecture
+
+    family = architecture(manifest)
     details: dict[str, Any] = {
         "format": manifest.format or "unknown",
-        "family": manifest.architecture or "unknown",
-        "families": [manifest.architecture] if manifest.architecture else None,
+        "family": family or "unknown",
+        "families": [family] if family else None,
         "parameter_size": manifest.parameters,
         "quantization_level": manifest.quantization,
     }
